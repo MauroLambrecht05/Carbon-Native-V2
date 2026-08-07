@@ -1,0 +1,29 @@
+# Carbon Native V2 Root Build File
+
+package(default_visibility = ["//visibility:public"])
+
+package_group(
+    name = "carbon_internal",
+    packages = [
+        "//labs/...",
+        "//products/...",
+        "//solutions/...",
+    ],
+)
+
+package_group(
+    name = "contracts",
+    packages = [
+        "//solutions/shared/contracts/...",
+    ],
+)
+
+filegroup(
+    name = "all_config_files",
+    srcs = glob([".config/**"]),
+)
+
+filegroup(
+    name = "all_tools",
+    srcs = glob([".tools/**"]),
+)

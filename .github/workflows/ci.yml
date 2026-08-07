@@ -1,0 +1,46 @@
+name: Carbon Native V2 CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  workspace-validation:
+    name: Workspace Structure & Tooling Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run Workspace Structure Validator
+        run: python .tools/validation/check_workspace.py
+
+  bazel-build:
+    name: Bazel Build & Test (${{ matrix.os }})
+    needs: workspace-validation
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bazel
+        uses: bazel-contrib/setup-bazel@v0.8.0
+        with:
+          bazelrc: |
+            build --enable_bzlmod
+
+      - name: Build All V2 Targets
+        run: bazel build //...
+
+      - name: Run All V2 Tests
+        run: bazel test //...

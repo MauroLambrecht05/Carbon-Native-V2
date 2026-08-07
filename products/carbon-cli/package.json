@@ -1,0 +1,26 @@
+{
+  "name": "carbon-cli",
+  "version": "0.2.0",
+  "description": "carbon-native CLI: scaffold, build, run, bundle and publish carbon apps.",
+  "type": "module",
+  "bin": {
+    "carbon": "./main.ts"
+  },
+  "//scripts": "The `build` and `bench` scripts are gone with build-cli.ts. Compiling the standalone binary is a Bazel target now: `bazel run //products/carbon-cli:compile`.",
+  "scripts": {
+    "carbon": "bun ./src/main.ts"
+  },
+  "//": "Ported from V1 tools/cli. Two workspace dependencies V1 declared are absent here because their packages have not been migrated yet (V2 README section 6, phases 3-5): @carbon/mini-solid (the Solid universal renderer, V1 carbon/runtime/engine/paint/renderers) and @carbon/compat-dom (V1 ecosystem/system/stdlib/compat/dom). src/pipeline/index.ts imports both. Re-add them here when those packages land.",
+  "dependencies": {
+    "@babel/core": "^7.29.0",
+    "@babel/preset-react": "^7.27.0",
+    "@babel/preset-typescript": "^7.27.0",
+    "babel-preset-solid": "^1.9.12",
+    "picocolors": "^1.1.0",
+    "smol-toml": "^1.3.0",
+    "vite": "^5.4.0"
+  },
+  "engines": {
+    "bun": ">=1.3.0"
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "name": "carbon-native-v2",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Carbon Native V2 — third-party npm dependencies for the TypeScript tier.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "//": "Not a bun workspace root: no `workspaces` array and no `workspace:*` anywhere. Internal @carbon/* wiring is path aliases in ./tsconfig.base.json, so nothing is installed or symlinked for it — this is purely the flat list of third-party packages the TypeScript tier needs. Install with `bun install --cwd .config` from the workspace root, which puts node_modules HERE. Bun then resolves it through the `node_modules` junction at the workspace root, because module resolution walks UP from each importing file and would otherwise never look inside .config/. Create that junction with .tools/automation/bootstrap/link-node-modules.{ps1,sh}.",
+  "scripts": {
+    "carbon": "bun ../products/carbon-cli/main.ts",
+    "test": "bun test ..",
+    "typecheck": "bunx tsc --noEmit -p ../products/carbon-cli/tsconfig.json"
+  },
+  "dependencies": {
+    "@babel/core": "^7.29.0",
+    "@babel/generator": "^7.29.0",
+    "@babel/parser": "^7.29.0",
+    "@babel/preset-react": "^7.27.0",
+    "@babel/preset-typescript": "^7.27.0",
+    "@babel/traverse": "^7.29.0",
+    "@babel/types": "^7.29.0",
+    "@noble/ciphers": "^1.0.0",
+    "@noble/curves": "^1.6.0",
+    "@noble/hashes": "^1.5.0",
+    "babel-preset-solid": "^1.9.12",
+    "picocolors": "^1.1.0",
+    "smol-toml": "^1.3.0",
+    "vite": "^5.4.0"
+  },
+  "devDependencies": {
+    "@types/babel__generator": "^7.6.8",
+    "@types/babel__traverse": "^7.20.6",
+    "@types/bun": "^1.3.0",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "bun": ">=1.3.0"
+  }
+}

@@ -1,0 +1,32 @@
+# Carbon Native V2 - @carbon/scaffolding
+#
+# Capability: turning a name and a preset into a working project.
+
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["**/*.ts", "**/*.js"], exclude = ["**/*.test.ts", "**/*.selftest.js"], allow_empty = True),
+)
+
+filegroup(
+    name = "tests",
+    srcs = glob(["**/*.test.ts"], allow_empty = True),
+)
+
+load("//.tools/orchestration/bazel/bun:defs.bzl", "bun_test")
+
+# The plan half is pure — no temp directory, no cleanup — so it covers every
+# preset. The writing half runs once against a real directory.
+#
+# @carbon/process is in srcs because the use case takes a ProcessRunner: the
+# test injects a fake, but the port's types still have to resolve.
+bun_test(
+    name = "scaffolding_integration_test",
+    entry = "tests/scaffolding.integration.test.ts",
+    srcs = [
+        ":srcs",
+        ":tests",
+        "//solutions/infrastructure/process:srcs",
+    ],
+)

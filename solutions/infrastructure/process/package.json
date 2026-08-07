@@ -1,0 +1,8 @@
+{
+  "name": "@carbon/process",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The ProcessRunner port and its node:child_process adapter.",
+  "type": "module",
+  "exports": { ".": "./index.ts" }
+}

@@ -1,0 +1,34 @@
+// Carbon Native V2 - Core Primitive Schemas
+namespace Carbon.Schemas;
+
+enum Status : uint8 {
+  Pending = 0,
+  Active = 1,
+  Completed = 2,
+  Failed = 3
+}
+
+struct Vec2 {
+  x: float;
+  y: float;
+}
+
+struct Vec3 {
+  x: float;
+  y: float;
+  z: float;
+}
+
+struct Transform {
+  position: Vec3;
+  rotation: Vec3;
+  scale: Vec3;
+}
+
+table MemoryBuffer {
+  id: uint64;
+  size: uint64;
+  alignment: uint32;
+  address: uint64;
+  data: [ubyte];
+}

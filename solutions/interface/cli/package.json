@@ -1,0 +1,8 @@
+{
+  "name": "@carbon/cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A command framework: Command base classes, a lazy registry, argv parsing, generated help and a dispatcher. Carbon-agnostic.",
+  "type": "module",
+  "exports": { ".": "./index.ts" }
+}

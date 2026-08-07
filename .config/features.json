@@ -1,0 +1,24 @@
+{
+  "features": {
+    "simd": {
+      "enabled": true,
+      "description": "AVX2 / NEON vector acceleration in C++ compute engine"
+    },
+    "zeroCopyBuffer": {
+      "enabled": true,
+      "description": "FlatBuffers shared memory zero-copy interop across languages"
+    },
+    "zigPluginRuntime": {
+      "enabled": true,
+      "description": "Zig C-ABI extension point dynamically loaded plugin host"
+    },
+    "rustAsyncTransport": {
+      "enabled": true,
+      "description": "Rust Tokio async network & task queue transport layer"
+    },
+    "ipcRpcChannel": {
+      "enabled": true,
+      "description": "Cross-process gRPC / Protobuf / IPC channel for CLI & Cloud"
+    }
+  }
+}

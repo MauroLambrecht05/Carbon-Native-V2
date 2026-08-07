@@ -1,0 +1,17 @@
+# Central project configuration.
+#
+# tsconfig.base.json holds the @carbon/* path aliases that replaced bun
+# workspaces — it is the internal dependency wiring for the TypeScript tier,
+# so anything running that code needs it present.
+
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "tsconfig",
+    srcs = ["tsconfig.base.json"],
+)
+
+filegroup(
+    name = "all_config_files",
+    srcs = glob(["**"]),
+)

@@ -1,0 +1,24 @@
+# Carbon Native V2 - @carbon/workspace
+#
+# Infrastructure: workspace layout and manifest loading.
+
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["**/*.ts", "**/*.js"], exclude = ["**/*.test.ts", "**/*.selftest.js"], allow_empty = True),
+)
+
+filegroup(
+    name = "tests",
+    srcs = glob(["**/*.test.ts"], allow_empty = True),
+)
+
+load("//.tools/orchestration/bazel/bun:defs.bzl", "bun_test")
+
+# Contracts (the manifest rules) meeting infrastructure (the TOML reader).
+bun_test(
+    name = "manifest_integration_test",
+    entry = "tests/manifest.integration.test.ts",
+    srcs = [":srcs", ":tests"],
+)

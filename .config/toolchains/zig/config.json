@@ -1,0 +1,6 @@
+{
+  "toolchain": "zig",
+  "version": "0.12.0",
+  "mode": "ReleaseFast",
+  "cAbiExport": true
+}

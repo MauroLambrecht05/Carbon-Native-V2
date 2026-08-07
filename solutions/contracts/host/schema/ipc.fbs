@@ -1,0 +1,14 @@
+// Carbon Native V2 - Inter-Process Communication Contract
+namespace Carbon.Ipc;
+
+table IpcHeader {
+  message_id: uint64;
+  channel: string;
+  sender_pid: uint32;
+}
+
+table IpcMessage {
+  header: IpcHeader;
+  method: string;
+  payload: [ubyte];
+}

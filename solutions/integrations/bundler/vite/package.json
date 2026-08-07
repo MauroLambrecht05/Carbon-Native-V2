@@ -1,0 +1,24 @@
+{
+  "name": "@carbon/vite",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Carbon's Vite integration: the plugins we ship for Vite, and the rules they implement. One solution, because it is one external tool — the nine plugin packages it replaced all served the same integration.",
+  "type": "module",
+  "exports": {
+    "./assets": "./infrastructure/plugins/assets.js",
+    "./css-compat": "./infrastructure/plugins/css-compat.ts",
+    "./dev": "./infrastructure/plugins/dev.js",
+    "./fast-import": "./infrastructure/plugins/fast-import.js",
+    "./imports": "./infrastructure/plugins/imports.js",
+    "./ink-shim": "./infrastructure/plugins/ink-shim.js",
+    "./tailwind": "./infrastructure/plugins/tailwind.ts",
+    "./tailwind/babel": "./infrastructure/babel/tailwind.ts",
+    "./tailwind/classes": "./domain/tailwind-classes.ts",
+    "./theme-extractor": "./domain/theme-extractor.ts",
+    "./three-bridge": "./infrastructure/plugins/three-bridge.js",
+    "./three-bridge/babel": "./infrastructure/babel/three-bridge.js",
+    "./transforms": "./infrastructure/plugins/transforms.ts",
+    "./transforms/babel": "./infrastructure/babel/transforms.ts"
+  },
+  "peerDependencies": { "vite": "^5.0.0" }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "@carbon/updating",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A/B slot updates: the state machine, staged rollout, yank list and artifact fetch.",
+  "type": "module",
+  "exports": { ".": "./index.ts" }
+}

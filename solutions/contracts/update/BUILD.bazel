@@ -1,0 +1,6 @@
+package(default_visibility = ["//visibility:public"])
+
+# Types only — the updater manifest shape, shared by signing (writes it) and
+# updating (reads it). No schema file yet; when the wire form is pinned down it
+# gains a schema/ directory and switches to flatbuffers_subject.
+filegroup(name = "srcs", srcs = glob(["**/*.ts"]))

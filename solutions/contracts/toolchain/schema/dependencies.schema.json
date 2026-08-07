@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://carbon-native.dev/schemas/dependencies.json",
+  "title": "Toolchain versions",
+  "description": "The versions this workspace is built against. Consumed by MODULE.bazel, the Dockerfile, CI and `carbon doctor` — all four must agree, and .tools/validation/check_workspace.py checks that they do.",
+  "type": "object",
+  "required": ["toolchains", "libraries"],
+  "additionalProperties": false,
+  "properties": {
+    "toolchains": {
+      "type": "object",
+      "description": "Compilers and runtimes installed into the environment.",
+      "required": ["llvm", "rust", "zig", "go"],
+      "additionalProperties": { "$ref": "#/$defs/version" },
+      "properties": {
+        "llvm": { "$ref": "#/$defs/version" },
+        "rust": { "$ref": "#/$defs/version" },
+        "zig": { "$ref": "#/$defs/version" },
+        "go": { "$ref": "#/$defs/version" },
+        "node": { "$ref": "#/$defs/version" },
+        "dotnet": { "$ref": "#/$defs/version" }
+      }
+    },
+    "libraries": {
+      "type": "object",
+      "description": "Bazel modules. Every key must match a bazel_dep version in MODULE.bazel.",
+      "additionalProperties": { "$ref": "#/$defs/version" }
+    }
+  },
+  "$defs": {
+    "version": {
+      "type": "string",
+      "description": "An exact version. Ranges are deliberately not allowed: this file is what CI provisions, and a range makes two machines disagree while both claim to be correct.",
+      "pattern": "^\\d+\\.\\d+(\\.\\d+)?$"
+    }
+  }
+}

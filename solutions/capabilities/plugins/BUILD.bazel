@@ -1,0 +1,30 @@
+# Carbon Native V2 - @carbon/plugins
+#
+# Capability: authoring, building and installing native plugins.
+
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["**/*.ts", "**/*.js"], exclude = ["**/*.test.ts", "**/*.selftest.js"], allow_empty = True),
+)
+
+filegroup(
+    name = "tests",
+    srcs = glob(["**/*.test.ts"], allow_empty = True),
+)
+
+load("//.tools/orchestration/bazel/bun:defs.bzl", "bun_test")
+
+# Runs against an in-memory workspace, so it covers the paths that need a built
+# .so, a host app several directories up, and a carbon.toml with comments in it
+# — none of which are reachable from a temp directory without a toolchain.
+bun_test(
+    name = "plugins_integration_test",
+    entry = "tests/plugins.integration.test.ts",
+    srcs = [
+        ":srcs",
+        ":tests",
+        "//solutions/infrastructure/process:srcs",
+    ],
+)

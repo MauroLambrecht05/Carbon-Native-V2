@@ -1,0 +1,8 @@
+{
+  "name": "@carbon/signing",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Ed25519 release signing: keypairs, detached signatures, manifest signing, key rotation.",
+  "type": "module",
+  "exports": { ".": "./index.ts" }
+}

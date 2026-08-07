@@ -1,0 +1,8 @@
+package(default_visibility = ["//visibility:public"])
+
+# The versions this workspace is built against. A schema plus its TypeScript
+# side; the instance is .config/dependencies.json.
+filegroup(
+    name = "srcs",
+    srcs = glob(["**/*.ts", "**/*.json"]),
+)

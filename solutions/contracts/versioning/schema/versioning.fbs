@@ -1,0 +1,14 @@
+// Carbon Native V2 - Versioning & Compatibility Contract
+namespace Carbon.Versioning;
+
+struct VersionTriple {
+  major: uint32;
+  minor: uint32;
+  patch: uint32;
+}
+
+table ProtocolVersion {
+  abi_version: uint32;
+  semver: VersionTriple;
+  min_compatible_version: VersionTriple;
+}

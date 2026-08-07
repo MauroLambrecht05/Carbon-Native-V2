@@ -1,0 +1,15 @@
+// Carbon Native V2 - Security & Cryptographic Contract
+namespace Carbon.Security;
+
+table SignatureHeader {
+  key_id: string;
+  algorithm: string;
+  signature: [ubyte];
+}
+
+table SecurityToken {
+  token_id: string;
+  issuer: string;
+  expiration: uint64;
+  signature: SignatureHeader;
+}

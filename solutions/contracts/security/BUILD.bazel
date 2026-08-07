@@ -1,0 +1,5 @@
+load("//solutions/contracts:defs.bzl", "flatbuffers_subject")
+
+package(default_visibility = ["//visibility:public"])
+
+flatbuffers_subject(name = "security")

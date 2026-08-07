@@ -1,0 +1,119 @@
+{
+  "//": "Internal package wiring for the whole workspace. This replaces bun workspaces: instead of `bun install` building a node_modules symlink farm from a `workspaces` array, every @carbon/* specifier is mapped straight to its source file. Paths are relative to THIS file's directory (.config/) — no baseUrl, which TypeScript 7 drops. Bun scopes paths to the tsconfig nearest the IMPORTING file, so each tree that imports @carbon/* needs its own tsconfig extending this one: currently products/ and solutions/.",
+  "//layout": "solutions/ has five categories ordered by dependency direction: contracts (agreements) -> foundation (universal primitives, none yet) -> capabilities (what carbon does) -> infrastructure (vendor-neutral technical services) -> integrations (named outside technologies, role/vendor) -> interface (shared presentation). See solutions/README.md.",
+  "compilerOptions": {
+    "paths": {
+      "@carbon/babel/app-decorator": [
+        "../solutions/integrations/transpiler/babel/infrastructure/app-decorator.ts"
+      ],
+      "@carbon/babel/css": [
+        "../solutions/integrations/transpiler/babel/infrastructure/css.ts"
+      ],
+      "@carbon/bundling": [
+        "../solutions/capabilities/bundling/index.ts"
+      ],
+      "@carbon/bundling/bundler": [
+        "../solutions/capabilities/bundling/infrastructure/BunBundler.ts"
+      ],
+      "@carbon/bundling/cache": [
+        "../solutions/capabilities/bundling/infrastructure/BuildCache.ts"
+      ],
+      "@carbon/cli": [
+        "../solutions/interface/cli/index.ts"
+      ],
+      "@carbon/contracts/app": [
+        "../solutions/contracts/app/types/CarbonManifest.ts"
+      ],
+      "@carbon/contracts/app/backend": [
+        "../solutions/contracts/app/types/Backend.ts"
+      ],
+      "@carbon/contracts/app/errors": [
+        "../solutions/contracts/app/errors/ConfigError.ts"
+      ],
+      "@carbon/contracts/distribution": [
+        "../solutions/contracts/distribution/types/InstallerTarget.ts"
+      ],
+      "@carbon/contracts/plugin": [
+        "../solutions/contracts/plugin/types/PluginManifest.ts"
+      ],
+      "@carbon/contracts/security": [
+        "../solutions/contracts/security/types/Keyring.ts"
+      ],
+      "@carbon/contracts/toolchain": [
+        "../solutions/contracts/toolchain/types/Toolchain.ts"
+      ],
+      "@carbon/contracts/update": [
+        "../solutions/contracts/update/types/UpdateManifest.ts"
+      ],
+      "@carbon/logging": [
+        "../solutions/infrastructure/logging/index.ts"
+      ],
+      "@carbon/packaging": [
+        "../solutions/capabilities/packaging/index.ts"
+      ],
+      "@carbon/plugins": [
+        "../solutions/capabilities/plugins/index.ts"
+      ],
+      "@carbon/process": [
+        "../solutions/infrastructure/process/index.ts"
+      ],
+      "@carbon/publishing": [
+        "../solutions/capabilities/publishing/index.ts"
+      ],
+      "@carbon/scaffolding": [
+        "../solutions/capabilities/scaffolding/index.ts"
+      ],
+      "@carbon/signing": [
+        "../solutions/capabilities/signing/index.ts"
+      ],
+      "@carbon/updating": [
+        "../solutions/capabilities/updating/index.ts"
+      ],
+      "@carbon/vite/assets": [
+        "../solutions/integrations/bundler/vite/infrastructure/plugins/assets"
+      ],
+      "@carbon/vite/css-compat": [
+        "../solutions/integrations/bundler/vite/infrastructure/plugins/css-compat.ts"
+      ],
+      "@carbon/vite/dev": [
+        "../solutions/integrations/bundler/vite/infrastructure/plugins/dev"
+      ],
+      "@carbon/vite/fast-import": [
+        "../solutions/integrations/bundler/vite/infrastructure/plugins/fast-import"
+      ],
+      "@carbon/vite/imports": [
+        "../solutions/integrations/bundler/vite/infrastructure/plugins/imports"
+      ],
+      "@carbon/vite/ink-shim": [
+        "../solutions/integrations/bundler/vite/infrastructure/plugins/ink-shim"
+      ],
+      "@carbon/vite/tailwind": [
+        "../solutions/integrations/bundler/vite/infrastructure/plugins/tailwind.ts"
+      ],
+      "@carbon/vite/tailwind/babel": [
+        "../solutions/integrations/bundler/vite/infrastructure/babel/tailwind.ts"
+      ],
+      "@carbon/vite/tailwind/classes": [
+        "../solutions/integrations/bundler/vite/domain/tailwind-classes.ts"
+      ],
+      "@carbon/vite/tailwind/theme-extractor": [
+        "../solutions/integrations/bundler/vite/domain/theme-extractor.ts"
+      ],
+      "@carbon/vite/three-bridge": [
+        "../solutions/integrations/bundler/vite/infrastructure/plugins/three-bridge"
+      ],
+      "@carbon/vite/three-bridge/babel": [
+        "../solutions/integrations/bundler/vite/infrastructure/babel/three-bridge"
+      ],
+      "@carbon/vite/transforms": [
+        "../solutions/integrations/bundler/vite/infrastructure/plugins/transforms.ts"
+      ],
+      "@carbon/vite/transforms/babel": [
+        "../solutions/integrations/bundler/vite/infrastructure/babel/transforms.ts"
+      ],
+      "@carbon/workspace": [
+        "../solutions/infrastructure/workspace/index.ts"
+      ]
+    }
+  }
+}

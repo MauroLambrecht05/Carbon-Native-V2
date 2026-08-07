@@ -1,0 +1,29 @@
+# Carbon Native V2 - @carbon/publishing
+#
+# Capability: a release artifact to where users fetch it.
+
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["**/*.ts", "**/*.js"], exclude = ["**/*.test.ts", "**/*.selftest.js"], allow_empty = True),
+)
+
+filegroup(
+    name = "tests",
+    srcs = glob(["**/*.test.ts"], allow_empty = True),
+)
+
+load("//.tools/orchestration/bazel/bun:defs.bzl", "bun_test")
+
+# The one artifact contracts/update and contracts/security meet in.
+bun_test(
+    name = "manifest_integration_test",
+    entry = "tests/manifest.integration.test.ts",
+    srcs = [
+        ":srcs",
+        ":tests",
+        "//solutions/contracts/update:srcs",
+        "//solutions/contracts/security:srcs",
+    ],
+)

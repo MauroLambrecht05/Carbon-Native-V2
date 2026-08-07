@@ -1,0 +1,29 @@
+# Carbon Native V2 - @carbon/updating
+#
+# Capability: keeping an installed app current without bricking it.
+
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["**/*.ts", "**/*.js"], exclude = ["**/*.test.ts", "**/*.selftest.js"], allow_empty = True),
+)
+
+filegroup(
+    name = "tests",
+    srcs = glob(["**/*.test.ts"], allow_empty = True),
+)
+
+load("//.tools/orchestration/bazel/bun:defs.bzl", "bun_test")
+
+# Pure domain — no filesystem, no network.
+bun_test(name = "rollout_test", entry = "domain/services/RolloutService.test.ts", srcs = [":srcs", ":tests"])
+bun_test(name = "slot_state_test", entry = "domain/entities/SlotState.test.ts", srcs = [":srcs", ":tests"])
+
+# The lifecycle that actually ships: stage, promote, crash, roll back — with
+# the file-backed repository, so the TOML round trip is exercised too.
+bun_test(
+    name = "slot_lifecycle_integration_test",
+    entry = "tests/slot-lifecycle.integration.test.ts",
+    srcs = [":srcs", ":tests"],
+)

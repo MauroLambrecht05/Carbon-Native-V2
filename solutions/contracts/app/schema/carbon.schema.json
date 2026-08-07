@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://carbon-native.dev/schema/carbon.toml.json",
+  "title": "carbon.toml",
+  "description": "Manifest for a carbon-native application. This file is the single source of truth for the manifest shape: the TypeScript loader in shared/logic/ts/src/config.ts and the Rust parser in shared/logic/core/src/config.rs are both checked against it by shared/tests/shared/config/conformance.test.ts. Change the schema first, then both parsers.",
+  "type": "object",
+  "required": ["app"],
+  "additionalProperties": true,
+  "properties": {
+    "app": {
+      "type": "object",
+      "description": "Identity and window shape of the application.",
+      "required": ["name", "version"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Machine name. Used for the binary name, the install directory and the update feed path.",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        },
+        "version": {
+          "type": "string",
+          "description": "Semantic version of the app. The updater compares releases with this.",
+          "pattern": "^\\d+\\.\\d+\\.\\d+"
+        },
+        "display_name": {
+          "type": "string",
+          "description": "Human-facing name shown in the title bar and installer."
+        },
+        "dev_url": {
+          "type": "string",
+          "description": "Dev-server URL used by `carbon dev` instead of the built bundle."
+        },
+        "window": {
+          "type": "object",
+          "description": "Initial window geometry. Consumed by the runtime, not the CLI.",
+          "properties": {
+            "width": { "type": "integer", "minimum": 1, "default": 1100 },
+            "height": { "type": "integer", "minimum": 1, "default": 720 },
+            "title": { "type": "string" },
+            "resizable": { "type": "boolean", "default": true },
+            "transparent": { "type": "boolean", "default": false },
+            "decorations": { "type": "boolean", "default": true }
+          },
+          "additionalProperties": true
+        },
+        "capabilities": {
+          "type": "object",
+          "description": "Capability grants. Every entry is a glob allow-list; an absent key means the capability is denied outright. Enforced by the runtime, never by the CLI.",
+          "additionalProperties": true
+        }
+      }
+    },
+
+    "runtime": {
+      "type": "object",
+      "description": "Which backend executes the app, and which optional native features it links in.",
+      "properties": {
+        "backend": {
+          "type": "string",
+          "description": "Renderer backend. Must be a directory under runtime/ with a native crate.",
+          "enum": ["mini", "blitz"],
+          "default": "mini"
+        },
+        "bytecode": {
+          "type": "boolean",
+          "default": false,
+          "description": "Pre-compile the JS bundle to QuickJS bytecode + zstd at build time. Saves ~5-10 ms cold start and shrinks the shipped bundle, but for trivial bundles the compress/decompress overhead breaks even. Worth enabling above ~50 KB of source. Implemented by the mini backend only."
+        },
+        "image": {
+          "type": "boolean",
+          "default": false,
+          "description": "Link carbon/runtime/features/image and register the image host imports. Off by default so apps that never load an image pay zero binary cost for the decoders."
+        },
+        "audio": {
+          "type": "boolean",
+          "default": false,
+          "description": "Link carbon/host/audio and expose the Web Audio API. Off by default so no audio device is opened and there is no cold-start cost."
+        }
+      },
+      "additionalProperties": true
+    },
+
+    "updater": {
+      "type": "object",
+      "description": "Update client configuration. Signatures are verified against `pubkey` using ed25519 (see shared/signer).",
+      "required": ["pubkey", "url"],
+      "properties": {
+        "enabled": { "type": "boolean", "default": true },
+        "pubkey": {
+          "type": "string",
+          "description": "ed25519 public key, base64. Generate with `carbon signer generate`. NEVER put the private key in this file."
+        },
+        "url": {
+          "type": "string",
+          "description": "Base URL of the update feed."
+        },
+        "channel": { "type": "string", "default": "stable" },
+        "crash_threshold": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 3,
+          "description": "Consecutive startup crashes after an update before the runtime rolls back to the previous version."
+        }
+      },
+      "additionalProperties": true
+    },
+
+    "plugins": {
+      "type": "object",
+      "description": "Native plugin grants. Keys are plugin names; values are either `true` (load from the default location), a path string, or a table with explicit path and capability grants. Loading is driven by carbon/api/plugin_loader.rs; an absent or empty section makes the loader a no-op.",
+      "additionalProperties": {
+        "oneOf": [
+          { "type": "boolean" },
+          { "type": "string" },
+          {
+            "type": "object",
+            "properties": {
+              "path": { "type": "string" },
+              "capabilities": { "type": "object", "additionalProperties": true }
+            },
+            "additionalProperties": true
+          }
+        ]
+      }
+    }
+  }
+}

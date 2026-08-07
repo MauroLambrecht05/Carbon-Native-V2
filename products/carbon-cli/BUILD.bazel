@@ -1,0 +1,93 @@
+# Carbon Native V2 - Carbon CLI Product Target
+#
+# Follows the common product template — see //products:README.md. A product
+# composes and presents; it holds no domain or application layer, those are in
+# solutions/. Everything that was not carbon-cli-specific lives in
+# solutions/ — @carbon/cli-kernel (the command framework), @carbon/build (the
+# build engine), @carbon/packaging (installer generators), @carbon/storage.
+#
+# This runs on Bun, not Node: the bundler drives Bun.build with a custom plugin
+# adapter, doctor.ts imports `spawnSync` from "bun", and paths.ts detects Bun's
+# compiled-binary VFS. See //.tools/orchestration/bazel/bun:defs.bzl for how
+# Bazel drives it, and what that does and does not guarantee.
+#
+#   bazel run //products/carbon-cli:carbon  -- --help
+#   bazel run //products/carbon-cli:carbon  -- dev ./my-app
+#   bazel run //products/carbon-cli:compile          # release binary
+
+load("//.tools/orchestration/bazel/bun:defs.bzl", "bun_binary", "bun_compile", "bun_test")
+
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "srcs",
+    srcs = glob(
+        ["**/*.ts"],
+        exclude = ["**/*.test.ts"],
+    ),
+)
+
+filegroup(
+    name = "test_srcs",
+    srcs = glob(["**/*.test.ts"]),
+)
+
+# Products depend on solutions; solutions never depend back.
+_DEPS = [
+    "package.json",
+    "tsconfig.json",
+    "//.config:tsconfig",
+    "//solutions/contracts:srcs",
+    "//solutions/capabilities/bundling:srcs",
+    "//solutions/capabilities/packaging:srcs",
+    "//solutions/capabilities/publishing:srcs",
+    "//solutions/capabilities/signing:srcs",
+    "//solutions/capabilities/updating:srcs",
+    "//solutions/infrastructure/logging:srcs",
+    "//solutions/infrastructure/process:srcs",
+    "//solutions/infrastructure/workspace:srcs",
+    "//solutions/interface/cli:srcs",
+    "//solutions/integrations/bundler/vite:srcs",
+    "//solutions/integrations/transpiler/babel:srcs",
+]
+
+bun_binary(
+    name = "carbon",
+    entry = "main.ts",
+    srcs = [":srcs"],
+    data = _DEPS,
+)
+
+# Loads every command class and fails if a registry descriptor disagrees with
+# it — the guard on the metadata that is deliberately declared twice.
+bun_test(
+    name = "registry_test",
+    entry = "tests/registry.test.ts",
+    srcs = [
+        ":srcs",
+        ":test_srcs",
+    ],
+    data = _DEPS,
+)
+
+# The release artifact: a standalone carbon.exe (~118 MB) that bundles the CLI
+# and the Bun runtime together, for machines with no Bun installed.
+#
+# Not part of `bazel build //...`: it writes into the source tree, because
+# `bun build` needs node_modules and that is not a Bazel input.
+bun_compile(
+    name = "compile",
+    entry = "main.ts",
+    out = "products/carbon-cli/dist/carbon.exe",
+    externals = [
+        # Optional vite dep, only loaded for CSS minification.
+        "lightningcss",
+        # macOS-only watcher; safe to drop on every platform.
+        "fsevents",
+        # babel does require("@babel/preset-typescript/package.json") inside a
+        # try/catch that only fires for .cts config files, which we never emit.
+        "@babel/preset-typescript",
+    ],
+    srcs = [":srcs"],
+    data = _DEPS,
+)

@@ -1,0 +1,8 @@
+{
+  "name": "@carbon/publishing",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Publishing release artifacts to a distribution target.",
+  "type": "module",
+  "exports": { ".": "./index.ts" }
+}

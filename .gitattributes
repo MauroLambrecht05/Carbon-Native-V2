@@ -1,0 +1,35 @@
+# Line endings are load-bearing in this repo, so nothing is left to autocrlf.
+#
+# Default everything to LF in the working tree as well as the index. The
+# toolchain is Bun, Bazel and shell scripts; all of them read LF on every
+# platform, including Windows.
+* text=auto eol=lf
+
+# ── Files that MUST stay LF ─────────────────────────────────────────────────
+# A .sh with CRLF fails as `/bin/bash^M: bad interpreter`, and these run inside
+# the Linux container as well as on the host.
+*.sh            text eol=lf
+Dockerfile      text eol=lf
+*.bzl           text eol=lf
+*.bazel         text eol=lf
+.bazelversion   text eol=lf
+
+# ── Files that MUST be CRLF ─────────────────────────────────────────────────
+# cmd.exe parses a .bat line-by-line as it executes. With LF endings a
+# multi-line batch file runs the first line and then misparses the rest —
+# see the note in .tools/orchestration/bazel/bun/defs.bzl, where the Bun
+# launcher hit exactly this.
+*.bat           text eol=crlf
+*.cmd           text eol=crlf
+*.ps1           text eol=crlf
+
+# ── Binary ──────────────────────────────────────────────────────────────────
+*.png           binary
+*.ico           binary
+*.icns          binary
+*.wasm          binary
+*.exe           binary
+
+# ── Generated, so diffs stay readable in review ─────────────────────────────
+.config/bun.lock       linguist-generated=true
+MODULE.bazel.lock      linguist-generated=true

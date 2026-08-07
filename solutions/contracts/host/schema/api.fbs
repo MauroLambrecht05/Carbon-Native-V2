@@ -1,0 +1,14 @@
+// Carbon Native V2 - API Interface Contract
+namespace Carbon.Api;
+
+table ApiEndpoint {
+  name: string;
+  version: uint32;
+  request_schema: string;
+  response_schema: string;
+}
+
+table ApiDescriptor {
+  api_name: string;
+  endpoints: [ApiEndpoint];
+}

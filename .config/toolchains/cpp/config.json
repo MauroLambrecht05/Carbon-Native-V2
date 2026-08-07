@@ -1,0 +1,7 @@
+{
+  "toolchain": "cpp",
+  "standard": "c++20",
+  "recommendedCompiler": "clang",
+  "sanitizers": ["address", "undefined", "thread"],
+  "optimizationFlags": ["-O3", "-march=native"]
+}

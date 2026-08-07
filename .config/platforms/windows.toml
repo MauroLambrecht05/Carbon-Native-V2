@@ -1,0 +1,12 @@
+[platform]
+os = "windows"
+arch = "x86_64"
+
+[compiler]
+cxx = "cl.exe"
+cxxflags = ["/std:c++20", "/W4", "/permissive-", "/EHsc"]
+defines = ["_CRT_SECURE_NO_WARNINGS", "WIN32_LEAN_AND_MEAN", "NOMINMAX"]
+
+[linker]
+ldflags = ["/SUBSYSTEM:CONSOLE"]
+libs = ["user32.lib", "kernel32.lib", "ws2_32.lib"]

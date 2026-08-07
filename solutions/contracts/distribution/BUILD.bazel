@@ -1,0 +1,6 @@
+package(default_visibility = ["//visibility:public"])
+
+# Types only — the installer formats the toolchain can produce, shared by
+# capabilities/packaging (implements a generator per target) and the CLI's
+# `bundle` command (validates --target and renders help from it).
+filegroup(name = "srcs", srcs = glob(["**/*.ts"]))

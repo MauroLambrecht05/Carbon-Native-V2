@@ -1,0 +1,9 @@
+load("//solutions/contracts:defs.bzl", "abi_subject", "flatbuffers_subject")
+
+package(default_visibility = ["//visibility:public"])
+
+# A plugin agrees on two things at once: how it describes itself on the wire,
+# and the binary interface the host loads it through.
+flatbuffers_subject(name = "plugin")
+
+abi_subject(name = "plugin")

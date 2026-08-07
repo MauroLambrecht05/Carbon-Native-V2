@@ -1,0 +1,8 @@
+{
+  "name": "@carbon/workspace",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Workspace layout and manifest loading.",
+  "type": "module",
+  "exports": { ".": "./index.ts" }
+}

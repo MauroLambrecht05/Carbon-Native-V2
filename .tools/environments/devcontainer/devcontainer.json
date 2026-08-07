@@ -1,0 +1,31 @@
+{
+  "//": "REWRITTEN, NOT RESTORED — the original was deleted during the solutions restructure and no copy survived. See the note atop ../docker/Dockerfile.",
+  "name": "Carbon Native V2",
+  "dockerComposeFile": "../docker/docker-compose.yml",
+  "service": "dev",
+  "workspaceFolder": "/workspace",
+
+  "//postCreate": "The npm manifest lives in .config/, and Node/Bun resolution walks UP from each importing file — so the workspace root needs a link into it before anything resolves.",
+  "postCreateCommand": "bun install --cwd .config && ./.tools/automation/bootstrap/link-node-modules.sh",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "BazelBuild.vscode-bazel",
+        "rust-lang.rust-analyzer",
+        "ziglang.vscode-zig",
+        "golang.go",
+        "llvm-vs-code-extensions.vscode-clangd",
+        "oven.bun-vscode"
+      ],
+      "settings": {
+        "//": "The TypeScript tier is Bun-run and uses path aliases from .config/tsconfig.base.json; point the editor at the workspace TypeScript so it resolves them the same way tsc does.",
+        "typescript.tsdk": "node_modules/typescript/lib",
+        "files.watcherExclude": {
+          "**/.bazel/**": true,
+          "**/node_modules/**": true
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,16 @@
+# Carbon Native V2 - the contract tier
+#
+# Subject-first: one directory per thing two parties must agree about, with the
+# kinds of agreement (schema/, abi/, types/, errors/) inside it. defs.bzl holds
+# the macros their BUILD files call.
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files(["defs.bzl"])
+
+SUBJECTS = ["core", "app", "plugin", "host", "security", "versioning", "update"]
+
+filegroup(
+    name = "srcs",
+    srcs = ["//solutions/contracts/%s:srcs" % s for s in SUBJECTS],
+)

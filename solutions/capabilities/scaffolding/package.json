@@ -1,0 +1,8 @@
+{
+  "name": "@carbon/scaffolding",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Creating a new carbon project: presets, templates, and the project plan.",
+  "type": "module",
+  "exports": { ".": "./index.ts" }
+}

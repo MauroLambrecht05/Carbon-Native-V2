@@ -1,0 +1,18 @@
+// Carbon Native V2 - Event Bus Payload Contract
+namespace Carbon.Events;
+
+enum EventLevel : uint8 {
+  Debug = 0,
+  Info = 1,
+  Warn = 2,
+  Error = 3
+}
+
+table SystemEvent {
+  event_id: uint64;
+  timestamp: uint64;
+  source: string;
+  topic: string;
+  level: EventLevel;
+  payload: [ubyte];
+}

@@ -1,0 +1,16 @@
+{
+  "toolchains": {
+    "llvm": "17.0.6",
+    "rust": "1.76.0",
+    "zig": "0.12.0",
+    "go": "1.22.0",
+    "node": "20.11.0",
+    "dotnet": "8.0.200"
+  },
+  "libraries": {
+    "flatbuffers": "24.3.25",
+    "rules_cc": "0.0.9",
+    "rules_rust": "0.40.0",
+    "rules_go": "0.46.0"
+  }
+}

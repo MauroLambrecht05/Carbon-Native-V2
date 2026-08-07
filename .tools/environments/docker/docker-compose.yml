@@ -1,0 +1,31 @@
+# Carbon Native V2 — development environment.
+#
+# REWRITTEN, NOT RESTORED. See the note at the top of Dockerfile.
+#
+# The two named volumes matter more than they look. Bazel's output base and
+# Bun's install cache are both large and both entirely derived — mounting them
+# as volumes keeps them out of the bind-mounted source tree, so a rebuild does
+# not churn the host filesystem and `git status` stays clean.
+
+services:
+  dev:
+    build:
+      context: ../../..
+      dockerfile: .tools/environments/docker/Dockerfile
+    working_dir: /workspace
+    volumes:
+      - ../../..:/workspace
+      - bazel-cache:/root/.cache/bazel
+      - bazel-output:/root/_bazel_root
+      - bun-cache:/root/.bun/install/cache
+    environment:
+      # .bazelrc points the disk cache here; naming it explicitly keeps the
+      # volume mount and the flag from drifting apart.
+      - XDG_CACHE_HOME=/root/.cache
+    stdin_open: true
+    tty: true
+
+volumes:
+  bazel-cache:
+  bazel-output:
+  bun-cache:

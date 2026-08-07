@@ -1,0 +1,34 @@
+# ── Bazel ───────────────────────────────────────────────────────────────────
+# .bazelrc sets --symlink_prefix=/ so Bazel creates no convenience symlinks at
+# all. These patterns are defensive: they keep bazel-bin/bazel-out/etc. and the
+# .bazel/ variant out of the index if that setting is ever changed or dropped.
+/.bazel/
+/bazel-*
+# MODULE.bazel.lock is suppressed via `common --lockfile_mode=off` in .bazelrc.
+# Ignored as well so re-enabling the lockfile does not silently commit it.
+MODULE.bazel.lock
+
+# ── Node / Bun ──────────────────────────────────────────────────────────────
+# The real tree lives in .config/node_modules; /node_modules is the junction
+# that makes it reachable (see .tools/automation/bootstrap/link-node-modules).
+# Both are generated — only .config/package.json and .config/bun.lock are source.
+node_modules/
+/node_modules
+
+# ── Build output ────────────────────────────────────────────────────────────
+/.build/
+dist/
+# Per-app build cache the CLI pipeline writes next to a project's dist/.
+.carboncache/
+
+# ── Local / machine-specific ────────────────────────────────────────────────
+/.local/
+# .env is machine-specific and the natural place a cache token or signing
+# password ends up. .env.example is the committed template — keep them in sync.
+.env
+.env.local
+*.log
+
+# ── OS noise ────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db

@@ -1,0 +1,25 @@
+# Carbon Native V2 - @carbon/signing
+#
+# Capability: proving an artifact came from us.
+
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["**/*.ts", "**/*.js"], exclude = ["**/*.test.ts", "**/*.selftest.js"], allow_empty = True),
+)
+
+filegroup(
+    name = "tests",
+    srcs = glob(["**/*.test.ts"], allow_empty = True),
+)
+
+load("//.tools/orchestration/bazel/bun:defs.bzl", "bun_test")
+
+# Crosses domain -> application -> the minisign byte format -> the filesystem.
+# Slow on purpose: every key operation runs Argon2id at m=65540, t=3.
+bun_test(
+    name = "signing_integration_test",
+    entry = "tests/signing.integration.test.ts",
+    srcs = [":srcs", ":tests"],
+)

@@ -1,0 +1,8 @@
+{
+  "name": "@carbon/bundling",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Turning project source into a runnable bundle, with a content-hash build cache.",
+  "type": "module",
+  "exports": { ".": "./index.ts" }
+}

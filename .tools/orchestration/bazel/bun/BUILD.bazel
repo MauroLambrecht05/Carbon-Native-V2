@@ -1,0 +1,12 @@
+# The Bun toolchain type. See README.md.
+
+package(default_visibility = ["//visibility:public"])
+
+toolchain_type(name = "toolchain_type")
+
+exports_files([
+    "defs.bzl",
+    "extensions.bzl",
+    "repositories.bzl",
+    "toolchain.bzl",
+])

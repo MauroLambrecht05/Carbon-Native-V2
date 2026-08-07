@@ -1,0 +1,11 @@
+// Carbon Native V2 - Manifest Contract
+namespace Carbon.Manifest;
+
+table PackageManifest {
+  name: string;
+  version: string;
+  author: string;
+  description: string;
+  entry_point: string;
+  dependencies: [string];
+}

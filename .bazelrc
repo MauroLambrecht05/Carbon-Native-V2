@@ -1,0 +1,55 @@
+# Carbon Native V2 Bazel Configuration
+
+# Bzlmod is the default in Bazel 7 (pinned in .bazelversion); the flag is kept
+# explicit so a future bazelisk bump cannot silently fall back to WORKSPACE.
+common --enable_bzlmod
+
+# Do not write MODULE.bazel.lock. It is suppressed to keep the workspace root
+# free of generated files; the cost is that the transitive module graph is
+# re-resolved from the registry rather than pinned, so a Bazel Central Registry
+# change can alter the build. Direct dependencies are still pinned to exact
+# versions in MODULE.bazel, and the Bazel version itself in .bazelversion.
+# Delete this line to get the lockfile back.
+common --lockfile_mode=off
+
+# ── C++ standard ────────────────────────────────────────────────────────────
+# -std=c++20 is a GCC/Clang spelling. MSVC rejects it, so it is scoped to the
+# non-Windows configs rather than applied unconditionally; the Windows config
+# below passes the MSVC equivalent. Previously both were applied at once.
+build:linux --cxxopt=-std=c++20
+build:linux --host_cxxopt=-std=c++20
+build:linux --copt=-fPIC
+build:macos --cxxopt=-std=c++20
+build:macos --host_cxxopt=-std=c++20
+
+build:windows --cxxopt=/std:c++20
+build:windows --host_cxxopt=/std:c++20
+build:windows --copt=/W4
+build:windows --copt=/WX-
+
+build --announce_rc
+
+# ── Output & formatting ─────────────────────────────────────────────────────
+build --color=yes
+test --test_output=errors
+
+# Do not create convenience symlinks at the workspace root.
+#
+# By default Bazel drops four on every build — bazel-bin, bazel-out,
+# bazel-testlogs and bazel-<workspace>. They are only pointers into the output
+# base (~/_bazel_<user>/…); nothing is ever stored in the repository, and
+# nothing in this workspace reads them. Build, run and test all work without
+# them; when you need an output path, ask for it:
+#
+#     bazel info bazel-bin
+#
+# Set this to a prefix like `.bazel/` instead if you want the shortcuts back
+# collapsed into one hidden directory.
+build --symlink_prefix=/
+
+# ── Debug vs release profiles ───────────────────────────────────────────────
+build:debug -c dbg
+build:release -c opt --strip=always
+
+# ── Cache ───────────────────────────────────────────────────────────────────
+build --disk_cache=~/.cache/bazel_carbon_v2

@@ -1,0 +1,27 @@
+{
+  "buildSystem": "bazel",
+  "minBazelVersion": "7.0.0",
+  "profiles": {
+    "debug": {
+      "optLevel": "0",
+      "debugSymbols": true,
+      "sanitizers": ["address", "undefined"]
+    },
+    "release": {
+      "optLevel": "3",
+      "debugSymbols": false,
+      "lto": true,
+      "strip": true
+    },
+    "profile": {
+      "optLevel": "2",
+      "debugSymbols": true,
+      "profiling": true
+    }
+  },
+  "targets": {
+    "defaultCxxStandard": "c++20",
+    "rustEdition": "2021",
+    "zigTarget": "native"
+  }
+}

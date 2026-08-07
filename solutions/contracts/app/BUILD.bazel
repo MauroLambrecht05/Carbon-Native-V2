@@ -1,0 +1,5 @@
+load("//solutions/contracts:defs.bzl", "json_schema_subject")
+
+package(default_visibility = ["//visibility:public"])
+
+json_schema_subject(name = "app")

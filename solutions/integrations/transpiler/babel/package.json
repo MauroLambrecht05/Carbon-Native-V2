@@ -1,0 +1,12 @@
+{
+  "name": "@carbon/babel",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Carbon's Babel integration: the transforms we ship for Babel itself — the carbon-css tagged-template compiler and the app decorator.",
+  "type": "module",
+  "exports": {
+    "./css": "./infrastructure/css.ts",
+    "./app-decorator": "./infrastructure/app-decorator.ts"
+  },
+  "dependencies": { "@babel/core": "^7.29.0" }
+}

@@ -1,0 +1,20 @@
+{
+  "//": "Bun resolves tsconfig paths from the tsconfig nearest the IMPORTING file, not from the entrypoint's. Verified: with a tsconfig only under products/, a file in solutions/ that imports @carbon/* fails to resolve. So this tree needs its own.",
+  "//options": "The compiler options are repeated from products/carbon-cli/tsconfig.json rather than inherited, because .config/tsconfig.base.json carries only the path aliases — it is the wiring both trees share, not a compiler profile. Without allowImportingTsExtensions the whole tree reports 'an import path can only end with .ts', since every internal import is explicit about the extension.",
+  "extends": "../.config/tsconfig.base.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "esModuleInterop": true,
+    "types": ["bun"]
+  },
+  "//include": "A single recursive glob, not a list of top-level folders. The folder list went stale the moment the tiers were renamed, and a stale include reports 'No inputs were found' pointing at line 1 — which reads like a syntax error and is not. This form cannot go stale while any .ts exists.",
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules"]
+}

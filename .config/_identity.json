@@ -1,0 +1,32 @@
+{
+  "identity": {
+    "name": "carbon-native",
+    "id": "com.carbon.native",
+    "version": "0.2.0",
+    "edition": "2"
+  },
+  "metadata": {
+    "description": "High-Performance Polyglot Native Execution Platform for Carbon applications",
+    "license": "MIT",
+    "homepage": "https://github.com/carbon-native/carbon",
+    "repository": "https://github.com/carbon-native/carbon.git",
+    "authors": ["Carbon Native Team"]
+  },
+  "project": {
+    "type": "polyglot-runtime",
+    "languages": [
+      "cpp",
+      "zig",
+      "rust",
+      "csharp",
+      "go",
+      "ts"
+    ],
+    "contractFormat": "flatbuffers",
+    "abi": "c-native"
+  },
+  "compatibility": {
+    "minimumCarbonVersion": "0.2.0",
+    "apiVersion": "2"
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "toolchain": "rust",
+  "edition": "2021",
+  "channel": "stable",
+  "version": "1.76.0",
+  "components": ["rustfmt", "clippy", "rust-analyzer"]
+}

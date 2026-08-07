@@ -1,0 +1,17 @@
+// Carbon Native V2 - Permissions & Capability Security Contract
+namespace Carbon.Permissions;
+
+enum PermissionFlags : uint32 {
+  None = 0,
+  FileSystemRead = 1,
+  FileSystemWrite = 2,
+  NetworkAccess = 4,
+  ProcessExecute = 8,
+  SystemDialog = 16
+}
+
+table CapabilityGrant {
+  granted_flags: uint32;
+  allowed_paths: [string];
+  allowed_hosts: [string];
+}
