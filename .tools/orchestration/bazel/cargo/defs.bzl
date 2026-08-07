@@ -282,6 +282,23 @@ def cargo_binary(name, **kwargs):
         **kwargs
     )
 
+def cargo_library(name, **kwargs):
+    """A Rust library, built by Cargo.
+
+    The same rule as cargo_binary — `cargo build -p <pkg>` builds whatever
+    targets the package declares. It exists under its own name so a BUILD file
+    reads honestly: a crate with no [[bin]] should not be declared as a binary
+    just because the underlying command is identical.
+    """
+    _cargo_binary(
+        name = name,
+        is_windows = select({
+            "@platforms//os:windows": True,
+            "//conditions:default": False,
+        }),
+        **kwargs
+    )
+
 def cargo_test(name, **kwargs):
     """`cargo test` for one package, as a Bazel test target."""
     _cargo_test(

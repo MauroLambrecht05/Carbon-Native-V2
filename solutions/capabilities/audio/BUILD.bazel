@@ -1,0 +1,34 @@
+# Carbon Native V2 - @carbon/audio
+#
+# Capability: a JS app builds an audio graph and hears it.
+
+package(default_visibility = ["//visibility:public"])
+
+load("//.tools/orchestration/bazel/cargo:defs.bzl", "cargo_library", "cargo_test")
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["**/*.rs", "Cargo.toml"], exclude = ["tests/**"], allow_empty = True),
+)
+
+filegroup(
+    name = "tests",
+    srcs = glob(["tests/**/*.rs"], allow_empty = True),
+)
+
+cargo_library(
+    name = "lib",
+    package = "carbon-audio",
+    crate_features = ["no-audio"],
+    srcs = [":srcs"],
+)
+
+# 9 integration tests. They run with the `no-audio` feature so there is no
+# attempt to open an output device — which is what makes them work in CI and
+# in the container.
+cargo_test(
+    name = "audio_test",
+    package = "carbon-audio",
+    crate_features = ["no-audio"],
+    srcs = [":srcs", ":tests"],
+)

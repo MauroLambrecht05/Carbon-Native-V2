@@ -1,0 +1,23 @@
+# Carbon Native V2 - @carbon/snapshot
+#
+# Capability: skipping cold-start JS heap construction by mapping a saved heap.
+
+package(default_visibility = ["//visibility:public"])
+
+load("//.tools/orchestration/bazel/cargo:defs.bzl", "cargo_library")
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["**/*.rs", "Cargo.toml"], exclude = ["tests/**"], allow_empty = True),
+)
+
+# No test target: this crate has none, and it is the most dangerous code in the
+# tree — it assumes the executable loads at a constant base and that every heap
+# pointer survives across processes. Worth knowing that nothing here checks
+# that.
+
+cargo_library(
+    name = "lib",
+    package = "carbon-snapshot",
+    srcs = [":srcs"],
+)

@@ -33,10 +33,10 @@ members = [
   #
   # Phase 2 — leaf capabilities (no runtime dependency, own tests):
   "../../solutions/capabilities/math",
-  #   "../../solutions/capabilities/text",
-  #   "../../solutions/capabilities/snapshot",
-  #   "../../solutions/capabilities/imaging",
-  #   "../../solutions/capabilities/audio",
+  "../../solutions/capabilities/text",
+  "../../solutions/capabilities/snapshot",
+  "../../solutions/capabilities/imaging",
+  "../../solutions/capabilities/audio",
   #
   # Phase 3 — engines:
   #   "../../solutions/capabilities/layout",

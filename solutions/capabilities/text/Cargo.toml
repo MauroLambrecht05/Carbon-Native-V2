@@ -1,0 +1,43 @@
+# @carbon/text — glyph rasterization, font fallback, wrapping and measurement.
+#
+# Capability: turning a string and a style into positioned, rasterized glyphs.
+#
+# A leaf. It knows nothing about the scene graph, the paint backend or the
+# runtime — which is why it was extracted from mini's main.rs in V1 in the first
+# place, and why any future paint backend can depend on it.
+#
+# ── ON THE FLAT LAYOUT ──────────────────────────────────────────────────────
+# No domain/ or infrastructure/ here, unlike the other capabilities. The crate
+# is one struct, TextEngine, with one inherent impl. There is no seam: the font
+# stack, the fallback chain, wrapping and measurement all read and mutate the
+# same rasterization cache, and separating them would mean either splitting one
+# impl block across modules for the sake of the directory listing, or inventing
+# an interface between halves that have never been apart.
+#
+# It also has no tests. Splitting a cohesive 831-line unit with nothing
+# protecting the result is how behaviour goes missing quietly. When this crate
+# gains tests, the split becomes a safe and worthwhile follow-up.
+
+[package]
+name = "carbon-text-renderer"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+license = "Apache-2.0"
+description = "Lazy-loaded text engine: fontdue glyph rasterization + a font-stack with per-glyph fallback, plus word-wrap and measurement. No dependency on any other engine crate, so any paint backend can use it."
+# The workspace manifest lives in .config/rust. Cargo only walks UP from a
+# crate, so it would never find it — the link has to be explicit.
+workspace = "../../../.config/rust"
+
+[lib]
+name = "carbon_text_renderer"
+# The crate root sits beside assets/ rather than under src/. That moved the
+# include_bytes! paths: they were "../assets/..." when lib.rs lived in src/, and
+# are "assets/..." now. include_bytes! resolves relative to the FILE, so getting
+# this wrong is a compile error rather than a silent one — but only for the
+# fonts that are actually referenced.
+path = "lib.rs"
+
+[dependencies]
+tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd", "png-format"] }
+fontdue = { version = "0.9", default-features = false, features = ["std"] }

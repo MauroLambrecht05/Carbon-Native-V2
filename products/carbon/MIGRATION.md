@@ -113,17 +113,39 @@ actually lands — declaring 139 functions before their implementations move
 would be writing the contract against V1's shape rather than the one they end
 up in.
 
-**2 — Leaf capabilities. IN PROGRESS.** `math`, `text`, `snapshot`, `imaging`,
+**2 — Leaf capabilities. DONE.** `math`, `text`, `snapshot`, `imaging`,
 `audio` — the five crates with no dependency on the runtime and their own
 existing tests. Lowest risk, and they prove the Cargo-under-Bazel setup on real
 code.
 
-- [x] `math` — 13 tests, passing through `bazel test`. Types under `domain/`,
-      crate root at `lib.rs` rather than `src/lib.rs`, and module paths held
-      identical with `#[path]` so the public API did not change at all.
-- [ ] `text`, `snapshot`, `imaging`, `audio`
+All five migrated, **52 Rust tests passing** through `bazel test`. Every crate
+keeps its module names via `#[path]`, so no public API changed; the crate root
+is `lib.rs` beside its folders rather than `src/lib.rs`.
 
-**3 — The engines.** `layout`, `painting`, `gpu-canvas`. Bigger, interdependent,
+| Capability | Tests | Layout |
+|---|---:|---|
+| `math` | 13 | `domain/` — the six types |
+| `text` | 0 | flat — one struct, one impl, no seam |
+| `snapshot` | 0 | flat — all infrastructure, no model |
+| `imaging` | 30 | `domain/` `application/` `infrastructure/` |
+| `audio` | 9 | `graph/` `nodes/` `infrastructure/` |
+
+`text` and `snapshot` kept flat layouts deliberately. `text` is one cohesive
+`TextEngine` struct with a single impl and no tests; splitting it would mean
+either scattering one impl across modules for the directory listing's sake, or
+inventing an interface between halves that have never been apart. `snapshot` is
+*entirely* infrastructure — a custom QuickJS allocator over a fixed-address
+VirtualAlloc region — so a `domain/` there would have been empty. The shape
+should describe the code.
+
+`audio` has no `domain/` and that is a finding, not an omission: the first
+attempt put `buffer` and `routing` there, and both import `crate::mixer` for
+`with_graph_mut`. A Web Audio node is a handle into one global mutable graph
+that an audio thread reads concurrently — no layer of that crate is free of it,
+so `domain/` would have been a label rather than a boundary. It became
+`graph/`.
+
+**3 — The engines. NEXT.** `layout`, `painting`, `gpu-canvas`. Bigger, interdependent,
 no existing tests — these need tests written as they land.
 
 **4 — Host and platform.** The 19 `host/native` modules into `infrastructure/os`

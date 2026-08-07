@@ -1,0 +1,22 @@
+# Carbon Native V2 - @carbon/text
+#
+# Capability: turning a string and a style into positioned, rasterized glyphs.
+
+package(default_visibility = ["//visibility:public"])
+
+load("//.tools/orchestration/bazel/cargo:defs.bzl", "cargo_library")
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["**/*.rs", "Cargo.toml"], exclude = ["tests/**"], allow_empty = True),
+)
+
+# No test target: this crate has none. Stated rather than silently omitted —
+# it is the reason the crate kept its flat layout instead of being split (see
+# Cargo.toml). A build target still exists so `bazel build //...` covers it.
+
+cargo_library(
+    name = "lib",
+    package = "carbon-text-renderer",
+    srcs = [":srcs"],
+)

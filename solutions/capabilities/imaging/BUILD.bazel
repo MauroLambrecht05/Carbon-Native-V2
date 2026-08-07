@@ -1,0 +1,32 @@
+# Carbon Native V2 - @carbon/imaging
+#
+# Capability: a path or byte string becomes RGBA the renderer can use.
+
+package(default_visibility = ["//visibility:public"])
+
+load("//.tools/orchestration/bazel/cargo:defs.bzl", "cargo_library", "cargo_test")
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["**/*.rs", "Cargo.toml"], exclude = ["tests/**"], allow_empty = True),
+)
+
+filegroup(
+    name = "tests",
+    srcs = glob(["tests/**/*.rs"], allow_empty = True),
+)
+
+cargo_library(
+    name = "lib",
+    package = "carbon-image",
+    srcs = [":srcs"],
+)
+
+# 14 unit tests plus 16 integration tests, each running a real QuickJS
+# context. Five more are #[ignore]d in V1 and stay that way — they leak GC
+# objects when the Runtime drops; run them with --ignored --test-threads=1.
+cargo_test(
+    name = "imaging_test",
+    package = "carbon-image",
+    srcs = [":srcs", ":tests"],
+)

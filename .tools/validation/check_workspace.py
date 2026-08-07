@@ -28,8 +28,11 @@ def validate_workspace(root: Path) -> bool:
         "distribution", "toolchain",
     ]
     CAPABILITIES = [
+        # TypeScript
         "signing", "updating", "bundling", "packaging", "publishing",
         "scaffolding", "plugins",
+        # Rust, migrated from V1's carbon/ — see products/carbon/MIGRATION.md
+        "math", "text", "snapshot", "imaging", "audio",
     ]
     INFRASTRUCTURE = ["logging", "process", "workspace"]
 
@@ -180,6 +183,47 @@ def validate_workspace(root: Path) -> bool:
                         print(f"[FAIL] domain imports outward: {rel} -> {forbidden}")
                         domain_violations += 1
                         passed = False
+
+    # The same rule for Rust, which the TypeScript glob above does not see.
+    #
+    # Rust makes this harder than TypeScript in one specific way: the crates use
+    # `#[path = "<layer>/<file>.rs"]` so module names survive the restructure,
+    # which means a module's NAME no longer says which layer it lives in.
+    # `use crate::decoder::DecodedImage` looks identical whether decoder.rs sits
+    # in domain/ or infrastructure/.
+    #
+    # So the layer map is read out of the #[path] attributes themselves, and
+    # `use crate::<name>` is resolved through it. Without this, adding a Rust
+    # capability silently added zero coverage — the check kept printing OK while
+    # inspecting nothing, which is how the imaging and audio violations got in.
+    path_attr = re.compile(r'#\[path\s*=\s*"([^"]+)"\]\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)\s*;')
+    use_crate = re.compile(r'^\s*use\s+crate::(\w+)')
+
+    for lib in sorted(root.glob("solutions/capabilities/*/lib.rs")):
+        capability = lib.parent
+        # module name -> the directory its file actually lives in
+        layer_of = {}
+        for rel_path, mod_name in path_attr.findall(lib.read_text(encoding="utf-8")):
+            layer_of[mod_name] = rel_path.split("/")[0] if "/" in rel_path else ""
+
+        domain_dir = capability / "domain"
+        if not domain_dir.is_dir():
+            continue
+
+        for source in sorted(domain_dir.rglob("*.rs")):
+            rel = source.relative_to(root).as_posix()
+            for line in source.read_text(encoding="utf-8").splitlines():
+                match = use_crate.match(line)
+                if not match:
+                    continue
+                target_layer = layer_of.get(match.group(1))
+                if target_layer in ("application", "infrastructure"):
+                    print(
+                        f"[FAIL] domain imports outward: {rel} -> "
+                        f"crate::{match.group(1)} (in {target_layer}/)"
+                    )
+                    domain_violations += 1
+                    passed = False
 
     if domain_violations == 0:
         print("[OK] Dependency direction: domain/ imports nothing outward")

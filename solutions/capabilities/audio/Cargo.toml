@@ -1,0 +1,79 @@
+# @carbon/audio — the Web Audio API, natively.
+#
+# Capability: a JS app builds an audio graph and hears it. AudioContext,
+# AudioBuffer, buffer sources, gain, oscillators and an analyser, mixed on a
+# real audio thread and written to the system output device.
+#
+#   domain/          buffers and params — no device, no JS, no graph
+#   nodes/           the Web Audio node types (see the note in lib.rs: each is
+#                    a model, a DSP routine and a QuickJS class at once)
+#   infrastructure/  the cpal device and the audio-thread mixer
+
+[package]
+name = "carbon-audio"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+license = "Apache-2.0"
+description = "Web Audio API implementation for the carbon runtime: AudioContext, AudioBuffer, AudioBufferSourceNode, GainNode, OscillatorNode, AnalyserNode and AudioParam, over cpal and symphonia."
+# The workspace manifest lives in .config/rust. Cargo only walks UP from a
+# crate, so it would never find it — the link has to be explicit.
+workspace = "../../../.config/rust"
+
+[lib]
+name = "carbon_audio"
+path = "lib.rs"
+
+[dependencies]
+# rquickjs — the same configuration carbon-fast-math uses. Every node type is a
+# JsClass, registered on the host globals by `register_audio`.
+rquickjs = { version = "0.9", default-features = false, features = ["classes", "macro"] }
+
+# cpal — cross-platform audio output: WASAPI on Windows, CoreAudio on macOS,
+# ALSA/PulseAudio on Linux. Default features are left ON deliberately; each
+# backend is a platform, and disabling one to save ~250 KB would mean shipping
+# a runtime that is silent on that platform.
+cpal = "0.15"
+
+# symphonia — pure-Rust decoding for decodeAudioData. Defaults are off so the
+# codec list is explicit: MP3, WAV (needs `pcm` to actually decode samples),
+# Vorbis with its Ogg container, and FLAC.
+#
+# AAC is deliberately absent. The decoder pulls in patent-encumbered code, and
+# documenting "AAC unsupported" is better than shipping a path we cannot defend.
+symphonia = { version = "0.5", default-features = false, features = [
+    "mp3",
+    "wav",
+    "pcm",
+    "vorbis",
+    "ogg",
+    "flac",
+] }
+
+# realfft — used by AnalyserNode. Chosen over rustfft because the analyser only
+# ever transforms real-valued input (audio samples), and realfft is ~2x faster
+# than wrapping a complex FFT around the same data.
+realfft = "3"
+
+# parking_lot — held for microseconds at a time on the audio thread. std's Mutex
+# adds poisoning and deadlock bookkeeping that is pure overhead at this scale,
+# and a heavier wakeup path, which on an audio thread means dropouts.
+parking_lot = "0.12"
+
+# once_cell — lazy-inits the global graph the audio thread reads from, without
+# the unsafe one-shot dance `static mut` would need.
+once_cell = "1"
+
+anyhow = { workspace = true }
+
+[features]
+# Skip opening the cpal device entirely. The graph, automation and
+# decodeAudioData all still work — there is simply no sound.
+#
+# This is what makes the crate testable in CI and in the container, where there
+# is no output device at all.
+no-audio = []
+
+[dev-dependencies]
+# The tests spin up a real rquickjs context, same pattern as the math tests.
+rquickjs = { version = "0.9", features = ["classes", "macro", "loader"] }
