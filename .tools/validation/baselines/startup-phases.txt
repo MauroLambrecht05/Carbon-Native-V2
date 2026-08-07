@@ -1,0 +1,52 @@
+# Ordered startup phases of carbon-mini, captured from a real app launch.
+#
+# Captured with:
+#   CARBON_TEST_EXIT_MS=2500 carbon-mini.exe shared/examples/my-app
+#
+# This is the launch contract. Each phase is printed to stderr as
+# `[timing] phase=<name>`, in this order, and the sequence encodes the
+# runtime's actual startup dependency graph: a window before a surface, a
+# surface before a scene, fonts before JS, host imports before the bundle,
+# the bundle before first paint.
+#
+# The migration splits mini.rs into capabilities. That reordering is exactly
+# where startup breaks — evaluate the bundle before host imports are
+# registered and every app dies on an undefined global, with no compile error
+# to warn you. The integration test asserts this order.
+#
+# Two phases are conditional and appear only when the feature is compiled in
+# and enabled by carbon.toml: image_registered, audio_registered.
+#
+# Reference timings on the capture machine (dist profile, my-app):
+#   startup -> first paint    347 ms
+#   startup -> content ready  347 ms
+#   font_preloaded            230 ms   (the dominant cost, by far)
+#   first_paint_visible        55 ms
+
+args_resolved
+event_loop_built
+window_built
+softbuffer_ctx
+softbuffer_ready
+scene_created
+text_engine_created
+font_user_resolved
+font_preloaded
+js_runtime_ready
+host_imports_registered
+native.fs
+native.process
+native.dialog_shell_clip_notif_autostart_winstate_keychain
+native.store_pty
+native.os_log_invoke_window_app
+native.net
+native_registered
+carbon_dispatcher_installed
+plugins_loaded
+image_registered
+audio_registered
+bundle_evaluated
+first_paint_before_show
+window_show_scheduled
+first_paint_visible
+effects_drained

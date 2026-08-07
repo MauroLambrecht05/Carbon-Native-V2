@@ -1,0 +1,16 @@
+# Cargo features of the carbon-runtime package.
+#
+# Each gates a subsystem AND a chunk of binary size — `gpu` alone is
+# 2.5 MB. A feature lost in the migration is either a bloated default
+# build or a subsystem that can no longer be turned on.
+# Count:   9
+
+audio	mini dep:carbon-audio
+blitz	dep:blitz-dom dep:blitz-paint dep:blitz-traits dep:anyrender dep:anyrender_vello dep:png
+default	
+gpu	mini dep:carbon-gpu-canvas carbon-paint/gpu
+image	mini dep:carbon-image
+mini	dep:tiny-skia dep:resvg dep:usvg dep:fontdue dep:taffy dep:softbuffer dep:carbon-fast-math dep:carbon-text-renderer dep:carbon-layout dep:carbon-paint dep:carbon-snapshot dep:lz4_flex
+profiling	mini dep:tracy-client
+snapshot	mini
+updater	mini dep:carbon-updater

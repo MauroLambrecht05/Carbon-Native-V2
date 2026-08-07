@@ -1,0 +1,181 @@
+# Migrating Carbon itself into V2
+
+The runtime, the host layer, the engines and the SDK — everything that is not
+the CLI. ~35,000 lines of Rust across 14 crates, restructured onto the same
+clean-core layering the TypeScript side already uses.
+
+Written before anything moves, because the failure mode here is not a broken
+build. It is a subsystem that quietly stops being reachable.
+
+## What is being moved
+
+Measured, not estimated:
+
+| Source | Lines | Becomes |
+|---|---:|---|
+| `carbon/runtime/mini.rs` | 4,441 | `products/carbon/` composition + several capabilities |
+| `carbon/runtime/blitz.rs` | 1,344 | `products/carbon/` + `integrations/renderer/blitz` |
+| `carbon/runtime/engine/paint` | 3,915 | `capabilities/painting` |
+| `carbon/runtime/engine/layout` | 3,726 | `capabilities/layout` |
+| `carbon/runtime/engine/gpu-canvas` | 3,406 | `capabilities/gpu-canvas` |
+| `carbon/runtime/features/math` | 3,791 | `capabilities/math` |
+| `carbon/host/audio` | 3,538 | `capabilities/audio` |
+| `carbon/host/native` (19 modules) | 3,997 | `infrastructure/os/*` |
+| `carbon/runtime/features/image` | 1,603 | `capabilities/imaging` |
+| `ecosystem/users/sdk/rust` + `zig` | 1,157 | `capabilities/plugin-sdk` |
+| `carbon/api` | 950 | `infrastructure/plugin-host` |
+| `carbon/runtime/features/snapshot` | 881 | `capabilities/snapshot` |
+| `carbon/runtime/engine/text-renderer` | 831 | `capabilities/text` |
+| `shared/logic/core` | 643 | `contracts/app` (Rust side) + `infrastructure/` |
+| `ecosystem/system/clipboard` | 524 | `labs/` or an example plugin |
+| `carbon/platform` | 83 | `infrastructure/platform` |
+
+Plus the TypeScript that ships with the runtime: `ecosystem/system/stdlib/`
+(api, compat/dom, compat/xterm, term, three, three-fiber) and the two renderers
+under `engine/paint/renderers/{solid,react}`.
+
+## The one contract that does not exist yet
+
+`carbon/host/native/mod.rs` registers 139 globals onto a QuickJS context. The
+JS side calls them by string name. Nothing declares that surface — it is
+implied by matching string literals on both sides of an FFI boundary, in two
+different languages.
+
+That is the single highest-value thing this migration produces:
+`contracts/runtime/`, holding the host-function registry as a language-agnostic
+definition, with generated Rust and TypeScript sides. Until it exists, "no
+functionality loss" is checked by a script grepping for string literals — which
+is what `.tools/validation/baselines/` does today, and which is a stopgap.
+
+## Target structure
+
+```
+products/carbon/                    the two shipped binaries
+├── mini/                           composition root for carbon-mini
+├── blitz/                          composition root for carbon-blitz
+└── tests/                          launches example apps, asserts the phases
+
+solutions/
+├── contracts/
+│   ├── runtime/          NEW  the 139 host functions, node kinds, prop names
+│   ├── plugin/           has   abi/carbon_abi.h  (+ Rust and Zig sides)
+│   ├── host/             has   api.fbs, events.fbs, ipc.fbs
+│   └── app/              has   carbon.toml — gains its Rust side
+│
+├── capabilities/
+│   ├── layout/                 scene graph, Taffy, CSS value parsing
+│   ├── painting/               tiny-skia dispatch, canvas2d, svg, blur
+│   ├── text/                   fontdue engine
+│   ├── gpu-canvas/             wgpu surface, geometry, materials
+│   ├── imaging/                decode, cache, async load
+│   ├── audio/                  Web Audio graph
+│   ├── math/                   Vector3, Matrix4, Quaternion, Box3, Frustum
+│   ├── snapshot/               heap snapshot / restore
+│   └── plugin-sdk/             what plugin authors compile against
+│
+├── infrastructure/
+│   ├── os/                     the 19 host/native modules, behind ports
+│   ├── platform/               windows · macos · unix
+│   └── plugin-host/            loader, host_exports
+│
+├── integrations/
+│   ├── javascript/quickjs/     the rquickjs binding layer
+│   ├── windowing/tao/          event loop, window
+│   └── renderer/blitz/         stylo + vello + wgpu
+│
+└── interface/
+    └── renderer/{solid,react}  the JS-side renderers
+```
+
+Rationale for the placements that are not obvious:
+
+- **`tao` and `rquickjs` are integrations, not infrastructure.** They are named
+  outside technologies, and the tier is named by role — `windowing/`,
+  `javascript/` — so swapping winit for tao changes a leaf.
+- **`blitz` is an integration, not a capability.** It is someone else's renderer
+  (stylo + vello). `painting/` is ours.
+- **`host/native` is infrastructure, not a capability.** Reading a file is a
+  driven adapter. The capability is whatever calls it.
+- **`plugin-sdk` is a capability, not a product.** It is not a binary we ship;
+  it is a library plugin authors depend on. `capabilities/plugins` (already in
+  V2) points at it, which closes the `packages/carbon-sdk` gap noted there.
+
+## Phases
+
+Each phase ends green — build, tests, baseline check — so the work can stop
+between any two without leaving the tree half-moved.
+
+**1 — Contracts and skeleton.** `contracts/runtime` with the 139 functions
+declared, `contracts/app`'s Rust side, the Bazel/Cargo plumbing, directory
+skeleton. Nothing moves yet. Ends with V2 able to build an empty Rust crate
+through Bazel.
+
+**2 — Leaf capabilities.** `math`, `text`, `snapshot`, `imaging`, `audio` — the
+five crates with no dependency on the runtime and their own existing tests.
+Lowest risk, and they prove the Cargo-under-Bazel setup on real code.
+
+**3 — The engines.** `layout`, `painting`, `gpu-canvas`. Bigger, interdependent,
+no existing tests — these need tests written as they land.
+
+**4 — Host and platform.** The 19 `host/native` modules into `infrastructure/os`
+behind ports, `platform/`, `plugin-host/`. This is where the 139-function
+contract gets enforced for the first time.
+
+**5 — The composition roots.** Split `mini.rs` (4,441 lines) and `blitz.rs` into
+`products/carbon/`. Highest risk in the whole migration: this file holds the
+startup ordering, and the ordering is the thing `startup-phases.txt` exists to
+protect.
+
+**6 — TypeScript tier.** `stdlib/`, the solid and react renderers, the type
+definitions.
+
+## How each phase is verified
+
+1. `cargo build` for the touched crates — a real compile, with the toolchain at
+   `C:\Users\mauro\.cargo\bin` (cargo 1.86.0, not on PATH by default).
+2. `cargo test` for crates that have tests (`math`, `image`, `audio`, the SDK's
+   `abi_compat_test`).
+3. `capture_baseline.py --check` — the 139 functions, 9 features, 23 env vars.
+4. From phase 5, the launch test: build an example app, run the binary against
+   it with `CARBON_TEST_EXIT_MS`, assert exit 0 and the 27 phases in order.
+5. `bazel build //...` and the workspace validator, as with everything else.
+
+## The launch test
+
+V1 has a test hook that makes this possible:
+
+```
+CARBON_TEST_EXIT_MS=2500 carbon-mini.exe shared/examples/my-app
+```
+
+auto-exits cleanly after N ms, so stderr flushes and the exit code is real.
+Verified working against the prebuilt V1 binary — 347 ms to first paint, exit 0,
+27 phases.
+
+Five example apps exist in V1: `my-app`, `notes-app`, `discord-app`, `react`,
+`terax-ai`. The first three are the useful ones — `react` proves the second
+renderer, `terax-ai` is a large real application and the best end-to-end signal.
+
+`CM_DUMP=1` prints the layout tree, and `CM_SCREENSHOT=<path>` writes a PNG on
+the blitz backend. Both are assertion surfaces beyond "did it exit 0".
+
+## Known risks
+
+- **No baseline test suite.** The runtime has essentially no tests — one
+  `plugin_loader_test.rs`. Everything else is verified against the captured
+  surface plus the launch test. Tests get written as each capability lands,
+  which is slower but is the only way this is checkable at all.
+- **`mini.rs` is a 4,441-line composition root** holding startup ordering,
+  event-loop dispatch, the renderer bridge and 56 host-function registrations.
+  Splitting it is phase 5 for a reason.
+- **Two backends share one Cargo package** via `include!` of `mod.rs` and
+  mutually exclusive features. Cargo has no per-binary dependency scoping, which
+  is *why* it is shaped that way — see the comment at the top of
+  `carbon/runtime/Cargo.toml`. Any restructure has to preserve that property or
+  every build compiles both stacks.
+- **Cargo and Bazel both want to own the build.** V2 is Bazel-only; V1 is Cargo
+  with a workspace manifest in `.config/rust`. `rules_rust` is already a
+  `bazel_dep`. Whether Bazel drives Cargo or replaces it is a decision phase 1
+  has to make and is not yet made.
+- **`gpu-canvas` needs a GPU.** Its tests cannot run in CI or in the container
+  without a software adapter.
