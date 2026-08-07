@@ -105,14 +105,23 @@ Rationale for the placements that are not obvious:
 Each phase ends green — build, tests, baseline check — so the work can stop
 between any two without leaving the tree half-moved.
 
-**1 — Contracts and skeleton.** `contracts/runtime` with the 139 functions
-declared, `contracts/app`'s Rust side, the Bazel/Cargo plumbing, directory
-skeleton. Nothing moves yet. Ends with V2 able to build an empty Rust crate
-through Bazel.
+**1 — Build plumbing. DONE.** Bazel-drives-Cargo decided and built
+(`.tools/orchestration/bazel/cargo`), workspace manifest at
+`.config/rust/Cargo.toml`, baselines captured. The original scope also listed
+`contracts/runtime`; that moved to phase 4, where the host layer it describes
+actually lands — declaring 139 functions before their implementations move
+would be writing the contract against V1's shape rather than the one they end
+up in.
 
-**2 — Leaf capabilities.** `math`, `text`, `snapshot`, `imaging`, `audio` — the
-five crates with no dependency on the runtime and their own existing tests.
-Lowest risk, and they prove the Cargo-under-Bazel setup on real code.
+**2 — Leaf capabilities. IN PROGRESS.** `math`, `text`, `snapshot`, `imaging`,
+`audio` — the five crates with no dependency on the runtime and their own
+existing tests. Lowest risk, and they prove the Cargo-under-Bazel setup on real
+code.
+
+- [x] `math` — 13 tests, passing through `bazel test`. Types under `domain/`,
+      crate root at `lib.rs` rather than `src/lib.rs`, and module paths held
+      identical with `#[path]` so the public API did not change at all.
+- [ ] `text`, `snapshot`, `imaging`, `audio`
 
 **3 — The engines.** `layout`, `painting`, `gpu-canvas`. Bigger, interdependent,
 no existing tests — these need tests written as they land.
@@ -128,6 +137,44 @@ protect.
 
 **6 — TypeScript tier.** `stdlib/`, the solid and react renderers, the type
 definitions.
+
+## The build decision, made
+
+**Bazel drives Cargo.** `crate_universe` would need all 123 build-script
+dependencies working under Bazel on three platforms — `rquickjs-sys` (compiles
+QuickJS C, runs bindgen), `ring` (assembly), `ash`/`naga` behind wgpu. The
+runtime needs the MSVC linker on Windows regardless, so hermeticity is out of
+reach either way. Bazel owns the graph; Cargo compiles. Same arrangement as the
+Bun rules, for the same reason.
+
+**No new Cargo files in the root.** The workspace manifest is
+`.config/rust/Cargo.toml`, and the settings that would otherwise need a root
+`.cargo/config.toml` are exported by the launcher instead — verified that cargo
+reads them, by feeding `CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS` a bad value
+and watching cargo reject it. Build output goes to `.build/`, already
+gitignored.
+
+Three problems that only appear under `bazel test`, all written up in
+`.tools/orchestration/bazel/cargo/`:
+
+- `features` is a **built-in Bazel attribute** and cannot be overridden. The
+  rule calls it `crate_features`, as `rules_rust` does.
+- `bazel test` **scrubs the environment**, so a run-time search for
+  `~/.cargo/bin` sees nothing and reports a missing toolchain that is installed.
+  Resolved at fetch time by a repository rule instead.
+- `bazel test` leaves the working directory in the execroot, so a relative
+  `--manifest-path` resolves against nothing. The workspace root is captured at
+  fetch time for the same reason.
+
+## Drift found while doing this
+
+Recorded because each was a real inconsistency, not a preference:
+
+- `.config/dependencies.json` declared Rust **1.76.0**; V1's workspace requires
+  **1.86**, and that is what is installed. The Dockerfile installed 1.76.0 too,
+  so the container could not have built the runtime. All three now say 1.86.0.
+- `MODULE.bazel` registered a `rules_rust` toolchain pinned to 1.76.0. Aligned,
+  and marked as the unused escape hatch it is.
 
 ## How each phase is verified
 
