@@ -1,0 +1,27 @@
+# Carbon Native V2 - @carbon/math
+#
+# Capability: three.js's math API, in Rust, fast enough to run a scene graph
+# under an interpreter.
+
+package(default_visibility = ["//visibility:public"])
+
+load("//.tools/orchestration/bazel/cargo:defs.bzl", "cargo_test")
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["**/*.rs", "Cargo.toml"], exclude = ["tests/**"], allow_empty = True),
+)
+
+filegroup(
+    name = "tests",
+    srcs = glob(["tests/**/*.rs"], allow_empty = True),
+)
+
+# 13 tests, each spinning up a real QuickJS context and running JS that
+# exercises the class bindings — so this covers the FFI surface, not just the
+# math. Migrated from V1 unchanged.
+cargo_test(
+    name = "math_test",
+    package = "carbon-fast-math",
+    srcs = [":srcs", ":tests"],
+)

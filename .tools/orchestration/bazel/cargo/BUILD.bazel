@@ -1,0 +1,10 @@
+# Cargo orchestration for Bazel.
+#
+# No toolchain_type here, unlike the Bun rules next door: cargo is located on
+# the host rather than fetched into runfiles, because Rust cannot be made
+# hermetic in this workspace without also vendoring a C toolchain. The reasoning
+# is in defs.bzl.
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files(["defs.bzl"])

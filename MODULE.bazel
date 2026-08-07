@@ -41,11 +41,27 @@ use_repo(bun, "bun_toolchains")
 
 register_toolchains("@bun_toolchains//:all")
 
+# The host's cargo, located once at fetch time. Nothing is downloaded — Rust
+# cannot be made hermetic here without vendoring a C toolchain, since 123 of the
+# runtime's transitive dependencies run build scripts (rquickjs-sys compiles
+# QuickJS, ring assembles, ash/naga sit behind wgpu). See
+# .tools/orchestration/bazel/cargo/README.md.
+#
+# This exists because `bazel test` scrubs the environment: a run-time search for
+# ~/.cargo/bin cannot see USERPROFILE and reports a missing toolchain that is in
+# fact installed. Repository rules run during fetch and do see the real env.
+cargo = use_extension("//.tools/orchestration/bazel/cargo:extensions.bzl", "cargo")
+use_repo(cargo, "carbon_cargo")
+
 # ── Rust Toolchain ──────────────────────────────────────────────────────────
+# Registered but NOT used to build anything today — cargo drives compilation
+# (see the extension above). This stays as the escape hatch: if the build-script
+# problem is ever solved, `rust_library` targets need a registered toolchain and
+# this is it. Version tracks .config/dependencies.json.
 rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
 rust.toolchain(
     edition = "2021",
-    versions = ["1.76.0"],
+    versions = ["1.86.0"],
 )
 use_repo(rust, "rust_toolchains")
 
