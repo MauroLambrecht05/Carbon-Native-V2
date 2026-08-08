@@ -16,5 +16,6 @@
   },
   "//include": "A single recursive glob, not a list of top-level folders. The folder list went stale the moment the tiers were renamed, and a stale include reports 'No inputs were found' pointing at line 1 — which reads like a syntax error and is not. This form cannot go stale while any .ts exists.",
   "include": ["**/*.ts"],
-  "exclude": ["node_modules"]
+  "//exclude": "interface/renderer/ holds the Solid and React renderers, moved out of V1's carbon/runtime/engine/paint/renderers/ in migration phase 3. They are source in the right place and nothing depends on them yet: their npm dependencies (solid-js, react, react-reconciler) are not installed, so including them here is 9 'cannot find module' errors for code that is not being built. Phase 6 installs those, adds the tsconfig paths and the Bazel targets, and this entry comes out. See products/carbon/MIGRATION.md.",
+  "exclude": ["node_modules", "interface/renderer"]
 }

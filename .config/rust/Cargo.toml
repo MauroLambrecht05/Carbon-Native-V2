@@ -39,9 +39,9 @@ members = [
   "../../solutions/capabilities/audio",
   #
   # Phase 3 — engines:
-  #   "../../solutions/capabilities/layout",
-  #   "../../solutions/capabilities/painting",
-  #   "../../solutions/capabilities/gpu-canvas",
+  "../../solutions/capabilities/layout",
+  "../../solutions/capabilities/painting",
+  "../../solutions/capabilities/gpu-canvas",
   #
   # Phase 4 — host and platform:
   #   "../../solutions/infrastructure/os",

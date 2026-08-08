@@ -1,0 +1,34 @@
+# Carbon Native V2 - @carbon/painting
+#
+# Capability: a laid-out scene becomes pixels.
+
+package(default_visibility = ["//visibility:public"])
+
+load("//.tools/orchestration/bazel/cargo:defs.bzl", "cargo_library", "cargo_test")
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["**/*.rs", "**/*.wgsl", "Cargo.toml"], exclude = ["tests/**"], allow_empty = True),
+)
+
+cargo_library(
+    name = "lib",
+    package = "carbon-paint",
+    srcs = [":srcs"],
+)
+
+# 9 tests over blur — the first this crate has ever had. Inline in
+# domain/blur.rs rather than tests/, because blur is a private module and
+# widening its visibility for the tests' benefit would be the wrong trade.
+#
+# Blur was the place to start: pure arithmetic over a byte buffer,
+# deterministic, no window or device needed. One of these caught a real
+# subtlety while being written — a lone 255-alpha pixel spread over a wide
+# Gaussian rounds to zero in 8 bits, so a spread test needs a filled block.
+#
+# The paint dispatch, canvas2d and svg are still uncovered.
+cargo_test(
+    name = "painting_test",
+    package = "carbon-paint",
+    srcs = [":srcs"],
+)

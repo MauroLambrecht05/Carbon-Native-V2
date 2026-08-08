@@ -145,8 +145,42 @@ that an audio thread reads concurrently — no layer of that crate is free of it
 so `domain/` would have been a label rather than a boundary. It became
 `graph/`.
 
-**3 — The engines. NEXT.** `layout`, `painting`, `gpu-canvas`. Bigger, interdependent,
-no existing tests — these need tests written as they land.
+**3 — The engines. DONE.** `layout`, `painting`, `gpu-canvas`.
+
+| Capability | Tests | Layout |
+|---|---:|---|
+| `layout` | 27 (new) | all `domain/` — scene + css_parse, mutually recursive |
+| `painting` | 9 (new) | `domain/blur` · `infrastructure/{canvas2d,svg}` |
+| `gpu-canvas` | 30 (recovered) | `domain/{geometry,material,uniforms}` · `infrastructure/{gpu,executor}` |
+
+`gpu-canvas` keeps `gpu` and `executor` in one layer because they import each
+other — which is why V1 extracted this as one crate rather than five, Cargo
+forbidding circular crate deps. A cycle cannot straddle a layer boundary
+either. `domain/shaders/` sits beside `material.rs` because `include_str!`
+resolves relative to the file.
+
+`layout` is entirely domain: it computes, and Taffy is a library it computes
+with, not an outside system it talks to.
+
+### What phase 3 turned up
+
+- **`carbon-gpu-canvas` does not build in V1.** It is excluded from
+  `build-all`, `test` and `clippy` there (see V1's `.config/justfile`) because
+  wgpu 27 wants rustc 1.88 and the pin is 1.86. That exclusion was hiding a
+  second, unrelated bug: its manifest never declared `serde_json`, which
+  `executor.rs` uses throughout. Both are fixed — it compiles here.
+- **30 tests that have never executed.** They live inside `gpu-canvas` in V1
+  and were skipped along with the crate. They now run, and pass.
+- **A fresh dependency resolution breaks wgpu.** Resolving from scratch picked
+  `wgpu-hal 27.0.4`, which fails to compile against the `windows` crate
+  versions it pulls. `.config/rust/Cargo.lock` is seeded from V1 so the
+  dependency set is the one V1 shipped — which is what "no functionality loss"
+  requires anyway.
+- **The JS renderers were in the wrong place.** `solid/` and `react/` lived
+  under `engine/paint/renderers/` in V1, inside the Rust crate that rasterizes
+  pixels. They are neither Rust nor rasterization — they are driving adapters,
+  the same category as the CLI. Moved to `interface/renderer/`, and excluded
+  from the TypeScript build until phase 6 wires their dependencies.
 
 **4 — Host and platform.** The 19 `host/native` modules into `infrastructure/os`
 behind ports, `platform/`, `plugin-host/`. This is where the 139-function

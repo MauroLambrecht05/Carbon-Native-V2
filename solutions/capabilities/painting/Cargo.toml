@@ -1,0 +1,43 @@
+# @carbon/painting — turning a laid-out scene into pixels.
+#
+# Capability: the scene graph from @carbon/layout becomes a tiny-skia Pixmap.
+#
+#   domain/          blur — a box-blur kernel over a pixel buffer. Imports
+#                    nothing at all: pure arithmetic.
+#   infrastructure/  canvas2d and svg. Both drive tiny-skia, and both would be
+#                    replaced together if the rasterizer changed.
+#
+# The crate root is the paint dispatch: it walks the scene and decides what each
+# node kind draws.
+#
+# ── NO TESTS ────────────────────────────────────────────────────────────────
+# 3,900 lines with no coverage. Unlike layout, this one has an obvious testing
+# strategy that does not need a window: paint into a Pixmap and compare pixels.
+# tiny-skia is deterministic and already a dependency.
+
+[package]
+name = "carbon-paint"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+license = "Apache-2.0"
+description = "tiny-skia paint dispatch for the carbon runtime: node painting, Canvas2D, SVG rendering and blur, over the carbon-layout scene graph."
+# The workspace manifest lives in .config/rust. Cargo only walks UP from a
+# crate, so it would never find it — the link has to be explicit.
+workspace = "../../../.config/rust"
+
+[lib]
+name = "carbon_paint"
+path = "lib.rs"
+
+[dependencies]
+carbon-layout = { path = "../layout" }
+carbon-text-renderer = { path = "../text" }
+# Optional so a build without the `gpu` feature never compiles wgpu — see the
+# note in the gpu-canvas manifest about its ~2.5 MB.
+carbon-gpu-canvas = { path = "../gpu-canvas", optional = true }
+serde_json = { workspace = true }
+tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd", "png-format"] }
+
+[features]
+gpu = ["dep:carbon-gpu-canvas"]
