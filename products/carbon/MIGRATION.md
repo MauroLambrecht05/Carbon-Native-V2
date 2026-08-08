@@ -262,7 +262,7 @@ components have actually moved. Only those are held to their declaration.
 are reported as pending, by name, and will be checked the moment phase 5 adds
 `composition` to that list.
 
-**5 — The composition roots. DONE (moved, not yet split).**
+**5 — The composition roots. DONE.**
 
 Both binaries build in V2 and **the runtime launches a real app**: exit 0,
 first paint, content ready, and the 27 startup phases in exactly the pinned
@@ -272,9 +272,19 @@ against the real binary and a checked-in bundle.
 **All 139 imports and 34 dispatchers are now verified present.** The boundary
 check holds every component to its declaration; nothing is pending.
 
-The files are moved and wired, not yet split. That order was deliberate: a
+Both are also split. Moving first and splitting second was deliberate — a
 working baseline in V2 is worth more than a tidy structure that does not run,
-and `launch.rs` is what makes the split safe to attempt next.
+and `launch.rs` verified every stage of the split as it happened.
+
+| | before | after | modules |
+|---|---:|---:|---|
+| `mini/main.rs` | 4,385 | **2,204** | timing · manifest · features · bundle · heap_snapshot · js · host_imports · scene_util |
+| `blitz/main.rs` | 1,325 | **785** | timing · css · dom · host_imports · js |
+
+Every module is a verbatim extraction — text moved, nothing rewritten — with
+`use super::*` giving each one the crate root's imports. What remains in each
+`main.rs` is `main()` and the event loop, which is one unit and should stay
+one.
 
 ### What phase 5 turned up
 
@@ -292,12 +302,25 @@ and `launch.rs` is what makes the split safe to attempt next.
   binaries failed with "takes 3 arguments but 2 were supplied" until each passed
   its own. That is the difference phase 4 identified, enforced.
 
-### Still to do here
+### What the split turned up
 
-`mini/main.rs` is 4,384 lines, `main()` alone about 2,000. The seams are clear —
-bundle loading, snapshot, host-import registration, config reading — and each
-is a file move the compiler can verify. `launch.rs` is what will catch a
-reordering while it happens.
+- **The extractor swept `use` lines into modules.** Attribute walk-back treats
+  the comment block above an item as part of it, and a `use carbon_snapshot as
+  snapshot;` sitting there went with it — shadowing the crate alias and
+  producing forty "cannot find module" errors. Both cases were caught by the
+  compiler, and the extractor now returns any stray top-level `use` to the
+  crate root.
+- **A module named `snapshot` collided with the crate aliased to `snapshot`.**
+  Renamed to `heap_snapshot`; the crate keeps the name every call site uses.
+- **`DocState`'s fields went private at a module boundary.** They were reachable
+  when blitz was one file. `pub(crate)` restores exactly the old reach and no
+  more.
+- **The launch test was flaky, and the flake was real.** Six tests each spawned
+  the runtime, cargo ran them in parallel, and under six concurrent windows a
+  debug build missed its exit budget — three failures on one run, six passes on
+  the next, no code change. Launching once and sharing the output removes the
+  contention rather than papering over it with a longer timeout. Confirmed
+  stable across three consecutive runs, and four times faster.
 
 **6 — TypeScript tier. NEXT.** `stdlib/`, the solid and react renderers, the type
 definitions.

@@ -30,6 +30,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 
 /// The fixture: a real scaffolded project with a prebuilt bundle.
 ///
@@ -40,15 +41,33 @@ fn fixture() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/hello-app")
 }
 
-/// Runs the runtime against the fixture and returns (exit code, stderr).
-fn launch(exit_after_ms: u64) -> (Option<i32>, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_carbon-mini"))
-        .arg(fixture())
-        .env("CARBON_TEST_EXIT_MS", exit_after_ms.to_string())
-        .output()
-        .expect("failed to spawn carbon-mini");
+/// The runtime is launched ONCE and every assertion reads the same run.
+///
+/// It used to launch per test. Cargo runs these in parallel, so that meant six
+/// concurrent processes each opening a window and standing up a QuickJS
+/// runtime — and under that load a debug build can miss the CARBON_TEST_EXIT_MS
+/// budget, exit early, and fail assertions about phases it never reached. That
+/// showed up as three failures on one run and six passes on the next with no
+/// code change in between.
+///
+/// A generous budget would have papered over it. Launching once removes the
+/// contention instead, and makes the suite four times faster.
+static RUN: OnceLock<(Option<i32>, String)> = OnceLock::new();
 
-    (output.status.code(), String::from_utf8_lossy(&output.stderr).into_owned())
+fn launch(_exit_after_ms: u64) -> &'static (Option<i32>, String) {
+    RUN.get_or_init(|| {
+        let output = Command::new(env!("CARGO_BIN_EXE_carbon-mini"))
+            .arg(fixture())
+            // Generous, because this is one run rather than six competing.
+            .env("CARBON_TEST_EXIT_MS", "8000")
+            .output()
+            .expect("failed to spawn carbon-mini");
+
+        (
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        )
+    })
 }
 
 /// The `[timing] phase=<name>` lines, in the order they were emitted.
@@ -96,6 +115,7 @@ const EXPECTED: &[&str] = &[
 #[test]
 fn the_runtime_starts_an_app_and_exits_cleanly() {
     let (code, stderr) = launch(3000);
+    let (code, stderr) = (*code, stderr.as_str());
     assert_eq!(
         code,
         Some(0),
@@ -106,6 +126,7 @@ fn the_runtime_starts_an_app_and_exits_cleanly() {
 #[test]
 fn it_reaches_first_paint() {
     let (_, stderr) = launch(3000);
+    let stderr = stderr.as_str();
     // Not just "did not crash" — it got as far as putting something on screen.
     assert!(
         stderr.contains("startup → first paint"),
@@ -120,10 +141,11 @@ fn it_reaches_first_paint() {
 #[test]
 fn it_evaluates_the_bundle() {
     let (_, stderr) = launch(3000);
+    let stderr = stderr.as_str();
     // bundle_evaluated is the phase that proves the app's own JavaScript ran,
     // rather than the runtime starting and painting an empty window.
     assert!(
-        phases(&stderr).contains(&"bundle_evaluated".to_string()),
+        phases(stderr).contains(&"bundle_evaluated".to_string()),
         "the bundle was never evaluated.\n--- stderr ---\n{stderr}"
     );
 }
@@ -131,7 +153,8 @@ fn it_evaluates_the_bundle() {
 #[test]
 fn the_startup_phases_are_exactly_the_pinned_sequence() {
     let (_, stderr) = launch(3000);
-    let actual = phases(&stderr);
+    let stderr = stderr.as_str();
+    let actual = phases(stderr);
 
     assert_eq!(
         actual.len(),
@@ -158,7 +181,8 @@ fn host_imports_are_registered_before_the_bundle_runs() {
     // the app dies on `undefined is not a function`, and nothing in either
     // toolchain would have warned about it.
     let (_, stderr) = launch(3000);
-    let p = phases(&stderr);
+    let stderr = stderr.as_str();
+    let p = phases(stderr);
 
     let registered = p.iter().position(|x| x == "native_registered");
     let evaluated = p.iter().position(|x| x == "bundle_evaluated");
