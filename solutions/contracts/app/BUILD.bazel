@@ -2,4 +2,14 @@ load("//solutions/contracts:defs.bzl", "json_schema_subject")
 
 package(default_visibility = ["//visibility:public"])
 
+load("//.tools/orchestration/bazel/cargo:defs.bzl", "cargo_library")
+
 json_schema_subject(name = "app")
+
+# The Rust rendering of carbon.toml, alongside the JSON Schema and the
+# TypeScript types.
+cargo_library(
+    name = "rust",
+    package = "carbon-core",
+    srcs = glob(["rust/**/*.rs", "rust/Cargo.toml"], allow_empty = True),
+)

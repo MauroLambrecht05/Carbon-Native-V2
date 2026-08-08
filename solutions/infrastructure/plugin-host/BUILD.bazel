@@ -1,0 +1,21 @@
+# Carbon Native V2 - @carbon/plugin-host
+
+package(default_visibility = ["//visibility:public"])
+
+load("//.tools/orchestration/bazel/cargo:defs.bzl", "cargo_library")
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["**/*.rs", "**/*.js", "Cargo.toml"], allow_empty = True),
+)
+
+# No test target. Every module here drives a real OS facility — opening a file
+# dialog, spawning a PTY, writing to the keychain — so tests need either a fake
+# at the port boundary (which does not exist yet) or a machine willing to pop
+# dialogs. The surface IS checked, by //.tools/validation:host_boundary against
+# contracts/runtime: every function this registers is verified present.
+cargo_library(
+    name = "lib",
+    package = "carbon-plugin-host",
+    srcs = [":srcs"],
+)

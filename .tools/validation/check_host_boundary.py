@@ -87,7 +87,18 @@ def main() -> int:
         return 1
 
     declared = tomllib.loads(REGISTRY.read_text(encoding="utf-8"))
-    imports = {n for mod in declared["imports"].values() for n in mod["functions"]}
+
+    # Only components that have actually migrated are held to their declaration.
+    # Everything else is reported as pending: a function that has not moved yet
+    # is not a function that was lost, and conflating the two turns this into a
+    # wall of noise that gets ignored.
+    migrated = set(declared.get("migration", {}).get("migrated", []))
+
+    imports, pending = set(), set()
+    for mod in declared["imports"].values():
+        target = imports if mod.get("component") in migrated else pending
+        target.update(mod["functions"])
+
     dispatchers = set(declared["dispatchers"]["functions"])
 
     registered, referenced = scan(args.source.resolve())
@@ -110,7 +121,7 @@ def main() -> int:
         for name in sorted(missing):
             print(f"         {name}")
 
-    undeclared = registered - imports
+    undeclared = registered - imports - pending
     if undeclared:
         failures += len(undeclared)
         print(f"[FAIL] {len(undeclared)} function(s) registered but not declared:")
@@ -119,19 +130,29 @@ def main() -> int:
 
     # A dispatcher Rust no longer mentions is an event that stopped being
     # delivered. Nothing else would notice.
+    #
+    # Every dispatcher is called from a composition root (mini.rs / blitz.rs),
+    # so this only bites once "composition" is in `migrated`.
     unused = dispatchers - referenced
-    if unused:
+    if unused and "composition" in migrated:
         failures += len(unused)
         print(f"[FAIL] {len(unused)} declared dispatcher(s) never called from Rust:")
         for name in sorted(unused):
             print(f"         {name}")
+    elif unused:
+        print(f"[..]   {len(unused)} dispatcher(s) pending - called from the "
+              f"composition roots, not yet migrated")
 
     if failures:
         print(f"\n[!] Host boundary differs from its declaration ({failures} issue(s)).")
         return 1
 
-    print(f"[OK] Host boundary: {len(imports)} imports, "
-          f"{len(dispatchers)} dispatchers, all accounted for")
+    if pending:
+        print(f"[..]   {len(pending)} import(s) pending - owned by components "
+              f"not yet migrated")
+
+    print(f"[OK] Host boundary: {len(imports)} migrated import(s) registered "
+          f"as declared" + (f", {len(pending)} pending" if pending else ""))
     return 0
 
 

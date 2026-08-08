@@ -1,0 +1,77 @@
+# @carbon/os — the native OS surface the runtime exposes to JavaScript.
+#
+# Infrastructure: nineteen driven adapters — filesystem, process, dialog,
+# clipboard, keychain, notifications, shell, PTY, store, window, networking —
+# each registering a slice of `__cm_*` host functions on a QuickJS context.
+#
+# ── A CRATE, WHERE V1 HAD INCLUDED SOURCE ───────────────────────────────────
+# V1 compiled this source directly into each backend binary (`#[path]` from
+# carbon/runtime/mod.rs), which let it reach into the including crate for
+# `UserEvent`, `tlog` and `platform`. Standing it up as a crate meant resolving
+# all three, and they resolved differently:
+#
+#   UserEvent   -> carbon-runtime-contract. Both backends carried byte-identical
+#                  copies; V1's comment claiming they differed is wrong.
+#   platform    -> carbon-platform. Plain std functions, no runtime types.
+#   tlog        -> a PORT. The two backends genuinely differ here, so
+#                  `register_all` takes it as a parameter and each composition
+#                  root supplies its own. See PhaseLogger in lib.rs.
+#
+# The dependency list below is the price of that surface, and it is most of the
+# runtime's non-rendering weight. Every entry is here because a host function
+# needs it, not because it was convenient.
+
+[package]
+name = "carbon-os"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+license = "Apache-2.0"
+description = "Native OS integration for the carbon runtime: the __cm_* host functions for filesystem, process, dialog, clipboard, keychain, notifications, shell, PTY, store, window and networking."
+# The workspace manifest lives in .config/rust. Cargo only walks UP from a
+# crate, so it would never find it — the link has to be explicit.
+workspace = "../../../.config/rust"
+
+[lib]
+name = "carbon_os"
+path = "lib.rs"
+
+[dependencies]
+carbon-runtime-contract = { path = "../../contracts/runtime/rust" }
+carbon-platform = { path = "../platform" }
+
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+# The event-loop proxy type in register_all's signature is tao's, so this crate
+# names tao even though it opens no window. That is the one place the host layer
+# touches the windowing library.
+tao = { version = "0.30", default-features = false, features = ["rwh_06"] }
+rquickjs = { version = "0.9", default-features = false, features = ["loader", "classes", "macro"] }
+
+# ── The OS integrations themselves ──────────────────────────────────────────
+# Pure Rust, small after LTO, using OS APIs directly rather than through a
+# portable wrapper.
+rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"] }
+keyring = { version = "3", default-features = false, features = ["windows-native", "apple-native", "linux-native"] }
+notify-rust = { version = "4", default-features = false }
+auto-launch = { version = "0.5", default-features = false }
+opener = { version = "0.7", default-features = false }
+arboard = { version = "3", default-features = false }
+dirs = "5"
+
+# ── Networking: fetch + WebSocket ───────────────────────────────────────────
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json", "gzip", "brotli", "http2"] }
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "macros", "sync", "time"] }
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+futures-util = { version = "0.3", default-features = false }
+bytes = "1"
+base64 = "0.22"
+
+# ── Process, PTY and file search ────────────────────────────────────────────
+portable-pty = "0.8"
+shared_child = "1"
+ignore = "0.4"
+globset = "0.4"
+grep-regex = "0.1"
+grep-searcher = "0.1"

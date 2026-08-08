@@ -1,5 +1,7 @@
 package(default_visibility = ["//visibility:public"])
 
+load("//.tools/orchestration/bazel/cargo:defs.bzl", "cargo_library")
+
 # The JS <-> Rust boundary. A registry rather than a schema: what it constrains
 # is a set of NAMES matched by string across two languages, which no type system
 # in this workspace can see across.
@@ -8,4 +10,12 @@ package(default_visibility = ["//visibility:public"])
 filegroup(
     name = "srcs",
     srcs = glob(["registry/*.toml"]),
+)
+
+# The Rust rendering: UserEvent and WindowOp, the event vocabulary between the
+# host layer and the event loop.
+cargo_library(
+    name = "rust",
+    package = "carbon-runtime-contract",
+    srcs = glob(["rust/**/*.rs", "rust/Cargo.toml"], allow_empty = True),
 )

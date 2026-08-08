@@ -1,0 +1,35 @@
+# The Rust side of contracts/app — carbon.toml, the IPC envelope, and the
+# capability matcher.
+#
+# Named carbon-core to match what every V1 crate already imports
+# (`use carbon_core::config::PluginEntry`), so the migration does not rename a
+# symbol at the same time as moving it.
+#
+# It lives under contracts/ rather than infrastructure/ because it is a
+# declaration, not an adapter: the same agreement as schema/carbon.schema.json
+# and types/CarbonManifest.ts, rendered for the third consumer.
+
+[package]
+name = "carbon-core"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+license = "Apache-2.0"
+description = "The Rust rendering of the carbon.toml contract, plus the IPC envelope and the capability matcher shared by the runtime and the toolchain."
+# The workspace manifest lives in .config/rust. Cargo only walks UP from a
+# crate, so it would never find it — the link has to be explicit.
+workspace = "../../../../.config/rust"
+
+[lib]
+name = "carbon_core"
+path = "lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = "0.8"
+# globset backs the capability matcher: [capabilities] fs.read is a glob list.
+globset = "0.4"
+rquickjs = { version = "0.9", default-features = false, features = ["loader", "macro", "parallel"] }
+tracing = "0.1"

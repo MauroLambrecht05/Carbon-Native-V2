@@ -182,7 +182,7 @@ with, not an outside system it talks to.
   the same category as the CLI. Moved to `interface/renderer/`, and excluded
   from the TypeScript build until phase 6 wires their dependencies.
 
-**4 — Host and platform. IN PROGRESS.**
+**4 — Host and platform. DONE.**
 
 - [x] **`contracts/runtime`** — the JS ↔ Rust boundary, declared and checked.
       139 imports (Rust installs, JS calls) and 34 dispatchers (JS installs,
@@ -192,9 +192,12 @@ with, not an outside system it talks to.
 - [x] **`infrastructure/platform`** — the per-OS shims. A real crate now; V1
       `#[path]`-included the source into each backend so it could share
       `UserEvent` and `tlog`, neither of which it actually uses.
-- [ ] **`infrastructure/os`** — the 19 `host/native` modules. Blocked on the
-      coupling below, which has to be resolved first.
-- [ ] **`infrastructure/plugin-host`** — loader and host_exports.
+- [x] **`infrastructure/os`** — the 19 `host/native` modules, ~4,000 lines,
+      now a standalone crate.
+- [x] **`infrastructure/plugin-host`** — loader and host_exports.
+- [x] **`contracts/app/rust`** — V1's `shared/logic/core`, which plugin_loader
+      needs for the `[plugins]` schema. It is the third rendering of
+      carbon.toml, beside the JSON Schema and the TypeScript types.
 
 ### What phase 4 turned up
 
@@ -222,12 +225,42 @@ binary, and it reaches into the including crate for:
 | `crate::UserEvent` | 3 | the event enum posted back to the event loop |
 | `crate::os_theme` | 1 | a sibling |
 
-`platform` is solved. The two that remain are real design decisions rather than
-moves: **`UserEvent`** is the event vocabulary between the host layer and the
-event loop, which makes it contract material, and **`tlog`** emits the 27
-startup phases that `startup-phases.txt` pins — infrastructure that both the
-host layer and the composition root need. Deciding where each lands is the
-first task of the next session, not something to guess at now.
+All five resolved, each from evidence rather than preference:
+
+| Reference | Finding | Resolution |
+|---|---|---|
+| `crate::UserEvent` | **byte-identical** in both backends, comments stripped | `contracts/runtime/rust` |
+| `crate::tlog` | mini traces every phase with deltas and is gated OUT by `CARBON_NO_TIMING`; blitz prints one line and is gated IN by `CARBON_MINI_TIMING` | a **port** — `register_all` takes `PhaseLogger` |
+| `crate::platform` | plain std functions, no runtime types | `carbon-platform` |
+| `crate::os_theme` | no coupling at all | a sibling module of `carbon-os` |
+| `crate::native` | its own siblings | `crate::` once it is a crate |
+
+**V1's own comment about this is wrong.** `carbon/runtime/mod.rs` says:
+
+> `UserEvent`, `tlog`, and `json_escape` are NOT here — mini's and blitz's
+> implementations of those differ (different UserEvent variants, different tlog
+> verbosity), so each binary keeps its own.
+
+That holds for `tlog`. It does not hold for `UserEvent`: diffing the two
+definitions with comments stripped shows them identical, all eighteen variants
+and every payload type. The stated reason for that duplication had stopped
+being true, and nothing was checking.
+
+### The checker had to learn about migration state
+
+Standing up `carbon-os` made the boundary check fail with 61 issues — 29
+imports and 32 dispatchers "missing". All of them live in `mini.rs`/`blitz.rs`,
+which is phase 5.
+
+A function that has not moved yet is not a function that was lost, and a check
+that cannot tell them apart produces a wall of noise for work that has not
+started — which is how a check gets ignored. The registry now records which V2
+component owns each group, and a `[migration] migrated` list says which
+components have actually moved. Only those are held to their declaration.
+
+**110 of the 139 imports are verified present in migrated code.** The other 29
+are reported as pending, by name, and will be checked the moment phase 5 adds
+`composition` to that list.
 
 **5 — The composition roots.** Split `mini.rs` (4,441 lines) and `blitz.rs` into
 `products/carbon/`. Highest risk in the whole migration: this file holds the

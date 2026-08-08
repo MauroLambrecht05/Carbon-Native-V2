@@ -1,0 +1,28 @@
+# The Rust side of contracts/runtime.
+#
+# Two enums and no logic. Its whole job is to exist in exactly one place so
+# every producer of an event and the single consumer agree on the payloads —
+# background threads in carbon-os post them, the composition roots in
+# products/carbon handle them, and before this crate both backends carried
+# their own byte-identical copy.
+#
+# Zero dependencies on purpose. A contract that pulls in a runtime is not a
+# contract, and anything that needs to name a UserEvent must be able to depend
+# on this without inheriting a stack.
+
+[package]
+name = "carbon-runtime-contract"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+license = "Apache-2.0"
+description = "The event vocabulary between the carbon host layer and the event loop: UserEvent and WindowOp."
+# The workspace manifest lives in .config/rust. Cargo only walks UP from a
+# crate, so it would never find it — the link has to be explicit.
+workspace = "../../../../.config/rust"
+
+[lib]
+name = "carbon_runtime_contract"
+path = "lib.rs"
+
+[dependencies]

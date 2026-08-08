@@ -12,11 +12,26 @@
 #   [dispatchers]   JS installs the function; RUST calls it — and calls it
 #                   from inside an eval'd JS string literal, so the name is
 #                   opaque to every tool in the toolchain.
+#
+# ── COMPONENT OWNERSHIP ─────────────────────────────────────────────────────
+# Each group records the V2 component that owns it, and `migrated` below lists
+# the components that have actually moved. The checker only holds a component
+# to its declaration once it appears there.
+#
+# Without this the checker cannot tell "this function was lost in the
+# migration" from "this function has not been migrated yet" — both look like a
+# name that is declared and not registered. Getting a wall of failures for work
+# that has not started is how a check gets ignored.
+
+[migration]
+# Components whose Rust lives in this workspace. Update as phases land.
+migrated = ["os", "plugin-host"]
 
 # ── Direction 1: Rust installs, JS calls ────────────────────────────────────
 
 [imports.app]
 source = "carbon/host/native/app.rs"
+component = "os"
 functions = [
   "__cm_app_name",
   "__cm_app_version",
@@ -24,6 +39,7 @@ functions = [
 
 [imports.autostart]
 source = "carbon/host/native/autostart.rs"
+component = "os"
 functions = [
   "__cm_autostart_disable",
   "__cm_autostart_enable",
@@ -34,6 +50,7 @@ functions = [
 
 [imports.clipboard]
 source = "carbon/host/native/clipboard.rs"
+component = "os"
 functions = [
   "__cm_clipboard_clear",
   "__cm_clipboard_read_text",
@@ -42,6 +59,7 @@ functions = [
 
 [imports.dialog]
 source = "carbon/host/native/dialog.rs"
+component = "os"
 functions = [
   "__cm_dialog_confirm",
   "__cm_dialog_message",
@@ -53,6 +71,7 @@ functions = [
 
 [imports.fs]
 source = "carbon/host/native/fs.rs"
+component = "os"
 functions = [
   "__cm_fs_app_cache_dir",
   "__cm_fs_app_config_dir",
@@ -73,6 +92,7 @@ functions = [
 
 [imports.invoke]
 source = "carbon/host/native/invoke.rs"
+component = "os"
 functions = [
   "__cm_invoke",
   "__cm_invoke_has",
@@ -80,6 +100,7 @@ functions = [
 
 [imports.keychain]
 source = "carbon/host/native/keychain.rs"
+component = "os"
 functions = [
   "__cm_keychain_delete",
   "__cm_keychain_get",
@@ -88,6 +109,7 @@ functions = [
 
 [imports.log]
 source = "carbon/host/native/log.rs"
+component = "os"
 functions = [
   "__cm_log",
   "__cm_log_path",
@@ -95,6 +117,7 @@ functions = [
 
 [imports.net]
 source = "carbon/host/native/net.rs"
+component = "os"
 functions = [
   "__cm_fetch_abort",
   "__cm_fetch_start",
@@ -106,12 +129,14 @@ functions = [
 
 [imports.notification]
 source = "carbon/host/native/notification.rs"
+component = "os"
 functions = [
   "__cm_notification_send",
 ]
 
 [imports.os]
 source = "carbon/host/native/os.rs"
+component = "os"
 functions = [
   "__cm_os_arch",
   "__cm_os_eol",
@@ -128,6 +153,7 @@ functions = [
 
 [imports.process]
 source = "carbon/host/native/process.rs"
+component = "os"
 functions = [
   "__cm_proc_exec",
   "__cm_proc_kill",
@@ -143,6 +169,7 @@ functions = [
 
 [imports.pty]
 source = "carbon/host/native/pty.rs"
+component = "os"
 functions = [
   "__cm_pty_close",
   "__cm_pty_kill",
@@ -155,6 +182,7 @@ functions = [
 
 [imports.shell]
 source = "carbon/host/native/shell.rs"
+component = "os"
 functions = [
   "__cm_shell_open",
   "__cm_shell_resolve",
@@ -163,6 +191,7 @@ functions = [
 
 [imports.store]
 source = "carbon/host/native/store.rs"
+component = "os"
 functions = [
   "__cm_store_clear",
   "__cm_store_delete",
@@ -177,6 +206,7 @@ functions = [
 
 [imports.window]
 source = "carbon/host/native/window.rs"
+component = "os"
 functions = [
   "__cm_window_close",
   "__cm_window_device_pixel_ratio",
@@ -203,6 +233,7 @@ functions = [
 
 [imports.window_state]
 source = "carbon/host/native/window_state.rs"
+component = "os"
 functions = [
   "__cm_window_state_clear",
   "__cm_window_state_load",
@@ -212,6 +243,7 @@ functions = [
 
 [imports.mini]
 source = "carbon/runtime/mini.rs"
+component = "composition"
 functions = [
   "__cm_apply_ops",
   "__cm_broadcast_resize",
@@ -245,6 +277,7 @@ functions = [
 
 [imports.blitz]
 source = "carbon/runtime/blitz.rs"
+component = "composition"
 functions = [
   "__cm_register_stylesheet",
 ]

@@ -1,0 +1,43 @@
+# @carbon/plugin-host — loading native plugins and exposing the host ABI.
+#
+# Infrastructure: a driven adapter over libloading, plus the C-ABI surface a
+# plugin compiles against.
+#
+# ── A CRATE, WHERE V1 HAD INCLUDED SOURCE ───────────────────────────────────
+# V1 `#[path]`-included carbon/api into each backend binary, which let it name
+# the binary's own `UserEvent`. That type now comes from
+# carbon-runtime-contract, which is what makes this compilable on its own.
+#
+# ── THE ABI IS FROZEN ───────────────────────────────────────────────────────
+# contracts/plugin/abi/carbon_abi.h is what plugin authors build against, and
+# plugins ship prebuilt. A layout change here breaks plugins already installed
+# on users' machines — the worst blast radius in the repository.
+
+[package]
+name = "carbon-plugin-host"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+license = "Apache-2.0"
+description = "Native plugin loading for the carbon runtime: the C-ABI host exports a plugin receives, and the manifest-driven loader that hands them over."
+# The workspace manifest lives in .config/rust. Cargo only walks UP from a
+# crate, so it would never find it — the link has to be explicit.
+workspace = "../../../.config/rust"
+
+[lib]
+name = "carbon_plugin_host"
+path = "lib.rs"
+
+[dependencies]
+carbon-runtime-contract = { path = "../../contracts/runtime/rust" }
+# carbon-core supplies the [plugins] section of carbon.toml that the loader
+# reads. It is the Rust side of contracts/app.
+carbon-core = { path = "../../contracts/app/rust" }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { version = "0.8", default-features = false, features = ["parse"] }
+# libloading does the cross-platform dlopen / GetProcAddress dance.
+libloading = "0.8"
+rquickjs = { version = "0.9", default-features = false, features = ["loader", "classes", "macro"] }
+tao = { version = "0.30", default-features = false, features = ["rwh_06"] }

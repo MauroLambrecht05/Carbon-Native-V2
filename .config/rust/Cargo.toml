@@ -44,9 +44,11 @@ members = [
   "../../solutions/capabilities/gpu-canvas",
   #
   # Phase 4 — host and platform:
-  #   "../../solutions/infrastructure/os",
+  "../../solutions/contracts/runtime/rust",
+  "../../solutions/contracts/app/rust",
+  "../../solutions/infrastructure/os",
   "../../solutions/infrastructure/platform",
-  #   "../../solutions/infrastructure/plugin-host",
+  "../../solutions/infrastructure/plugin-host",
   #
   # Phase 5 — the binaries:
   #   "../../products/carbon",
