@@ -4,8 +4,7 @@ Everything the products are built out of. Products depend on solutions;
 solutions never depend back.
 
 A solution solves one problem, and is product-agnostic: nothing in here knows
-that `carbon-cli` exists. The five tiers below are ordered by dependency
-direction — each may depend on the ones above it, never on the ones below.
+that `carbon-cli` exists.
 
 ```
 solutions/
@@ -46,6 +45,26 @@ solutions/
     ├── renderer/        solid · react — JSX into scene-graph host calls
     └── stdlib/          api · dom — the app-facing surface over __cm_*
 ```
+
+## Which tier may depend on which
+
+Not a line — a DAG. This file used to claim the five tiers were "ordered by
+dependency direction, each may depend on the ones above it", and measuring the
+tree found **22 breaches of that rule, every one of them correct design**: a
+capability using a `ProcessRunner` port, `bundling` driving Vite. The rule was
+wrong, not the code.
+
+| Tier | May depend on | Because |
+|---|---|---|
+| `contracts/` | **nothing** | a contract that imports an implementation is not one |
+| `infrastructure/` | contracts | a technical service that knows which business calls it is not a service |
+| `integrations/` | contracts | same |
+| `capabilities/` | contracts, infrastructure, integrations | this is where business logic composes the rest |
+| `interface/` | anything | the driving edge — and **nothing may depend on it** |
+
+`.tools/validation/check_workspace.py` enforces this. The two rules with teeth
+are the outer ones: contracts import nothing, and nothing imports `interface/`.
+The middle rows mostly describe what already happens.
 
 ## Two languages, one tree
 

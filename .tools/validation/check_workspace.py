@@ -226,6 +226,88 @@ def validate_workspace(root: Path) -> bool:
                     domain_violations += 1
                     passed = False
 
+    # ── Tier dependency direction ───────────────────────────────────────────
+    #
+    # solutions/ is a DAG, not a line. The README used to claim the five tiers
+    # were "ordered by dependency direction — each may depend on the ones above
+    # it, never the ones below", and measuring it found 22 breaches of that rule
+    # in the tree, every one of them correct design: a capability using a
+    # ProcessRunner port, or bundling driving Vite. The rule was wrong, not the
+    # code.
+    #
+    # What is actually true:
+    #
+    #   contracts/       depends on NOTHING. It is the agreement layer; a
+    #                    contract that imports an implementation is not one.
+    #   infrastructure/  may use contracts. Not capabilities — a technical
+    #                    service that knows what business calls it is not a
+    #                    service.
+    #   integrations/    same.
+    #   capabilities/    may use contracts, infrastructure, integrations.
+    #   interface/       may use anything, and NOTHING may use it. It is the
+    #                    driving edge — the same argument that keeps the CLI in
+    #                    products/.
+    ALLOWED = {
+        "contracts": set(),
+        "infrastructure": {"contracts"},
+        "integrations": {"contracts"},
+        "capabilities": {"contracts", "infrastructure", "integrations"},
+        "interface": {"contracts", "infrastructure", "integrations", "capabilities"},
+    }
+
+    # Which tier an @carbon/* specifier resolves to, read from the tsconfig
+    # paths so it cannot drift from the actual wiring.
+    tier_of_alias = {}
+    base = root / ".config" / "tsconfig.base.json"
+    if base.is_file():
+        text = re.sub(r"^\s*//.*$", "", base.read_text(encoding="utf-8"), flags=re.M)
+        for alias, targets in json.loads(text)["compilerOptions"]["paths"].items():
+            m = re.search(r"solutions/(\w+)/", targets[0])
+            if m and m.group(1) in ALLOWED:
+                tier_of_alias[alias.rstrip("/*").rstrip("/")] = m.group(1)
+
+    def resolve(spec):
+        for key in sorted(tier_of_alias, key=len, reverse=True):
+            if spec == key or spec.startswith(key + "/"):
+                return tier_of_alias[key]
+        return None
+
+    # Only real import/export statements.
+    #
+    # Template literals are stripped FIRST. Both scaffolding's App.tsx template
+    # and babel's @CarbonApp epilogue contain the line
+    #
+    #     import { mount } from "@carbon/mini-solid";
+    #
+    # inside a backtick string — generated code for somebody else's project, not
+    # a dependency of the file emitting it. A line-anchored regex cannot tell
+    # the difference, and reading them as real produced three confident false
+    # failures the first time this check ran.
+    TEMPLATE_LITERAL = re.compile(r"`(?:[^`\\]|\\.)*`", re.S)
+    STATEMENT = re.compile(
+        r'^\s*(?:import|export)\b[^;\n]*?\bfrom\s+"(@carbon/[^"]+)"', re.M
+    )
+
+    tier_violations = 0
+    for source in sorted((root / "solutions").rglob("*.ts")):
+        rel = source.relative_to(root).as_posix()
+        if "node_modules" in rel or "/tests/" in rel:
+            continue
+        parts = source.relative_to(root / "solutions").parts
+        if not parts or parts[0] not in ALLOWED:
+            continue
+        src_tier = parts[0]
+        code = TEMPLATE_LITERAL.sub("``", source.read_text(encoding="utf-8"))
+        for spec in STATEMENT.findall(code):
+            dst_tier = resolve(spec)
+            if dst_tier and dst_tier != src_tier and dst_tier not in ALLOWED[src_tier]:
+                print(f"[FAIL] {src_tier} may not depend on {dst_tier}: {rel} -> {spec}")
+                tier_violations += 1
+                passed = False
+
+    if tier_violations == 0:
+        print("[OK] Tier direction: contracts depend on nothing, nothing depends on interface")
+
     if domain_violations == 0:
         print("[OK] Dependency direction: domain/ imports nothing outward")
 
