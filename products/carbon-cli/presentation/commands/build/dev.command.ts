@@ -100,7 +100,14 @@ export async function devCommand(rest: string[]): Promise<number> {
 
   try {
     await ensureNodeModules(projectDir, log);
-    const exe = await ensureRuntime(backend, log);
+    const exe = await ensureRuntime(backend, log, {
+      // The manifest decides which optional subsystems get linked — see
+      // backendCargoFeatures. Without this an app declaring `image = true`
+      // gets a runtime that cannot decode images, silently.
+      image: cfg.runtime.image,
+      audio: cfg.runtime.audio,
+      updater: cfg.updater?.enabled,
+    });
 
     // Dev always builds plain .js (NOT bytecode), regardless of carbon.toml.
     // Measured: in the HMR loop bytecode is a net LOSS — the ~2 s compile +

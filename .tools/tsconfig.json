@@ -1,0 +1,20 @@
+{
+  "//": "Bun resolves @carbon/* aliases from the tsconfig nearest the IMPORTING file, not from the entrypoint's. .tools/automation/testing imports @carbon/workspace, so this tree needs its own — the same reason products/ and solutions/ each have one. Documented in .config/tsconfig.base.json.",
+  "extends": "../.config/tsconfig.base.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "esModuleInterop": true,
+    "types": ["bun"]
+  },
+  "//include": "automation/ only. orchestration/ is Starlark and generators/ is Python; validation/ is Python too.",
+  "//exclude-benchmarks": "automation/benchmarks/ is excluded: the scripts import msgpackr (not a dependency of this workspace) and reach into V1's ecosystem/ tree by relative path. They are measurement harnesses rather than shipped code, and rewiring them is separate work from the migration — tracked in products/carbon/MIGRATION.md rather than silently deleted.",
+  "include": ["automation/**/*.ts"],
+  "exclude": ["node_modules", "automation/benchmarks"],
+}

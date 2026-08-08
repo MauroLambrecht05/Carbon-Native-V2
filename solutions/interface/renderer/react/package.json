@@ -11,10 +11,6 @@
     "./jsx-dev-runtime": "./jsx-runtime.ts",
     "./types": "./types/index.d.ts"
   },
-  "files": [
-    "src",
-    "types"
-  ],
   "peerDependencies": {
     "react": ">=18.3.0"
   },

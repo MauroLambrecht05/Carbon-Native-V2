@@ -1,0 +1,34 @@
+[package]
+name = "carbon-plugin-sdk"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+license = "Apache-2.0"
+description = "SDK for writing Carbon plugins (audio, image, GPU, …) in safe Rust. Wraps the language-agnostic C ABI in `include/carbon_plugin.h`."
+repository = "https://github.com/yoavbls/carbon-native"
+# Workspace manifest lives in .config/rust; Cargo only walks up, so the link is explicit.
+workspace = "../../../../.config/rust"
+
+[lib]
+name = "carbon_plugin_sdk"
+path = "src/lib.rs"
+
+[dependencies]
+# serde + serde_json for the manifest JSON. We deliberately avoid pulling in
+# rquickjs at this layer so plugins authored against the SDK don't transitively
+# depend on the JS engine (which would tie their version to the runtime's).
+# Plugins that DO want to register typed classes can opt into rquickjs in
+# their own Cargo.toml; the SDK helps them with the FFI bookkeeping but
+# stays engine-agnostic.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[features]
+default = []
+# `engine-rquickjs` re-exports a few rquickjs convenience helpers for plugins
+# that want to declare classes the same way carbon-audio does today. Off by
+# default — most plugins will only need the C ABI surface.
+engine-rquickjs = []
+
+[package.metadata.docs.rs]
+all-features = true

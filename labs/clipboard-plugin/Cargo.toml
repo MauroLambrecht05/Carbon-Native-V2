@@ -1,0 +1,38 @@
+[package]
+name = "carbon-clipboard"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+license = "Apache-2.0"
+description = "Web-Clipboard-API-shaped JS bindings backed by `arboard` (Rust cross-platform OS clipboard). First Layer-2 plugin built against carbon-plugin-sdk; serves as the canonical capability-gated example."
+# Workspace manifest lives in .config/rust; Cargo only walks up, so the link is explicit.
+workspace = "../../../.config/rust"
+
+[lib]
+# `cdylib` produces `carbon_clipboard.dll` (Windows), `libcarbon_clipboard.so`
+# (Linux), or `libcarbon_clipboard.dylib` (macOS) — carbon-mini dlopens these
+# by name. `rlib` is also emitted so integration tests under `tests/` (which
+# link against the crate as a Rust library) compile. The two outputs share
+# the same .o files so this doesn't double the build cost.
+name = "carbon_clipboard"
+crate-type = ["cdylib", "rlib"]
+path = "src/lib.rs"
+
+[dependencies]
+# Path dep into the carbon-native repo. When carbon-plugin-sdk lands on
+# crates.io we'll switch to `carbon-plugin-sdk = "0.1"`.
+carbon-plugin-sdk = { path = "../../users/sdk/rust" }
+
+# arboard — cross-platform OS clipboard. Wraps Win32 OleClipboard on Windows,
+# NSPasteboard on macOS, and X11 selection / Wayland wl-clipboard on Linux.
+# Default features are disabled to drop arboard's optional `image-data`
+# support (we're text-only in v1) — keeps the DLL small.
+arboard = { version = "3", default-features = false }
+
+# serde_json — used for two things:
+#   1. Encoding JSON-string results into the CarbonJSCallback result_buf
+#      (the SDK FFI surface is JSON-string in / JSON-string out).
+#   2. Parsing the SDK's `args_json` (a JSON-encoded array of arguments).
+# The SDK already has a transitive dep on serde_json for its Manifest type,
+# so this adds nothing to the link line that wasn't already there.
+serde_json = { version = "1", default-features = false, features = ["std"] }

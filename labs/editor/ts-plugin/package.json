@@ -1,0 +1,16 @@
+{
+  "name": "@carbon/ts-plugin",
+  "version": "0.1.0",
+  "description": "TypeScript Language Service plugin that hides carbon-mini's custom syntax from the editor (so @CarbonApp on a function doesn't show as a parser error).",
+  "main": "src/index.js",
+  "private": true,
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "dependencies": {
+    "@carbon/mini-solid": "workspace:*"
+  }
+}

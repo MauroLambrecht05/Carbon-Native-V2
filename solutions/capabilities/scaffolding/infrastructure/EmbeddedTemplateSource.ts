@@ -17,7 +17,7 @@ function render(template: string, request: TemplateRequest): string {
   return template
     .replace(/@@NAME@@/g, request.name.slug)
     .replace(/@@DISPLAY@@/g, request.name.display)
-    .replace(/@@PACKAGES@@/g, request.packagesPath);
+    .replace(/@@ROOT@@/g, request.packagesPath);
 }
 
 export class EmbeddedTemplateSource implements TemplateSource {
@@ -34,7 +34,9 @@ export class EmbeddedTemplateSource implements TemplateSource {
       { path: "carbon.toml", contents: manifest },
       { path: "package.json", contents: render(packageJsonTemplate(request.preset.name), request) },
       { path: "App.tsx", contents: render(appTsxTemplate(request.preset.styling), request) },
-      { path: "tsconfig.json", contents: TSCONFIG_JSON },
+      // Rendered, not raw: the tsconfig carries @@ROOT@@ now, so that the
+      // editor can resolve @carbon/mini-solid from the workspace.
+      { path: "tsconfig.json", contents: render(TSCONFIG_JSON, request) },
       { path: ".gitignore", contents: GITIGNORE },
     ];
   }

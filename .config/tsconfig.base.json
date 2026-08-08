@@ -3,8 +3,14 @@
   "//layout": "solutions/ has five categories ordered by dependency direction: contracts (agreements) -> foundation (universal primitives, none yet) -> capabilities (what carbon does) -> infrastructure (vendor-neutral technical services) -> integrations (named outside technologies, role/vendor) -> interface (shared presentation). See solutions/README.md.",
   "compilerOptions": {
     "paths": {
+      "@carbon/testing": [
+        "../.tools/automation/testing/src/index.ts"
+      ],
       "@carbon/api/*": [
         "../solutions/interface/stdlib/api/*"
+      ],
+      "@carbon/runtime-bindings": [
+        "../solutions/interface/stdlib/bindings/index.ts"
       ],
       "@carbon/compat-dom": [
         "../solutions/interface/stdlib/dom/index.ts"

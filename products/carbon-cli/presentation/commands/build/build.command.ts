@@ -51,7 +51,14 @@ export async function buildCommand(rest: string[]): Promise<number> {
 
   try {
     await ensureNodeModules(projectDir, log);
-    await ensureRuntime(backend, log);
+    await ensureRuntime(backend, log, {
+      // The manifest decides which optional subsystems get linked — see
+      // backendCargoFeatures. Without this an app declaring `image = true`
+      // gets a runtime that cannot decode images, silently.
+      image: cfg.runtime.image,
+      audio: cfg.runtime.audio,
+      updater: cfg.updater?.enabled,
+    });
     await buildProject(projectDir, backend, log, {
       // Release forces bytecode regardless of carbon.toml so the shipped app
       // never pays the QuickJS source-parse at launch.

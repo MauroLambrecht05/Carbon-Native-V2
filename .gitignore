@@ -32,3 +32,8 @@ dist/
 # ── OS noise ────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+
+# ── Migration scratch ───────────────────────────────────────────────────────
+# labs/e2e holds the throwaway project `carbon init` creates when the CLI loop
+# is exercised end to end. Reproducible in one command; not source.
+/labs/e2e/

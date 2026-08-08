@@ -1,0 +1,10 @@
+# Carbon Native V2 - @carbon/runtime-bindings
+#
+# Interface: the other half of the app-facing surface over __cm_*.
+
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["**/*.ts", "package.json"], allow_empty = True),
+)

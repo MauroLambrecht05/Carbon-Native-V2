@@ -1,0 +1,49 @@
+# Plugin manifest for carbon-clipboard. Mirrors what `manifest()` in
+# src/lib.rs returns; both must agree, and the build asserts they do.
+#
+# Carbon-mini (the runtime) reads the JSON returned by `carbon_plugin_manifest`
+# at load time. This .toml is only used by build-time tooling — currently
+# `carbon-vite-plugin-imports` discovers it to learn that the plugin exposes
+# `carbon:clipboard` with the named exports listed in the [exports] table.
+name = "carbon-clipboard"
+version = "0.1.0"
+language = "rust"
+
+[plugin]
+name = "carbon-clipboard"
+modules = ["carbon:clipboard"]
+
+[abi]
+major = 1
+minor = 0
+
+[capabilities]
+# Hard requirements — carbon-mini refuses to load the plugin if the host
+# app's `carbon.toml [plugins]` block doesn't grant these.
+required = ["clipboard.read", "clipboard.write"]
+optional = []
+
+# JS module names the plugin exports. The carbon-vite-plugin-imports build
+# plugin resolves `import "carbon:clipboard"` against this list.
+modules = ["carbon:clipboard"]
+
+# Lifecycle hooks the plugin actually implements. Carbon-mini still uses
+# dlsym to find them; this is informational.
+hooks = ["register"]
+
+# ── JS API surface (consumed by carbon-vite-plugin-imports) ────────────────
+# The virtual module body is generated as
+#   `export const <name> = globalThis.<global>;`
+# so the user-facing shape mirrors the Web Clipboard API:
+#   import { read, write } from "carbon:clipboard";
+#   await write("hello");
+#   const text = await read();
+#
+# The plugin's `register` installs both the underscore-prefixed sync helpers
+# (`__carbon_clipboard_read` / `__carbon_clipboard_write`) AND the Promise-
+# wrapped versions (`__carbon_clipboard_read_async` / `_write_async`) via a
+# tiny JS bootstrap. We re-export the async ones here so user code matches
+# the Web Clipboard API shape (both methods return Promises).
+[exports."carbon:clipboard"]
+names = ["read", "write"]
+globals = { read = "__carbon_clipboard_read_async", write = "__carbon_clipboard_write_async" }

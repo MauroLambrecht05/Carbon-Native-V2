@@ -12,8 +12,5 @@
     "./addon-serialize": "./addons/serialize.ts",
     "./addon-web-links": "./addons/web-links.ts",
     "./addon-webgl": "./addons/webgl.ts"
-  },
-  "files": [
-    "src"
-  ]
+  }
 }

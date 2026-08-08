@@ -1,0 +1,13 @@
+[app]
+name = "notes-app"
+version = "0.1.0"
+display_name = "Notes"
+
+[runtime]
+backend = "mini"
+bytecode = true
+framework = "react"
+
+[window]
+width = 1200
+height = 760

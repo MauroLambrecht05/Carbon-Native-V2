@@ -12,7 +12,7 @@ import type { ProjectName } from "../../domain/value-objects/ProjectName.ts";
 export interface TemplateRequest {
   readonly name: ProjectName;
   readonly preset: Preset;
-  /** Relative path from the project back to the workspace packages/ dir. */
+  /** Relative path from the project back to the workspace root. */
   readonly packagesPath: string;
   /** Runtime backend to write into the manifest. */
   readonly backend: string;

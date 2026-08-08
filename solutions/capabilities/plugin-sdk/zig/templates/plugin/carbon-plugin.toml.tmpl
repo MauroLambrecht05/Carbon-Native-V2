@@ -1,0 +1,16 @@
+# Plugin manifest used by `carbon plugin info` and `carbon plugin install`.
+# Mirrors what `MANIFEST_JSON` in src/main.zig serializes; both must agree.
+name = "@@NAME@@"
+version = "0.1.0"
+language = "zig"
+
+[abi]
+major = 1
+minor = 0
+
+[capabilities]
+required = []
+optional = ["fs.read"]
+
+modules = ["carbon:@@NAME@@"]
+hooks = ["register"]

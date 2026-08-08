@@ -16,7 +16,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync, copyFileS
 import { join, basename } from "node:path";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { VENDOR_DIR } from "@carbon/shared/paths";
+import { VENDOR_DIR } from "@carbon/workspace";
 
 // Delta-update tools are vendored in tooling/vendor/ so this CLI is
 // self-contained; see that directory's README for provenance and checksums.

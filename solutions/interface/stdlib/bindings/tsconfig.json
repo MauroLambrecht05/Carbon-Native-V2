@@ -1,0 +1,17 @@
+{
+  "//": "This package DECLARES web-platform globals — Headers, Response, AbortController, AbortSignal, WebSocket — because it is the shim that provides them to an app. That collides with @types/bun, which declares the same names, so it cannot join solutions/tsconfig.json (whose types are [\"bun\"]). Same shape of problem as interface/stdlib/dom, which declares DOM globals and therefore cannot take lib DOM.",
+  "extends": "../../../../.config/tsconfig.base.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "types": []
+  },
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules"]
+}

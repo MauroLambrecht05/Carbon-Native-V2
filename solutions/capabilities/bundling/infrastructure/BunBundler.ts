@@ -72,7 +72,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 // @babel/core + the presets are LAZY-loaded (see loadBabel below). The common
 // React native-JSX path never runs Babel, and loading @babel/core + 3 presets
 // eagerly added ~0.3–0.5 s to `carbon build` startup. Deferring them keeps that
@@ -96,6 +96,7 @@ import {
   TAILWIND_CLASSES_SRC,
   CSS_ENGINE_SRC,
   MINI_REACT_SRC,
+  MINI_SOLID_SRC,
   COMPAT_DOM_INSTALL_SRC,
   COMPAT_DOM_SRC,
 } from "@carbon/workspace";
@@ -884,6 +885,29 @@ export async function buildBundleWithBabel(
           });
           b.onResolve({ filter: /^@carbon\/vite-tailwind\/classes$/ }, () => {
             return { path: _carbonClassesPath };
+          });
+          // @carbon/mini-solid is the moduleName babel-preset-solid compiles
+          // every JSX element against, so it MUST resolve — but a scaffolded
+          // project cannot depend on it the ordinary way.
+          //
+          // A `file:` dependency is what V1 generated, and it does not work
+          // here: bun walks up from the dependency, finds the node_modules
+          // JUNCTION at the workspace root (the real tree lives in .config/),
+          // and the copy fails with EPERM on Windows. Reproduced in isolation —
+          // a plain directory works, the same package under a junction does
+          // not.
+          //
+          // So the renderer is injected, exactly like the reconciler and the
+          // DOM shim above: resolved from the workspace, never installed into
+          // the app.
+          b.onResolve({ filter: /^@carbon\/mini-solid$/ }, () => {
+            return { path: MINI_SOLID_SRC };
+          });
+          b.onResolve({ filter: /^@carbon\/mini-solid\/polyfills$/ }, () => {
+            return { path: join(dirname(MINI_SOLID_SRC), "polyfills.ts") };
+          });
+          b.onResolve({ filter: /^@carbon\/mini-solid\/image$/ }, () => {
+            return { path: join(dirname(MINI_SOLID_SRC), "image-intrinsic.ts") };
           });
         },
       },

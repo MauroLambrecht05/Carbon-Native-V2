@@ -33,6 +33,8 @@ members = [
   #
   # Phase 2 — leaf capabilities (no runtime dependency, own tests):
   "../../solutions/capabilities/math",
+  "../../solutions/capabilities/updating/rust",
+  "../../solutions/capabilities/plugin-sdk/rust",
   "../../solutions/capabilities/text",
   "../../solutions/capabilities/snapshot",
   "../../solutions/capabilities/imaging",

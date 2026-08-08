@@ -1,0 +1,19 @@
+// Zig package descriptor for `carbon-plugin-sdk`.
+// Usage from a downstream build.zig.zon:
+//   .dependencies = .{
+//       .@"carbon-plugin-sdk" = .{
+//           .path = "../../packages/carbon-sdk/zig",
+//       },
+//   },
+.{
+    .name = "carbon-plugin-sdk",
+    .version = "0.1.0",
+    // Minimum Zig version targeted. Bump as needed.
+    .minimum_zig_version = "0.13.0",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "../include",
+    },
+}

@@ -14,7 +14,7 @@ import { resolve } from "node:path";
 import type { ProcessRunner } from "@carbon/process";
 import { ProjectPlan } from "../../domain/entities/ProjectPlan.ts";
 import { TargetNotEmptyError, OutsideWorkspaceError } from "../../domain/errors/ScaffoldError.ts";
-import { packagesRelativeTo } from "../../domain/value-objects/PackagesPath.ts";
+import { workspaceRelativeTo } from "../../domain/value-objects/PackagesPath.ts";
 import { presetNamed, DEFAULT_PRESET } from "../../domain/value-objects/Preset.ts";
 import { ProjectName } from "../../domain/value-objects/ProjectName.ts";
 import type { ProjectFileSystem } from "../ports/ProjectFileSystem.ts";
@@ -65,7 +65,7 @@ export class CreateProjectUseCase {
 
     let packagesPath: string;
     try {
-      packagesPath = packagesRelativeTo(target, request.workspaceRoot);
+      packagesPath = workspaceRelativeTo(target, request.workspaceRoot);
     } catch (e) {
       throw new OutsideWorkspaceError(
         target,
@@ -96,11 +96,10 @@ export class CreateProjectUseCase {
 
     let installExitCode: number | null = null;
     if (request.install ?? true) {
-      // NOTE: this currently fails to resolve @carbon/mini-solid, because the
-      // templates pin it into a packages/ directory that has not existed since
-      // V1 — see domain/value-objects/PackagesPath.ts. The non-zero code is
-      // reported rather than thrown: the project itself is scaffolded fine, and
-      // the user can install by hand once the dependency is published.
+      // A non-zero code is reported rather than thrown. The project is
+      // scaffolded either way, and an install can fail for reasons that have
+      // nothing to do with the scaffold — no network, a registry outage — where
+      // deleting the project would be the wrong response.
       const result = await this.processes.run("bun", ["install"], {
         cwd: plan.target,
         stdio: "inherit",

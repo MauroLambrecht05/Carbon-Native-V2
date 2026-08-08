@@ -1,0 +1,48 @@
+[app]
+name = "terax-ai"
+version = "0.6.4"
+display_name = "Terax"
+
+[runtime]
+backend = "mini"
+# Switched to carbon-mini for the V2 migration check. Bytecode stays off: the
+# bundle here is prebuilt plain JS, and turning bytecode on would need a
+# rebuild through `carbon build`. Note for later — terax's bundle is ~4.6 MB. The QuickJS source parser spends
+# ~4 s parsing that on every cold start AND every HMR re-eval. Precompiling
+# to QuickJS bytecode (.qbc.zst) skips the parse entirely — measured cold
+# start to first paint drops 7.2 s → 2.4 s, and HMR re-eval 4.85 s → 0.66 s.
+# The only cost is a ~1.5 s compile step at build time (worth it; for big
+# bundles the parse savings dwarf the lz4 decompress overhead).
+bytecode = false
+framework = "react"
+# Image loading enabled — used by hugeicons + AI provider logos.
+image = true
+# Audio enabled — voice input pipeline.
+audio = false
+
+[window]
+# Matches the Tauri build's actual spawn size. Tauri restores its window
+# via tauri-plugin-window-state (.window-state.json → 986x701 logical), so
+# the 800x600 in tauri.conf.json is only the first-run default. carbon-mini
+# has no state restore yet, so we pin the same logical size for a 1:1
+# side-by-side. These are LOGICAL (CSS) px — the DPI-aware paint pipeline
+# scales to the monitor's physical resolution.
+width = 986
+height = 701
+# Hide native title bar / window chrome — the React app renders its own
+# header (custom min/max/close in /modules/header/WindowControls) and
+# expects the viewport to start at y=0.
+decorated = false
+
+[theme]
+# Terax ships dark-first: `:root` defines the LIGHT palette (white-on-white,
+# unusable as a default) and `.dark` overrides everything to dark. Without
+# this, the engine extracts the LIGHT palette and renders the whole window
+# white-on-white, hiding the UI. Apps that want light-on-light should omit
+# this block (default = "light").
+mode = "dark"
+
+[plugins]
+# carbon-mini ships the bindings for fs/process/pty/store/os/log/notification/
+# autostart/shell/clipboard/dialog/keychain/window-state/invoke as built-ins —
+# no [plugins] entries needed.

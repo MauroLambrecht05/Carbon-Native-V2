@@ -1,29 +1,33 @@
-// The relative path from a new project back to the workspace's packages/ dir.
+// The relative path from a new project back to the workspace root.
 //
-// ── KNOWN BROKEN, PRESERVED DELIBERATELY ────────────────────────────────────
-// The generated package.json pins the runtime as `file:<this>/mini-runtime`.
-// There has been no packages/ directory since V1, so `bun install` in a freshly
-// scaffolded project fails to resolve @carbon/mini-solid.
+// A generated package.json depends on the runtime and the build plugins with
+// `file:` specifiers, and `file:` is resolved relative to the project. So the
+// templates need to know how far up the workspace root is.
 //
-// This is carried over unchanged rather than fixed, because fixing it is a
-// decision about how V2 publishes its runtime — workspace protocol, a Bazel
-// output path, or actually publishing to npm — and that decision has not been
-// made. Silently pointing the templates somewhere that happens to exist today
-// would bury the question. When it is answered, this file and the package
-// templates are the two places to change.
+// ── ONE PLACEHOLDER, NOT SEVERAL ────────────────────────────────────────────
+// Templates say `file:@@ROOT@@/solutions/interface/renderer/solid`. The
+// alternative — a placeholder per dependency, or paths like
+// `@@PACKAGES@@/../../../integrations/...` — puts the same arithmetic in five
+// template strings, and each of those breaks silently when a package moves.
+// One placeholder means a move changes the literal path in the template, where
+// it is readable.
 //
-// The path arithmetic itself is correct and tested; it is the destination that
-// does not exist.
+// V1 pointed these at `<root>/packages/mini-runtime`, a directory that has not
+// existed since the migration, so every scaffolded project failed
+// `bun install` on a missing @carbon/mini-solid.
+//
+// `file:` rather than a published version because nothing is published yet.
+// When it is, these become version ranges and this arithmetic goes away.
 
 /**
- * How many `../` it takes to get from `target` to `<root>/packages`.
+ * How many `../` it takes to get from `target` up to `root`.
  *
  * Case-insensitive because Windows paths compare that way, and split on both
  * separators for the same reason.
  *
  * @throws if target is not inside root — a `file:` dependency cannot reach it.
  */
-export function packagesRelativeTo(target: string, root: string): string {
+export function workspaceRelativeTo(target: string, root: string): string {
   // Both inputs are assumed already absolute (resolve()'d by the caller).
   const targetParts = target.toLowerCase().split(/[\\/]+/).filter(Boolean);
   const rootParts = root.toLowerCase().split(/[\\/]+/).filter(Boolean);
@@ -39,6 +43,14 @@ export function packagesRelativeTo(target: string, root: string): string {
   }
 
   const depth = targetParts.length - common;
-  if (depth === 0) return "./packages";
-  return Array(depth).fill("..").join("/") + "/packages";
+  // A project AT the root would be odd, but "." is the honest answer.
+  return depth === 0 ? "." : Array(depth).fill("..").join("/");
 }
+
+/**
+ * Kept as the old name so nothing outside this capability had to change when
+ * the meaning shifted from "path to packages/" to "path to the workspace root".
+ *
+ * @deprecated use workspaceRelativeTo
+ */
+export const packagesRelativeTo = workspaceRelativeTo;

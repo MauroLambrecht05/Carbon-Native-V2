@@ -11,7 +11,9 @@
     "skipLibCheck": true,
     "esModuleInterop": true,
     "allowImportingTsExtensions": true,
-    "types": []
+    // bun, because tests/ uses bun:test and node: builtins. The library
+    // sources reference neither.
+    "types": ["bun"]
   },
   "include": ["**/*.ts"],
   "exclude": ["node_modules"]

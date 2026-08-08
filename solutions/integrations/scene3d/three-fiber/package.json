@@ -9,9 +9,6 @@
     ".": "./index.ts",
     "./types": "./types.ts"
   },
-  "files": [
-    "src"
-  ],
   "scripts": {
     "test": "bun test"
   },

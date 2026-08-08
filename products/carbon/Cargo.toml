@@ -80,7 +80,7 @@ audio = ["mini", "dep:carbon-audio"]
 # Zero overhead when disabled. Enable for development/benchmarking.
 profiling = ["mini", "dep:tracy-client"]
 # Self-update support. A/B partition state machine with crash-counter rollback.
-# updater = ["mini", "dep:carbon-updater"]   # pending migration
+updater = ["mini", "dep:carbon-updater"]
 # Heap snapshot (cold-start exec-skip). carbon-snapshot itself is pulled in by
 # "mini" unconditionally (it always compiles); this flag only toggles the
 # build.rs linker behavior (/DYNAMICBASE:NO — see build.rs) so the executable
@@ -137,9 +137,7 @@ carbon-audio = { path = "../../solutions/capabilities/audio", optional = true }
 # carbon-gpu-canvas — the GPU canvas subsystem. Optional via the 'gpu' feature.
 carbon-gpu-canvas = { path = "../../solutions/capabilities/gpu-canvas", optional = true }
 # carbon-updater — A/B partition state machine and manifest verification (OPTIONAL via 'updater' feature).
-# carbon-updater is still in V1 (tools/updater). The `updater` feature is
-# disabled until it migrates — see products/carbon/MIGRATION.md.
-# carbon-updater = { path = "...", optional = true }
+carbon-updater = { path = "../../solutions/capabilities/updating/rust", optional = true }
 # Tracy profiler — optional profiling zones for frame-level analysis.
 # Connect with Tracy server: https://github.com/wolfpld/tracy
 tracy-client = { version = "0.17", optional = true }

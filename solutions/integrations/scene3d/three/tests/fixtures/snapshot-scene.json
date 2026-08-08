@@ -1,0 +1,523 @@
+[
+  {
+    "type": "clear",
+    "rgba": [
+      0.1,
+      0.2,
+      0.3,
+      1
+    ]
+  },
+  {
+    "type": "setCamera",
+    "camera": {
+      "view": {
+        "__typed": "Float32Array",
+        "length": 16,
+        "head": [
+          1,
+          0,
+          0,
+          0
+        ],
+        "tail": [
+          0,
+          0,
+          -6,
+          1
+        ]
+      },
+      "projection": {
+        "__typed": "Float32Array",
+        "length": 16,
+        "head": [
+          1.299,
+          0,
+          0,
+          0
+        ],
+        "tail": [
+          0,
+          0,
+          -0.2002,
+          0
+        ]
+      },
+      "position": [
+        0,
+        0,
+        6
+      ]
+    }
+  },
+  {
+    "type": "setLights",
+    "lights": [
+      {
+        "type": "ambient",
+        "color": [
+          0.0144,
+          0.0144,
+          0.0144
+        ],
+        "intensity": 0.5
+      },
+      {
+        "type": "directional",
+        "color": [
+          1,
+          1,
+          1
+        ],
+        "intensity": 1,
+        "direction": [
+          -0.379,
+          -0.7581,
+          -0.5307
+        ]
+      }
+    ]
+  },
+  {
+    "type": "mesh",
+    "geometryId": "<id>",
+    "positions": {
+      "__typed": "Float32Array",
+      "length": 72,
+      "head": [
+        0.5,
+        0.5,
+        0.5,
+        0.5
+      ],
+      "tail": [
+        -0.5,
+        -0.5,
+        -0.5,
+        -0.5
+      ]
+    },
+    "normals": {
+      "__typed": "Float32Array",
+      "length": 72,
+      "head": [
+        1,
+        0,
+        0,
+        1
+      ],
+      "tail": [
+        -1,
+        0,
+        0,
+        -1
+      ]
+    },
+    "uvs": {
+      "__typed": "Float32Array",
+      "length": 48,
+      "head": [
+        0,
+        1,
+        1,
+        1
+      ],
+      "tail": [
+        0,
+        0,
+        1,
+        0
+      ]
+    },
+    "indices": {
+      "__typed": "Uint16Array",
+      "length": 36,
+      "head": [
+        0,
+        2,
+        1,
+        2
+      ],
+      "tail": [
+        21,
+        22,
+        23,
+        21
+      ]
+    },
+    "transform": {
+      "__typed": "Float32Array",
+      "length": 16,
+      "head": [
+        1,
+        0,
+        0,
+        0
+      ],
+      "tail": [
+        -2,
+        0,
+        0,
+        1
+      ]
+    },
+    "normalMatrix": {
+      "__typed": "Float32Array",
+      "length": 9,
+      "head": [
+        1,
+        0,
+        0,
+        0
+      ],
+      "tail": [
+        0,
+        0,
+        0,
+        1
+      ]
+    },
+    "material": {
+      "type": "basic",
+      "color": [
+        1,
+        0,
+        0
+      ],
+      "opacity": 1,
+      "transparent": false,
+      "side": 0,
+      "map": null
+    }
+  },
+  {
+    "type": "mesh",
+    "geometryId": "<id>",
+    "positions": {
+      "__typed": "Float32Array",
+      "length": 189,
+      "head": [
+        0,
+        0.5,
+        0,
+        0
+      ],
+      "tail": [
+        0,
+        0,
+        -0.5,
+        0
+      ]
+    },
+    "normals": {
+      "__typed": "Float32Array",
+      "length": 189,
+      "head": [
+        0,
+        1,
+        0,
+        0
+      ],
+      "tail": [
+        0,
+        0,
+        -1,
+        0
+      ]
+    },
+    "uvs": {
+      "__typed": "Float32Array",
+      "length": 126,
+      "head": [
+        0.0625,
+        1,
+        0.1875,
+        1
+      ],
+      "tail": [
+        0.8125,
+        0,
+        0.9375,
+        0
+      ]
+    },
+    "indices": {
+      "__typed": "Uint16Array",
+      "length": 240,
+      "head": [
+        0,
+        9,
+        10,
+        1
+      ],
+      "tail": [
+        61,
+        53,
+        52,
+        62
+      ]
+    },
+    "transform": {
+      "__typed": "Float32Array",
+      "length": 16,
+      "head": [
+        1,
+        0,
+        0,
+        0
+      ],
+      "tail": [
+        0,
+        0,
+        0,
+        1
+      ]
+    },
+    "normalMatrix": {
+      "__typed": "Float32Array",
+      "length": 9,
+      "head": [
+        1,
+        0,
+        0,
+        0
+      ],
+      "tail": [
+        0,
+        0,
+        0,
+        1
+      ]
+    },
+    "material": {
+      "type": "standard",
+      "color": [
+        0,
+        1,
+        0
+      ],
+      "opacity": 1,
+      "transparent": false,
+      "side": 0,
+      "map": null,
+      "metalness": 0.3,
+      "roughness": 0.4,
+      "emissive": [
+        0,
+        0,
+        0
+      ]
+    }
+  },
+  {
+    "type": "mesh",
+    "geometryId": "<id>",
+    "positions": {
+      "__typed": "Float32Array",
+      "length": 12,
+      "head": [
+        -0.5,
+        0.5,
+        0,
+        0.5
+      ],
+      "tail": [
+        0,
+        0.5,
+        -0.5,
+        0
+      ]
+    },
+    "normals": {
+      "__typed": "Float32Array",
+      "length": 12,
+      "head": [
+        0,
+        0,
+        1,
+        0
+      ],
+      "tail": [
+        1,
+        0,
+        0,
+        1
+      ]
+    },
+    "uvs": {
+      "__typed": "Float32Array",
+      "length": 8,
+      "head": [
+        0,
+        1,
+        1,
+        1
+      ],
+      "tail": [
+        0,
+        0,
+        1,
+        0
+      ]
+    },
+    "indices": {
+      "__typed": "Uint16Array",
+      "length": 6,
+      "head": [
+        0,
+        2,
+        1,
+        2
+      ],
+      "tail": [
+        3,
+        1
+      ]
+    },
+    "transform": {
+      "__typed": "Float32Array",
+      "length": 16,
+      "head": [
+        1,
+        0,
+        0,
+        0
+      ],
+      "tail": [
+        2,
+        0,
+        0,
+        1
+      ]
+    },
+    "normalMatrix": {
+      "__typed": "Float32Array",
+      "length": 9,
+      "head": [
+        1,
+        0,
+        0,
+        0
+      ],
+      "tail": [
+        0,
+        0,
+        0,
+        1
+      ]
+    },
+    "material": {
+      "type": "phong",
+      "color": [
+        0,
+        0,
+        1
+      ],
+      "opacity": 1,
+      "transparent": false,
+      "side": 0,
+      "map": null,
+      "shininess": 50,
+      "specular": [
+        0.0056,
+        0.0056,
+        0.0056
+      ],
+      "emissive": [
+        0,
+        0,
+        0
+      ]
+    }
+  },
+  {
+    "type": "line",
+    "geometryId": "<id>",
+    "positions": {
+      "__typed": "Float32Array",
+      "length": 9,
+      "head": [
+        -1,
+        1,
+        0,
+        0
+      ],
+      "tail": [
+        0,
+        1,
+        1,
+        0
+      ]
+    },
+    "indices": null,
+    "color": [
+      1,
+      1,
+      0
+    ],
+    "opacity": 1,
+    "transparent": false,
+    "mode": 1,
+    "transform": {
+      "__typed": "Float32Array",
+      "length": 16,
+      "head": [
+        1,
+        0,
+        0,
+        0
+      ],
+      "tail": [
+        0,
+        0,
+        0,
+        1
+      ]
+    }
+  },
+  {
+    "type": "points",
+    "geometryId": "<id>",
+    "positions": {
+      "__typed": "Float32Array",
+      "length": 9,
+      "head": [
+        -1,
+        -1,
+        0,
+        0
+      ],
+      "tail": [
+        0,
+        1,
+        -1,
+        0
+      ]
+    },
+    "color": [
+      1,
+      0,
+      1
+    ],
+    "size": 4,
+    "opacity": 1,
+    "transparent": false,
+    "sizeAttenuation": true,
+    "transform": {
+      "__typed": "Float32Array",
+      "length": 16,
+      "head": [
+        1,
+        0,
+        0,
+        0
+      ],
+      "tail": [
+        0,
+        0,
+        0,
+        1
+      ]
+    }
+  }
+]

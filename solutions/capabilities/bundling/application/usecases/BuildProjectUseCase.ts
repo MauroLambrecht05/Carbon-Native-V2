@@ -25,8 +25,8 @@ import {
   readCache,
   writeCache,
 } from "../../infrastructure/BuildCache.ts";
-import { resolveBackendBinary, runtimeBinaryPath, runtimeCargoDir, SCRIPTS_DIR, supportsMiniBytecode, usesMiniBundlePipeline } from "@carbon/workspace";
-import { backendCargoFeatures, type BackendName } from "@carbon/contracts/app/backend";
+import { resolveBackendBinary, runtimeBinaryPath, runtimeCargoDir, SCRIPTS_DIR, TARGET_DIR, supportsMiniBytecode, usesMiniBundlePipeline } from "@carbon/workspace";
+import { backendCargoFeatures, type BackendName, type RuntimeFeatureFlags } from "@carbon/contracts/app/backend";
 
 /** `bun install` if node_modules doesn't exist yet. */
 export async function ensureNodeModules(projectDir: string, logger: Logger): Promise<void> {
@@ -40,7 +40,11 @@ export async function ensureNodeModules(projectDir: string, logger: Logger): Pro
 }
 
 /** `cargo build --release` for the chosen backend if its binary doesn't exist yet. */
-export async function ensureRuntime(backend: BackendName, logger: Logger): Promise<string> {
+export async function ensureRuntime(
+  backend: BackendName,
+  logger: Logger,
+  flags: RuntimeFeatureFlags = {},
+): Promise<string> {
   // Search dist before release (resolveBackendBinary's order) rather than
   // hardcoding runtimeBinaryPath's "release" default — a dist-only build
   // (no release binary at all) must still resolve to the binary that
@@ -58,8 +62,14 @@ export async function ensureRuntime(backend: BackendName, logger: Logger): Promi
     "build", "--release",
     "--bin", `carbon-${backend}`,
     "--no-default-features",
-    "--features", backendCargoFeatures(backend),
+    "--features", backendCargoFeatures(backend, flags),
   ];
+  // Cargo's default target directory is beside the workspace manifest
+  // (.config/rust/target). TARGET_DIR says .build/rust, and the Bazel cargo
+  // rules set CARGO_TARGET_DIR to match. Without this the CLI builds
+  // successfully and then fails to find what it just built.
+  const cargoEnv = { ...process.env, CARGO_TARGET_DIR: TARGET_DIR };
+
   const { code } = process.platform === "win32"
     ? await spawnRun(
         "powershell",
@@ -68,11 +78,11 @@ export async function ensureRuntime(backend: BackendName, logger: Logger): Promi
           "-ExecutionPolicy",
           "Bypass",
           "-Command",
-          `. "${join(SCRIPTS_DIR, "activate-msvc.ps1")}"; cargo ${cargoArgs.join(" ")}`,
+          `. "${join(SCRIPTS_DIR, "automation", "bootstrap", "activate-msvc.ps1")}"; cargo ${cargoArgs.join(" ")}`,
         ],
-        { cwd: dir },
+        { cwd: dir, env: cargoEnv },
       )
-    : await spawnRun("cargo", cargoArgs, { cwd: dir });
+    : await spawnRun("cargo", cargoArgs, { cwd: dir, env: cargoEnv });
   if (code !== 0) throw new Error(`cargo build for ${backend} failed (exit ${code})`);
   if (!existsSync(exe)) {
     throw new Error(`cargo finished but binary not at expected path: ${exe}`);

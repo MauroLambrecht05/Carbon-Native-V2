@@ -22,7 +22,7 @@ export {
   type ManifestShape,
   type Styling,
 } from "./domain/value-objects/Preset.ts";
-export { packagesRelativeTo } from "./domain/value-objects/PackagesPath.ts";
+export { workspaceRelativeTo } from "./domain/value-objects/PackagesPath.ts";
 export {
   ScaffoldError,
   UnknownPresetError,

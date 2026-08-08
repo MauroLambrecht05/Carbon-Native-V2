@@ -1,0 +1,13 @@
+[app]
+name = "react"
+version = "0.1.0"
+display_name = "React"
+
+[runtime]
+backend = "mini"
+bytecode = true
+framework = "react"
+
+[window]
+width = 1100
+height = 720

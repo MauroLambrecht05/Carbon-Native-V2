@@ -18,7 +18,7 @@ import {
   EmbeddedTemplateSource,
   NodeProjectFileSystem,
   OutsideWorkspaceError,
-  packagesRelativeTo,
+  workspaceRelativeTo,
   PRESET_NAMES,
   ProjectName,
   TargetNotEmptyError,
@@ -108,15 +108,33 @@ describe("every preset produces a coherent project", () => {
       }
     });
 
-    test(`${preset}: the runtime dependency is pinned`, () => {
-      expect(planFor(preset).fileAt("package.json")!.contents).toContain("@carbon/mini-solid");
+    test(`${preset}: declares no carbon dependency at all`, () => {
+      // The renderer and the build plugins are INJECTED from the workspace by
+      // the build pipeline, never installed into the project. V1 generated
+      // `file:` dependencies here; they pointed at a directory that no longer
+      // exists, and `file:` cannot work under this workspace anyway — bun hits
+      // EPERM on the node_modules junction at the root.
+      const pkg = planFor(preset).fileAt("package.json")!.contents;
+      expect(pkg).not.toContain("file:");
+      expect(pkg).not.toContain("packages/mini-runtime");
+      // Real npm dependencies are still declared normally.
+      expect(pkg).toContain("solid-js");
+    });
+
+    test(`${preset}: the editor can still resolve @carbon/mini-solid`, () => {
+      // Not installed, so without a tsconfig path the imports would be red in
+      // an editor while building fine — its own kind of broken.
+      const ts = planFor(preset).fileAt("tsconfig.json")!.contents;
+      expect(ts).toContain("@carbon/mini-solid");
+      expect(ts).toContain("solutions/interface/renderer/solid");
     });
   }
 
-  test("tailwind presets get the tailwind plugin and class-based JSX", () => {
+  test("tailwind presets are marked in the manifest and use class-based JSX", () => {
+    // The plugin itself is injected by the pipeline, so it does NOT appear in
+    // package.json. `[tailwind] enabled` in the manifest is what turns it on.
     const plan = planFor("tailwind");
     expect(plan.fileAt("carbon.toml")!.contents).toContain("[tailwind]");
-    expect(plan.fileAt("package.json")!.contents).toContain("@carbon/vite/tailwind");
     expect(plan.fileAt("App.tsx")!.contents).toContain('class="p-7');
   });
 
@@ -187,27 +205,27 @@ describe("refusals", () => {
   });
 });
 
-describe("the packages path", () => {
+describe("the path back to the workspace root", () => {
   test("counts one level up per directory below the root", () => {
-    expect(packagesRelativeTo(join(ROOT, "apps", "demo"), ROOT)).toBe("../../packages");
+    expect(workspaceRelativeTo(join(ROOT, "apps", "demo"), ROOT)).toBe("../..");
   });
 
-  test("the root itself is ./packages", () => {
-    expect(packagesRelativeTo(ROOT, ROOT)).toBe("./packages");
+  test("a project at the root itself is \".\"", () => {
+    expect(workspaceRelativeTo(ROOT, ROOT)).toBe(".");
   });
 
   test("compares case-insensitively, because Windows paths do", () => {
-    expect(packagesRelativeTo(join(ROOT.toUpperCase(), "demo"), ROOT)).toBe("../packages");
+    expect(workspaceRelativeTo(join(ROOT.toUpperCase(), "demo"), ROOT)).toBe("..");
   });
 
   test("a sibling path deep enough to look plausible is still outside", () => {
     // Deeper than the root, so it gets past the length check and has to be
     // caught by the prefix comparison.
-    expect(() => packagesRelativeTo("/somewhere/else/much/deeper", ROOT)).toThrow(/not inside/);
+    expect(() => workspaceRelativeTo("/somewhere/else/much/deeper", ROOT)).toThrow(/not inside/);
   });
 
   test("a path shallower than the root is rejected on its own terms", () => {
-    expect(() => packagesRelativeTo("/tmp", ROOT)).toThrow(/shallower/);
+    expect(() => workspaceRelativeTo("/tmp", ROOT)).toThrow(/shallower/);
   });
 });
 

@@ -40,7 +40,9 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 
 # Where to look. Anything with a tsconfig.json under these is a project.
-SEARCH = ["solutions", "products"]
+# .tools carries one too: automation/testing imports @carbon/* and bun
+# resolves aliases from the nearest tsconfig to the importing file.
+SEARCH = ["solutions", "products", ".tools"]
 
 # Not projects: .config holds the shared base (no inputs of its own), and
 # labs/ is scratch space that is deliberately not built.

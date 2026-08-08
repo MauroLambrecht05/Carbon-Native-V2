@@ -10,11 +10,6 @@
     "./mock-executor": "./mock-executor.ts",
     "./types": "./types.ts"
   },
-  "files": [
-    "src",
-    "INTEGRATION.md",
-    "README.md"
-  ],
   "scripts": {
     "test": "bun test",
     "bench": "bun run ../../scripts/bench-phase2.ts"

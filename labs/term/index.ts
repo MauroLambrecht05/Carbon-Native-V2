@@ -1,6 +1,6 @@
 // @carbon/term — Solid universal renderer wired into the carbon-term
 // scene-graph host imports. Exposes Ink-compatible component names and hooks
-// so existing Ink apps port via the @carbon/vite-ink-shim Vite plugin
+// so existing Ink apps port via the @carbon/vite/ink-shim Vite plugin
 // without any source-code changes.
 //
 // Configure vite-plugin-solid with this package as the universal moduleName:

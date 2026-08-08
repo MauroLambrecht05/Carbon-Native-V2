@@ -1,0 +1,20 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Carbon CTSX",
+  "scopeName": "source.ctsx",
+  "patterns": [
+    {
+      "comment": "@Carbon* directives at top of statement (the carbon DSL)",
+      "match": "^\\s*(@Carbon[A-Z][A-Za-z0-9_]*)\\b",
+      "captures": {
+        "1": {
+          "name": "keyword.control.carbon-directive.ctsx"
+        }
+      }
+    },
+    {
+      "comment": "Everything else flows through the built-in TypeScript-React grammar so JSX, types, identifiers, comments, strings, etc. all highlight identically to a .tsx file.",
+      "include": "source.tsx"
+    }
+  ]
+}

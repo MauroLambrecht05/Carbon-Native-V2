@@ -88,6 +88,35 @@ export function backend(name: BackendName): Backend {
  * .config/justfile's build-runtime/build-runtime-dev recipes — keep both
  * in sync if backend-specific default features change.
  */
-export function backendCargoFeatures(name: BackendName): string {
-  return name === "mini" ? "mini,snapshot" : name;
+export interface RuntimeFeatureFlags {
+  /** carbon.toml `[runtime] image` — links the image decoders. */
+  readonly image?: boolean;
+  /** carbon.toml `[runtime] audio` — links the Web Audio implementation. */
+  readonly audio?: boolean;
+  /** carbon.toml `[updater] enabled` — links the A/B slot state machine. */
+  readonly updater?: boolean;
+}
+
+export function backendCargoFeatures(
+  name: BackendName,
+  flags: RuntimeFeatureFlags = {},
+): string {
+  const features = name === "mini" ? ["mini", "snapshot"] : [name];
+
+  // ── WHY THE FLAGS MATTER ──────────────────────────────────────────────────
+  // These subsystems are optional Cargo features AND runtime-gated by
+  // carbon.toml. Both have to line up: the feature decides whether the code is
+  // linked at all, the manifest decides whether it is switched on.
+  //
+  // This function used to ignore the manifest entirely, so an app declaring
+  // `[runtime] image = true` got a runtime built without the image feature —
+  // `maybe_register_image` compiled to its no-op stub and every image silently
+  // failed to load, with nothing reporting why. Only mini has these.
+  if (name === "mini") {
+    if (flags.image) features.push("image");
+    if (flags.audio) features.push("audio");
+    if (flags.updater) features.push("updater");
+  }
+
+  return features.join(",");
 }

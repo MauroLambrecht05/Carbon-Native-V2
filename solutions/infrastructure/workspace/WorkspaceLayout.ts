@@ -93,19 +93,21 @@ export const SOLUTIONS_DIR = join(CARBON_ROOT, "solutions");
 export const LABS_DIR = join(CARBON_ROOT, "labs");
 export const TOOLS_DIR = join(CARBON_ROOT, ".tools");
 
-/** solutions/shared — public interfaces with zero internal dependencies. */
-export const SHARED_DIR = join(SOLUTIONS_DIR, "shared");
-/** solutions/internal — the business capabilities. */
-export const INTERNAL_DIR = join(SOLUTIONS_DIR, "internal");
-/** solutions/external — integrations with tools we do not own. */
-export const EXTERNAL_DIR = join(SOLUTIONS_DIR, "external");
+// The five tiers. These replaced shared/ internal/ external/, which this file
+// still described long after they stopped existing — every constant below
+// pointed at an absent directory, and nothing noticed because nothing read
+// them. That is the failure this file's own header warns about, and it landed
+// anyway; the paths that ARE read are grouped at the bottom for that reason.
+export const CONTRACTS_DIR = join(SOLUTIONS_DIR, "contracts");
+export const CAPABILITIES_DIR = join(SOLUTIONS_DIR, "capabilities");
+export const INFRASTRUCTURE_DIR = join(SOLUTIONS_DIR, "infrastructure");
+export const INTEGRATIONS_DIR = join(SOLUTIONS_DIR, "integrations");
+export const INTERFACE_DIR = join(SOLUTIONS_DIR, "interface");
 
-/** FlatBuffers IDL + carbon.schema.json — the cross-language contracts. */
-export const CONTRACTS_DIR = join(SHARED_DIR, "contracts");
-/** The C-ABI header tree (carbon_abi.h). */
-export const ABI_DIR = join(CONTRACTS_DIR, "abi");
-/** carbon.toml JSON Schema — source of truth for the manifest shape. */
-export const CARBON_SCHEMA = join(CONTRACTS_DIR, "project", "carbon.schema.json");
+/** The C-ABI header a plugin author compiles against. */
+export const ABI_DIR = join(CONTRACTS_DIR, "plugin", "abi");
+/** carbon.toml JSON Schema — one of three renderings of that contract. */
+export const CARBON_SCHEMA = join(CONTRACTS_DIR, "app", "schema", "carbon.schema.json");
 
 export const CONFIG_DIR = join(CARBON_ROOT, ".config");
 export const SCRIPTS_DIR = TOOLS_DIR;
@@ -127,14 +129,19 @@ export const LOCAL_DIR = join(CARBON_ROOT, ".local");
  * them — and only on the code paths that read them. Anchoring to CARBON_ROOT
  * means a move breaks them here, once, loudly.
  */
-export const BUILD_PLUGINS_DIR = join(EXTERNAL_DIR, "build-plugins");
-export const TAILWIND_CLASSES_SRC = join(BUILD_PLUGINS_DIR, "vite", "tailwind", "src", "classes.ts");
+export const BUILD_PLUGINS_DIR = join(INTEGRATIONS_DIR, "bundler");
+export const TAILWIND_CLASSES_SRC = join(
+  INTEGRATIONS_DIR, "bundler", "vite", "domain", "tailwind-classes.ts",
+);
 
 /**
  * Cargo build output. One workspace → one target directory, so every backend
  * binary lands in the same place regardless of which crate produced it.
  */
-export const TARGET_DIR = join(CARBON_ROOT, ".build", "bin");
+// `.build/rust`, not `.build/bin`: the cargo rules set CARGO_TARGET_DIR to the
+// former (see .tools/orchestration/bazel/cargo/defs.bzl). They disagreed, so
+// `carbon run` looked for a binary in a directory cargo never writes to.
+export const TARGET_DIR = join(CARBON_ROOT, ".build", "rust");
 
 /**
  * Profiles searched for a runtime binary, in preference order.
@@ -155,14 +162,15 @@ export const BINARY_PROFILES = ["dist", "release"] as const;
 // the honest state of the port: the CLI's build pipeline cannot compile a
 // runtime until there is a runtime in V2 to compile.
 
-/** V1: carbon/runtime. Destination of migration phases 3–5. */
-export const RUNTIME_DIR = join(INTERNAL_DIR, "runtime");
-/** V1: ecosystem/system/stdlib. */
-export const STDLIB_DIR = join(INTERNAL_DIR, "stdlib");
-/** V1: shared/examples. */
+/** products/carbon — the Cargo package both runtime binaries live in. */
+export const RUNTIME_DIR = join(PRODUCTS_DIR, "carbon");
+/** interface/stdlib — the app-facing TypeScript surface. */
+export const STDLIB_DIR = join(INTERFACE_DIR, "stdlib");
+/** interface/renderer — solid and react, which turn JSX into host calls. */
+export const RENDERERS_DIR = join(INTERFACE_DIR, "renderer");
 export const EXAMPLES_DIR = join(LABS_DIR, "examples");
 
-export const CSS_ENGINE_SRC = join(STDLIB_DIR, "compat", "dom", "src", "css.ts");
+export const CSS_ENGINE_SRC = join(STDLIB_DIR, "dom", "css.ts");
 
 /**
  * Source directory of the Cargo package both backends share.
@@ -182,7 +190,7 @@ export function backendCrateDir(_backend: BackendName): string {
  * paint engine crate, not under a per-backend directory.
  */
 export function backendRenderersDir(_backend: BackendName): string {
-  return join(RUNTIME_DIR, "engine", "paint", "renderers");
+  return RENDERERS_DIR;
 }
 
 /**
@@ -195,9 +203,11 @@ export function backendRenderersDir(_backend: BackendName): string {
  * so an injected specifier the app never declared cannot resolve from the
  * app's directory. This is the same reason TAILWIND_CLASSES_SRC exists.
  */
-export const MINI_REACT_SRC = join(backendRenderersDir("mini"), "react", "src", "index.ts");
-export const COMPAT_DOM_INSTALL_SRC = join(STDLIB_DIR, "compat", "dom", "src", "install.ts");
-export const COMPAT_DOM_SRC = join(STDLIB_DIR, "compat", "dom", "src", "index.ts");
+export const MINI_REACT_SRC = join(RENDERERS_DIR, "react", "index.ts");
+/** The Solid renderer a scaffolded project depends on. */
+export const MINI_SOLID_SRC = join(RENDERERS_DIR, "solid", "index.ts");
+export const COMPAT_DOM_INSTALL_SRC = join(STDLIB_DIR, "dom", "install.ts");
+export const COMPAT_DOM_SRC = join(STDLIB_DIR, "dom", "index.ts");
 
 /** Path a backend binary would occupy under a given profile, built or not. */
 export function backendBinaryPath(backend: BackendName, profile: string = "release"): string {

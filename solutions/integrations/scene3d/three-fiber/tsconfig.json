@@ -15,7 +15,9 @@
     "allowSyntheticDefaultImports": true,
     "allowImportingTsExtensions": true,
     "isolatedModules": true,
-    "types": []
+    // bun, because tests/ uses bun:test and node: builtins. The library
+    // sources reference neither.
+    "types": ["bun"]
   },
   "include": ["**/*.ts", "**/*.tsx"],
   "exclude": ["node_modules"]
