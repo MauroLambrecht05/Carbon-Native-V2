@@ -7,11 +7,13 @@ package(default_visibility = ["//visibility:public"])
 
 load("//.tools/orchestration/bazel/cargo:defs.bzl", "cargo_binary", "cargo_test")
 
+# Structured by concern — composition/ and presentation/ — not by binary. Both
+# entry points live in composition/; see README.md for why there is no mini/ or
+# blitz/ directory.
 filegroup(
     name = "srcs",
     srcs = glob(
-        ["**/*.rs", "Cargo.toml"],
-        exclude = ["tests/**"],
+        ["composition/**/*.rs", "presentation/**/*.rs", "*.rs", "Cargo.toml"],
         allow_empty = True,
     ),
 )

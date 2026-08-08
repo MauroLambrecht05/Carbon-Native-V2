@@ -40,12 +40,24 @@ def validate_workspace(root: Path) -> bool:
     contract_dirs = ["solutions/contracts/" + s for s in CONTRACT_SUBJECTS]
 
     # Products follow one template — see products/README.md.
+    # Every product, and the layer every product has.
+    #
+    # A product ALWAYS has presentation — the surfaces something reaches it
+    # through. carbon-cli's is commands, because a developer types them;
+    # carbon's is the __cm_* host functions, the event loop and the startup
+    # trace. Beyond that a product has whatever it needs: carbon has a
+    # composition layer because standing a runtime up for a particular app is
+    # most of what it does.
     product_dirs = [
         "products/carbon-cli",
         "products/carbon-cli/composition",
         "products/carbon-cli/presentation",
         "products/carbon-cli/presentation/commands",
         "products/carbon-cli/tests",
+        "products/carbon",
+        "products/carbon/composition",
+        "products/carbon/presentation",
+        "products/carbon/tests",
     ]
 
     solution_dirs = (

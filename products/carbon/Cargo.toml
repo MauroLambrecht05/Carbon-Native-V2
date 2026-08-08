@@ -37,12 +37,12 @@ build = "build.rs"
 
 [[bin]]
 name = "carbon-mini"
-path = "mini/main.rs"
+path = "composition/mini.rs"
 required-features = ["mini"]
 
 [[bin]]
 name = "carbon-blitz"
-path = "blitz/main.rs"
+path = "composition/blitz.rs"
 required-features = ["blitz"]
 
 # The launch test needs the mini binary, so it is gated on the same feature.

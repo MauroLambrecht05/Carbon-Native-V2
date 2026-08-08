@@ -43,21 +43,45 @@ use tao::window::WindowBuilder;
 // crates now. Re-binding the old names keeps every call site in this file
 // exactly as it was, which is the point: a 4,400-line composition root is not
 // where you want to also be rewriting a few hundred paths.
-// ── Split out of this file ──────────────────────────────────────────────
-// Verbatim extractions; `use super::*` gives each module this file's imports.
-mod css;
+
+
+use carbon_runtime_contract::{UserEvent, WindowOp};
+// ── Module map ──────────────────────────────────────────────────────────────
+// Structured by CONCERN, not by binary. `carbon-mini` and `carbon-blitz` are
+// two implementations of the same product, and both declare the SAME module
+// names — `host`, `pump`, `trace` — pointing at different files. What differs
+// is how each renders, not what a runtime is made of.
+//
+//   composition/   how the runtime assembles itself for a given app: read the
+//                  manifest, restore or build a heap, load the bundle, decide
+//                  which optional subsystems get registered.
+//   presentation/  every surface something reaches in or out through —
+//                  host/ is the __cm_* functions an app calls, js/ drives the
+//                  engine from the event loop, timing/ is the startup trace.
+//
+// Nothing here is named `mini` or `blitz` except the two entry points, because
+// the backend is an implementation of the renderer, not a kind of thing a
+// product has.
+
+// presentation — blitz renders into a real document rather than a scene graph,
+// so its `host` is the document surface and its `pump` drives that model.
+#[path = "../presentation/host/document.rs"]
+mod host;
+#[path = "../presentation/host/dom.rs"]
 mod dom;
-mod host_imports;
-mod js;
-mod timing;
+#[path = "../presentation/host/css.rs"]
+mod css;
+#[path = "../presentation/js/pump_dom.rs"]
+mod pump;
+#[path = "../presentation/timing/minimal.rs"]
+mod trace;
 
 use css::*;
 use dom::*;
-use host_imports::*;
-use js::*;
-use timing::*;
+use host::*;
+use pump::*;
+use trace::*;
 
-use carbon_runtime_contract::{UserEvent, WindowOp};
 use carbon_os as native;
 use carbon_os::os_theme;
 use carbon_platform as platform;

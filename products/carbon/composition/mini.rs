@@ -45,30 +45,8 @@ macro_rules! prof_zone {
     ($name:expr) => {};
 }
 
-mod async_image;
 
-// ── Split out of this file ──────────────────────────────────────────────────
-// Each module is a verbatim extraction — the text moved, nothing was rewritten.
-// `use super::*` in each gives it this file's imports, so the split needed no
-// per-module import juggling. tests/launch.rs verifies the startup order did
-// not change.
-mod bundle;
-mod features;
-mod manifest;
-mod js;
-mod heap_snapshot;
-mod host_imports;
-mod scene_util;
-mod timing;
 
-use bundle::*;
-use features::*;
-use manifest::*;
-use js::*;
-use heap_snapshot::*;
-use host_imports::*;
-use scene_util::*;
-use timing::*;
 // V1 spliced carbon/runtime/mod.rs in here textually (`include!`), so that
 // unqualified `native::`, `platform::`, `os_theme::`, `host_exports::` and
 // `plugin_loader::` call sites resolved without a module path. Those are five
@@ -76,6 +54,55 @@ use timing::*;
 // exactly as it was, which is the point: a 4,400-line composition root is not
 // where you want to also be rewriting a few hundred paths.
 use carbon_runtime_contract::{UserEvent, WindowOp};
+// ── Module map ──────────────────────────────────────────────────────────────
+// Structured by CONCERN, not by binary. `carbon-mini` and `carbon-blitz` are
+// two implementations of the same product, and both declare the SAME module
+// names — `host`, `pump`, `trace` — pointing at different files. What differs
+// is how each renders, not what a runtime is made of.
+//
+//   composition/   how the runtime assembles itself for a given app: read the
+//                  manifest, restore or build a heap, load the bundle, decide
+//                  which optional subsystems get registered.
+//   presentation/  every surface something reaches in or out through —
+//                  host/ is the __cm_* functions an app calls, js/ drives the
+//                  engine from the event loop, timing/ is the startup trace.
+//
+// Nothing here is named `mini` or `blitz` except the two entry points, because
+// the backend is an implementation of the renderer, not a kind of thing a
+// product has.
+
+// composition — siblings of this file
+mod bundle;
+mod features;
+mod manifest;
+// The file is named for the concern; the MODULE cannot be `snapshot` because
+// this binary aliases the carbon-snapshot crate to that name, and every call
+// site inside says `snapshot::`. The crate keeps the plain name.
+#[path = "snapshot.rs"]
+mod heap_snapshot;
+
+// presentation
+#[path = "../presentation/host/scene.rs"]
+mod host;
+#[path = "../presentation/host/tree.rs"]
+mod tree;
+#[path = "../presentation/host/image.rs"]
+mod image_host;
+#[path = "../presentation/js/pump.rs"]
+mod pump;
+#[path = "../presentation/timing/trace.rs"]
+mod trace;
+
+use bundle::*;
+use features::*;
+use host::*;
+use image_host as async_image;
+use manifest::*;
+use pump::*;
+use heap_snapshot::*;
+use trace::*;
+use tree::*;
+
 use carbon_os as native;
 use carbon_os::os_theme;
 use carbon_platform as platform;
