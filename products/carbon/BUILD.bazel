@@ -1,0 +1,67 @@
+# Carbon Native V2 - carbon
+#
+# The two shipped runtime binaries. One Cargo package, two [[bin]] targets —
+# see Cargo.toml for why they cannot be split.
+
+package(default_visibility = ["//visibility:public"])
+
+load("//.tools/orchestration/bazel/cargo:defs.bzl", "cargo_binary", "cargo_test")
+
+filegroup(
+    name = "srcs",
+    srcs = glob(
+        ["**/*.rs", "Cargo.toml"],
+        exclude = ["tests/**"],
+        allow_empty = True,
+    ),
+)
+
+filegroup(
+    name = "tests",
+    srcs = glob(["tests/**"], allow_empty = True),
+)
+
+# `snapshot` rides along with mini because it is what links the binary at a
+# constant base (/DYNAMICBASE:NO — see build.rs), which the heap snapshot's
+# absolute code pointers require. V1's justfile builds it the same way.
+cargo_binary(
+    name = "mini",
+    package = "carbon-runtime",
+    bin = "carbon-mini",
+    crate_features = [
+        "mini",
+        "snapshot",
+    ],
+    srcs = [":srcs"],
+)
+
+cargo_binary(
+    name = "blitz",
+    package = "carbon-runtime",
+    bin = "carbon-blitz",
+    crate_features = ["blitz"],
+    srcs = [":srcs"],
+)
+
+# The test the migration is verified against: start the real binary against a
+# real bundle and watch it reach first paint.
+#
+# Six assertions, and the one that earns its keep is the phase sequence — 27
+# names in a fixed order that encodes the startup dependency graph. Splitting
+# the 4,400-line composition root is the next piece of work, and reordering is
+# exactly how that goes wrong.
+#
+# It needs no display: the runtime paints into a softbuffer surface and
+# CARBON_TEST_EXIT_MS brings it down cleanly.
+cargo_test(
+    name = "launch_test",
+    package = "carbon-runtime",
+    crate_features = [
+        "mini",
+        "snapshot",
+    ],
+    srcs = [
+        ":srcs",
+        ":tests",
+    ],
+)

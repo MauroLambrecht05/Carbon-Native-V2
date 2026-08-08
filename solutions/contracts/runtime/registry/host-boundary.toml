@@ -25,7 +25,7 @@
 
 [migration]
 # Components whose Rust lives in this workspace. Update as phases land.
-migrated = ["os", "plugin-host"]
+migrated = ["os", "plugin-host", "composition"]
 
 # ── Direction 1: Rust installs, JS calls ────────────────────────────────────
 

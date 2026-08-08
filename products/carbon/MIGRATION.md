@@ -262,12 +262,44 @@ components have actually moved. Only those are held to their declaration.
 are reported as pending, by name, and will be checked the moment phase 5 adds
 `composition` to that list.
 
-**5 — The composition roots.** Split `mini.rs` (4,441 lines) and `blitz.rs` into
-`products/carbon/`. Highest risk in the whole migration: this file holds the
-startup ordering, and the ordering is the thing `startup-phases.txt` exists to
-protect.
+**5 — The composition roots. DONE (moved, not yet split).**
 
-**6 — TypeScript tier.** `stdlib/`, the solid and react renderers, the type
+Both binaries build in V2 and **the runtime launches a real app**: exit 0,
+first paint, content ready, and the 27 startup phases in exactly the pinned
+order. `products/carbon/tests/launch.rs` automates that — six assertions
+against the real binary and a checked-in bundle.
+
+**All 139 imports and 34 dispatchers are now verified present.** The boundary
+check holds every component to its declaration; nothing is pending.
+
+The files are moved and wired, not yet split. That order was deliberate: a
+working baseline in V2 is worth more than a tidy structure that does not run,
+and `launch.rs` is what makes the split safe to attempt next.
+
+### What phase 5 turned up
+
+- **V1 vendors a patched rquickjs-core.** `shared/vendor/rquickjs-core`, applied
+  through `[patch.crates-io]` in the workspace root — a registry patch, not a
+  path dependency, so every crate in the graph is redirected at once rather
+  than ending up with two incompatible copies of the same types. The fork adds
+  exactly one method, `Runtime::from_raw_restored`, which adopts a JSRuntime
+  whose heap was mapped back from a snapshot. Without it the `snapshot` feature
+  does not compile. Migrated to `integrations/javascript/quickjs`.
+- **Three `net.rs` functions were `pub(crate)`.** `http_client`, `post` and `rt`
+  are used by `async_image.rs`, which was in the same crate in V1 and is in
+  `products/carbon` now. A crate boundary runs between them.
+- **`tlog` being a port was the right call, and the compiler proved it.** Both
+  binaries failed with "takes 3 arguments but 2 were supplied" until each passed
+  its own. That is the difference phase 4 identified, enforced.
+
+### Still to do here
+
+`mini/main.rs` is 4,384 lines, `main()` alone about 2,000. The seams are clear —
+bundle loading, snapshot, host-import registration, config reading — and each
+is a file move the compiler can verify. `launch.rs` is what will catch a
+reordering while it happens.
+
+**6 — TypeScript tier. NEXT.** `stdlib/`, the solid and react renderers, the type
 definitions.
 
 ## The build decision, made

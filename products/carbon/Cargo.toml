@@ -1,0 +1,206 @@
+# products/carbon — the two shipped runtime binaries.
+#
+# ONE package, TWO [[bin]] targets, exactly as V1 had it and for the reason V1
+# documented: Cargo has no per-binary dependency scoping. Every non-optional
+# dependency is compiled for every --bin in the package, so each backend's
+# exclusive stack MUST be optional and feature-gated. Two packages would
+# duplicate the shared host layer instead.
+#
+# A compile-time selector, not a runtime dispatcher: carbon-mini and
+# carbon-blitz are fully independent executables over one host layer.
+#
+# ── WHAT CHANGED FROM V1 ────────────────────────────────────────────────────
+# V1 spliced carbon/runtime/mod.rs into both binaries with `include!`, pulling
+# host/native, carbon/api and carbon/platform in as SOURCE so they could name
+# the binary's own UserEvent and tlog. Those are crates now:
+#
+#   carbon-os                the 19 host modules
+#   carbon-plugin-host       loader + host exports
+#   carbon-platform          per-OS shims
+#   carbon-runtime-contract  UserEvent and WindowOp, which both binaries
+#                            previously declared byte-identically
+#
+# `tlog` stayed in each binary, because the two genuinely differ — it is passed
+# into carbon_os::register_all as a port.
+
+[package]
+name = "carbon-runtime"
+version = "0.2.0"
+edition = "2021"
+rust-version.workspace = true
+license = "Apache-2.0"
+description = "carbon-native runtime: carbon-mini (tiny-skia paint, fontdue text, Taffy layout, Solid/React via rquickjs) and carbon-blitz (stylo + taffy + parley via vello/wgpu), sharing one host layer."
+# The workspace manifest lives in .config/rust. Cargo only walks UP from a
+# crate, so it would never find it — the link has to be explicit.
+workspace = "../../.config/rust"
+build = "build.rs"
+
+[[bin]]
+name = "carbon-mini"
+path = "mini/main.rs"
+required-features = ["mini"]
+
+[[bin]]
+name = "carbon-blitz"
+path = "blitz/main.rs"
+required-features = ["blitz"]
+
+# The launch test needs the mini binary, so it is gated on the same feature.
+# Without `required-features` a bare `cargo test -p carbon-runtime` tries to
+# build a test whose binary was never compiled.
+[[test]]
+name = "launch"
+path = "tests/launch.rs"
+required-features = ["mini"]
+
+[features]
+# Each backend's own stack, fully optional so building one never compiles
+# the other's dependencies (Cargo has no per-binary dependency scoping —
+# every non-optional [dependencies] entry is compiled for every `--bin` in
+# the package, so backend-exclusive deps MUST be optional).
+mini = [
+  "dep:tiny-skia", "dep:resvg", "dep:usvg", "dep:fontdue", "dep:taffy", "dep:softbuffer",
+  "dep:carbon-fast-math", "dep:carbon-text-renderer", "dep:carbon-layout", "dep:carbon-paint",
+  "dep:carbon-snapshot", "dep:lz4_flex",
+]
+blitz = ["dep:blitz-dom", "dep:blitz-paint", "dep:blitz-traits", "dep:anyrender", "dep:anyrender_vello", "dep:png"]
+
+# ── mini's optional sub-features (all imply "mini" — they only mean
+#    anything for that backend) ──
+# GPU canvas support. Off by default to extract 2.5 MB.
+# Phase 2: migrates to carbon-canvas plugin with dynamic loading.
+gpu = ["mini", "dep:carbon-gpu-canvas", "carbon-paint/gpu"]
+# Image loading. Off by default to extract 0.8 MB.
+# Phase 2: migrates to carbon-image plugin with dynamic loading.
+image = ["mini", "dep:carbon-image"]
+# Audio support. Off by default to extract 0.4 MB.
+# Phase 2: migrates to carbon-audio plugin with dynamic loading.
+audio = ["mini", "dep:carbon-audio"]
+# Profiling. Optional Tracy zones for frame-level performance analysis.
+# Zero overhead when disabled. Enable for development/benchmarking.
+profiling = ["mini", "dep:tracy-client"]
+# Self-update support. A/B partition state machine with crash-counter rollback.
+# updater = ["mini", "dep:carbon-updater"]   # pending migration
+# Heap snapshot (cold-start exec-skip). carbon-snapshot itself is pulled in by
+# "mini" unconditionally (it always compiles); this flag only toggles the
+# build.rs linker behavior (/DYNAMICBASE:NO — see build.rs) so the executable
+# loads at a constant base, required for the snapshot's absolute code
+# pointers to stay valid. Off by default keeps ASLR on for normal builds.
+snapshot = ["mini"]
+
+# No default features. Cargo's `--features` stacks additively on top of
+# defaults rather than replacing them — a bare `cargo build --bin carbon-blitz
+# --features blitz` would otherwise still compile mini's entire stack via
+# `default`, defeating the whole point of making it optional. Every build
+# must name its backend explicitly: `--no-default-features --features mini`
+# or `--no-default-features --features blitz` (see .config/justfile).
+default = []
+
+[dependencies]
+# ─── mini's own stack (optional, see "mini" feature above) ──────────────
+tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd", "png-format"], optional = true }
+# resvg — SVG rasterizer. Built by the tiny-skia author so it paints
+# directly into tiny_skia::Pixmap with no extra copy. Used by the
+# `<img src="data:image/svg+xml,...">` path (and any other SVG source the
+# img element receives — file, http URL, etc.). Without this every inline
+# SVG data URL from npm icon packs (@iconify-json/*, lucide-static, …)
+# renders blank.
+# Disabling defaults strips text-shaping (we don't render SVG <text>),
+# raster-images-inside-SVG (no PNG-in-SVG), and the system-font-DB —
+# leaving the bare path/shape/gradient/clip painter the file-icon use
+# case actually needs. ~250 KB after LTO.
+resvg = { version = "0.45", default-features = false, optional = true }
+usvg = { version = "0.45", default-features = false, optional = true }
+fontdue = { version = "0.9", default-features = false, features = ["std"], optional = true }
+taffy = { version = "0.7", default-features = false, features = ["std", "flexbox", "grid", "taffy_tree"], optional = true }
+softbuffer = { version = "0.4", default-features = false, optional = true }
+# Phase 3 — Rust-native three.js math classes (Vector3, Matrix4, Quaternion,
+# Box3, Frustum, Color). The bundle opts in via `globalThis.__cm_register_math()`
+# so UI-only apps that never construct a Vector3 don't pay the prototype-
+# allocation cost.
+carbon-fast-math = { path = "../../solutions/capabilities/math", optional = true }
+# carbon-text-renderer — fontdue text engine, no dependency on carbon-mini,
+# reusable by any future paint backend.
+carbon-text-renderer = { path = "../../solutions/capabilities/text", optional = true }
+# carbon-snapshot — heap snapshot/restore.
+carbon-snapshot = { path = "../../solutions/capabilities/snapshot", optional = true }
+# carbon-layout — scene graph + Taffy + CSS value parsing.
+carbon-layout = { path = "../../solutions/capabilities/layout", optional = true }
+# carbon-paint — the tiny-skia paint dispatch, plus canvas2d/svg/blur/css_parse.
+carbon-paint = { path = "../../solutions/capabilities/painting", optional = true }
+# carbon-image — opt-in image loading (OPTIONAL via 'image' feature).
+# Still gated by CARBON_IMAGE_PATHS env var or carbon.toml at runtime.
+# Note: default features = no avif (keeps binary small).
+carbon-image = { path = "../../solutions/capabilities/imaging", optional = true }
+# Web Audio API — opt-in (OPTIONAL via 'audio' feature).
+carbon-audio = { path = "../../solutions/capabilities/audio", optional = true }
+# carbon-gpu-canvas — the GPU canvas subsystem. Optional via the 'gpu' feature.
+carbon-gpu-canvas = { path = "../../solutions/capabilities/gpu-canvas", optional = true }
+# carbon-updater — A/B partition state machine and manifest verification (OPTIONAL via 'updater' feature).
+# carbon-updater is still in V1 (tools/updater). The `updater` feature is
+# disabled until it migrates — see products/carbon/MIGRATION.md.
+# carbon-updater = { path = "...", optional = true }
+# Tracy profiler — optional profiling zones for frame-level analysis.
+# Connect with Tracy server: https://github.com/wolfpld/tracy
+tracy-client = { version = "0.17", optional = true }
+# lz4_flex: pure-Rust LZ4, used to compress pre-compiled QuickJS bytecode
+# when the user opts in via carbon.toml [runtime] bytecode = true.
+lz4_flex = { version = "0.11", default-features = false, features = ["safe-decode", "safe-encode", "std"], optional = true }
+
+# ─── blitz's own stack (optional, see "blitz" feature above) ────────────
+# Sub-crates directly, NOT the `blitz`/`blitz-shell` umbrella, so we stay on
+# tao instead of winit and reuse mini's native layer.
+blitz-dom = { version = "0.2", optional = true }
+blitz-paint = { version = "0.2", optional = true }
+blitz-traits = { version = "0.2", optional = true }
+anyrender = { version = "0.6", optional = true }
+anyrender_vello = { version = "0.6", optional = true }
+# PNG encoder for the headless screenshot mode (CM_SCREENSHOT) — also the
+# basis for the benchmark's fidelity captures. Tiny, pure-Rust.
+png = { version = "0.17", optional = true }
+
+# ─── Shared by both backends — same crates + versions, ungated ──────────
+tao = { version = "0.30", default-features = false, features = ["rwh_06"] }
+rquickjs = { version = "0.9", default-features = false, features = ["loader", "classes", "macro"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = { version = "0.8", default-features = false, features = ["parse"] }
+anyhow = { version = "1", default-features = false, features = ["std"] }
+# Plugin loader — carbon-core provides the [plugins] config schema, and
+# libloading does the actual cross-platform dlopen / GetProcAddress dance.
+carbon-core = { path = "../../solutions/contracts/app/rust" }
+libloading = "0.8"
+
+# ── The layers that were included source in V1 ──────────────────────────────
+carbon-runtime-contract = { path = "../../solutions/contracts/runtime/rust" }
+carbon-os = { path = "../../solutions/infrastructure/os" }
+carbon-platform = { path = "../../solutions/infrastructure/platform" }
+carbon-plugin-host = { path = "../../solutions/infrastructure/plugin-host" }
+# arboard — system clipboard. Used by the text input primitive for
+# Ctrl+C / Ctrl+V / Ctrl+X.
+arboard = { version = "3", default-features = false }
+
+# ─── Native OS integration crates ───────────────────────────────────────
+# These power the host imports exposed to JS via `carbon-native` (see
+# `carbon/host/native/`). All are pure Rust, small (~50-150 KB each
+# after LTO), and use OS APIs directly — no portable wrappers.
+rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"] }
+keyring = { version = "3", default-features = false, features = ["windows-native", "apple-native", "linux-native"] }
+notify-rust = { version = "4", default-features = false }
+auto-launch = { version = "0.5", default-features = false }
+opener = { version = "0.7", default-features = false }
+dirs = "5"
+
+# ─── Networking (fetch + WebSocket) ─────────────────────────────────────
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json", "gzip", "brotli", "http2"] }
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "macros", "sync", "time"] }
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+futures-util = { version = "0.3", default-features = false }
+bytes = "1"
+base64 = "0.22"
+portable-pty = "0.8"
+ignore = "0.4"
+globset = "0.4"
+grep-regex = "0.1"
+grep-searcher = "0.1"
+shared_child = "1"

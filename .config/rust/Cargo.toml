@@ -51,7 +51,7 @@ members = [
   "../../solutions/infrastructure/plugin-host",
   #
   # Phase 5 — the binaries:
-  #   "../../products/carbon",
+  "../../products/carbon",
 ]
 
 [workspace.package]
@@ -86,3 +86,20 @@ lto = "fat"
 panic = "abort"
 opt-level = "z"
 strip = "symbols"
+
+# ── Vendored rquickjs-core ──────────────────────────────────────────────────
+# A registry PATCH, not a path dependency: every crate in the graph asks for
+# `rquickjs-core` from crates.io, and this redirects all of them at once. A
+# path dependency would only redirect the crates that named it, leaving the
+# rest on the registry version and producing two incompatible copies of the
+# same types in one binary.
+#
+# [patch] is only honoured in a workspace root, which is why it lives here
+# rather than beside the crate that needs it.
+#
+# The fork adds ONE method: `Runtime::from_raw_restored`, which adopts a
+# JSRuntime whose heap was memory-mapped back from a snapshot. Without it the
+# `snapshot` feature cannot compile — see
+# solutions/integrations/javascript/quickjs.
+[patch.crates-io]
+rquickjs-core = { path = "../../solutions/integrations/javascript/quickjs" }

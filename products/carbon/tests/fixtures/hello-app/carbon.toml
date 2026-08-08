@@ -1,0 +1,12 @@
+[app]
+name = "my-app"
+version = "0.1.0"
+display_name = "My App"
+
+[runtime]
+backend = "mini"
+bytecode = true
+
+[window]
+width = 1100
+height = 720

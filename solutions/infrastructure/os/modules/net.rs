@@ -34,7 +34,7 @@ use carbon_runtime_contract::UserEvent;
 
 // ─── Globals ──────────────────────────────────────────────────────────────
 
-pub(crate) fn rt() -> &'static Runtime {
+pub fn rt() -> &'static Runtime {
     static R: OnceLock<Runtime> = OnceLock::new();
     R.get_or_init(|| {
         tokio::runtime::Builder::new_multi_thread()
@@ -46,7 +46,7 @@ pub(crate) fn rt() -> &'static Runtime {
     })
 }
 
-pub(crate) fn http_client() -> &'static reqwest::Client {
+pub fn http_client() -> &'static reqwest::Client {
     static C: OnceLock<reqwest::Client> = OnceLock::new();
     C.get_or_init(|| {
         reqwest::Client::builder()
@@ -61,7 +61,7 @@ fn proxy_slot() -> &'static Mutex<Option<EventLoopProxy<UserEvent>>> {
     P.get_or_init(|| Mutex::new(None))
 }
 
-pub(crate) fn post(ev: UserEvent) {
+pub fn post(ev: UserEvent) {
     if let Some(p) = proxy_slot().lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         let _ = p.send_event(ev);
     }
