@@ -159,12 +159,6 @@ These are half-steps, marked so they are not mistaken for finished work:
   contract-valid manifest, but `platforms` is empty because no artifact is
   signed, hashed or uploaded yet. `carbon publish` warns instead of reporting
   a publish that did not happen.
-- **`scaffolding/` and `plugins/` point at directories that do not exist.**
-  Generated projects depend on `<root>/packages/mini-runtime`, and plugin
-  templates are read from `<root>/packages/carbon-sdk`. Neither has existed
-  since V1. Preserved deliberately — where V2 keeps its runtime and plugin SDK
-  is an open decision, and pointing them somewhere plausible would bury it.
-  See `PackagesPath.ts` and `SdkTemplateSource.ts`.
 - **`Bundler` is declared but unused.** `BuildProjectUseCase` imports
   `BunBundler` directly rather than taking the port. The interface names the
   seam; threading it through is separate work. `Logger` and `ProcessRunner`

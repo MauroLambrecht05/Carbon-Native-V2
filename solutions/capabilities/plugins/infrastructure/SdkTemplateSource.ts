@@ -7,12 +7,13 @@
 // embeds its own copy they drift, silently, into producing different plugins
 // for the same command.
 //
-// ── KNOWN BROKEN, PRESERVED DELIBERATELY ────────────────────────────────────
-// The SDK is looked up at <workspace>/packages/carbon-sdk, which has not
-// existed since V1 — so `carbon plugin new` fails on a missing template file.
-// Same situation as PackagesPath in @carbon/scaffolding, same reason for not
-// papering over it: where V2 keeps the plugin SDK is an open question, and
-// pointing this at a plausible-looking directory would bury it.
+// The SDK lives in solutions/capabilities/plugin-sdk, which holds the Rust and
+// Zig libraries a plugin compiles against plus the templates a new plugin is
+// generated from.
+//
+// It pointed at <workspace>/packages/carbon-sdk until the SDK was migrated — a
+// V1 directory that had not existed since, so `carbon plugin new` failed on a
+// missing template file.
 
 import { join } from "node:path";
 import type {
@@ -24,7 +25,7 @@ import type { PluginWorkspace } from "../application/ports/PluginWorkspace.ts";
 
 /** Where the SDK lives, relative to the workspace root. */
 export function sdkRootFor(workspaceRoot: string): string {
-  return join(workspaceRoot, "packages", "carbon-sdk");
+  return join(workspaceRoot, "solutions", "capabilities", "plugin-sdk");
 }
 
 /**
