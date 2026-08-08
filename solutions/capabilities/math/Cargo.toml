@@ -10,6 +10,7 @@
 # setup on real code, with real tests, without dragging the runtime along.
 
 [package]
+# carbon-kind = "library"
 name = "carbon-fast-math"
 version = "0.1.0"
 edition = "2021"

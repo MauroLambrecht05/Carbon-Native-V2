@@ -100,7 +100,12 @@ export class CreateProjectUseCase {
       // scaffolded either way, and an install can fail for reasons that have
       // nothing to do with the scaffold — no network, a registry outage — where
       // deleting the project would be the wrong response.
-      const result = await this.processes.run("bun", ["install"], {
+      // --linker=isolated, explicitly. A scaffolded project sits inside this
+      // workspace but has its own directory, and bunfig is found by walking up
+      // from the CWD — it would reach the repository root, where there is no
+      // bunfig, not .config/. Without the flag a `file:` dependency fails with
+      // EPERM against the root's node_modules junction. See .config/bunfig.toml.
+      const result = await this.processes.run("bun", ["install", "--linker=isolated"], {
         cwd: plan.target,
         stdio: "inherit",
       });

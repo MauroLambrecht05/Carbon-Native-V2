@@ -10,6 +10,7 @@
 #   infrastructure/  the cpal device and the audio-thread mixer
 
 [package]
+# carbon-kind = "engine"
 name = "carbon-audio"
 version = "0.1.0"
 edition = "2021"

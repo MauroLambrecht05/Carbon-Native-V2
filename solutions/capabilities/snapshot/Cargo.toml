@@ -21,6 +21,7 @@
 # a user's machine, not a failing build.
 
 [package]
+# carbon-kind = "engine"
 name = "carbon-snapshot"
 version = "0.1.0"
 edition = "2021"

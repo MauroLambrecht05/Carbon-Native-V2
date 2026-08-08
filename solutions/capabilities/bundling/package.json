@@ -4,5 +4,10 @@
   "private": true,
   "description": "Turning project source into a runnable bundle, with a content-hash build cache.",
   "type": "module",
-  "exports": { ".": "./index.ts" }
+  "exports": {
+    ".": "./index.ts"
+  },
+  "carbon": {
+    "kind": "service"
+  }
 }

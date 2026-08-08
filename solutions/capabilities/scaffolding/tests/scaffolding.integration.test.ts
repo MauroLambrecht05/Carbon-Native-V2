@@ -266,7 +266,11 @@ describe("writing to a real filesystem", () => {
     expect(installExitCode).toBe(0);
     expect(runner.calls).toHaveLength(1);
     expect(runner.calls[0].command).toBe("bun");
-    expect(runner.calls[0].args).toEqual(["install"]);
+    // --linker=isolated is not optional here: a scaffolded project's bun
+    // walks up to the repository root for its config and finds none, so the
+    // flag has to be explicit or `file:` deps fail on the node_modules
+    // junction. See .config/bunfig.toml.
+    expect(runner.calls[0].args).toEqual(["install", "--linker=isolated"]);
     // Installing in the wrong cwd is how you corrupt the parent workspace.
     expect(runner.calls[0].options?.cwd).toBe(plan.target);
   });

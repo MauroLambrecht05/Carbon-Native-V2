@@ -450,6 +450,128 @@ def validate_workspace(root: Path) -> bool:
         if result.returncode != 0:
             passed = False
 
+    # ── Internal shape ──────────────────────────────────────────────────────
+    #
+    # solutions/README.md used to say "every capability follows the same
+    # internal shape". Half of them did not, and each exception was documented
+    # and correct — text is one cohesive struct, snapshot is entirely FFI, audio
+    # cannot separate a domain from its shared graph.
+    #
+    # The claim was wrong because ONE shape was being asserted over THREE kinds
+    # of thing. Measuring which product consumes each of them separates them
+    # cleanly:
+    #
+    #   consumed by the CLI    -> use-case shaped   6 of 6
+    #   consumed by the runtime-> flat/algorithmic  7 of 9
+    #
+    # So the rule is per KIND, declared here, rather than one rule that half the
+    # tree has to opt out of. A capability declares its kind in package.json or
+    # Cargo.toml via `carbon.kind`; absent, it is inferred from whether it has
+    # an application/ directory.
+    #
+    #   service    domain/ + application/{ports,usecases}/ + infrastructure/
+    #              The toolchain doing something for a developer. Has use cases
+    #              because a developer invokes them.
+    #   engine     no application/ — engines have algorithms, not use cases.
+    #              A computational subsystem the runtime composes.
+    #   library    flat. Pure computation, no carbon knowledge, replaceable by
+    #              an off-the-shelf package.
+    #
+    # What is checked is only what is load-bearing: a service must have the
+    # layers its shape promises, and an engine must NOT grow use cases (which is
+    # how an engine turns into a service by accident).
+    shape_violations = 0
+    for capability in sorted((root / "solutions" / "capabilities").iterdir()):
+        if not capability.is_dir():
+            continue
+        rel = capability.relative_to(root).as_posix()
+
+        kind = None
+        for manifest, key in ((capability / "package.json", '"kind"'),
+                              (capability / "Cargo.toml", "kind")):
+            if manifest.is_file():
+                text = manifest.read_text(encoding="utf-8")
+                m = re.search(r'carbon[.\-_]?kind["\s:=]+"?(\w+)"?', text)
+                if m:
+                    kind = m.group(1)
+                    break
+        if kind is None:
+            kind = "service" if (capability / "application").is_dir() else "engine"
+
+        if kind == "service":
+            if not (capability / "application").is_dir():
+                print(f"[FAIL] service {rel} has no application/ — that is what "
+                      f"makes it a service")
+                shape_violations += 1
+                passed = False
+
+            # A service needs a model, but not necessarily a LOCAL one.
+            #
+            # This rule started as "must have domain/", and three services
+            # failed it: bundling, packaging and publishing. All three were
+            # right and the rule was wrong — their model is a CONTRACT, shared
+            # with whoever else speaks it. packaging models installer targets
+            # via contracts/distribution; publishing models the release
+            # manifest via contracts/update and contracts/security.
+            #
+            # That is the better outcome, not a loophole: a model two
+            # capabilities share belongs in contracts, and duplicating it into
+            # a local domain/ to satisfy a directory check is exactly the drift
+            # contracts exist to stop. What is actually forbidden is a service
+            # with no model anywhere.
+            has_local = (capability / "domain").is_dir()
+            has_contract = any(
+                "@carbon/contracts" in f.read_text(encoding="utf-8", errors="replace")
+                for f in capability.rglob("*.ts")
+                if "/tests/" not in f.as_posix()
+            )
+            if not has_local and not has_contract:
+                print(f"[FAIL] service {rel} has neither a domain/ nor a contract "
+                      f"— where is its model?")
+                shape_violations += 1
+                passed = False
+        elif kind == "engine":
+            # The first version of this rule said an engine may not have an
+            # application/ directory. `imaging` failed it, and `imaging` was
+            # right: it is composed by the runtime, and it does have one genuine
+            # use case — load an image, capability-checked first. Directory
+            # presence was never the invariant.
+            #
+            # What actually matters is direction. An engine that calls a service
+            # has inverted the system: the render path would depend on the
+            # toolchain, so painting a frame could not happen without the thing
+            # that publishes releases.
+            for source in capability.rglob("*.rs"):
+                text = source.read_text(encoding="utf-8", errors="replace")
+                for service in ("carbon_updater", "carbon_plugin_host"):
+                    if re.search(rf"{service}::", text):
+                        print(f"[FAIL] engine {rel} depends on a service: {service}")
+                        shape_violations += 1
+                        passed = False
+                        break
+
+        elif kind == "library":
+            # A library is defined by replaceability: it could be swapped for an
+            # off-the-shelf package. That only holds while it knows nothing
+            # about carbon.
+            manifests = [capability / "Cargo.toml", capability / "rust" / "Cargo.toml",
+                         capability / "package.json"]
+            for manifest in manifests:
+                if not manifest.is_file():
+                    continue
+                body = manifest.read_text(encoding="utf-8")
+                deps = re.findall(r'^(carbon-[\w-]+)\s*=', body, re.M)
+                deps += re.findall(r'"(@carbon/[\w/-]+)":', body)
+                if deps:
+                    print(f"[FAIL] library {rel} depends on carbon: {sorted(set(deps))} "
+                          f"— a library that knows about carbon is a capability")
+                    shape_violations += 1
+                    passed = False
+
+    if shape_violations == 0:
+        print("[OK] Internal shape: services have a model, engines and libraries "
+              "depend downward only")
+
     if passed:
         print("\n[+] Workspace structure validation PASSED successfully!")
     else:

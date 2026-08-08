@@ -4,5 +4,10 @@
   "private": true,
   "description": "OS installer generators: nsis, wix, dmg, deb, appimage.",
   "type": "module",
-  "exports": { ".": "./index.ts" }
+  "exports": {
+    ".": "./index.ts"
+  },
+  "carbon": {
+    "kind": "service"
+  }
 }

@@ -19,6 +19,7 @@
 # gains tests, the split becomes a safe and worthwhile follow-up.
 
 [package]
+# carbon-kind = "engine"
 name = "carbon-text-renderer"
 version = "0.1.0"
 edition = "2021"

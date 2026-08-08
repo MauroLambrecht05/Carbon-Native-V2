@@ -4,5 +4,10 @@
   "private": true,
   "description": "Publishing release artifacts to a distribution target.",
   "type": "module",
-  "exports": { ".": "./index.ts" }
+  "exports": {
+    ".": "./index.ts"
+  },
+  "carbon": {
+    "kind": "service"
+  }
 }

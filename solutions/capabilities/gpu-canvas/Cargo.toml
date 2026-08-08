@@ -17,6 +17,7 @@
 # software adapter (lavapipe, or wgpu's noop backend). Worth doing; not free.
 
 [package]
+# carbon-kind = "engine"
 name = "carbon-gpu-canvas"
 version = "0.1.0"
 edition = "2021"

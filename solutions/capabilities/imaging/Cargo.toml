@@ -12,6 +12,7 @@
 # infrastructure/js_class.rs does. domain/cache.rs survives both.
 
 [package]
+# carbon-kind = "engine"
 name = "carbon-image"
 version = "0.1.0"
 edition = "2021"

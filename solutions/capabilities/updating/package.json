@@ -4,5 +4,10 @@
   "private": true,
   "description": "A/B slot updates: the state machine, staged rollout, yank list and artifact fetch.",
   "type": "module",
-  "exports": { ".": "./index.ts" }
+  "exports": {
+    ".": "./index.ts"
+  },
+  "carbon": {
+    "kind": "service"
+  }
 }

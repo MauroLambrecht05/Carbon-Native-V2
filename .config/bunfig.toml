@@ -1,0 +1,21 @@
+# Bun configuration for the workspace.
+#
+# ── WHY isolated ────────────────────────────────────────────────────────────
+# The default (hoisted) linker COPIES a `file:` dependency into the consumer's
+# node_modules. That copy fails with EPERM on Windows when the dependency sits
+# under a directory whose ancestor has a `node_modules` JUNCTION — which is
+# exactly this workspace's shape: the real tree is `.config/node_modules` and
+# the root carries a junction to it, so the repository root stays clean.
+#
+# Reproduced in isolation rather than inferred: the same package installs fine
+# from a plain directory, and fails under a junction. Both `--linker=hoisted`
+# and the default fail; `--linker=isolated` succeeds, because it SYMLINKS into
+# a content-addressed .bun/ store instead of copying.
+#
+#   hoisted   5 packages installed, "Failed to install 1 package"
+#   isolated  12 packages installed, no failure, package readable
+#
+# This is what makes the empty-root design compatible with `file:` dependencies
+# instead of trading one for the other.
+[install]
+linker = "isolated"

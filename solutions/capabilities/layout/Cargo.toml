@@ -15,6 +15,7 @@
 # plain data — no device, no filesystem, no JS context needed.
 
 [package]
+# carbon-kind = "engine"
 name = "carbon-layout"
 version = "0.1.0"
 edition = "2021"

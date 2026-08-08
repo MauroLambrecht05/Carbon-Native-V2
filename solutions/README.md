@@ -76,7 +76,44 @@ reason: they are what carbon does.
 Rust crates are built through `//.tools/orchestration/bazel/cargo`, TypeScript
 through `//.tools/orchestration/bazel/bun`. Neither tier knows.
 
-Every capability follows the same internal shape:
+## Capabilities come in three kinds
+
+`capabilities/` was doing too much as one category — it holds `signing`
+(business logic), `math` (a vector library), `snapshot` (pure FFI) and
+`plugin-sdk` (a distributable), and "what carbon does" is true of all four
+while discriminating between none.
+
+Measuring which product consumes each one separated them almost perfectly:
+
+| consumed by | shape | count |
+|---|---|---|
+| the **CLI** | use-case shaped | 6 of 6 |
+| the **runtime** | flat / algorithmic | 7 of 9 |
+
+So a capability declares its `kind` — in `package.json` under `carbon.kind`,
+or as `# carbon-kind` in `Cargo.toml`:
+
+| kind | what it is | the rule with teeth |
+|---|---|---|
+| **service** | the toolchain doing something a developer asked for | has `application/`, and a model — local `domain/` **or** a contract |
+| **engine** | a subsystem the runtime composes to run an app | may not depend on a service |
+| **library** | pure computation, no knowledge of carbon | may not depend on anything carbon |
+
+This replaced the claim that "every capability follows the same internal
+shape", which was false: half of them did not, and every exception was
+correct. One shape was being asserted over three kinds of thing.
+
+The rules are about **dependencies**, not directories, and that took two
+attempts to get right. The first version required every service to have a
+local `domain/`; `bundling`, `packaging` and `publishing` failed it, and all
+three were right — their model is a *contract*, shared with whoever else
+speaks it. The second required engines to have no `application/`; `imaging`
+failed that, and was also right — a runtime engine can still have one genuine
+use case. Directory presence was never the invariant.
+
+## The service shape
+
+A service — and only a service — follows this:
 
 ```
 <capability>/

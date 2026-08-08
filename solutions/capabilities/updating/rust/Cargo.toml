@@ -11,6 +11,7 @@
 # asserts exactly that; this side is the other half.
 
 [package]
+# carbon-kind = "service"
 name = "carbon-updater"
 version = "0.1.0"
 edition = "2021"

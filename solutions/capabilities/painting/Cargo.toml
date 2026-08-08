@@ -16,6 +16,7 @@
 # tiny-skia is deterministic and already a dependency.
 
 [package]
+# carbon-kind = "engine"
 name = "carbon-paint"
 version = "0.1.0"
 edition = "2021"
