@@ -170,10 +170,11 @@ changes one leaf rather than a name that appears throughout the tree.
 
 These are half-steps, marked so they are not mistaken for finished work:
 
-- **`packaging/` is dead code.** Nothing invokes the installers. `carbon
-  bundle` validates its `--target` against `contracts/distribution` and reports
-  what it *would* build; it does not call a generator. Inherited from V1, and
-  the command says so rather than claiming success.
+- **`packaging/` produces definitions, not installers.** The generators emit
+  an NSIS `.nsi`, a WiX `.wxs`, a Debian `control` file — the INPUT a packaging
+  tool consumes. Producing a `.exe`/`.msi`/`.deb` needs makensis, the WiX
+  toolset or dpkg-deb installed, and `carbon bundle` says so rather than
+  implying it built one.
 - **`publishing/` uploads nothing.** `BuildUpdateManifestUseCase` produces a
   contract-valid manifest, but `platforms` is empty because no artifact is
   signed, hashed or uploaded yet. `carbon publish` warns instead of reporting

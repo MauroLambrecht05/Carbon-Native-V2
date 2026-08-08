@@ -1,19 +1,19 @@
 // `carbon bundle` — create OS-specific installers.
 //
-// ── WHAT THIS DOES NOT DO ───────────────────────────────────────────────────
-// It does not build an installer. @carbon/packaging has a generator per target
-// and none of them is called from anywhere; this command validates the request,
-// reports what it would build, and exits 0. That was true of the V1 version too
-// and is preserved rather than quietly half-implemented — a `carbon bundle`
-// that emits a broken .msi is worse than one that admits it is not wired up.
+// ── WHAT THIS PRODUCES ──────────────────────────────────────────────────────
+// The installer DEFINITION, not the installer: an NSIS `.nsi`, a WiX `.wxs`, a
+// Debian `control` file. Turning one into a `.exe`/`.msi`/`.deb` needs
+// makensis, the WiX toolset or dpkg-deb on the machine — `carbon doctor` is
+// what checks for those.
 //
-// The `--dry-run` wording below is the honest description of every run, which
-// is why the success line says "would build".
+// The command reported "would build" until @carbon/packaging grew a use case:
+// the five generators existed and nothing called them. It writes files now, and
+// says precisely which.
 //
-// What did change: the target list now comes from contracts/distribution
-// instead of being written out five times in this file. One of those five
-// copies disagreed with the others — the DMG branch compared a normalised
-// platform name against a raw one, so `--target dmg` was unreachable on macOS.
+// The target list comes from contracts/distribution rather than being written
+// out five times in this file. One of those five copies disagreed with the
+// others — the DMG branch compared a normalised platform name against a raw
+// one, so `--target dmg` was unreachable on macOS.
 
 import {
   Command,
@@ -31,7 +31,8 @@ import {
   isBuildableOn,
   targetsForPlatform,
 } from "@carbon/contracts/distribution";
-import { loadConfig } from "@carbon/workspace";
+import { generatePackageUseCase } from "@carbon/packaging";
+import { loadConfig, resolveBackendBinary } from "@carbon/workspace";
 import { existsSync } from "node:fs";
 
 export class BundleCommand extends Command {
@@ -81,6 +82,21 @@ export class BundleCommand extends Command {
         return EXIT_FAILURE;
       }
 
+      // The installer wraps the built runtime. Without it there is nothing to
+      // package, and a definition pointing at a missing binary is worse than
+      // an error — it fails later, in the packaging tool, further from the
+      // cause.
+      const binary = resolveBackendBinary(config.runtime.backend);
+      if (!binary) {
+        ctx.io.error(
+          `no runtime binary for the ${config.runtime.backend} backend — run \`carbon build\` first`,
+        );
+        return EXIT_FAILURE;
+      }
+
+      const generate = generatePackageUseCase();
+      let written = 0;
+
       // `all` means everything applicable on this machine; anything else is a
       // comma-separated list of ids.
       const names =
@@ -107,10 +123,25 @@ export class BundleCommand extends Command {
           continue;
         }
 
-        ctx.io.step(`Building ${target.id} installer...`);
-        ctx.io.success(`would build ${target.id} into ${outDir}/${target.id}/`);
+        ctx.io.step(`Generating ${target.id} installer definition...`);
+        const { path, bytes } = await generate.execute({
+          target: target.id,
+          config,
+          binaryPath: binary,
+          outputDir: outDir,
+        });
+        ctx.io.success(`${target.id}: ${path} (${bytes} bytes)`);
+        written++;
       }
 
+      if (written === 0) {
+        ctx.io.warn("nothing was generated");
+        return EXIT_FAILURE;
+      }
+      ctx.io.info(
+        `${written} definition(s) written. They are packaging-tool INPUT — run ` +
+          `makensis / wix / dpkg-deb to produce an installer.`,
+      );
       return EXIT_OK;
     } catch (e) {
       // `e` is `unknown` under strict mode, and a throw is not required to be
