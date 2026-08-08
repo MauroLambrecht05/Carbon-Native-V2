@@ -3,12 +3,12 @@
   "version": "0.2.0",
   "description": "React 19+ adapter for the carbon-mini desktop runtime. Maps react-reconciler HostConfig onto carbon-mini's __cm_* scene-graph host imports \u2014 no DOM required, no react-dom shipped.",
   "type": "module",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "main": "./index.ts",
+  "types": "./index.ts",
   "exports": {
-    ".": "./src/index.ts",
-    "./jsx-runtime": "./src/jsx-runtime.ts",
-    "./jsx-dev-runtime": "./src/jsx-runtime.ts",
+    ".": "./index.ts",
+    "./jsx-runtime": "./jsx-runtime.ts",
+    "./jsx-dev-runtime": "./jsx-runtime.ts",
     "./types": "./types/index.d.ts"
   },
   "files": [

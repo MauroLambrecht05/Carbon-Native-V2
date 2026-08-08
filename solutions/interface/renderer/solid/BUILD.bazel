@@ -1,0 +1,11 @@
+# Carbon Native V2 - @carbon/mini-solid
+#
+# Interface: Solid's universal renderer, bound to the scene-graph host
+# functions. One of the two consumers of contracts/runtime on the JS side.
+
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["**/*.ts", "**/*.tsx", "**/*.d.ts", "package.json"], allow_empty = True),
+)

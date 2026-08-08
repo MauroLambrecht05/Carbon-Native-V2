@@ -1,0 +1,29 @@
+{
+  "name": "@carbon/three",
+  "version": "0.1.0",
+  "description": "Custom three.js renderer that emits a stream of DrawCommands consumable by Carbon's GPU canvas surface.",
+  "type": "module",
+  "main": "./index.ts",
+  "types": "./index.ts",
+  "exports": {
+    ".": "./index.ts",
+    "./mock-executor": "./mock-executor.ts",
+    "./types": "./types.ts"
+  },
+  "files": [
+    "src",
+    "INTEGRATION.md",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "bun test",
+    "bench": "bun run ../../scripts/bench-phase2.ts"
+  },
+  "peerDependencies": {
+    "three": ">=0.140.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.160.0",
+    "typescript": "^5.6.0"
+  }
+}

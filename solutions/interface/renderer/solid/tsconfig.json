@@ -1,0 +1,20 @@
+{
+  "//": "The Solid renderer needs lib DOM because solid-js's own type declarations name DOM types, and --jsx for the intrinsics. Neither belongs in solutions/tsconfig.json — see the note there.",
+  "extends": "../../../../.config/tsconfig.base.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM"],
+    "jsx": "preserve",
+    "jsxImportSource": "solid-js",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowImportingTsExtensions": true,
+    "types": []
+  },
+  "include": ["**/*.ts", "**/*.tsx", "**/*.d.ts"],
+  "exclude": ["node_modules"]
+}

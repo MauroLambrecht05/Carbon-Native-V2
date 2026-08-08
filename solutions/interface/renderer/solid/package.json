@@ -3,12 +3,12 @@
   "version": "0.1.0",
   "description": "Solid universal renderer + JSX intrinsics for the carbon-mini desktop runtime",
   "type": "module",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "main": "./index.ts",
+  "types": "./index.ts",
   "exports": {
-    ".": "./src/index.ts",
-    "./polyfills": "./src/polyfills.ts",
-    "./image": "./src/image-intrinsic.ts",
+    ".": "./index.ts",
+    "./polyfills": "./polyfills.ts",
+    "./image": "./image-intrinsic.ts",
     "./types": "./types/jsx.d.ts",
     "./types/jsx-image": "./types/jsx-image.d.ts"
   },

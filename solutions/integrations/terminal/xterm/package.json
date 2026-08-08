@@ -1,0 +1,19 @@
+{
+  "name": "@carbon/compat-xterm",
+  "version": "0.1.0",
+  "description": "xterm.js-compatible Terminal + addons on top of the carbon-mini scene graph. Apps import `@xterm/xterm` (etc.) \u2014 the carbon CLI's bundler aliases those paths to subpaths of this package. The implementation paints cells as scene-graph text/span nodes, not <canvas>, so it works in the no-webview runtime.",
+  "type": "module",
+  "private": true,
+  "sideEffects": false,
+  "exports": {
+    "./xterm": "./index.ts",
+    "./addon-fit": "./addons/fit.ts",
+    "./addon-search": "./addons/search.ts",
+    "./addon-serialize": "./addons/serialize.ts",
+    "./addon-web-links": "./addons/web-links.ts",
+    "./addon-webgl": "./addons/webgl.ts"
+  },
+  "files": [
+    "src"
+  ]
+}

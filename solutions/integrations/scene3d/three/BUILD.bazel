@@ -1,0 +1,10 @@
+# Carbon Native V2 - @carbon/three
+#
+# Integration: the three.js bridge onto carbon's GPU canvas.
+
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["**/*.ts", "**/*.tsx", "**/*.d.ts", "package.json"], allow_empty = True),
+)

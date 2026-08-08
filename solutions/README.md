@@ -35,12 +35,27 @@ solutions/
 │   └── workspace/       where things live, and reading carbon.toml
 │
 ├── integrations/    outside technologies, named by ROLE then vendor
-│   ├── bundler/vite/    our Vite integration (was nine packages)
-│   └── transpiler/babel/  the carbon-css compiler + app decorator
+│   ├── bundler/vite/       our Vite integration (was nine packages)
+│   ├── transpiler/babel/   the carbon-css compiler + app decorator
+│   ├── javascript/quickjs/ the vendored rquickjs-core fork
+│   ├── terminal/xterm/     an xterm.js-compatible terminal
+│   └── scene3d/            three · three-fiber
 │
-└── interface/       shared presentation
-    └── cli/             the command framework: Command, Dispatcher, flags, help
+└── interface/       how application code and developers reach the runtime
+    ├── cli/             the command framework: Command, Dispatcher, flags, help
+    ├── renderer/        solid · react — JSX into scene-graph host calls
+    └── stdlib/          api · dom — the app-facing surface over __cm_*
 ```
+
+## Two languages, one tree
+
+`solutions/` holds Rust and TypeScript side by side, and the tier a thing
+belongs to does not depend on its language. `capabilities/audio` is Rust,
+`capabilities/signing` is TypeScript, and both are capabilities for the same
+reason: they are what carbon does.
+
+Rust crates are built through `//.tools/orchestration/bazel/cargo`, TypeScript
+through `//.tools/orchestration/bazel/bun`. Neither tier knows.
 
 Every capability follows the same internal shape:
 
@@ -100,6 +115,30 @@ presentation machinery; the commands themselves live in the product.
 The same rule decides future cases. An HTTP API for `carbon-cloud` is a driving
 adapter and belongs to that product. A Postgres adapter behind a repository
 interface is driven, and belongs in `infrastructure/`.
+
+## TypeScript projects are not one project
+
+Most of the tree typechecks under `solutions/tsconfig.json`. Five packages
+cannot, and each carries its own `tsconfig.json`:
+
+| Package | Needs | Why |
+|---|---|---|
+| `interface/renderer/solid` | lib DOM, `--jsx` | solid-js's own types name DOM |
+| `interface/renderer/react` | lib DOM, `--jsx` | react-reconciler's do too |
+| `integrations/terminal/xterm` | lib DOM | it is API-compatible with xterm.js, whose surface is `HTMLElement` |
+| `integrations/scene3d/three` | lib DOM | three.js's declarations name it |
+| `integrations/scene3d/three-fiber` | lib DOM, `--jsx` | both |
+
+Those options must not reach the rest of the tree: carbon has **no DOM**, and
+with `lib DOM` in scope a stray `document.getElementById` compiles cleanly and
+fails at runtime.
+
+`interface/stdlib/dom` is the pointed exception — it implements those globals,
+so giving it `lib DOM` would collide with its own declarations. It declares the
+one type it needs (`BufferSource`) locally instead.
+
+Run them all with `.tools/validation/check_typescript.py`, which discovers
+projects rather than listing them. It found a stale `include` on its first run.
 
 ## Why integrations are named by role
 

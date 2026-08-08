@@ -349,6 +349,25 @@ def validate_workspace(root: Path) -> bool:
         if result.returncode != 0:
             passed = False
 
+    # ── TypeScript ──────────────────────────────────────────────────────────
+    #
+    # Delegated to check_typescript.py, which discovers every tsconfig rather
+    # than checking one. There are seven projects now: five packages need
+    # compiler options (lib DOM, --jsx) the rest of the tree must not have, so
+    # a single `tsc -p solutions` would report zero errors while covering half
+    # the tree — which is exactly how a stale `include` hid twice before.
+    typescript = Path(__file__).resolve().parent / "check_typescript.py"
+    if typescript.is_file():
+        result = subprocess.run(
+            [sys.executable, str(typescript), "--quiet"],
+            capture_output=True,
+            text=True,
+        )
+        for line in result.stdout.strip().splitlines():
+            print(line)
+        if result.returncode != 0:
+            passed = False
+
     if passed:
         print("\n[+] Workspace structure validation PASSED successfully!")
     else:

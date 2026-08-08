@@ -1,0 +1,11 @@
+# Carbon Native V2 - @carbon/compat-xterm
+#
+# Integration: an xterm.js-compatible terminal. Named by ROLE (terminal) with
+# the vendor as the leaf, per the tier's rule.
+
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["**/*.ts", "**/*.tsx", "**/*.d.ts", "package.json"], allow_empty = True),
+)

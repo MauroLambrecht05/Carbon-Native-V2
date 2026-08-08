@@ -1,0 +1,24 @@
+{
+  "name": "@carbon/api",
+  "version": "0.1.0",
+  "description": "Native ports for carbon-mini apps. Subpath modules \u2014 window, store, secrets, event, app, path, opener, os, process, autostart, updater, invoke, fs, pty \u2014 each a thin TS wrapper over the engine's __cm_* host imports.",
+  "type": "module",
+  "private": true,
+  "sideEffects": false,
+  "exports": {
+    "./window": "./window.ts",
+    "./store": "./store.ts",
+    "./secrets": "./secrets.ts",
+    "./event": "./event.ts",
+    "./app": "./app.ts",
+    "./path": "./path.ts",
+    "./opener": "./opener.ts",
+    "./os": "./os.ts",
+    "./process": "./process.ts",
+    "./autostart": "./autostart.ts",
+    "./updater": "./updater.ts",
+    "./invoke": "./invoke.ts",
+    "./fs": "./fs.ts",
+    "./pty": "./pty.ts"
+  }
+}

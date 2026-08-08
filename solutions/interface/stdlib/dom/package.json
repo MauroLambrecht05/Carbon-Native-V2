@@ -1,0 +1,20 @@
+{
+  "name": "@carbon/compat-dom",
+  "version": "0.1.0",
+  "description": "Tier 1+2 DOM shim for carbon-mini. Provides Document, Element, Text, Event, window, etc. backed by carbon-mini's __cm_* scene-graph host imports \u2014 enough to make DOM-targeting frameworks render without bundling a full webview.",
+  "type": "module",
+  "main": "./index.ts",
+  "types": "./index.ts",
+  "sideEffects": true,
+  "exports": {
+    ".": "./index.ts",
+    "./install": "./install.ts",
+    "./css": "./css.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}

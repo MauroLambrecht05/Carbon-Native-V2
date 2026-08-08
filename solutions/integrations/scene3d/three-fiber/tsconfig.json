@@ -1,0 +1,22 @@
+{
+  "//": "react-three-fiber's surface is JSX, so this needs --jsx, and it targets Solid rather than React — jsxImportSource says so. It also names DOM types through three.js's own declarations. Both are reasons it cannot join solutions/tsconfig.json, which deliberately has neither.",
+  "extends": "../../../../.config/tsconfig.base.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM"],
+    "jsx": "preserve",
+    "jsxImportSource": "solid-js",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "types": []
+  },
+  "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": ["node_modules"]
+}

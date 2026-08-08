@@ -1,0 +1,18 @@
+{
+  "//": "three.js's type declarations reference DOM types (WebGLRenderingContext, HTMLCanvasElement), so this needs lib DOM even though the bridge itself renders through carbon's GPU canvas. Kept out of solutions/tsconfig.json for the same reason as xterm: DOM must not leak into the rest of the tree.",
+  "extends": "../../../../.config/tsconfig.base.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowImportingTsExtensions": true,
+    "types": []
+  },
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules"]
+}

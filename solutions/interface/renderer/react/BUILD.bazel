@@ -1,0 +1,10 @@
+# Carbon Native V2 - @carbon/mini-react
+#
+# Interface: the same surface over react-reconciler.
+
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["**/*.ts", "**/*.tsx", "**/*.d.ts", "package.json"], allow_empty = True),
+)

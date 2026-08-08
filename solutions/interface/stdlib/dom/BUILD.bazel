@@ -1,0 +1,11 @@
+# Carbon Native V2 - @carbon/compat-dom
+#
+# Interface: browser API shims so DOM-shaped code runs against the runtime.
+# Cannot take lib DOM — it IS the shim, and the declarations would collide.
+
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["**/*.ts", "**/*.tsx", "**/*.d.ts", "package.json"], allow_empty = True),
+)

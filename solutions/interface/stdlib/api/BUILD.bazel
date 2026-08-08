@@ -1,0 +1,11 @@
+# Carbon Native V2 - @carbon/api
+#
+# Interface: the app-facing API over the __cm_* host boundary. Subpath-only
+# — @carbon/api/fs, @carbon/api/window — with no barrel index.
+
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["**/*.ts", "**/*.tsx", "**/*.d.ts", "package.json"], allow_empty = True),
+)

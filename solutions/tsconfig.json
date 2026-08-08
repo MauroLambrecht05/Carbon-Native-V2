@@ -17,5 +17,12 @@
   "//include": "A single recursive glob, not a list of top-level folders. The folder list went stale the moment the tiers were renamed, and a stale include reports 'No inputs were found' pointing at line 1 — which reads like a syntax error and is not. This form cannot go stale while any .ts exists.",
   "include": ["**/*.ts"],
   "//exclude": "interface/renderer/ holds the Solid and React renderers, moved out of V1's carbon/runtime/engine/paint/renderers/ in migration phase 3. They are source in the right place and nothing depends on them yet: their npm dependencies (solid-js, react, react-reconciler) are not installed, so including them here is 9 'cannot find module' errors for code that is not being built. Phase 6 installs those, adds the tsconfig paths and the Bazel targets, and this entry comes out. See products/carbon/MIGRATION.md.",
-  "exclude": ["node_modules", "interface/renderer"]
+  "//exclude-dom": "These four need compiler options the rest of the tree must NOT have: lib DOM (xterm and three name browser types in their public APIs) and --jsx (three-fiber, and the two renderers). Letting DOM into this project would make a stray `document.` compile everywhere and fail at runtime. Each carries its own tsconfig and is checked separately — see .tools/validation/check_typescript.py.",
+  "exclude": [
+    "node_modules",
+    "interface/renderer",
+    "integrations/terminal/xterm",
+    "integrations/scene3d/three",
+    "integrations/scene3d/three-fiber"
+  ]
 }

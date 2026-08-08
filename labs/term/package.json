@@ -1,0 +1,22 @@
+{
+  "name": "@carbon/term",
+  "version": "0.1.0",
+  "description": "Solid universal renderer + Ink-compatible JSX intrinsics for the carbon-term CLI runtime",
+  "type": "module",
+  "main": "./index.ts",
+  "types": "./index.ts",
+  "exports": {
+    ".": "./index.ts",
+    "./types": "./types/jsx.d.ts"
+  },
+  "files": [
+    "src",
+    "types"
+  ],
+  "peerDependencies": {
+    "solid-js": "^1.9.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}

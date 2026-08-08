@@ -1,0 +1,19 @@
+{
+  "//": "xterm.js is a BROWSER terminal, and its public API names DOM types — HTMLElement, KeyboardEvent, WheelEvent. This package exists to be API-compatible with it, so those names have to typecheck even though carbon has no DOM. That is why this tsconfig exists rather than the package joining solutions/tsconfig.json: it needs lib DOM, and lib DOM must NOT leak into the rest of the tree, where a stray `document.` would then compile and fail at runtime.",
+  "extends": "../../../../.config/tsconfig.base.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM"],
+    "strict": true,
+    "noUncheckedIndexedAccess": false,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "types": []
+  },
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules"]
+}

@@ -1,0 +1,31 @@
+{
+  "name": "@carbon/three-fiber",
+  "version": "0.1.0",
+  "description": "Solid bridge for three.js \u2014 JSX intrinsics that map to three.js objects, rendered via @carbon/three.",
+  "type": "module",
+  "main": "./index.ts",
+  "types": "./index.ts",
+  "exports": {
+    ".": "./index.ts",
+    "./types": "./types.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "bun test"
+  },
+  "peerDependencies": {
+    "solid-js": "^1.9.0",
+    "three": "^0.160.0",
+    "@carbon/three": "*",
+    "@carbon/mini-solid": "*"
+  },
+  "devDependencies": {
+    "@types/three": "^0.160.0",
+    "typescript": "^5.6.0"
+  },
+  "dependencies": {
+    "@carbon/three": "workspace:*"
+  }
+}

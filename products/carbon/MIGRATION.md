@@ -322,8 +322,48 @@ one.
   contention rather than papering over it with a longer timeout. Confirmed
   stable across three consecutive runs, and four times faster.
 
-**6 — TypeScript tier. NEXT.** `stdlib/`, the solid and react renderers, the type
-definitions.
+**6 — TypeScript tier. DONE.** `stdlib/`, the renderers, and the three.js and
+xterm integrations.
+
+| From V1 | To | Tier |
+|---|---|---|
+| `stdlib/api` | `interface/stdlib/api` | app-facing surface over `__cm_*` |
+| `stdlib/compat/dom` | `interface/stdlib/dom` | browser API shims |
+| `engine/paint/renderers/{solid,react}` | `interface/renderer/*` | wired and typechecking (phase 3 left them unbuilt) |
+| `stdlib/compat/xterm` | `integrations/terminal/xterm` | role-then-vendor |
+| `stdlib/three`, `stdlib/three-fiber` | `integrations/scene3d/*` | |
+| `stdlib/term` | **`labs/term`** | see below |
+
+`src/` folders were flattened to the root, matching every other solution.
+Relative imports between siblings are unaffected by that move.
+
+### What phase 6 turned up
+
+- **`@carbon/term` targets a runtime that no longer exists.** Every host
+  function it declares is `__ct_*`, its header points at
+  `archive/runtimes/term/src/main.rs`, and zero of those names appear in
+  `contracts/runtime`. The shipping runtime speaks `__cm_*`. It is parked in
+  `labs/` with the reasoning recorded rather than filed under `interface/`,
+  which would have claimed it works.
+- **A real bug in it, deliberately not fixed.** `renderer.createElement(tag,
+  props)` passes two arguments to a function that takes one — in solid-js's
+  universal renderer interface *and* in carbon's own. The props are silently
+  dropped, and the comment directly above says "we forward all props". Fixing
+  it means inventing behaviour for an archived host layer; the typecheck error
+  is the record.
+- **TypeScript is no longer one project.** Five packages need `lib DOM` or
+  `--jsx`, and those options must not reach the rest of the tree — with `lib
+  DOM` in scope a stray `document.getElementById` compiles and fails at
+  runtime. Each carries its own tsconfig now.
+- **Which meant a checker.** `.tools/validation/check_typescript.py` discovers
+  every tsconfig and runs all of them, because `tsc -p solutions` reporting
+  zero errors looks identical whether it covers the tree or half of it — the
+  exact way a stale `include` hid twice before. **It found a third instance on
+  its first run**: `api/tsconfig.json` still said `include: ["src/**/*.ts"]`
+  after the flattening.
+- **`interface/stdlib/dom` cannot have `lib DOM`.** It *implements* those
+  globals, so the library declarations would collide with its own. It declares
+  the single type it needs (`BufferSource`) locally.
 
 ## The build decision, made
 
