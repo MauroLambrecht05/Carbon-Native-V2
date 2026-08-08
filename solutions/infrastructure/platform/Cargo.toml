@@ -1,0 +1,36 @@
+# @carbon/platform — the handful of operations that differ per OS.
+#
+# Infrastructure: spawning a shell, recovering a persistent session's exit code
+# and cwd, revealing a path in the file manager. Three implementations, one per
+# target family, selected by cfg.
+#
+# ── A CRATE, WHERE V1 HAD INCLUDED SOURCE ───────────────────────────────────
+# V1 `#[path]`-included these files into each backend binary so they could share
+# the including crate's UserEvent and tlog without a trait indirection. They do
+# not need either — every function takes and returns plain std types. Being a
+# real crate means it compiles and can be tested standalone, which included
+# source cannot.
+#
+# Not everything OS-specific moved here. `#![windows_subsystem = "windows"]` is
+# a crate-level inner attribute and has to stay on the binary; build.rs's
+# Windows resource embedding is a build-script concern tied to its own crate.
+# This holds the pieces that are genuinely swappable functions.
+
+[package]
+name = "carbon-platform"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+license = "Apache-2.0"
+description = "Per-OS implementations of the operations the carbon runtime needs: shell spawning, persistent-session sentinels, and revealing a path in the file manager."
+# The workspace manifest lives in .config/rust. Cargo only walks UP from a
+# crate, so it would never find it — the link has to be explicit.
+workspace = "../../../.config/rust"
+
+[lib]
+name = "carbon_platform"
+path = "lib.rs"
+
+[dependencies]
+# None. Everything here is std::process and std::path, which is the point:
+# a platform shim that pulled in dependencies would be doing too much.

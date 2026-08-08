@@ -6,6 +6,7 @@ Ensures directory invariants, BUILD file presence, and module boundary hygiene.
 
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -25,7 +26,7 @@ def validate_workspace(root: Path) -> bool:
     # See solutions/README.md.
     CONTRACT_SUBJECTS = [
         "core", "app", "plugin", "host", "security", "versioning", "update",
-        "distribution", "toolchain",
+        "distribution", "toolchain", "runtime",
     ]
     CAPABILITIES = [
         # TypeScript
@@ -270,7 +271,7 @@ def validate_workspace(root: Path) -> bool:
                 print(f"[FAIL] contract {contract.name} is missing {required}")
                 contract_violations += 1
                 passed = False
-        definitions = list(contract.glob("schema/*.fbs")) + list(contract.glob("schema/*.json")) +             list(contract.glob("abi/*.h")) + list(contract.glob("schema/*.fbs")) + list(contract.glob("schema/*.json")) + list(contract.glob("types/*.ts"))
+        definitions = list(contract.glob("schema/*.fbs")) + list(contract.glob("schema/*.json")) +             list(contract.glob("abi/*.h")) + list(contract.glob("types/*.ts")) + list(contract.glob("registry/*.toml"))
         if not definitions:
             print(f"[FAIL] contract {contract.name} has no definition file")
             contract_violations += 1
@@ -326,6 +327,27 @@ def validate_workspace(root: Path) -> bool:
 
     if version_violations == 0:
         print("[OK] Toolchain versions: dependencies.json agrees with MODULE.bazel")
+
+    # ── The JS <-> Rust boundary ────────────────────────────────────────────
+    #
+    # Delegated to check_host_boundary.py, which owns the comparison. Run from
+    # here so `check_workspace.py` stays the single command: a check nobody
+    # remembers to run is not a check.
+    #
+    # Until the host layer migrates (phase 4), there is no boundary-touching
+    # Rust in this workspace and the checker reports SKIP rather than a vacuous
+    # OK. The real surface still lives in V1.
+    boundary = Path(__file__).resolve().parent / "check_host_boundary.py"
+    if boundary.is_file():
+        result = subprocess.run(
+            [sys.executable, str(boundary)],
+            capture_output=True,
+            text=True,
+        )
+        for line in result.stdout.strip().splitlines():
+            print(line)
+        if result.returncode != 0:
+            passed = False
 
     if passed:
         print("\n[+] Workspace structure validation PASSED successfully!")

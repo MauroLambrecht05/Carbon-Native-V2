@@ -1,0 +1,21 @@
+# Carbon Native V2 - @carbon/platform
+#
+# Infrastructure: the handful of operations that differ per OS.
+
+package(default_visibility = ["//visibility:public"])
+
+load("//.tools/orchestration/bazel/cargo:defs.bzl", "cargo_library")
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["**/*.rs", "Cargo.toml"], allow_empty = True),
+)
+
+# No test target. Each function shells out to a real OS command, so a test would
+# either assert on the constructed Command (worth doing, not yet done) or
+# actually spawn explorer.exe. The first is the right answer.
+cargo_library(
+    name = "lib",
+    package = "carbon-platform",
+    srcs = [":srcs"],
+)

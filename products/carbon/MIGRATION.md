@@ -182,9 +182,52 @@ with, not an outside system it talks to.
   the same category as the CLI. Moved to `interface/renderer/`, and excluded
   from the TypeScript build until phase 6 wires their dependencies.
 
-**4 — Host and platform.** The 19 `host/native` modules into `infrastructure/os`
-behind ports, `platform/`, `plugin-host/`. This is where the 139-function
-contract gets enforced for the first time.
+**4 — Host and platform. IN PROGRESS.**
+
+- [x] **`contracts/runtime`** — the JS ↔ Rust boundary, declared and checked.
+      139 imports (Rust installs, JS calls) and 34 dispatchers (JS installs,
+      Rust calls). `.tools/validation/check_host_boundary.py` compares the
+      registry against the source in both directions and is wired into
+      `check_workspace.py`, so it runs as part of one command.
+- [x] **`infrastructure/platform`** — the per-OS shims. A real crate now; V1
+      `#[path]`-included the source into each backend so it could share
+      `UserEvent` and `tlog`, neither of which it actually uses.
+- [ ] **`infrastructure/os`** — the 19 `host/native` modules. Blocked on the
+      coupling below, which has to be resolved first.
+- [ ] **`infrastructure/plugin-host`** — loader and host_exports.
+
+### What phase 4 turned up
+
+- **The boundary runs in two directions, and V1 documents neither.** 139
+  functions Rust installs for JS to call, and 34 that JS installs for Rust to
+  call. The second set is called from inside evaluated JS string literals —
+  `"globalThis.__cm_dispatch_click && ..."` — so the name is opaque to rustc
+  *and* to tsc. A rename on the JS side silently stops delivering the event.
+- **Fifteen names looked like dispatchers and are not.** Rust both registers and
+  calls them (reading back something it owns, like `__cm_app_name`). The rule
+  that separates the lists is in the registry.
+- **`hosts.ts` declares 69 of the 139 imports.** Its own comment asks people to
+  keep it in step by hand. It has not been.
+
+### The coupling that blocks `infrastructure/os`
+
+`host/native` is not a crate in V1 — it is source compiled into each backend
+binary, and it reaches into the including crate for:
+
+| Reference | Count | What it is |
+|---|---:|---|
+| `crate::native` | 16 | its own siblings — fine once it is a crate |
+| `crate::tlog` | 6 | the startup phase tracer |
+| `crate::platform` | 6 | now `carbon-platform` |
+| `crate::UserEvent` | 3 | the event enum posted back to the event loop |
+| `crate::os_theme` | 1 | a sibling |
+
+`platform` is solved. The two that remain are real design decisions rather than
+moves: **`UserEvent`** is the event vocabulary between the host layer and the
+event loop, which makes it contract material, and **`tlog`** emits the 27
+startup phases that `startup-phases.txt` pins — infrastructure that both the
+host layer and the composition root need. Deciding where each lands is the
+first task of the next session, not something to guess at now.
 
 **5 — The composition roots.** Split `mini.rs` (4,441 lines) and `blitz.rs` into
 `products/carbon/`. Highest risk in the whole migration: this file holds the

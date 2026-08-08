@@ -1,0 +1,303 @@
+# The JavaScript <-> Rust boundary.
+#
+# Every name here is matched by STRING between two languages. Neither rustc
+# nor tsc can see across it: a typo on either side is a runtime failure with
+# no build error anywhere. This file is the declaration that makes it
+# checkable — see .tools/validation/check_host_boundary.py.
+#
+# The boundary runs in BOTH directions, which V1 documented nowhere:
+#
+#   [imports.*]     Rust installs the function on the QuickJS globals; JS
+#                   calls it. 139 of these.
+#   [dispatchers]   JS installs the function; RUST calls it — and calls it
+#                   from inside an eval'd JS string literal, so the name is
+#                   opaque to every tool in the toolchain.
+
+# ── Direction 1: Rust installs, JS calls ────────────────────────────────────
+
+[imports.app]
+source = "carbon/host/native/app.rs"
+functions = [
+  "__cm_app_name",
+  "__cm_app_version",
+]
+
+[imports.autostart]
+source = "carbon/host/native/autostart.rs"
+functions = [
+  "__cm_autostart_disable",
+  "__cm_autostart_enable",
+  "__cm_autostart_is_enabled",
+  "__cm_autostart_set_args",
+  "__cm_autostart_set_name",
+]
+
+[imports.clipboard]
+source = "carbon/host/native/clipboard.rs"
+functions = [
+  "__cm_clipboard_clear",
+  "__cm_clipboard_read_text",
+  "__cm_clipboard_write_text",
+]
+
+[imports.dialog]
+source = "carbon/host/native/dialog.rs"
+functions = [
+  "__cm_dialog_confirm",
+  "__cm_dialog_message",
+  "__cm_dialog_open_dir",
+  "__cm_dialog_open_file",
+  "__cm_dialog_open_files",
+  "__cm_dialog_save_file",
+]
+
+[imports.fs]
+source = "carbon/host/native/fs.rs"
+functions = [
+  "__cm_fs_app_cache_dir",
+  "__cm_fs_app_config_dir",
+  "__cm_fs_app_data_dir",
+  "__cm_fs_exists",
+  "__cm_fs_home_dir",
+  "__cm_fs_is_dir",
+  "__cm_fs_is_file",
+  "__cm_fs_mkdir",
+  "__cm_fs_read_dir",
+  "__cm_fs_read_text",
+  "__cm_fs_rename",
+  "__cm_fs_rm",
+  "__cm_fs_stat",
+  "__cm_fs_temp_dir",
+  "__cm_fs_write_text",
+]
+
+[imports.invoke]
+source = "carbon/host/native/invoke.rs"
+functions = [
+  "__cm_invoke",
+  "__cm_invoke_has",
+]
+
+[imports.keychain]
+source = "carbon/host/native/keychain.rs"
+functions = [
+  "__cm_keychain_delete",
+  "__cm_keychain_get",
+  "__cm_keychain_set",
+]
+
+[imports.log]
+source = "carbon/host/native/log.rs"
+functions = [
+  "__cm_log",
+  "__cm_log_path",
+]
+
+[imports.net]
+source = "carbon/host/native/net.rs"
+functions = [
+  "__cm_fetch_abort",
+  "__cm_fetch_start",
+  "__cm_ws_close",
+  "__cm_ws_connect",
+  "__cm_ws_send_binary_b64",
+  "__cm_ws_send_text",
+]
+
+[imports.notification]
+source = "carbon/host/native/notification.rs"
+functions = [
+  "__cm_notification_send",
+]
+
+[imports.os]
+source = "carbon/host/native/os.rs"
+functions = [
+  "__cm_os_arch",
+  "__cm_os_eol",
+  "__cm_os_exe_path",
+  "__cm_os_family",
+  "__cm_os_home_dir",
+  "__cm_os_hostname",
+  "__cm_os_locale",
+  "__cm_os_platform",
+  "__cm_os_temp_dir",
+  "__cm_os_theme",
+  "__cm_os_version",
+]
+
+[imports.process]
+source = "carbon/host/native/process.rs"
+functions = [
+  "__cm_proc_exec",
+  "__cm_proc_kill",
+  "__cm_proc_pid_self",
+  "__cm_proc_read_stderr",
+  "__cm_proc_read_stdout",
+  "__cm_proc_relaunch_self",
+  "__cm_proc_spawn",
+  "__cm_proc_try_status",
+  "__cm_proc_wait",
+  "__cm_proc_write_stdin",
+]
+
+[imports.pty]
+source = "carbon/host/native/pty.rs"
+functions = [
+  "__cm_pty_close",
+  "__cm_pty_kill",
+  "__cm_pty_read",
+  "__cm_pty_resize",
+  "__cm_pty_spawn",
+  "__cm_pty_wait",
+  "__cm_pty_write",
+]
+
+[imports.shell]
+source = "carbon/host/native/shell.rs"
+functions = [
+  "__cm_shell_open",
+  "__cm_shell_resolve",
+  "__cm_shell_reveal",
+]
+
+[imports.store]
+source = "carbon/host/native/store.rs"
+functions = [
+  "__cm_store_clear",
+  "__cm_store_delete",
+  "__cm_store_entries",
+  "__cm_store_get",
+  "__cm_store_has",
+  "__cm_store_keys",
+  "__cm_store_reload",
+  "__cm_store_save",
+  "__cm_store_set",
+]
+
+[imports.window]
+source = "carbon/host/native/window.rs"
+functions = [
+  "__cm_window_close",
+  "__cm_window_device_pixel_ratio",
+  "__cm_window_focus",
+  "__cm_window_hide",
+  "__cm_window_inner_height",
+  "__cm_window_inner_width",
+  "__cm_window_is_focused",
+  "__cm_window_is_maximized",
+  "__cm_window_is_minimized",
+  "__cm_window_label",
+  "__cm_window_maximize",
+  "__cm_window_minimize",
+  "__cm_window_open",
+  "__cm_window_opts_json",
+  "__cm_window_resize_tick",
+  "__cm_window_set_fullscreen",
+  "__cm_window_set_title",
+  "__cm_window_show",
+  "__cm_window_start_drag",
+  "__cm_window_toggle_maximize",
+  "__cm_window_unmaximize",
+]
+
+[imports.window_state]
+source = "carbon/host/native/window_state.rs"
+functions = [
+  "__cm_window_state_clear",
+  "__cm_window_state_load",
+  "__cm_window_state_save",
+  "__cm_window_state_set_app_name",
+]
+
+[imports.mini]
+source = "carbon/runtime/mini.rs"
+functions = [
+  "__cm_apply_ops",
+  "__cm_broadcast_resize",
+  "__cm_canvas",
+  "__cm_canvas2d_create",
+  "__cm_canvas2d_destroy",
+  "__cm_canvas2d_flush",
+  "__cm_canvas2d_get_pixels",
+  "__cm_canvas2d_measure_text",
+  "__cm_canvas2d_put_pixels",
+  "__cm_canvas2d_resize",
+  "__cm_create_node",
+  "__cm_dump_tree",
+  "__cm_insert_node",
+  "__cm_layout_box",
+  "__cm_load_font",
+  "__cm_load_font_bytes",
+  "__cm_load_system_font",
+  "__cm_register_math",
+  "__cm_remove_node",
+  "__cm_request_paint",
+  "__cm_reset_paint_props",
+  "__cm_run_deferred_mount",
+  "__cm_set_prop",
+  "__cm_set_root",
+  "__cm_set_scroll_y",
+  "__cm_set_text",
+  "__cm_test",
+  "__cm_text_probe",
+]
+
+[imports.blitz]
+source = "carbon/runtime/blitz.rs"
+functions = [
+  "__cm_register_stylesheet",
+]
+
+# ── Direction 2: JS installs, Rust calls ────────────────────────────────────
+#
+# These are installed by the renderer and stdlib packages and invoked from
+# Rust. The call sites look like:
+#
+#     globalThis.__cm_dispatch_click && globalThis.__cm_dispatch_click({});
+#
+# inside a Rust string that is handed to the JS engine. Renaming one on the
+# JS side leaves the Rust untouched and silently stops delivering the event.
+#
+# The rule that separates the two lists: a name Rust both REGISTERS and calls is
+# an import (Rust reading back something it installed — `__cm_app_name` is
+# called from evaluated JS but owned by Rust). A dispatcher is referenced by
+# Rust and registered by Rust nowhere.
+
+[dispatchers]
+functions = [
+  "__cm_channel_dispatch",
+  "__cm_defer_mount",
+  "__cm_dispatch_click",
+  "__cm_dispatch_context_menu",
+  "__cm_dispatch_file_drag",
+  "__cm_dispatch_input",
+  "__cm_dispatch_keydown",
+  "__cm_dispatch_pointer",
+  "__cm_dispatch_theme_changed",
+  "__cm_dispatch_wheel",
+  "__cm_dispatch_window_focus",
+  "__cm_drain_raf",
+  "__cm_fetch_dispatch_chunk",
+  "__cm_fetch_dispatch_end",
+  "__cm_fetch_dispatch_error",
+  "__cm_fetch_dispatch_headers",
+  "__cm_flush_react",
+  "__cm_has_pending",
+  "__cm_hmr_reset",
+  "__cm_node_id_seq",
+  "__cm_pty_dispatch_exit",
+  "__cm_pty_dispatch_output",
+  "__cm_raf_queue",
+  "__cm_raf_seq",
+  "__cm_resolve_class",
+  "__cm_run_raf",
+  "__cm_run_timers",
+  "__cm_timer_seq",
+  "__cm_timers",
+  "__cm_window_dispatch_resize",
+  "__cm_ws_dispatch_close",
+  "__cm_ws_dispatch_error",
+  "__cm_ws_dispatch_message",
+  "__cm_ws_dispatch_open",
+]

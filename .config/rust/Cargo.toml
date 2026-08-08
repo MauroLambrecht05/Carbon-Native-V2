@@ -45,7 +45,7 @@ members = [
   #
   # Phase 4 — host and platform:
   #   "../../solutions/infrastructure/os",
-  #   "../../solutions/infrastructure/platform",
+  "../../solutions/infrastructure/platform",
   #   "../../solutions/infrastructure/plugin-host",
   #
   # Phase 5 — the binaries:

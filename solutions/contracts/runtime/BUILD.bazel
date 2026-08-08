@@ -1,0 +1,11 @@
+package(default_visibility = ["//visibility:public"])
+
+# The JS <-> Rust boundary. A registry rather than a schema: what it constrains
+# is a set of NAMES matched by string across two languages, which no type system
+# in this workspace can see across.
+#
+# Checked by //.tools/validation:host_boundary_test, not compiled into anything.
+filegroup(
+    name = "srcs",
+    srcs = glob(["registry/*.toml"]),
+)
