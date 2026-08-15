@@ -103,10 +103,8 @@ pub(crate) fn snapshot_spike(mode: &str, snap_path: &str, extra: Option<&str>) -
                     // `bundle_evaluated` phase.
                     let raw = std::fs::read(file).with_context(|| format!("read {file}"))?;
                     let bc: Vec<u8> = if file.ends_with(".qbc.zst") {
-                        let ulen =
-                            u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]) as usize;
-                        lz4_flex::decompress(&raw[4..], ulen)
-                            .map_err(|e| anyhow!("lz4: {e}"))?
+                        let ulen = u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]) as usize;
+                        lz4_flex::decompress(&raw[4..], ulen).map_err(|e| anyhow!("lz4: {e}"))?
                     } else {
                         raw
                     };
@@ -126,8 +124,9 @@ pub(crate) fn snapshot_spike(mode: &str, snap_path: &str, extra: Option<&str>) -
                         let msg = if cstr.is_null() {
                             "<unprintable>".into()
                         } else {
-                            let s =
-                                std::ffi::CStr::from_ptr(cstr).to_string_lossy().into_owned();
+                            let s = std::ffi::CStr::from_ptr(cstr)
+                                .to_string_lossy()
+                                .into_owned();
                             qjs::JS_FreeCString(ctx, cstr);
                             s
                         };
@@ -160,8 +159,8 @@ pub(crate) fn snapshot_spike(mode: &str, snap_path: &str, extra: Option<&str>) -
             let write_ms = t_w.elapsed().as_secs_f64() * 1000.0;
             // Also write the uncompressed mmap form (for the lazy-restore path).
             let raw_path = path.with_extension("raw");
-            let raw_len = snapshot::write_snapshot_mmap(&raw_path)
-                .map_err(|e| anyhow!("write mmap: {e}"))?;
+            let raw_len =
+                snapshot::write_snapshot_mmap(&raw_path).map_err(|e| anyhow!("write mmap: {e}"))?;
             eprintln!(
                 "[spike] BUILD: eval={eval_ms:.1}ms  arena_used={:.2}MB  live={:.2}MB  \
                  lz4_file={:.2}MB  write={write_ms:.1}ms  raw_file={:.2}MB",
@@ -172,7 +171,10 @@ pub(crate) fn snapshot_spike(mode: &str, snap_path: &str, extra: Option<&str>) -
             );
             // Probe before exit to show the live heap is correct pre-snapshot.
             if extra.is_none() {
-                eprintln!("[spike] pre-snapshot probe -> {}", spike_eval(ctx, "probe()")?);
+                eprintln!(
+                    "[spike] pre-snapshot probe -> {}",
+                    spike_eval(ctx, "probe()")?
+                );
             }
         }
         Ok(())
@@ -294,13 +296,27 @@ pub(crate) fn snapshot_build_app(project_dir: &std::path::Path) -> Result<()> {
         // different value (e.g. "win32" vs "windows") silently corrupts app
         // behaviour after restore. The build runs the same binary on the same
         // machine, so we inject the real values here.
-        let platform = if cfg!(target_os = "windows") { "windows" }
-            else if cfg!(target_os = "macos") { "macos" }
-            else if cfg!(target_os = "linux") { "linux" } else { "unknown" };
-        let arch = if cfg!(target_arch = "x86_64") { "x86_64" }
-            else if cfg!(target_arch = "aarch64") { "aarch64" }
-            else if cfg!(target_arch = "x86") { "x86" } else { "unknown" };
-        let home = dirs::home_dir().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+        let platform = if cfg!(target_os = "windows") {
+            "windows"
+        } else if cfg!(target_os = "macos") {
+            "macos"
+        } else if cfg!(target_os = "linux") {
+            "linux"
+        } else {
+            "unknown"
+        };
+        let arch = if cfg!(target_arch = "x86_64") {
+            "x86_64"
+        } else if cfg!(target_arch = "aarch64") {
+            "aarch64"
+        } else if cfg!(target_arch = "x86") {
+            "x86"
+        } else {
+            "unknown"
+        };
+        let home = dirs::home_dir()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default();
         let pd = project_dir.to_path_buf();
         let (app_name, app_version) = read_app_metadata(&pd);
         let (win_w, win_h, _dec) = read_window_cfg(&pd);
@@ -379,7 +395,8 @@ pub(crate) fn snapshot_build_app(project_dir: &std::path::Path) -> Result<()> {
         snapshot::set_rt_ctx(rt as *mut std::ffi::c_void, ctx as *mut std::ffi::c_void);
 
         let raw_path = project_dir.join("dist/bundle.cmsnap.raw");
-        let raw_len = snapshot::write_snapshot_mmap(&raw_path).map_err(|e| anyhow!("write: {e}"))?;
+        let raw_len =
+            snapshot::write_snapshot_mmap(&raw_path).map_err(|e| anyhow!("write: {e}"))?;
         let build_ms = t0.elapsed().as_secs_f64() * 1000.0;
         eprintln!(
             "[carbon-mini snapshot-build] {} -> {} ({:.2} MB heap, {:.2} MB live) in {build_ms:.0}ms",
@@ -430,7 +447,10 @@ pub(crate) fn create_fresh_runtime() -> Result<(JsRuntime, JsContext)> {
 /// absent, or restore fails. Gated behind `CARBON_SNAPSHOT` so it's strictly
 /// opt-in.
 #[cfg(all(feature = "snapshot", windows))]
-pub(crate) fn try_restore_snapshot(project_dir: &std::path::Path, t0: Instant) -> Option<(JsRuntime, JsContext)> {
+pub(crate) fn try_restore_snapshot(
+    project_dir: &std::path::Path,
+    t0: Instant,
+) -> Option<(JsRuntime, JsContext)> {
     // OPT-IN (CARBON_SNAPSHOT=1). The snapshot restores a heap whose module-init
     // ran at BUILD time with a stand-in environment; apps that derive state from
     // host fns at module-init (e.g. terax: terminal/explorer/stores) can behave
@@ -453,7 +473,11 @@ pub(crate) fn try_restore_snapshot(project_dir: &std::path::Path, t0: Instant) -
     let snap_mtime = std::fs::metadata(&raw).and_then(|m| m.modified()).ok();
     let bundle_mtime = ["dist/bundle.qbc.zst", "dist/bundle.qbc", "dist/bundle.js"]
         .iter()
-        .filter_map(|p| std::fs::metadata(project_dir.join(p)).and_then(|m| m.modified()).ok())
+        .filter_map(|p| {
+            std::fs::metadata(project_dir.join(p))
+                .and_then(|m| m.modified())
+                .ok()
+        })
         .max();
     if let (Some(s), Some(b)) = (snap_mtime, bundle_mtime) {
         if s < b {
@@ -492,7 +516,9 @@ pub(crate) fn try_restore_snapshot(project_dir: &std::path::Path, t0: Instant) -
 }
 
 #[cfg(not(all(feature = "snapshot", windows)))]
-pub(crate) fn try_restore_snapshot(_project_dir: &std::path::Path, _t0: Instant) -> Option<(JsRuntime, JsContext)> {
+pub(crate) fn try_restore_snapshot(
+    _project_dir: &std::path::Path,
+    _t0: Instant,
+) -> Option<(JsRuntime, JsContext)> {
     None
 }
-

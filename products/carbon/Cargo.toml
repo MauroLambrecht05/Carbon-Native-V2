@@ -28,11 +28,11 @@ name = "carbon-runtime"
 version = "0.2.0"
 edition = "2021"
 rust-version.workspace = true
-license = "Apache-2.0"
 description = "carbon-native runtime: carbon-mini (tiny-skia paint, fontdue text, Taffy layout, Solid/React via rquickjs) and carbon-blitz (stylo + taffy + parley via vello/wgpu), sharing one host layer."
-# The workspace manifest lives in .config/rust. Cargo only walks UP from a
-# crate, so it would never find it — the link has to be explicit.
-workspace = "../../.config/rust"
+# The workspace manifest lives in .tools/orchestration/bazel/cargo, beside the
+# Bazel rules that drive it. Cargo only walks UP from a crate, so it would
+# never find it — the link has to be explicit.
+workspace = "../../.tools/orchestration/bazel/cargo"
 build = "build.rs"
 
 [[bin]]
@@ -52,6 +52,11 @@ required-features = ["blitz"]
 name = "launch"
 path = "tests/launch.rs"
 required-features = ["mini"]
+
+# Clippy runs with -D warnings; the shared allow-list lives in the workspace
+# root so one rationale covers every crate. See //.tools/orchestration/bazel/cargo/Cargo.toml.
+[lints]
+workspace = true
 
 [features]
 # Each backend's own stack, fully optional so building one never compiles
@@ -78,7 +83,11 @@ image = ["mini", "dep:carbon-image"]
 audio = ["mini", "dep:carbon-audio"]
 # Profiling. Optional Tracy zones for frame-level performance analysis.
 # Zero overhead when disabled. Enable for development/benchmarking.
-profiling = ["mini", "dep:tracy-client"]
+# Forwards into carbon-paint/profiling, which gates the paint dispatch's frame
+# zone markers. Without the forward the binary got Tracy zones but the paint
+# layer stayed silent — and carbon-paint never declared the feature at all, so
+# nothing could have turned it on.
+profiling = ["mini", "dep:tracy-client", "carbon-paint/profiling"]
 # Self-update support. A/B partition state machine with crash-counter rollback.
 updater = ["mini", "dep:carbon-updater"]
 # Heap snapshot (cold-start exec-skip). carbon-snapshot itself is pulled in by
@@ -93,7 +102,8 @@ snapshot = ["mini"]
 # --features blitz` would otherwise still compile mini's entire stack via
 # `default`, defeating the whole point of making it optional. Every build
 # must name its backend explicitly: `--no-default-features --features mini`
-# or `--no-default-features --features blitz` (see .config/justfile).
+# or `--no-default-features --features blitz`. //products/carbon:mini and
+# :blitz pass exactly that, via crate_features on the cargo rule.
 default = []
 
 [dependencies]

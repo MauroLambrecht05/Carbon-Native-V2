@@ -75,7 +75,11 @@ pub(crate) fn compile_bundle(input: &str, output: &str) -> Result<()> {
         std::fs::write(output, &compressed).with_context(|| format!("write {output}"))?;
         eprintln!(
             "[carbon-mini] compiled {} ({} B JS) -> {} ({} B .qbc.zst, {} B bytecode pre-compress)",
-            input, src.len(), output, compressed.len(), bytes.len()
+            input,
+            src.len(),
+            output,
+            compressed.len(),
+            bytes.len()
         );
         Ok(())
     })?;
@@ -251,4 +255,3 @@ pub(crate) fn load_and_eval_bundle(js_ctx: &JsContext, path: &PathBuf) -> Result
     let src = read_bundle(path)?;
     eval_bundle_src(js_ctx, &src)
 }
-

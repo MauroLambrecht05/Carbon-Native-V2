@@ -28,7 +28,9 @@ pub(crate) fn drain_js_jobs_counted(rt: &rquickjs::Runtime) -> usize {
     let mut iters = 0usize;
     while iters < 10_000 {
         match rt.execute_pending_job() {
-            Ok(true) => { iters += 1; }
+            Ok(true) => {
+                iters += 1;
+            }
             Ok(false) => break,
             Err(e) => {
                 eprintln!("[carbon-mini] pending job error: {e:?}");
@@ -55,7 +57,9 @@ pub(crate) fn drain_and_flush_react(rt: &rquickjs::Runtime, js_ctx: &rquickjs::C
     let d1 = t.elapsed().as_secs_f64() * 1000.0;
     let tf = Instant::now();
     let _ = js_ctx.with(|ctx| -> rquickjs::Result<()> {
-        ctx.eval::<(), _>(b"globalThis.__cm_flush_react && globalThis.__cm_flush_react();".as_slice())?;
+        ctx.eval::<(), _>(
+            b"globalThis.__cm_flush_react && globalThis.__cm_flush_react();".as_slice(),
+        )?;
         Ok(())
     });
     let df = tf.elapsed().as_secs_f64() * 1000.0;

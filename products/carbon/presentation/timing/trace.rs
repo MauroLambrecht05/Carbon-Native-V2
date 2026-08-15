@@ -62,4 +62,3 @@ pub(crate) fn timing_done(label: &str, since: Instant) {
     eprintln!("[timing] ✓ {label}: TOTAL {ms:.2} ms");
     let _ = std::io::stderr().flush();
 }
-

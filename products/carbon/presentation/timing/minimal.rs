@@ -13,4 +13,3 @@ pub fn tlog(phase: &str) {
         eprintln!("[timing] {phase}");
     }
 }
-

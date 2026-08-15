@@ -24,10 +24,10 @@ static HOST_WINDOW_SIZE: Mutex<(f32, f32)> = Mutex::new((1280.0, 800.0));
 use std::time::Instant;
 use tao::dpi::LogicalSize;
 use tao::event::{ElementState, Event, MouseButton, WindowEvent};
-use tiny_skia::{Paint, Rect, Transform};
 use tao::event_loop::{ControlFlow, EventLoop, EventLoopBuilder};
 use tao::keyboard::{Key, ModifiersState};
 use tao::window::WindowBuilder;
+use tiny_skia::{Paint, Rect, Transform};
 
 /// Profiling — optional frame zone markers.
 /// When profiling feature is enabled, emits marker names for external profilers (Tracy, etc).
@@ -44,8 +44,6 @@ macro_rules! prof_zone {
 macro_rules! prof_zone {
     ($name:expr) => {};
 }
-
-
 
 // V1 spliced carbon/runtime/mod.rs in here textually (`include!`), so that
 // unqualified `native::`, `platform::`, `os_theme::`, `host_exports::` and
@@ -84,32 +82,32 @@ mod heap_snapshot;
 // presentation
 #[path = "../presentation/host/scene.rs"]
 mod host;
-#[path = "../presentation/host/tree.rs"]
-mod tree;
 #[path = "../presentation/host/image.rs"]
 mod image_host;
 #[path = "../presentation/js/pump.rs"]
 mod pump;
 #[path = "../presentation/timing/trace.rs"]
 mod trace;
+#[path = "../presentation/host/tree.rs"]
+mod tree;
 
 use bundle::*;
 use features::*;
+use heap_snapshot::*;
 use host::*;
 use image_host as async_image;
 use manifest::*;
 use pump::*;
-use heap_snapshot::*;
 use trace::*;
 use tree::*;
 
+use carbon_layout::scene;
 use carbon_os as native;
 use carbon_os::os_theme;
 use carbon_platform as platform;
 use carbon_plugin_host::host_exports;
 use carbon_plugin_host::plugin_loader;
 use carbon_snapshot as snapshot;
-use carbon_layout::scene;
 use scene::{PaintProps, Scene};
 
 // Extracted to its own crate (no dependency on carbon-mini) — aliased so
@@ -137,7 +135,9 @@ unsafe fn spike_eval(ctx: *mut rquickjs::qjs::JSContext, code: &str) -> Result<S
         let msg = if cstr.is_null() {
             "<unprintable exception>".to_string()
         } else {
-            let s = std::ffi::CStr::from_ptr(cstr).to_string_lossy().into_owned();
+            let s = std::ffi::CStr::from_ptr(cstr)
+                .to_string_lossy()
+                .into_owned();
             qjs::JS_FreeCString(ctx, cstr);
             s
         };
@@ -148,7 +148,9 @@ unsafe fn spike_eval(ctx: *mut rquickjs::qjs::JSContext, code: &str) -> Result<S
     let s = if cstr.is_null() {
         String::new()
     } else {
-        let s = std::ffi::CStr::from_ptr(cstr).to_string_lossy().into_owned();
+        let s = std::ffi::CStr::from_ptr(cstr)
+            .to_string_lossy()
+            .into_owned();
         qjs::JS_FreeCString(ctx, cstr);
         s
     };
@@ -211,7 +213,9 @@ unsafe fn snapshot_eval_bundle_file(
             let msg = if cstr.is_null() {
                 "<unprintable>".to_string()
             } else {
-                let s = std::ffi::CStr::from_ptr(cstr).to_string_lossy().into_owned();
+                let s = std::ffi::CStr::from_ptr(cstr)
+                    .to_string_lossy()
+                    .into_owned();
                 qjs::JS_FreeCString(ctx, cstr);
                 s
             };
@@ -222,7 +226,8 @@ unsafe fn snapshot_eval_bundle_file(
         qjs::JS_FreeValue(ctx, r);
         Ok(())
     } else {
-        let src = std::fs::read_to_string(file).with_context(|| format!("read {}", file.display()))?;
+        let src =
+            std::fs::read_to_string(file).with_context(|| format!("read {}", file.display()))?;
         spike_eval(ctx, &src).map(|_| ())
     }
 }
@@ -310,9 +315,13 @@ fn main() -> Result<()> {
         if a == "--dev" {
             dev_mode = true;
         } else if a == "--window-label" {
-            if let Some(v) = iter.next() { window_label = v.clone(); }
+            if let Some(v) = iter.next() {
+                window_label = v.clone();
+            }
         } else if a == "--window-opts" {
-            if let Some(v) = iter.next() { window_opts_json = v.clone(); }
+            if let Some(v) = iter.next() {
+                window_opts_json = v.clone();
+            }
         } else if !a.starts_with("--") {
             if positional.is_none() {
                 positional = Some(PathBuf::from(a));
@@ -356,7 +365,11 @@ fn main() -> Result<()> {
     // app bundle). Absent on normal/single-bundle builds → this is a no-op.
     let vendor_path = {
         let v = project_dir.join("dist/vendor.js");
-        if v.exists() { Some(v) } else { None }
+        if v.exists() {
+            Some(v)
+        } else {
+            None
+        }
     };
     timing_log("args_resolved", t0);
 
@@ -398,8 +411,7 @@ fn main() -> Result<()> {
             }
         }
     }
-    let event_loop: EventLoop<UserEvent> =
-        EventLoopBuilder::<UserEvent>::with_user_event().build();
+    let event_loop: EventLoop<UserEvent> = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
     timing_log("event_loop_built", t0);
 
@@ -412,11 +424,21 @@ fn main() -> Result<()> {
     let mut win_resizable = true;
     if window_opts_json != "{}" {
         if let Ok(opts) = serde_json::from_str::<serde_json::Value>(&window_opts_json) {
-            if let Some(t) = opts.get("title").and_then(|v| v.as_str()) { win_title = t.to_string(); }
-            if let Some(w) = opts.get("width").and_then(|v| v.as_f64()) { init_w = w; }
-            if let Some(h) = opts.get("height").and_then(|v| v.as_f64()) { init_h = h; }
-            if let Some(d) = opts.get("decorated").and_then(|v| v.as_bool()) { decorated = d; }
-            if let Some(r) = opts.get("resizable").and_then(|v| v.as_bool()) { win_resizable = r; }
+            if let Some(t) = opts.get("title").and_then(|v| v.as_str()) {
+                win_title = t.to_string();
+            }
+            if let Some(w) = opts.get("width").and_then(|v| v.as_f64()) {
+                init_w = w;
+            }
+            if let Some(h) = opts.get("height").and_then(|v| v.as_f64()) {
+                init_h = h;
+            }
+            if let Some(d) = opts.get("decorated").and_then(|v| v.as_bool()) {
+                decorated = d;
+            }
+            if let Some(r) = opts.get("resizable").and_then(|v| v.as_bool()) {
+                win_resizable = r;
+            }
         }
     }
     let window = WindowBuilder::new()
@@ -442,8 +464,8 @@ fn main() -> Result<()> {
     timing_log("window_built", t0);
 
     // softbuffer context bound to the window
-    let context = softbuffer::Context::new(window.clone())
-        .map_err(|e| anyhow!("softbuffer ctx: {e}"))?;
+    let context =
+        softbuffer::Context::new(window.clone()).map_err(|e| anyhow!("softbuffer ctx: {e}"))?;
     timing_log("softbuffer_ctx", t0);
     let mut surface = softbuffer::Surface::new(&context, window.clone())
         .map_err(|e| anyhow!("softbuffer surface: {e}"))?;
@@ -527,7 +549,10 @@ fn main() -> Result<()> {
     // on any DPI, matching a browser / DPI-aware webview.
     let sf = (initial_scale as f32).max(0.1);
     if let Ok(mut g) = HOST_WINDOW_SIZE.lock() {
-        *g = (initial_size.width as f32 / sf, initial_size.height as f32 / sf);
+        *g = (
+            initial_size.width as f32 / sf,
+            initial_size.height as f32 / sf,
+        );
     }
     // Pull app metadata from carbon.toml if present. This is intentionally
     // best-effort — apps without carbon.toml still get a valid CarbonApp
@@ -613,6 +638,13 @@ fn main() -> Result<()> {
             eprintln!("[carbon-mini-timing] restored_scene_nodes={n}");
         }
     } else {
+        // `lifecycle.before_bundle_eval` — the last moment at which a plugin can
+        // install a global the app's own module-init code will see. Everything
+        // else a plugin does happens in `lifecycle.register`, which runs AFTER
+        // the bundle so plugin globals shadow app ones; this point exists for
+        // the cases where that order is the wrong way round.
+        plugin_registry.dispatch_before_bundle_eval();
+
         // Eval the vendor bundle FIRST (if present) so the app bundle's `require`
         // calls resolve against the populated registry.
         if let Some(vp) = &vendor_path {
@@ -628,8 +660,16 @@ fn main() -> Result<()> {
             // If the worker hasn't finished, we block (rare — read+lz4 on a
             // ~300 KB file is normally <10 ms vs. window's ~170 ms).
             let read_result: Result<BundleSrc> = bundle_read_handle
-                .map(|h| h.join().map_err(|_| anyhow!("bundle read worker panicked"))?)
-                .unwrap_or_else(|| Err(anyhow!("bundle read worker missing for path {}", path.display())));
+                .map(|h| {
+                    h.join()
+                        .map_err(|_| anyhow!("bundle read worker panicked"))?
+                })
+                .unwrap_or_else(|| {
+                    Err(anyhow!(
+                        "bundle read worker missing for path {}",
+                        path.display()
+                    ))
+                });
             match read_result.and_then(|src| eval_bundle_src(&js_ctx, &src)) {
                 Ok(()) => {}
                 Err(e) => {
@@ -685,10 +725,7 @@ fn main() -> Result<()> {
                 const POLL_MS: u64 = 100;
                 const STABLE_MS: u64 = 80;
                 let initial_meta = std::fs::metadata(&path);
-                let mut last_mtime = initial_meta
-                    .as_ref()
-                    .ok()
-                    .and_then(|m| m.modified().ok());
+                let mut last_mtime = initial_meta.as_ref().ok().and_then(|m| m.modified().ok());
                 let mut last_size: u64 = initial_meta.map(|m| m.len()).unwrap_or(0);
                 loop {
                     std::thread::sleep(std::time::Duration::from_millis(POLL_MS));
@@ -725,7 +762,10 @@ fn main() -> Result<()> {
                     }
                 }
             });
-            eprintln!("[carbon-mini] --dev: watching {} for changes", watch_path_log.display());
+            eprintln!(
+                "[carbon-mini] --dev: watching {} for changes",
+                watch_path_log.display()
+            );
         }
     }
 
@@ -1299,6 +1339,11 @@ fn main() -> Result<()> {
                     let _ = ctx.eval::<(), _>(script.as_bytes());
                     Ok(())
                 });
+                // `window.theme_changed` — for plugins that draw something
+                // themselves and therefore have their own colours to swap. A
+                // plugin that only renders through JS is already covered by the
+                // dispatch above.
+                plugin_registry.dispatch_theme_changed(matches!(theme, Theme::Dark));
             }
             Event::WindowEvent {
                 event: WindowEvent::Focused(focused),
@@ -1947,6 +1992,12 @@ fn main() -> Result<()> {
                     //    __hmr_state Map on globalThis survives because
                     //    we don't drop the runtime — createPersistentSignal
                     //    reads its previous values back during construction.
+                    //
+                    //    `lifecycle.before_bundle_eval` fires here too: the
+                    //    point is defined as "before EACH evaluation", and a
+                    //    plugin whose global must precede the bundle needs it
+                    //    to precede the reloaded one as well.
+                    plugin_registry.dispatch_before_bundle_eval();
                     match load_and_eval_bundle(&js_ctx, path) {
                         Ok(()) => {
                             let ms = t_reload.elapsed().as_secs_f64() * 1000.0;
@@ -2228,4 +2279,3 @@ use carbon_paint as paint;
 // main.rs's own event loop also calls `crate::canvas2d::X` directly (the
 // <canvas> 2D context host imports), not just through paint's dispatch.
 use carbon_paint::canvas2d;
-

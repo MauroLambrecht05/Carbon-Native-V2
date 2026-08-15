@@ -155,11 +155,9 @@ fn decode_non_png(bytes: &[u8]) -> Result<Pixmap, String> {
 
 #[cfg(not(feature = "image"))]
 fn decode_non_png(_bytes: &[u8]) -> Result<Pixmap, String> {
-    Err(
-        "non-PNG remote images require the 'image' feature \
+    Err("non-PNG remote images require the 'image' feature \
          (carbon.toml: [runtime] image = true)"
-            .to_string(),
-    )
+        .to_string())
 }
 
 /// Parse the `<media-type>[;base64],<payload>` body of a data: URL into

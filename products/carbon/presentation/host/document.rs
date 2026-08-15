@@ -140,4 +140,3 @@ pub(crate) fn register_host_imports(ctx: &JsContext) -> Result<()> {
         Ok(())
     })
 }
-

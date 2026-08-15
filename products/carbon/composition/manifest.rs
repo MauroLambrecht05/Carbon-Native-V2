@@ -102,4 +102,3 @@ pub(crate) fn read_plugins_section(
         }
     }
 }
-

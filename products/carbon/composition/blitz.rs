@@ -44,7 +44,6 @@ use tao::window::WindowBuilder;
 // exactly as it was, which is the point: a 4,400-line composition root is not
 // where you want to also be rewriting a few hundred paths.
 
-
 use carbon_runtime_contract::{UserEvent, WindowOp};
 // ── Module map ──────────────────────────────────────────────────────────────
 // Structured by CONCERN, not by binary. `carbon-mini` and `carbon-blitz` are
@@ -65,12 +64,12 @@ use carbon_runtime_contract::{UserEvent, WindowOp};
 
 // presentation — blitz renders into a real document rather than a scene graph,
 // so its `host` is the document surface and its `pump` drives that model.
-#[path = "../presentation/host/document.rs"]
-mod host;
-#[path = "../presentation/host/dom.rs"]
-mod dom;
 #[path = "../presentation/host/css.rs"]
 mod css;
+#[path = "../presentation/host/dom.rs"]
+mod dom;
+#[path = "../presentation/host/document.rs"]
+mod host;
 #[path = "../presentation/js/pump_dom.rs"]
 mod pump;
 #[path = "../presentation/timing/minimal.rs"]
@@ -91,7 +90,6 @@ use carbon_plugin_host::plugin_loader;
 /// Event-loop user events posted from native worker threads (net/pty/ws) and
 /// the window-control host imports. mirrors carbon-mini — must stay in
 /// sync, since the shared `native/*` modules construct these variants.
-
 
 // M2 harness: builds a styled card entirely via the __cm_* host imports, the
 // same calls carbon-dom-shim makes for a real app — but hand-written so M2 is
@@ -180,8 +178,7 @@ fn main() -> Result<()> {
         }
     }
 
-    let event_loop: EventLoop<UserEvent> =
-        EventLoopBuilder::<UserEvent>::with_user_event().build();
+    let event_loop: EventLoop<UserEvent> = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
 
     // Window label/opts (native::window reads these; multi-window support).
@@ -210,7 +207,12 @@ fn main() -> Result<()> {
     // Feed the size/scale slots native::window's __cm_window_inner_* read.
     native::window::set_inner_size(phys.width.max(1), phys.height.max(1));
     native::window::set_scale_factor(scale as f64);
-    let viewport = Viewport::new(phys.width.max(1), phys.height.max(1), scale, ColorScheme::Dark);
+    let viewport = Viewport::new(
+        phys.width.max(1),
+        phys.height.max(1),
+        scale,
+        ColorScheme::Dark,
+    );
 
     // Build the document with the browser UA stylesheet (gives div/body/etc.
     // their default `display: block` — without it every element is `inline`).
@@ -302,11 +304,16 @@ fn main() -> Result<()> {
         let css_path = std::path::Path::new(bpath).with_file_name("app.css");
         match std::fs::read_to_string(&css_path) {
             Ok(css) => {
-                eprintln!("[mini-blitz] registering app.css ({} bytes) before mount", css.len());
+                eprintln!(
+                    "[mini-blitz] registering app.css ({} bytes) before mount",
+                    css.len()
+                );
                 register_css(&css);
                 with_doc(|st| st.doc.resolve(0.0));
             }
-            Err(_) => eprintln!("[mini-blitz] (no app.css next to bundle — class-based styling unstyled)"),
+            Err(_) => {
+                eprintln!("[mini-blitz] (no app.css next to bundle — class-based styling unstyled)")
+            }
         }
     }
 
@@ -392,10 +399,11 @@ fn main() -> Result<()> {
     // panels use the light theme vars while chrome/text stay dark — the
     // half-updated look. We're dark-first: re-assert `dark` and re-cascade.
     with_doc(|st| {
-        let cls = st
-            .doc
-            .get_node(html_id)
-            .and_then(|n| n.data.attr(blitz_dom::local_name!("class")).map(|s| s.to_string()));
+        let cls = st.doc.get_node(html_id).and_then(|n| {
+            n.data
+                .attr(blitz_dom::local_name!("class"))
+                .map(|s| s.to_string())
+        });
         set_attr(st, html_id, html_qual("class"), "dark");
         st.doc.resolve(0.0);
         // Theme diagnostics (CM_DUMP=1): html class + computed backgrounds +
@@ -420,7 +428,10 @@ fn main() -> Result<()> {
                         let cc = s.clone_color();
                         let bg = s.get_background().background_color.resolve_to_absolute(&cc);
                         if bg.alpha > 0.5 && bg.components.0 > 0.6 {
-                            let cls = n.data.attr(blitz_dom::local_name!("class")).map(|s| s.to_string());
+                            let cls = n
+                                .data
+                                .attr(blitz_dom::local_name!("class"))
+                                .map(|s| s.to_string());
                             eprintln!("[light-bg] carbon={cid} bg={bg:?} class={cls:?}");
                             hits += 1;
                         }
@@ -449,7 +460,10 @@ fn main() -> Result<()> {
                 let mut buf: Vec<u8> = Vec::new();
                 ir.render_to_vec(|scene| paint_scene(scene, &st.doc, scale, w, h), &mut buf);
                 save_png(&shot_path, w, h, &buf);
-                eprintln!("[mini-blitz] screenshot saved: {shot_path} ({w}x{h}, nodes={})", st.id_map.len());
+                eprintln!(
+                    "[mini-blitz] screenshot saved: {shot_path} ({w}x{h}, nodes={})",
+                    st.id_map.len()
+                );
             }
         });
         std::process::exit(0);
@@ -795,7 +809,10 @@ fn render_frame_inner(renderer: &mut VelloWindowRenderer) {
                     if let Some(&b1) = st.id_map.get(&1) {
                         if let Some(n) = st.doc.get_node(b1) {
                             let l = n.final_layout;
-                            eprintln!("[frame {f}] carbon-root(1) size=({:.1}x{:.1})", l.size.width, l.size.height);
+                            eprintln!(
+                                "[frame {f}] carbon-root(1) size=({:.1}x{:.1})",
+                                l.size.width, l.size.height
+                            );
                         }
                     }
                 }

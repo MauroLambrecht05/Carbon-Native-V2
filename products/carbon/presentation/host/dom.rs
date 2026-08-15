@@ -58,7 +58,10 @@ pub(crate) fn cm_create_node(id: i64, tag: &str) {
                 m.append_children(el, &[tx]);
                 (el, Some(tx))
             } else {
-                (m.create_element(html_qual(tag), Vec::<Attribute>::new()), None)
+                (
+                    m.create_element(html_qual(tag), Vec::<Attribute>::new()),
+                    None,
+                )
             };
             m.flush();
             r
@@ -78,7 +81,11 @@ pub(crate) fn cm_create_node(id: i64, tag: &str) {
 pub(crate) fn cm_set_text(id: i64, text: &str) {
     with_doc(|st| {
         // "text" nodes route to their child text node; anything else directly.
-        let target = st.text_child.get(&id).copied().or_else(|| st.id_map.get(&id).copied());
+        let target = st
+            .text_child
+            .get(&id)
+            .copied()
+            .or_else(|| st.id_map.get(&id).copied());
         if let Some(bid) = target {
             let mut m = st.doc.mutate();
             m.set_node_text(bid, text);
@@ -120,19 +127,30 @@ pub(crate) fn set_attr(st: &mut DocState, bid: usize, name: QualName, value: &st
 
 pub(crate) fn cm_set_prop(id: i64, key: &str, value_json: &str) {
     with_doc(|st| {
-        let Some(&bid) = st.id_map.get(&id) else { return };
+        let Some(&bid) = st.id_map.get(&id) else {
+            return;
+        };
         // SVG elements: every prop is a presentation ATTRIBUTE (d, fill, stroke,
         // viewBox, width…), set verbatim (original casing, no px) so blitz's
         // outer_html→usvg path parses + renders the icon. className stays too.
         if st.svg_nodes.contains(&id) {
             let val = json_to_value(value_json);
-            let name = if key == "className" || key == "class" { "class" } else { key };
+            let name = if key == "className" || key == "class" {
+                "class"
+            } else {
+                key
+            };
             set_attr(st, bid, html_qual(name), &val);
             return;
         }
         // set_attribute / set_style_property panic on non-element nodes; guard.
         // (With text→span, every mapped node is an element — this is a safety net.)
-        if st.doc.get_node(bid).map(|n| n.element_data().is_none()).unwrap_or(true) {
+        if st
+            .doc
+            .get_node(bid)
+            .map(|n| n.element_data().is_none())
+            .unwrap_or(true)
+        {
             return;
         }
 
@@ -213,4 +231,3 @@ pub(crate) fn cm_set_root(id: i64) {
 }
 
 // ─── JS host wiring ──────────────────────────────────────────────────────────
-

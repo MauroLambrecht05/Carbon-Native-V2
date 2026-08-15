@@ -12,10 +12,28 @@ use super::*;
 pub(crate) fn is_svg_tag(tag: &str) -> bool {
     matches!(
         tag,
-        "svg" | "path" | "circle" | "rect" | "line" | "polyline" | "polygon"
-            | "ellipse" | "g" | "defs" | "use" | "symbol" | "clipPath" | "mask"
-            | "pattern" | "linearGradient" | "radialGradient" | "stop" | "tspan"
-            | "foreignObject" | "marker" | "filter"
+        "svg"
+            | "path"
+            | "circle"
+            | "rect"
+            | "line"
+            | "polyline"
+            | "polygon"
+            | "ellipse"
+            | "g"
+            | "defs"
+            | "use"
+            | "symbol"
+            | "clipPath"
+            | "mask"
+            | "pattern"
+            | "linearGradient"
+            | "radialGradient"
+            | "stop"
+            | "tspan"
+            | "foreignObject"
+            | "marker"
+            | "filter"
     )
 }
 
@@ -43,7 +61,6 @@ pub(crate) fn register_css(css: &str) {
     });
 }
 
-
 /// Build a QualName for an HTML-namespaced element/attribute from a runtime tag.
 pub(crate) fn html_qual(name: &str) -> QualName {
     QualName::new(None, ns!(html), LocalName::from(name))
@@ -55,13 +72,44 @@ pub(crate) fn html_qual(name: &str) -> QualName {
 pub(crate) fn is_attribute_key(key: &str) -> bool {
     matches!(
         key,
-        "id" | "role" | "href" | "src" | "alt" | "type" | "value" | "name"
-            | "title" | "placeholder" | "tabindex" | "for" | "checked" | "disabled"
-            | "selected" | "readonly" | "multiple" | "hidden" | "contenteditable"
-            | "dir" | "lang" | "spellcheck" | "autocapitalize" | "autocorrect"
-            | "autocomplete" | "autofocus" | "inputmode" | "enterkeyhint"
-            | "maxlength" | "minlength" | "rows" | "cols" | "wrap" | "accept"
-            | "download" | "target" | "rel" | "draggable" | "translate"
+        "id" | "role"
+            | "href"
+            | "src"
+            | "alt"
+            | "type"
+            | "value"
+            | "name"
+            | "title"
+            | "placeholder"
+            | "tabindex"
+            | "for"
+            | "checked"
+            | "disabled"
+            | "selected"
+            | "readonly"
+            | "multiple"
+            | "hidden"
+            | "contenteditable"
+            | "dir"
+            | "lang"
+            | "spellcheck"
+            | "autocapitalize"
+            | "autocorrect"
+            | "autocomplete"
+            | "autofocus"
+            | "inputmode"
+            | "enterkeyhint"
+            | "maxlength"
+            | "minlength"
+            | "rows"
+            | "cols"
+            | "wrap"
+            | "accept"
+            | "download"
+            | "target"
+            | "rel"
+            | "draggable"
+            | "translate"
     ) || key.starts_with("data-")
         || key.starts_with("aria-")
 }
@@ -105,17 +153,38 @@ pub(crate) fn is_unsupported_style(prop: &str) -> bool {
         || matches!(
             prop,
             "clickable"
-                | "user-select" | "-webkit-user-select" | "-moz-user-select" | "-ms-user-select"
-                | "touch-action" | "font-kerning" | "tab-index"
-                | "-webkit-font-smoothing" | "-moz-osx-font-smoothing"
-                | "appearance" | "-webkit-appearance" | "-webkit-tap-highlight-color"
-                | "text-size-adjust" | "-webkit-text-size-adjust"
-                | "scrollbar-width" | "scrollbar-color" | "overscroll-behavior"
-                | "resize" | "-webkit-overflow-scrolling" | "-webkit-line-clamp"
-                | "-webkit-box-orient" | "-webkit-background-clip" | "text-rendering"
-                | "content-visibility" | "contain-intrinsic-size" | "will-change"
-                | "-webkit-touch-callout" | "-webkit-user-drag" | "-webkit-app-region"
-                | "print-color-adjust" | "-webkit-print-color-adjust" | "color-adjust"
+                | "user-select"
+                | "-webkit-user-select"
+                | "-moz-user-select"
+                | "-ms-user-select"
+                | "touch-action"
+                | "font-kerning"
+                | "tab-index"
+                | "-webkit-font-smoothing"
+                | "-moz-osx-font-smoothing"
+                | "appearance"
+                | "-webkit-appearance"
+                | "-webkit-tap-highlight-color"
+                | "text-size-adjust"
+                | "-webkit-text-size-adjust"
+                | "scrollbar-width"
+                | "scrollbar-color"
+                | "overscroll-behavior"
+                | "resize"
+                | "-webkit-overflow-scrolling"
+                | "-webkit-line-clamp"
+                | "-webkit-box-orient"
+                | "-webkit-background-clip"
+                | "text-rendering"
+                | "content-visibility"
+                | "contain-intrinsic-size"
+                | "will-change"
+                | "-webkit-touch-callout"
+                | "-webkit-user-drag"
+                | "-webkit-app-region"
+                | "print-color-adjust"
+                | "-webkit-print-color-adjust"
+                | "color-adjust"
         )
 }
 
@@ -123,8 +192,17 @@ pub(crate) fn is_unsupported_style(prop: &str) -> bool {
 pub(crate) fn is_unitless(prop: &str) -> bool {
     matches!(
         prop,
-        "opacity" | "z-index" | "font-weight" | "flex-grow" | "flex-shrink"
-            | "order" | "line-height" | "flex" | "zoom" | "tab-size" | "flex-basis"
+        "opacity"
+            | "z-index"
+            | "font-weight"
+            | "flex-grow"
+            | "flex-shrink"
+            | "order"
+            | "line-height"
+            | "flex"
+            | "zoom"
+            | "tab-size"
+            | "flex-basis"
     )
 }
 
@@ -148,4 +226,3 @@ pub(crate) fn json_to_css_value(raw: &str, prop: &str) -> String {
         Err(_) => raw.to_string(),
     }
 }
-

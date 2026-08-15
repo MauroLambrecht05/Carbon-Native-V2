@@ -10,7 +10,9 @@ use super::*;
 /// (returns the inner content, no surrounding quotes). Used for PluginEvent.
 pub(crate) fn json_escape(s: &str) -> String {
     let full = serde_json::to_string(s).unwrap_or_else(|_| "\"\"".to_string());
-    full.get(1..full.len().saturating_sub(1)).unwrap_or("").to_string()
+    full.get(1..full.len().saturating_sub(1))
+        .unwrap_or("")
+        .to_string()
 }
 
 // ─── Bridge state ───────────────────────────────────────────────────────────
@@ -49,7 +51,9 @@ pub(crate) fn drain_jobs(rt: &JsRuntime) {
 pub(crate) fn drain_and_flush(rt: &JsRuntime, ctx: &JsContext) {
     drain_jobs(rt);
     let _ = ctx.with(|ctx| {
-        ctx.eval::<(), _>(b"globalThis.__cm_flush_react && globalThis.__cm_flush_react();".as_slice())
+        ctx.eval::<(), _>(
+            b"globalThis.__cm_flush_react && globalThis.__cm_flush_react();".as_slice(),
+        )
     });
     drain_jobs(rt);
 }
@@ -72,4 +76,3 @@ pub(crate) fn tick_js_frame(rt: &JsRuntime, ctx: &JsContext) -> bool {
 }
 
 // ─── __cm_* host-import implementations (drive the blitz DocumentMutator) ─────
-

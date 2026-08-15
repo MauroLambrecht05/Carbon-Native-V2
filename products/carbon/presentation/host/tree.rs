@@ -98,4 +98,3 @@ pub(crate) fn install_hardcoded_scene(scene: &Arc<Mutex<Scene>>) {
     s.insert_node(3, 4, None);
     s.dirty = true;
 }
-

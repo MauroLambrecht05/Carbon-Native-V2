@@ -996,4 +996,3 @@ pub(crate) fn install_carbon_event_dispatcher(js_ctx: &JsContext) -> Result<()> 
     })?;
     Ok(())
 }
-

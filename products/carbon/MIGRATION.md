@@ -107,7 +107,7 @@ between any two without leaving the tree half-moved.
 
 **1 — Build plumbing. DONE.** Bazel-drives-Cargo decided and built
 (`.tools/orchestration/bazel/cargo`), workspace manifest at
-`.config/rust/Cargo.toml`, baselines captured. The original scope also listed
+`.tools/orchestration/bazel/cargo/Cargo.toml`, baselines captured. The original scope also listed
 `contracts/runtime`; that moved to phase 4, where the host layer it describes
 actually lands — declaring 139 functions before their implementations move
 would be writing the contract against V1's shape rather than the one they end
@@ -173,7 +173,7 @@ with, not an outside system it talks to.
   and were skipped along with the crate. They now run, and pass.
 - **A fresh dependency resolution breaks wgpu.** Resolving from scratch picked
   `wgpu-hal 27.0.4`, which fails to compile against the `windows` crate
-  versions it pulls. `.config/rust/Cargo.lock` is seeded from V1 so the
+  versions it pulls. `.tools/orchestration/bazel/cargo/Cargo.lock` is seeded from V1 so the
   dependency set is the one V1 shipped — which is what "no functionality loss"
   requires anyway.
 - **The JS renderers were in the wrong place.** `solid/` and `react/` lived
@@ -209,7 +209,7 @@ with, not an outside system it talks to.
 - **Fifteen names looked like dispatchers and are not.** Rust both registers and
   calls them (reading back something it owns, like `__cm_app_name`). The rule
   that separates the lists is in the registry.
-- **`hosts.ts` declares 69 of the 139 imports.** Its own comment asks people to
+- **`stdlib/api/host/imports.ts` declares 69 of the 139 imports.** Its own comment asks people to
   keep it in step by hand. It has not been.
 
 ### The coupling that blocks `infrastructure/os`
@@ -365,6 +365,98 @@ Relative imports between siblings are unaffected by that move.
   globals, so the library declarations would collide with its own. It declares
   the single type it needs (`BufferSource`) locally.
 
+**7 — Closing the gaps. DONE.** Phases 1–6 moved the code. An audit of V1
+against V2 afterwards found that the code had migrated almost exactly — all 139
+host imports, every capability, every CLI command, the pipeline line for line —
+and that what had *not* come across was everything around it: the enforcement,
+the release path, the fixtures and the governance files.
+
+Twenty-six findings, closed here. The ones that were breaking something:
+
+| | Was | Now |
+|---|---|---|
+| `[profile.dist]` | `panic = "abort"`, which makes `catch_unwind` a no-op | `unwind` — the event loop's crash resilience works again |
+| `labs/clipboard-plugin` | not a workspace member, and two stale V1 path depths | builds; the canonical Layer-2 example is reachable |
+| `launch.rs` fixture | matched `dist/` in `.gitignore`, so untracked | committed via a negation rule — the test has an input on a clean clone |
+| `ignore` crate | drifted to 0.4.30, which needs rustc 1.88 | pinned to V1's 0.4.23; `products/carbon` compiles on the declared MSRV again |
+| `carbon-paint` | `#[cfg(feature = "profiling")]` on an undeclared feature | feature declared and forwarded from `products/carbon` — the paint zones were unreachable |
+| notes-app, discord-app | imported `theme.tsx` / `Sidebar.tsx` / `store.ts`, none copied | restored; all four buildable examples import-complete |
+| `publish.ts` delta path | `.tools/vendor/{bsdiff,zig-zstd}.exe` did not exist | replaced by `carbon-delta` in `capabilities/publishing/rust`; the vendored binaries are gone and delta publishing works off Windows |
+| `bun_compile` | documented as excluded from `//...`, but untagged | `tags = ["manual"]`, applied by the macro |
+| `bench-phase3.ps1` | built a `bench_runner` whose source never migrated | source restored as an explicit `[[bin]]`; script's V1 paths fixed |
+
+And the enforcement that had no V2 equivalent at all — all of it as **Bazel
+targets**, because Bazel is this workspace's entrypoint and a gate that only a
+separate task runner could invoke is a gate that does not run:
+
+| Target | Was |
+|---|---|
+| `//:fmt_test`, `//:clippy_test` | nothing checked formatting or lints |
+| `//.tools/validation:workspace_test` | script, invoked by nothing |
+| `//.tools/validation:host_boundary_test` | the label two BUILD files already cited, pointing at a package that did not exist |
+| `//.tools/validation:typescript_test` | script, invoked by nothing |
+| `//.tools/automation/ci:boundaries_test` | migrated file, invoked by nothing, V1-shaped |
+| `//.tools/validation:baseline_check` | `bazel run` — needs ../V1, so not a test |
+
+Plus the test preload (a `[test]` block in bunfig for `bun test`, and a
+`preload` attribute on `bun_test` resolved through the runfiles MANIFEST,
+because under `bazel test` bun runs outside the source tree and finds neither a
+bunfig nor a relative path), the examples CI job, and `release.yml`.
+
+Both workflows call `bazel` and nothing else.
+
+### Two claims in this document were wrong
+
+Recorded because both were load-bearing and neither was checked:
+
+- **"a checked-in bundle"** (phase 5, on `launch.rs`). It was not checked in —
+  `dist/` in `.gitignore` swept it up, so the only end-to-end test of the
+  runtime had no input on a fresh clone. True now.
+- **"`.tools/orchestration/bazel/cargo/Cargo.lock` is seeded from V1 so the dependency set is the
+  one V1 shipped"** (phase 3). Sixteen crates had drifted from V1's lock. Most
+  were harmless patch bumps; `ignore` was not, and it is what made the runtime
+  fail to build on the 1.86 the workspace declares. The remaining fifteen are
+  left alone deliberately — reverting patch versions with no failure attached
+  is churn, not correctness.
+
+### What phase 7 turned up
+
+- **Neither `fmt-check` nor `lint` had ever passed, in either version.** V1's CI
+  declared both gates and V1's own tree had 570 rustfmt diffs and the same
+  clippy failures. So the gates were red from the day they were written. The
+  tree is formatted now and clippy passes with `-D warnings`, which makes this
+  the first time either gate means anything.
+- **Two deny-by-default clippy errors in the plugin SDK.** `push.rs` takes
+  `*mut CarbonApp` in safe functions. Marking them `unsafe fn` would push an
+  `unsafe {}` block into every plugin's call site to restate a guarantee the
+  runtime already makes through the C ABI, so it is allowed at the workspace
+  level with the contract written down.
+- **The lint debt is listed, not hidden.** `[workspace.lints.clippy]` names each
+  allowed lint with a count and a reason instead of a blanket `-A clippy::all`,
+  so it is countable and can be deleted line by line. Ten of them are
+  `missing_safety_doc` on FFI and snapshot code, left for whoever knows the
+  contract — a safety comment that is wrong is worse than one that is absent.
+- **Twelve `workspace:*` dependencies survived**, in the example apps, the
+  ts-plugin and `three-fiber` — despite the V2 README stating there are none
+  anywhere. V2 has no bun workspace, so each would fail `bun install` outright.
+  They were inert only because `BunBundler` resolves `@carbon/*` from absolute
+  paths exported by `@carbon/workspace` rather than from node_modules.
+- **The toolchain was never pinned, and two crates were relying on that.**
+  `rust-version = "1.86"` is an MSRV assertion, not a toolchain selector, so
+  every build silently used whatever `rustup default` happened to be — 1.96 on
+  the machine this was written on. Pinning it (RUSTUP_TOOLCHAIN in the Bazel
+  cargo launcher, rather than a rust-toolchain.toml at the root) surfaced two
+  things at once: the `ignore` lockfile drift above, and that
+  `carbon-gpu-canvas` still does not build on 1.86. Phase 3 recorded that crate
+  as fixed; it was only ever compiling because the pin was missing. It is now
+  tagged `manual` with the two ways out written down, rather than passing by
+  accident.
+- **`terax-ai` is not ours to migrate.** It is a checkout of
+  `github.com/crynta/terax-ai` with its own `.git`, and carbon's repository
+  never tracked a file of it. V2 carrying only its `carbon.toml` is correct, and
+  the examples CI job skips any app directory with no `package.json` for that
+  reason.
+
 ## The build decision, made
 
 **Bazel drives Cargo.** `crate_universe` would need all 123 build-script
@@ -375,7 +467,7 @@ reach either way. Bazel owns the graph; Cargo compiles. Same arrangement as the
 Bun rules, for the same reason.
 
 **No new Cargo files in the root.** The workspace manifest is
-`.config/rust/Cargo.toml`, and the settings that would otherwise need a root
+`.tools/orchestration/bazel/cargo/Cargo.toml`, and the settings that would otherwise need a root
 `.cargo/config.toml` are exported by the launcher instead — verified that cargo
 reads them, by feeding `CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS` a bad value
 and watching cargo reject it. Build output goes to `.build/`, already
@@ -448,7 +540,7 @@ the blitz backend. Both are assertion surfaces beyond "did it exit 0".
   `carbon/runtime/Cargo.toml`. Any restructure has to preserve that property or
   every build compiles both stacks.
 - **Cargo and Bazel both want to own the build.** V2 is Bazel-only; V1 is Cargo
-  with a workspace manifest in `.config/rust`. `rules_rust` is already a
+  with a workspace manifest in `.tools/orchestration/bazel/cargo`. `rules_rust` is already a
   `bazel_dep`. Whether Bazel drives Cargo or replaces it is a decision phase 1
   has to make and is not yet made.
 - **`gpu-canvas` needs a GPU.** Its tests cannot run in CI or in the container

@@ -79,8 +79,7 @@ pub(crate) fn maybe_register_audio(
     }
 
     js_ctx.with(|ctx| -> anyhow::Result<()> {
-        carbon_audio::register_audio(&ctx)
-            .map_err(|e| anyhow::anyhow!("register_audio: {e}"))?;
+        carbon_audio::register_audio(&ctx).map_err(|e| anyhow::anyhow!("register_audio: {e}"))?;
         Ok(())
     })?;
 
@@ -98,6 +97,3 @@ pub(crate) fn maybe_register_audio(
     // Audio feature disabled; no-op.
     Ok(())
 }
-
-
-
