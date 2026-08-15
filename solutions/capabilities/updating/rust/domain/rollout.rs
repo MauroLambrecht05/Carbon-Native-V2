@@ -1,4 +1,4 @@
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 
 pub fn in_rollout(installation_id: &str, version: &str, rollout_pct: u8) -> bool {
     if rollout_pct >= 100 {

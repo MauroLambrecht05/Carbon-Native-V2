@@ -3,11 +3,7 @@ use anyhow::Result;
 use std::fs;
 use std::path::Path;
 
-pub fn promote_staging(
-    staging_dir: &Path,
-    slots_dir: &Path,
-    version: &str,
-) -> Result<()> {
+pub fn promote_staging(staging_dir: &Path, slots_dir: &Path, version: &str) -> Result<()> {
     let staged_version = staging_dir.join(version);
     let target_slot = slots_dir.join(version);
 

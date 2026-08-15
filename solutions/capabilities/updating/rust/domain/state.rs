@@ -52,8 +52,8 @@ impl SlotState {
     }
 
     pub fn rollback(&mut self, install_dir: &Path) -> Result<()> {
-        if let Some(prev) = &self.previous_slot {
-            std::mem::swap(&mut self.active_slot, &mut self.previous_slot.as_mut().unwrap());
+        if self.previous_slot.is_some() {
+            std::mem::swap(&mut self.active_slot, self.previous_slot.as_mut().unwrap());
             self.in_progress_count = 0;
         }
         self.save(install_dir)?;

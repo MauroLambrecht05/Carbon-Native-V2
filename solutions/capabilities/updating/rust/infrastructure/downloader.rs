@@ -1,6 +1,6 @@
 use crate::manifest::UpdaterManifest;
 use anyhow::{anyhow, Result};
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -27,7 +27,7 @@ pub fn download_update(
     let filename = platform_entry
         .url
         .split('/')
-        .last()
+        .next_back()
         .unwrap_or("update.bin");
 
     let file_path = version_dir.join(filename);
