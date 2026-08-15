@@ -22,7 +22,7 @@ node_modules/
 /.tools/generators/out/
 dist/
 # Per-app build cache the CLI pipeline writes next to a project's dist/.
-.carboncache/
+.carbon-cache/
 
 # EXCEPTION: the launch test's fixture bundle is an INPUT, not build output.
 #
