@@ -13,10 +13,10 @@
 
 use std::io::Cursor;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
-use image::{DynamicImage, ImageFormat, RgbaImage};
+use image::{ImageFormat, RgbaImage};
 
 use carbon_image::{
     async_load::check_capability,
@@ -42,7 +42,8 @@ fn make_png_bytes(r: u8, g: u8, b: u8) -> Vec<u8> {
     let pixels: Vec<u8> = (0..(w * h)).flat_map(|_| [r, g, b, 255]).collect();
     let img = RgbaImage::from_raw(w, h, pixels).unwrap();
     let mut buf = Vec::new();
-    img.write_to(&mut Cursor::new(&mut buf), ImageFormat::Png).unwrap();
+    img.write_to(&mut Cursor::new(&mut buf), ImageFormat::Png)
+        .unwrap();
     buf
 }
 
@@ -53,7 +54,8 @@ fn make_jpeg_bytes(r: u8, g: u8, b: u8) -> Vec<u8> {
     let rgb: Vec<u8> = (0..(w * h)).flat_map(|_| [r, g, b]).collect();
     let img = image::RgbImage::from_raw(w, h, rgb).unwrap();
     let mut buf = Vec::new();
-    img.write_to(&mut Cursor::new(&mut buf), ImageFormat::Jpeg).unwrap();
+    img.write_to(&mut Cursor::new(&mut buf), ImageFormat::Jpeg)
+        .unwrap();
     buf
 }
 
@@ -98,7 +100,10 @@ fn decode_garbage_bytes_errors() {
 fn decode_byte_len_invariant() {
     let bytes = make_png_bytes(1, 2, 3);
     let img = decode_bytes(&bytes).unwrap();
-    assert_eq!(img.byte_len(), (img.width as usize) * (img.height as usize) * 4);
+    assert_eq!(
+        img.byte_len(),
+        (img.width as usize) * (img.height as usize) * 4
+    );
 }
 
 // ─── File-based decoder tests ─────────────────────────────────────────────
@@ -135,6 +140,10 @@ fn make_decoded(w: u32, h: u32) -> Arc<DecodedImage> {
     })
 }
 
+// Only referenced by decode_sync_to_bytes_returns_uint8array, which is
+// #[ignore]d (it leaks QuickJS GC objects at Runtime drop), so the compiler
+// sees no caller in a normal build.
+#[allow(dead_code)]
 fn dummy_key(name: &str, n: u64) -> CacheKey {
     CacheKey::from_metadata(
         name.to_string(),
@@ -147,7 +156,8 @@ fn dummy_key(name: &str, n: u64) -> CacheKey {
             std::env::var("CARGO_MANIFEST_DIR")
                 .map(|d| format!("{d}/Cargo.toml"))
                 .unwrap_or("Cargo.toml".to_string()),
-        ).unwrap(),
+        )
+        .unwrap(),
     );
     // We can't construct CacheKey directly (fields are private). Use the test
     // key constructor exposed via test cfg.
@@ -179,7 +189,9 @@ fn cache_eviction_drops_oldest() {
     let per = 40 * 4usize;
     let mut cache = ImageCache::new(per * 3);
 
-    let keys: Vec<_> = (0..4).map(|i| CacheKey::test_key(format!("/{i}.png"), i as u64, i as u64 * 10)).collect();
+    let keys: Vec<_> = (0..4)
+        .map(|i| CacheKey::test_key(format!("/{i}.png"), i as u64, i as u64 * 10))
+        .collect();
     let imgs: Vec<_> = (0..4).map(|_| make_decoded(40, 1)).collect();
 
     for (k, img) in keys.iter().zip(imgs.iter()).take(3) {
@@ -234,10 +246,7 @@ fn capability_path_outside_glob_rejected() {
 
 #[test]
 fn capability_multiple_globs() {
-    let globs = vec![
-        "/app/assets/**".to_string(),
-        "/tmp/cache/**".to_string(),
-    ];
+    let globs = vec!["/app/assets/**".to_string(), "/tmp/cache/**".to_string()];
     assert!(check_capability("/app/assets/logo.png", &globs).is_ok());
     assert!(check_capability("/tmp/cache/thumb.jpg", &globs).is_ok());
     assert!(check_capability("/home/user/secret.png", &globs).is_err());
@@ -287,11 +296,17 @@ fn register_image_installs_globals() {
     ctx.with(|ctx| {
         carbon_image::register_image(&ctx, cache, vec!["**".to_string()]).unwrap();
         // Check that the globals exist.
-        let has_load: bool = ctx.eval(b"typeof __carbon_image_load_path === 'function'".as_slice()).unwrap();
+        let has_load: bool = ctx
+            .eval(b"typeof __carbon_image_load_path === 'function'".as_slice())
+            .unwrap();
         assert!(has_load, "__carbon_image_load_path must be a function");
-        let has_bytes: bool = ctx.eval(b"typeof __carbon_image_load_bytes === 'function'".as_slice()).unwrap();
+        let has_bytes: bool = ctx
+            .eval(b"typeof __carbon_image_load_bytes === 'function'".as_slice())
+            .unwrap();
         assert!(has_bytes);
-        let has_sync: bool = ctx.eval(b"typeof __carbon_image_decode_sync === 'function'".as_slice()).unwrap();
+        let has_sync: bool = ctx
+            .eval(b"typeof __carbon_image_decode_sync === 'function'".as_slice())
+            .unwrap();
         assert!(has_sync);
     });
 }
@@ -306,8 +321,7 @@ fn decode_sync_returns_object_with_dimensions() {
         // Encode a 4x2 PNG in Rust, pass it to JS, decode sync.
         let png = make_png_bytes(100, 150, 200);
         // Set global pngBytes (Uint8Array) via Rust, then decode in JS.
-        let typed: rquickjs::TypedArray<u8> =
-            rquickjs::TypedArray::new(ctx.clone(), png).unwrap();
+        let typed: rquickjs::TypedArray<u8> = rquickjs::TypedArray::new(ctx.clone(), png).unwrap();
         ctx.globals().set("_testPngBytes", typed).unwrap();
         let width: i32 = ctx
             .eval(b"__carbon_image_decode_sync(_testPngBytes.buffer).width".as_slice())
@@ -322,18 +336,17 @@ fn decode_sync_returns_object_with_dimensions() {
 
 #[test]
 #[ignore = "leaks QuickJS GC objects at Runtime drop; see note above"]
-fn decode_sync_toBytes_returns_uint8array() {
+fn decode_sync_to_bytes_returns_uint8array() {
     let (ctx, _rt) = make_js_context();
     let cache = carbon_image::default_cache();
     ctx.with(|ctx| {
         carbon_image::register_image(&ctx, cache, vec!["**".to_string()]).unwrap();
         let png = make_png_bytes(255, 128, 64);
-        let typed: rquickjs::TypedArray<u8> =
-            rquickjs::TypedArray::new(ctx.clone(), png).unwrap();
+        let typed: rquickjs::TypedArray<u8> = rquickjs::TypedArray::new(ctx.clone(), png).unwrap();
         ctx.globals().set("_testPng2", typed).unwrap();
-        let byte_count: i32 = ctx.eval(
-            b"__carbon_image_decode_sync(_testPng2.buffer).toBytes().length".as_slice()
-        ).unwrap();
+        let byte_count: i32 = ctx
+            .eval(b"__carbon_image_decode_sync(_testPng2.buffer).toBytes().length".as_slice())
+            .unwrap();
         // 16 * 8 * 4 = 512
         assert_eq!(byte_count, 512);
     });
@@ -346,16 +359,11 @@ fn load_path_rejects_capability_violation() {
     let cache = carbon_image::default_cache();
     ctx.with(|ctx| {
         // Only allow /app/assets/**; try to load /etc/passwd.
-        let result = carbon_image::register_image(
-            &ctx,
-            cache,
-            vec!["/app/assets/**".to_string()],
-        );
+        let result = carbon_image::register_image(&ctx, cache, vec!["/app/assets/**".to_string()]);
         assert!(result.is_ok());
         // __carbon_image_load_path("/etc/passwd") should throw.
-        let r: rquickjs::Result<rquickjs::Value<'_>> = ctx.eval(
-            b"__carbon_image_load_path('/etc/passwd')".as_slice()
-        );
+        let r: rquickjs::Result<rquickjs::Value<'_>> =
+            ctx.eval(b"__carbon_image_load_path('/etc/passwd')".as_slice());
         assert!(r.is_err(), "path outside capability must error");
     });
 }
@@ -378,15 +386,13 @@ fn load_path_succeeds_for_allowed_path() {
     let cache = carbon_image::default_cache();
     ctx.with(|ctx| {
         // Allow all paths for this test (glob "**" matches everything).
-        carbon_image::register_image(
-            &ctx,
-            cache,
-            vec!["**".to_string()],
-        ).unwrap();
+        carbon_image::register_image(&ctx, cache, vec!["**".to_string()]).unwrap();
         // Call load_path. With "**" glob, it should load the file.
         // Use eval to call and get typeof the result.
         let script = format!("typeof __carbon_image_load_path('{path_str}')");
-        let val: String = ctx.eval(script.as_bytes()).unwrap_or_else(|_| "error".to_string());
+        let val: String = ctx
+            .eval(script.as_bytes())
+            .unwrap_or_else(|_| "error".to_string());
         assert_eq!(val, "object", "load_path must return a Promise (object)");
     });
 }
@@ -420,7 +426,11 @@ fn cache_second_hit_is_same_arc() {
     let elapsed = t0.elapsed();
 
     // Cache hit should be fast (no decode = no disk I/O).
-    assert!(elapsed < Duration::from_millis(5), "cache hit too slow: {:?}", elapsed);
+    assert!(
+        elapsed < Duration::from_millis(5),
+        "cache hit too slow: {:?}",
+        elapsed
+    );
     // Same pixel data (pointer equality via Arc).
     assert!(Arc::ptr_eq(&img1, &img2), "cache must return the same Arc");
 }

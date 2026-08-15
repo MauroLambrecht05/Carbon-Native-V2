@@ -34,7 +34,10 @@ pub struct CarbonImageJs {
 impl CarbonImageJs {
     /// Construct from a decoded image (shared via Arc, no copy).
     pub fn from_decoded(image: Arc<DecodedImage>) -> Self {
-        Self { image, texture_id: -1 }
+        Self {
+            image,
+            texture_id: -1,
+        }
     }
 
     /// Build a JS Class<CarbonImageJs> object in the given context.
@@ -53,7 +56,7 @@ impl<'js> Trace<'js> for CarbonImageJs {
     }
 }
 
-unsafe impl<'js> rquickjs::JsLifetime<'js> for CarbonImageJs {
+unsafe impl rquickjs::JsLifetime<'_> for CarbonImageJs {
     type Changed<'to> = CarbonImageJs;
 }
 
@@ -101,9 +104,7 @@ impl<'js> JsClass<'js> for CarbonImageJs {
             ctx,
             &proto,
             "textureId",
-            Func::from(|this: This<Class<'js, CarbonImageJs>>| -> i32 {
-                this.borrow().texture_id
-            }),
+            Func::from(|this: This<Class<'js, CarbonImageJs>>| -> i32 { this.borrow().texture_id }),
             Func::from(|this: This<Class<'js, CarbonImageJs>>, v: i32| {
                 this.borrow_mut().texture_id = v;
             }),

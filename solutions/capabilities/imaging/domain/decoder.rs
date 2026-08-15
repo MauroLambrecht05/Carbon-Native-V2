@@ -16,7 +16,7 @@
 // `avif` feature off) we surface a clear error to JS.
 
 use anyhow::{anyhow, Context, Result};
-use image::{ImageReader, ImageFormat};
+use image::{ImageFormat, ImageReader};
 use std::io::Cursor;
 
 /// One decoded image in canonical RGBA8 layout. `bytes.len() == w * h * 4`.
@@ -97,8 +97,8 @@ pub fn decode_bytes(bytes: &[u8]) -> Result<DecodedImage> {
 /// path-based callers can apply their capability check before hitting
 /// the filesystem.
 pub fn decode_path(path: &std::path::Path) -> Result<DecodedImage> {
-    let bytes = std::fs::read(path)
-        .with_context(|| format!("read image file {}", path.display()))?;
+    let bytes =
+        std::fs::read(path).with_context(|| format!("read image file {}", path.display()))?;
     decode_bytes(&bytes)
 }
 

@@ -43,7 +43,12 @@ impl CacheKey {
     /// Build a key directly from components. Used in tests that can't easily
     /// create real filesystem metadata but need specific key values.
     pub fn test_key(path: String, mtime_secs: u64, size: u64) -> Self {
-        Self { path, mtime_secs, mtime_nanos: 0, size }
+        Self {
+            path,
+            mtime_secs,
+            mtime_nanos: 0,
+            size,
+        }
     }
 
     /// Build a key from a canonical path + the file's std::fs::Metadata.
@@ -136,8 +141,7 @@ impl ImageCache {
             // Keep at least 1 entry even if it alone exceeds the budget.
             if let Some(oldest_key) = self.order.pop_front() {
                 if let Some(evicted) = self.entries.remove(&oldest_key) {
-                    self.total_bytes =
-                        self.total_bytes.saturating_sub(evicted.byte_len());
+                    self.total_bytes = self.total_bytes.saturating_sub(evicted.byte_len());
                 }
             }
         }
@@ -198,7 +202,9 @@ mod tests {
         // When we add a 5th, the first should be evicted.
         let budget = 4 * 100 * 4;
         let mut cache = ImageCache::new(budget);
-        let keys: Vec<_> = (0..5).map(|i| dummy_key(&format!("/{i}.png"), i as u64)).collect();
+        let keys: Vec<_> = (0..5)
+            .map(|i| dummy_key(&format!("/{i}.png"), i as u64))
+            .collect();
         let imgs: Vec<_> = (0..5).map(|_| make_image(100)).collect();
 
         for (k, img) in keys.iter().zip(imgs.iter()).take(4) {
@@ -241,7 +247,10 @@ mod tests {
         cache.insert(key.clone(), make_image(10));
         let before = cache.total_bytes;
         cache.insert(key.clone(), make_image(10)); // duplicate
-        assert_eq!(cache.total_bytes, before, "duplicate must not inflate total_bytes");
+        assert_eq!(
+            cache.total_bytes, before,
+            "duplicate must not inflate total_bytes"
+        );
         assert_eq!(cache.len(), 1);
     }
 }

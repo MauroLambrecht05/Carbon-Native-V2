@@ -89,7 +89,10 @@ fn glob_inner(mut pat: &[u8], mut s: &[u8]) -> bool {
                             return true;
                         }
                         // Only advance past non-separators OR advance past '/'.
-                        if i < s.len() { /* always advance */ } else { break; }
+                        if i < s.len() { /* always advance */
+                        } else {
+                            break;
+                        }
                     }
                     return false;
                 }
@@ -113,7 +116,6 @@ fn glob_inner(mut pat: &[u8], mut s: &[u8]) -> bool {
         }
     }
 }
-
 
 // ─── FINAL DESIGN: synchronous on calling thread, but wrapped in resolved Promise ─
 //
@@ -190,10 +192,7 @@ pub fn load_path_async<'js>(
 
 /// Decode bytes in memory and return a pre-resolved Promise-value.
 /// No cache (no stable key). No capability check (bytes already in memory).
-pub fn load_bytes_async<'js>(
-    ctx: Ctx<'js>,
-    bytes: Vec<u8>,
-) -> JsResult<rquickjs::Value<'js>> {
+pub fn load_bytes_async(ctx: Ctx<'_>, bytes: Vec<u8>) -> JsResult<rquickjs::Value<'_>> {
     let decoded = decode_bytes(&bytes)
         .map(Arc::new)
         .map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
@@ -232,8 +231,9 @@ pub fn make_carbon_image_object<'js>(
     // bound method on the object in JS eval:
     // (We set _bytes above; define toBytes to return a copy via slice()).
     ctx.eval::<(), _>(br#"void 0"#)?; // no-op eval to confirm ctx is usable
-    // Set toBytes as a function that reads _bytes from `this`.
-    let to_bytes_src = b"(function() { return this._bytes ? this._bytes.slice() : new Uint8Array(0); })";
+                                      // Set toBytes as a function that reads _bytes from `this`.
+    let to_bytes_src =
+        b"(function() { return this._bytes ? this._bytes.slice() : new Uint8Array(0); })";
     let to_bytes_fn: Function<'_> = ctx.eval(to_bytes_src.as_slice())?;
     obj.set("toBytes", to_bytes_fn)?;
 
@@ -304,4 +304,3 @@ mod tests {
         assert_eq!(s, r#""hello \"world\"""#);
     }
 }
-

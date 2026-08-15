@@ -54,28 +54,28 @@
 // because cache.rs imports DecodedImage from it: a domain file reaching into
 // infrastructure is the one direction this layering exists to forbid, and the
 // import was correct — the classification was not.
-#[path = "domain/decoder.rs"]
-pub mod decoder;
-#[path = "domain/cache.rs"]
-pub mod cache;
 #[path = "application/async_load.rs"]
 pub mod async_load;
-#[path = "infrastructure/js_class.rs"]
-pub mod js_class;
+#[path = "domain/cache.rs"]
+pub mod cache;
 #[path = "domain/common.rs"]
 mod common;
+#[path = "domain/decoder.rs"]
+pub mod decoder;
+#[path = "infrastructure/js_class.rs"]
+pub mod js_class;
 
+pub use async_load::check_capability;
+pub use cache::ImageCache;
 pub use decoder::DecodedImage;
 pub use image::ImageFormat;
-pub use cache::ImageCache;
 pub use js_class::CarbonImageJs;
-pub use async_load::check_capability;
 
 use std::sync::{Arc, Mutex};
 
-use rquickjs::{Class, Ctx, Exception, Function, Result as JsResult};
 #[allow(unused_imports)]
 use rquickjs::IntoJs as _;
+use rquickjs::{Class, Ctx, Exception, Function, Result as JsResult};
 
 /// Register the `CarbonImage` class and the three loader globals onto the
 /// QuickJS context.
@@ -125,7 +125,9 @@ pub fn register_image<'js>(
     {
         let f = Function::new(
             ctx.clone(),
-            move |ctx2: Ctx<'js>, buf: rquickjs::ArrayBuffer<'js>| -> JsResult<rquickjs::Value<'js>> {
+            move |ctx2: Ctx<'js>,
+                  buf: rquickjs::ArrayBuffer<'js>|
+                  -> JsResult<rquickjs::Value<'js>> {
                 let bytes = buf.as_bytes().unwrap_or(&[]).to_vec();
                 async_load::load_bytes_async(ctx2, bytes)
             },
@@ -137,7 +139,9 @@ pub fn register_image<'js>(
     {
         let f = Function::new(
             ctx.clone(),
-            move |ctx2: Ctx<'js>, buf: rquickjs::ArrayBuffer<'js>| -> JsResult<rquickjs::Object<'js>> {
+            move |ctx2: Ctx<'js>,
+                  buf: rquickjs::ArrayBuffer<'js>|
+                  -> JsResult<rquickjs::Object<'js>> {
                 let bytes_slice = buf.as_bytes().unwrap_or(&[]);
                 let decoded = decoder::decode_bytes(bytes_slice)
                     .map(Arc::new)
@@ -161,7 +165,7 @@ pub fn register_image<'js>(
     //     height: number,
     //   ): number               // GPU texture id, or -1 on failure
     //
-    // The image-intrinsic.ts calls this after a successful load to bind the
+    // The <image> intrinsic calls this after a successful load to bind the
     // decoded image to a wgpu Texture2D on the canvas surface. Until this
     // is implemented, the intrinsic falls back to displaying dimensions as text.
     {
