@@ -1,0 +1,94 @@
+// The real BuildRepository, over Bun's native Postgres client.
+//
+// claimNext is one statement — `UPDATE ... WHERE id = (SELECT ... FOR UPDATE
+// SKIP LOCKED) RETURNING *` — specifically so two workers polling at the same
+// instant cannot both come away with the same build. SKIP LOCKED means a
+// worker that loses the race sees the row as absent rather than blocking on
+// it, so it just gets null back and polls again next tick instead of queuing
+// up behind whoever won.
+//
+// Takes a `Bun.SQL` instance rather than a connection string: the connection
+// itself is products/carbon-cloud/infrastructure/persistence's concern (which
+// database, pooling), this only knows the `builds` table.
+
+import { INSTALLER_TARGETS, type TargetPlatform } from "@carbon/contracts/distribution";
+import { Build, type BuildArtifact, type BuildProps } from "../domain/entities/Build.ts";
+import type { BuildStatus } from "../domain/value-objects/BuildStatus.ts";
+import type { BuildRepository } from "../application/ports/BuildRepository.ts";
+
+interface Row {
+  id: string;
+  org_id: string;
+  repo_url: string;
+  commit_sha: string;
+  targets: string[];
+  status: BuildStatus;
+  worker_id: string | null;
+  artifacts: BuildArtifact[];
+  error: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+function toBuild(row: Row): Build {
+  const props: BuildProps = {
+    id: row.id,
+    orgId: row.org_id,
+    repoUrl: row.repo_url,
+    commitSha: row.commit_sha,
+    targets: row.targets as BuildProps["targets"],
+    status: row.status,
+    workerId: row.worker_id,
+    artifacts: row.artifacts,
+    error: row.error,
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+  };
+  return Build.fromProps(props);
+}
+
+export class PostgresBuildRepository implements BuildRepository {
+  constructor(private readonly sql: Bun.SQL) {}
+
+  async save(build: Build): Promise<void> {
+    const p = build.toProps();
+    await this.sql`
+      INSERT INTO builds (id, org_id, repo_url, commit_sha, targets, status, worker_id, artifacts, error, created_at, updated_at)
+      VALUES (${p.id}, ${p.orgId}, ${p.repoUrl}, ${p.commitSha}, ${JSON.stringify(p.targets)}::jsonb,
+              ${p.status}, ${p.workerId}, ${JSON.stringify(p.artifacts)}::jsonb, ${p.error}, ${p.createdAt}, ${p.updatedAt})
+      ON CONFLICT (id) DO UPDATE SET
+        status = EXCLUDED.status,
+        worker_id = EXCLUDED.worker_id,
+        artifacts = EXCLUDED.artifacts,
+        error = EXCLUDED.error,
+        updated_at = EXCLUDED.updated_at
+    `;
+  }
+
+  async findById(id: string): Promise<Build | null> {
+    const rows = await this.sql<Row[]>`SELECT * FROM builds WHERE id = ${id}`;
+    return rows[0] ? toBuild(rows[0]) : null;
+  }
+
+  async claimNext(platform: TargetPlatform, workerId: string): Promise<Build | null> {
+    // Precomputed here, not in SQL: the target -> platform mapping is a TS
+    // contract (solutions/contracts/distribution), not something the
+    // database should know how to reproduce.
+    const platformTargets = INSTALLER_TARGETS.filter((t) => t.platform === platform).map((t) => t.id);
+    if (platformTargets.length === 0) return null;
+
+    const rows = await this.sql<Row[]>`
+      UPDATE builds
+      SET status = 'claimed', worker_id = ${workerId}, updated_at = now()
+      WHERE id = (
+        SELECT id FROM builds
+        WHERE status = 'queued' AND targets ?| ${platformTargets}::text[]
+        ORDER BY created_at ASC
+        FOR UPDATE SKIP LOCKED
+        LIMIT 1
+      )
+      RETURNING *
+    `;
+    return rows[0] ? toBuild(rows[0]) : null;
+  }
+}

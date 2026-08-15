@@ -1,0 +1,13 @@
+{
+  "name": "@carbon/cloud-workers",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The worker side of Carbon Cloud: claim a build, run it, report back.",
+  "type": "module",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "carbon": {
+    "kind": "service"
+  }
+}

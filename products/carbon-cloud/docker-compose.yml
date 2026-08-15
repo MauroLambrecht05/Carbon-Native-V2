@@ -1,0 +1,86 @@
+# Carbon Cloud — self-hosted, v1.
+#
+# `docker compose up` from this directory brings up everything Phase 2
+# needs: Postgres (builds), MinIO (artifacts + hosted manifests), the
+# control plane, and one Linux worker. Windows/Mac workers join the same
+# `builds` queue later (Phases 3/7) without any change here beyond adding
+# their own service.
+#
+# Build contexts are the repo root (`../..`), not this directory: the
+# control plane and worker both resolve `@carbon/*` path aliases across the
+# whole solutions/ tree, which only works from the workspace root's
+# node_modules junction — see .config/package.json's own note on why.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: carbon_cloud
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-carbon_cloud_dev}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${OBJECT_STORE_ACCESS_KEY_ID:-carbon_cloud}
+      MINIO_ROOT_PASSWORD: ${OBJECT_STORE_SECRET_ACCESS_KEY:-carbon_cloud_dev_secret}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  control-plane:
+    build:
+      context: ../..
+      dockerfile: products/carbon-cloud/composition/docker/control-plane.Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-carbon_cloud_dev}@postgres:5432/carbon_cloud
+      PORT: "8080"
+      OBJECT_STORE_ENDPOINT: http://minio:9000
+      OBJECT_STORE_ACCESS_KEY_ID: ${OBJECT_STORE_ACCESS_KEY_ID:-carbon_cloud}
+      OBJECT_STORE_SECRET_ACCESS_KEY: ${OBJECT_STORE_SECRET_ACCESS_KEY:-carbon_cloud_dev_secret}
+      OBJECT_STORE_BUCKET: carbon-cloud
+      OBJECT_STORE_PUBLIC_BASE_URL: http://localhost:9000/carbon-cloud
+    ports:
+      - "8080:8080"
+
+  worker-linux:
+    build:
+      context: ../..
+      dockerfile: products/carbon-cloud/composition/docker/worker-linux.Dockerfile
+    depends_on:
+      - control-plane
+    environment:
+      CONTROL_PLANE_URL: http://control-plane:8080
+      WORKER_API_TOKEN: ${WORKER_API_TOKEN:-dev-token}
+      WORKER_ID: linux-1
+      OBJECT_STORE_ENDPOINT: http://minio:9000
+      OBJECT_STORE_ACCESS_KEY_ID: ${OBJECT_STORE_ACCESS_KEY_ID:-carbon_cloud}
+      OBJECT_STORE_SECRET_ACCESS_KEY: ${OBJECT_STORE_SECRET_ACCESS_KEY:-carbon_cloud_dev_secret}
+      OBJECT_STORE_BUCKET: carbon-cloud
+      # Signing is optional: unset, the worker builds unsigned artifacts
+      # rather than refusing to start. Set both to sign for real.
+      SIGNING_KEY_PATH: ${SIGNING_KEY_PATH:-}
+      SIGNING_KEY_PASSWORD: ${SIGNING_KEY_PASSWORD:-}
+
+volumes:
+  postgres_data:
+  minio_data:

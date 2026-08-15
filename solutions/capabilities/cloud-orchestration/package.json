@@ -1,0 +1,13 @@
+{
+  "name": "@carbon/cloud-orchestration",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A repo + commit, turned into a tracked, claimable build.",
+  "type": "module",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "carbon": {
+    "kind": "service"
+  }
+}

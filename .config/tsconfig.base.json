@@ -93,6 +93,12 @@
       "@carbon/cli": [
         "../solutions/interface/cli/index.ts"
       ],
+      "@carbon/cloud-orchestration": [
+        "../solutions/capabilities/cloud-orchestration/index.ts"
+      ],
+      "@carbon/cloud-workers": [
+        "../solutions/capabilities/cloud-workers/index.ts"
+      ],
       "@carbon/contracts/app": [
         "../solutions/contracts/app/types/CarbonManifest.ts"
       ],

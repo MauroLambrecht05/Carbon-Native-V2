@@ -1,0 +1,12 @@
+{
+  "name": "carbon-cloud",
+  "version": "0.1.0",
+  "description": "Carbon Cloud: build, sign, package, publish and serve updates for carbon apps.",
+  "type": "module",
+  "scripts": {
+    "start": "bun ./composition/entrypoint.ts"
+  },
+  "engines": {
+    "bun": ">=1.3.0"
+  }
+}
