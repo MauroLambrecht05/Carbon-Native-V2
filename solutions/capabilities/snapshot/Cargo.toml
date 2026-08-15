@@ -26,15 +26,20 @@ name = "carbon-snapshot"
 version = "0.1.0"
 edition = "2021"
 rust-version.workspace = true
-license = "Apache-2.0"
 description = "Native QuickJS heap snapshot/restore at a fixed memory address (Windows-only; non-Windows builds compile to no-op stubs). Depends only on rquickjs and its own hand-rolled Win32 FFI bindings."
-# The workspace manifest lives in .config/rust. Cargo only walks UP from a
-# crate, so it would never find it — the link has to be explicit.
-workspace = "../../../.config/rust"
+# The workspace manifest lives in .tools/orchestration/bazel/cargo, beside the
+# Bazel rules that drive it. Cargo only walks UP from a crate, so it would
+# never find it — the link has to be explicit.
+workspace = "../../../.tools/orchestration/bazel/cargo"
 
 [lib]
 name = "carbon_snapshot"
 path = "lib.rs"
+
+# Clippy runs with -D warnings; the shared allow-list lives in the workspace
+# root so one rationale covers every crate. See //.tools/orchestration/bazel/cargo/Cargo.toml.
+[lints]
+workspace = true
 
 [dependencies]
 rquickjs = { version = "0.9", default-features = false, features = ["loader", "classes", "macro"] }

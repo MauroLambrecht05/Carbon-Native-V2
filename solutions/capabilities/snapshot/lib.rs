@@ -57,6 +57,24 @@
 
 use std::ffi::c_void;
 
+// ── Layout ──────────────────────────────────────────────────────────────────
+//   domain/          the on-disk header and control block. Frozen, and pure
+//                    layout — no Win32, no allocator.
+//   infrastructure/  the Win32 calls: VirtualAlloc at a fixed address, the
+//                    module-base check. The only platform-specific part.
+//
+// The rest — the allocator and the copy — is what actually changes, and stays
+// in this file. The directory names are the same two the other Rust
+// capabilities use rather than the `format/` + `platform/` this crate invented
+// for itself; a frozen byte layout is a model and a Win32 call is an adapter,
+// which is exactly what those two words mean everywhere else in solutions/.
+#[path = "infrastructure/win.rs"]
+mod win;
+#[path = "domain/header.rs"]
+mod header;
+use header::*;
+
+
 // ── Fixed arena geometry ────────────────────────────────────────────────────
 
 /// Base virtual address for the arena. Chosen high in the 128-TiB user VA
@@ -77,40 +95,8 @@ const MAX_SMALL_PAYLOAD: usize = 1024 * 1024; // 1 MiB
 /// Number of small size classes: payload 16,32,…,MAX_SMALL_PAYLOAD.
 const NUM_CLASSES: usize = MAX_SMALL_PAYLOAD / 16; // 65536
 
-/// 16-byte per-allocation header. `size` is the rounded payload size in bytes
-/// (what the allocator considers this block to be), recoverable from just the
-/// user pointer so `free`/`realloc`/`usable_size` work without a size arg.
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct Hdr {
-    size: u64,
-    magic: u32,
-    _pad: u32,
-}
 const HDR_SIZE: usize = 16;
 const HDR_MAGIC: u32 = 0xC0DECAFE;
-
-/// Arena control block, placed at `ARENA_BASE_ADDR`. Everything the allocator
-/// needs lives here so the whole allocator state round-trips with the snapshot.
-/// Field layout is `#[repr(C)]` and version-tagged; never reorder without
-/// bumping `SNAP_VERSION`.
-#[repr(C)]
-struct Control {
-    magic: u64,
-    version: u64,
-    exe_base: u64,    // module base of carbon-mini.exe at build time (ASLR guard)
-    base: u64,        // == ARENA_BASE_ADDR
-    reserve: u64,     // == ARENA_RESERVE
-    committed: u64,   // bytes committed from base
-    bump: u64,        // next fresh-allocation address
-    data_start: u64,  // first allocatable address (past this struct)
-    rt: u64,          // *mut JSRuntime
-    ctx: u64,         // *mut JSContext
-    huge_head: u64,   // free list of huge blocks (header addresses)
-    alloc_calls: u64, // stats
-    live_bytes: u64,  // stats: currently-handed-out payload bytes (approx)
-    free_heads: [u64; NUM_CLASSES], // per-class free-list heads (header addrs)
-}
 
 const SNAP_MAGIC: u64 = 0x434D5F534E_415031; // "CM_SNAP1" -ish
 const SNAP_VERSION: u64 = 2;
@@ -120,73 +106,13 @@ const SNAP_VERSION: u64 = 2;
 /// is only ever called from there, so a plain `static mut` raw pointer is safe.
 static mut CTRL: *mut Control = std::ptr::null_mut();
 
-#[inline]
-fn round16(n: usize) -> usize {
-    (n + 15) & !15
-}
-#[inline]
-fn align_up(n: usize, a: usize) -> usize {
-    (n + a - 1) & !(a - 1)
-}
-
-// ── Windows VirtualAlloc bindings ────────────────────────────────────────────
-
-#[cfg(windows)]
-mod win {
-    use std::ffi::c_void;
-    extern "system" {
-        pub fn VirtualAlloc(
-            lpAddress: *mut c_void,
-            dwSize: usize,
-            flAllocationType: u32,
-            flProtect: u32,
-        ) -> *mut c_void;
-        pub fn VirtualFree(lpAddress: *mut c_void, dwSize: usize, dwFreeType: u32) -> i32;
-        pub fn GetModuleHandleW(lpModuleName: *const u16) -> *mut c_void;
-        pub fn CreateFileW(
-            name: *const u16,
-            access: u32,
-            share: u32,
-            sec: *mut c_void,
-            disposition: u32,
-            flags: u32,
-            template: *mut c_void,
-        ) -> *mut c_void;
-        pub fn CreateFileMappingW(
-            file: *mut c_void,
-            sec: *mut c_void,
-            protect: u32,
-            max_hi: u32,
-            max_lo: u32,
-            name: *const u16,
-        ) -> *mut c_void;
-        pub fn MapViewOfFileEx(
-            mapping: *mut c_void,
-            desired: u32,
-            off_hi: u32,
-            off_lo: u32,
-            bytes: usize,
-            base: *mut c_void,
-        ) -> *mut c_void;
-        pub fn CloseHandle(h: *mut c_void) -> i32;
-    }
-    pub const MEM_COMMIT: u32 = 0x1000;
-    pub const MEM_RESERVE: u32 = 0x2000;
-    pub const MEM_RELEASE: u32 = 0x8000;
-    pub const PAGE_READWRITE: u32 = 0x04;
-    pub const PAGE_WRITECOPY: u32 = 0x08;
-    pub const GENERIC_READ: u32 = 0x8000_0000;
-    pub const FILE_SHARE_READ: u32 = 0x1;
-    pub const OPEN_EXISTING: u32 = 3;
-    pub const FILE_ATTRIBUTE_NORMAL: u32 = 0x80;
-    pub const FILE_MAP_COPY: u32 = 0x1;
-    pub const INVALID_HANDLE_VALUE: isize = -1;
-}
-
 #[cfg(windows)]
 fn to_wide(s: &std::path::Path) -> Vec<u16> {
     use std::os::windows::ffi::OsStrExt;
-    s.as_os_str().encode_wide().chain(std::iter::once(0)).collect()
+    s.as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
 }
 
 /// Base address of the main executable module. Constant across runs only when
@@ -543,10 +469,8 @@ pub fn snapshot_to_vec() -> Result<Vec<u8>, String> {
             compressed: 1,
         };
         let mut out = Vec::with_capacity(FILE_HEADER_SIZE + compressed.len());
-        let hdr_bytes = std::slice::from_raw_parts(
-            &hdr as *const FileHeader as *const u8,
-            FILE_HEADER_SIZE,
-        );
+        let hdr_bytes =
+            std::slice::from_raw_parts(&hdr as *const FileHeader as *const u8, FILE_HEADER_SIZE);
         out.extend_from_slice(hdr_bytes);
         out.extend_from_slice(&compressed);
         Ok(out)
@@ -590,7 +514,10 @@ pub fn restore_from_bytes(data: &[u8]) -> Result<Restored, String> {
             return Err("snapshot: bad magic".into());
         }
         if hdr.version != SNAP_VERSION {
-            return Err(format!("snapshot: version {} != {SNAP_VERSION}", hdr.version));
+            return Err(format!(
+                "snapshot: version {} != {SNAP_VERSION}",
+                hdr.version
+            ));
         }
         let cur_exe = exe_base();
         if hdr.exe_base != cur_exe {
@@ -704,7 +631,8 @@ pub fn write_snapshot_mmap(path: &std::path::Path) -> Result<usize, String> {
             use std::io::Write;
             let mut f = std::fs::File::create(path)
                 .map_err(|e| format!("create {}: {e}", path.display()))?;
-            f.write_all(arena).map_err(|e| format!("write {}: {e}", path.display()))?;
+            f.write_all(arena)
+                .map_err(|e| format!("write {}: {e}", path.display()))?;
             if used_padded > used {
                 f.write_all(&vec![0u8; used_padded - used])
                     .map_err(|e| format!("pad {}: {e}", path.display()))?;
@@ -721,10 +649,8 @@ pub fn write_snapshot_mmap(path: &std::path::Path) -> Result<usize, String> {
             ctx: ctrl.ctx,
             compressed: 0,
         };
-        let hdr_bytes = std::slice::from_raw_parts(
-            &hdr as *const FileHeader as *const u8,
-            FILE_HEADER_SIZE,
-        );
+        let hdr_bytes =
+            std::slice::from_raw_parts(&hdr as *const FileHeader as *const u8, FILE_HEADER_SIZE);
         let meta = path.with_extension("meta");
         std::fs::write(&meta, hdr_bytes).map_err(|e| format!("write {}: {e}", meta.display()))?;
         Ok(used)
@@ -753,7 +679,10 @@ pub fn restore_mmap(path: &std::path::Path) -> Result<Restored, String> {
             return Err("mmap restore: bad magic".into());
         }
         if hdr.version != SNAP_VERSION {
-            return Err(format!("mmap restore: version {} != {SNAP_VERSION}", hdr.version));
+            return Err(format!(
+                "mmap restore: version {} != {SNAP_VERSION}",
+                hdr.version
+            ));
         }
         if hdr.exe_base != exe_base() {
             return Err(format!(
@@ -763,7 +692,9 @@ pub fn restore_mmap(path: &std::path::Path) -> Result<Restored, String> {
             ));
         }
         if hdr.fingerprint != code_fingerprint() {
-            return Err("mmap restore: code fingerprint mismatch (built by a different binary)".into());
+            return Err(
+                "mmap restore: code fingerprint mismatch (built by a different binary)".into(),
+            );
         }
         if hdr.base as usize != ARENA_BASE_ADDR {
             return Err("mmap restore: arena base mismatch".into());
