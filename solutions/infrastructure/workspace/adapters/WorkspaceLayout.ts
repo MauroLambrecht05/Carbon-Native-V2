@@ -113,13 +113,35 @@ export const CONFIG_DIR = join(CARBON_ROOT, ".config");
 export const SCRIPTS_DIR = TOOLS_DIR;
 
 /**
- * Checksummed third-party release binaries (bsdiff, zstd, …) that the release
- * pipeline shells out to. V1 kept these in tools/vendor.
+ * The publish-time delta tool, or null when it has not been built.
+ *
+ * This replaced VENDOR_DIR, which pointed at two prebuilt Windows executables
+ * committed at .tools/vendor — `bsdiff.exe` and `zig-zstd.exe`. They made
+ * `carbon publish` a Windows-only command and they were the only committed
+ * binaries in the repository. `carbon-delta` is built from
+ * solutions/capabilities/publishing/rust like any other crate.
+ *
+ * Searches BINARY_PROFILES in preference order, the same way a runtime binary
+ * is resolved — a release build wins over a debug one when both exist.
  */
-export const VENDOR_DIR = join(TOOLS_DIR, "vendor");
+export function resolveDeltaTool(): string | null {
+  const exe = process.platform === "win32" ? ".exe" : "";
+  for (const profile of BINARY_PROFILES) {
+    const candidate = join(TARGET_DIR, profile, `carbon-delta${exe}`);
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
 
-/** Generated and machine-local trees. Nothing here is source. */
-export const LOCAL_DIR = join(CARBON_ROOT, ".local");
+/**
+ * The Cargo workspace: the manifest, the lockfile, and the target directory
+ * cargo writes into.
+ *
+ * Beside the Bazel rules that drive it. It was `.config/rust`, which put a
+ * 17-member workspace manifest in the tier that holds configuration, next to
+ * `.config/toolchains/rust/` — two directories called `rust` in one place.
+ */
+export const CARGO_WORKSPACE_DIR = join(TOOLS_DIR, "orchestration", "bazel", "cargo");
 
 /**
  * Source files the build pipeline reads directly rather than importing.
@@ -138,10 +160,12 @@ export const TAILWIND_CLASSES_SRC = join(
  * Cargo build output. One workspace → one target directory, so every backend
  * binary lands in the same place regardless of which crate produced it.
  */
-// `.build/rust`, not `.build/bin`: the cargo rules set CARGO_TARGET_DIR to the
-// former (see .tools/orchestration/bazel/cargo/defs.bzl). They disagreed, so
-// `carbon run` looked for a binary in a directory cargo never writes to.
-export const TARGET_DIR = join(CARBON_ROOT, ".build", "rust");
+// `target/` beside the Cargo workspace manifest, and it must match
+// CARGO_TARGET_DIR in .tools/orchestration/bazel/cargo/defs.bzl and
+// `target-dir` in .cargo/config.toml exactly. All three have disagreed before,
+// and the symptom is a binary that builds and cannot be found —
+// //.tools/validation:workspace_test compares them.
+export const TARGET_DIR = join(CARGO_WORKSPACE_DIR, "target");
 
 /**
  * Profiles searched for a runtime binary, in preference order.
@@ -206,8 +230,22 @@ export function backendRenderersDir(_backend: BackendName): string {
 export const MINI_REACT_SRC = join(RENDERERS_DIR, "react", "index.ts");
 /** The Solid renderer a scaffolded project depends on. */
 export const MINI_SOLID_SRC = join(RENDERERS_DIR, "solid", "index.ts");
-export const COMPAT_DOM_INSTALL_SRC = join(STDLIB_DIR, "dom", "install.ts");
+export const COMPAT_DOM_INSTALL_SRC = join(STDLIB_DIR, "dom", "globals", "install.ts");
 export const COMPAT_DOM_SRC = join(STDLIB_DIR, "dom", "index.ts");
+
+/**
+ * The injected packages' SUBPATH entries, one constant each.
+ *
+ * The build pipeline used to derive these with `join(dirname(MINI_REACT_SRC),
+ * "jsx-runtime.ts")` — which reads as "next to the renderer's index" and is
+ * really "I know how that package is laid out inside". It broke the moment the
+ * renderers grew directories. A subpath is part of a package's public surface
+ * (each one has a matching `exports` entry in its package.json); naming them
+ * here keeps the pipeline resolving entries rather than guessing at files.
+ */
+export const MINI_REACT_JSX_RUNTIME_SRC = join(RENDERERS_DIR, "react", "runtime", "jsx-runtime.ts");
+export const MINI_SOLID_POLYFILLS_SRC = join(RENDERERS_DIR, "solid", "runtime", "polyfills.ts");
+export const MINI_SOLID_IMAGE_SRC = join(RENDERERS_DIR, "solid", "intrinsics", "image.ts");
 
 /** Path a backend binary would occupy under a given profile, built or not. */
 export function backendBinaryPath(backend: BackendName, profile: string = "release"): string {
