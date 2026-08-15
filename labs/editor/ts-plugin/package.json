@@ -10,7 +10,5 @@
   "exports": {
     ".": "./src/index.js"
   },
-  "dependencies": {
-    "@carbon/mini-solid": "workspace:*"
-  }
+  "//dependencies": "None. `@carbon/mini-solid` was declared here as `workspace:*`, but the plugin never imports it — it EMITS the string `import { mount } from \"@carbon/mini-solid\"` into the user's virtual file (src/index.js:37) so the TS server type-checks their code. A string in generated output is not a dependency of the generator, and V2 has no bun workspace to resolve the specifier against anyway."
 }
