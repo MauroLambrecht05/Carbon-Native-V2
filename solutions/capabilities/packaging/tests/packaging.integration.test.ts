@@ -33,6 +33,8 @@ class MemoryWriter implements PackageWriter {
   writeFile(path: string, contents: string): void {
     this.files.set(path, contents);
   }
+  copyFile(): void {}
+  makeExecutable(): void {}
 }
 
 function useCase(writer: PackageWriter = new MemoryWriter()) {

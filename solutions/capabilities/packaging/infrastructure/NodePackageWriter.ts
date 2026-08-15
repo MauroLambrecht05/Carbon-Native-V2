@@ -1,6 +1,6 @@
 // The real filesystem.
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { PackageWriter } from "../application/ports/PackageWriter.ts";
 
@@ -12,5 +12,14 @@ export class NodePackageWriter implements PackageWriter {
   writeFile(path: string, contents: string): void {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, contents);
+  }
+
+  copyFile(from: string, to: string): void {
+    mkdirSync(dirname(to), { recursive: true });
+    copyFileSync(from, to);
+  }
+
+  makeExecutable(path: string): void {
+    chmodSync(path, 0o755);
   }
 }
