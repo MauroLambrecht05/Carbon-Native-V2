@@ -15,3 +15,8 @@ export { verifyFile } from "./application/usecases/VerifyFileUseCase.ts";
 export { rotateKeypair, rotateKeypair as rotate, DEFAULT_VALIDITY_WINDOW_DAYS } from "./application/usecases/RotateKeypairUseCase.ts";
 export { signManifest, verifyManifest, verifyManifestFile, canonicalizeManifest } from "./application/usecases/SignManifestUseCase.ts";
 export { readSecretKey, readPublicKey, readSigFile, writeKeypair, writeSigFile, writePublicKey, writeSecretKey, ALGORITHM } from "./infrastructure/MinisignKeyStore.ts";
+export {
+  signAuthenticode,
+  AuthenticodeSignError,
+  type AuthenticodeCredentials,
+} from "./infrastructure/AuthenticodeSigner.ts";

@@ -9,8 +9,7 @@
 // a real toolchain installed, which is true on a build worker and not
 // generally true on a dev laptop.
 //
-// Linux only for now (deb, appimage) — the first worker target. Windows
-// (nsis, wix) and macOS (dmg) builders land with their own workers.
+// macOS (dmg) still needs its own worker before it has a builder here.
 
 import type { CarbonConfig } from "@carbon/contracts/app";
 import type { ProcessRunner } from "@carbon/process";
@@ -23,6 +22,8 @@ import {
 import type { PackageWriter } from "../ports/PackageWriter.ts";
 import { buildAppImage } from "../../infrastructure/builders/appimage.ts";
 import { buildDeb } from "../../infrastructure/builders/deb.ts";
+import { buildNsis } from "../../infrastructure/builders/nsis.ts";
+import { buildWix } from "../../infrastructure/builders/wix.ts";
 import { UnknownTargetError, WrongPlatformError } from "./GeneratePackageUseCase.ts";
 
 type Builder = (
@@ -36,14 +37,13 @@ type Builder = (
 const BUILDERS: Partial<Record<InstallerTargetId, Builder>> = {
   deb: buildDeb,
   appimage: buildAppImage,
+  nsis: buildNsis,
+  wix: buildWix,
 };
 
 export class TargetNotBuildableError extends Error {
   constructor(readonly target: InstallerTargetId) {
-    super(
-      `${target} has a generator but no builder yet — only deb and appimage ` +
-        `actually invoke a toolchain today`,
-    );
+    super(`${target} has a generator but no builder yet — dmg needs a macOS worker first`);
   }
 }
 

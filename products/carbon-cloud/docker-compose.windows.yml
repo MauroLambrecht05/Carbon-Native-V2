@@ -1,0 +1,35 @@
+# The Windows worker, separately: a single Docker Engine is Linux-container
+# OR Windows-container mode, never both, so this cannot be one more service
+# in docker-compose.yml alongside postgres/minio/control-plane/worker-linux.
+# Run this on a Windows Docker host, pointed at the same control plane those
+# bring up (CONTROL_PLANE_URL is the control plane's reachable address from
+# that host — not `http://control-plane:8080`, which only resolves inside
+# the Linux compose network).
+#
+#   docker compose -f docker-compose.windows.yml up
+#
+# See composition/docker/worker-windows.Dockerfile's own note: written to
+# the same standard as the Linux worker, unverified against a real Windows
+# Docker host.
+
+services:
+  worker-windows:
+    build:
+      context: ../..
+      dockerfile: products/carbon-cloud/composition/docker/worker-windows.Dockerfile
+    environment:
+      CONTROL_PLANE_URL: ${CONTROL_PLANE_URL:?set to the control plane's reachable URL}
+      WORKER_API_TOKEN: ${WORKER_API_TOKEN:-dev-token}
+      WORKER_ID: windows-1
+      OBJECT_STORE_ENDPOINT: ${OBJECT_STORE_ENDPOINT:?}
+      OBJECT_STORE_ACCESS_KEY_ID: ${OBJECT_STORE_ACCESS_KEY_ID:-carbon_cloud}
+      OBJECT_STORE_SECRET_ACCESS_KEY: ${OBJECT_STORE_SECRET_ACCESS_KEY:-carbon_cloud_dev_secret}
+      OBJECT_STORE_BUCKET: carbon-cloud
+      SIGNING_KEY_PATH: ${SIGNING_KEY_PATH:-}
+      SIGNING_KEY_PASSWORD: ${SIGNING_KEY_PASSWORD:-}
+      # Authenticode — optional, same as the Linux worker's minisign key.
+      # Unset, artifacts still get the minisign signature; they just aren't
+      # Authenticode-signed, and Windows will warn on install.
+      CARBON_CERT_PATH: ${CARBON_CERT_PATH:-}
+      CARBON_CERT_PASSWORD: ${CARBON_CERT_PASSWORD:-}
+      CARBON_TIMESTAMP_SERVER: ${CARBON_TIMESTAMP_SERVER:-}

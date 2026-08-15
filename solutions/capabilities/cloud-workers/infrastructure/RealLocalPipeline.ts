@@ -8,7 +8,13 @@ import type { CarbonConfig } from "@carbon/contracts/app";
 import type { InstallerTargetId } from "@carbon/contracts/distribution";
 import { buildProject, ensureNodeModules, ensureRuntime } from "@carbon/bundling";
 import { generatePackageUseCase, buildPackageUseCase } from "@carbon/packaging";
-import { signFile, readSecretKey } from "@carbon/signing";
+import {
+  signFile,
+  readSecretKey,
+  signAuthenticode,
+  type AuthenticodeCredentials,
+} from "@carbon/signing";
+import { nodeProcessRunner } from "@carbon/process";
 import type { Logger } from "@carbon/logging";
 import type { LocalPipeline, PackagedTarget } from "../application/ports/LocalPipeline.ts";
 
@@ -17,8 +23,18 @@ export interface SigningKey {
   readonly password: string;
 }
 
+// nsis/wix produce a real Windows executable/MSI; a minisign signature on
+// disk means nothing to Windows itself (SmartScreen, Defender) — that needs
+// Authenticode. Every other target's minisign signature is the only one
+// that applies.
+const AUTHENTICODE_TARGETS: readonly InstallerTargetId[] = ["nsis", "wix"];
+
 export class RealLocalPipeline implements LocalPipeline {
-  constructor(private readonly logger: Logger, private readonly signingKey?: SigningKey) {
+  constructor(
+    private readonly logger: Logger,
+    private readonly signingKey?: SigningKey,
+    private readonly authenticode?: AuthenticodeCredentials,
+  ) {
     // Fails fast on a bad key/password rather than on the first artifact of
     // the first job — a worker that can't sign shouldn't claim work at all.
     if (signingKey) readSecretKey(signingKey.keyFile, signingKey.password);
@@ -40,6 +56,9 @@ export class RealLocalPipeline implements LocalPipeline {
     await generatePackageUseCase().execute({ target, config, binaryPath, outputDir: outDir });
     const built = await buildPackageUseCase().execute({ target, config, binaryPath, dir: join(outDir, target) });
 
+    if (this.authenticode && AUTHENTICODE_TARGETS.includes(target)) {
+      await signAuthenticode(built.outputPath, this.authenticode, nodeProcessRunner);
+    }
     if (this.signingKey) {
       signFile(built.outputPath, this.signingKey.keyFile, this.signingKey.password);
     }

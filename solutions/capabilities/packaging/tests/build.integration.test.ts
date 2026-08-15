@@ -1,10 +1,11 @@
 // Building a real installer from a generated definition.
 //
-// Linux only (deb, appimage) — the toolchain a build worker has today.
-// Windows/macOS builders land with their own workers; requesting them here
-// is a clear refusal (TargetNotBuildableError), not a silent no-op.
+// Linux (deb, appimage) and Windows (nsis, wix) — the toolchains a build
+// worker has today. macOS (dmg) needs its own worker; requesting it here is
+// a clear refusal (TargetNotBuildableError), not a silent no-op.
 
 import { describe, expect, test } from "bun:test";
+import { join } from "node:path";
 import type { CarbonConfig } from "@carbon/contracts/app";
 import type { ProcessOptions, ProcessResult, ProcessRunner } from "@carbon/process";
 import {
@@ -114,6 +115,49 @@ describe("appimage", () => {
   });
 });
 
+describe("nsis", () => {
+  test("copies the binary beside the script and invokes makensis", async () => {
+    const { useCase: uc, writer, runner } = useCase();
+    const result = await uc.execute({
+      target: "nsis",
+      config,
+      binaryPath: "/build/carbon-mini.exe",
+      dir: "/out/nsis",
+      platform: "win32",
+    });
+
+    expect(writer.files.has("/out/nsis/installer.nsi")).toBe(true);
+    expect(writer.copies).toContainEqual([
+      "/build/carbon-mini.exe",
+      join("/out/nsis", "carbon-mini.exe"),
+    ]);
+    expect(runner.calls[0]!.command).toBe("makensis");
+    expect(runner.calls[0]!.args).toEqual(["/out/nsis/installer.nsi"]);
+    expect(result.outputPath).toBe("/out/nsis/Demo App-1.2.3-setup.exe");
+  });
+});
+
+describe("wix", () => {
+  test("copies the binary beside the wxs and invokes wix build", async () => {
+    const { useCase: uc, writer, runner } = useCase();
+    const result = await uc.execute({
+      target: "wix",
+      config,
+      binaryPath: "/build/carbon-mini.exe",
+      dir: "/out/wix",
+      platform: "win32",
+    });
+
+    expect(writer.files.has("/out/wix/installer.wxs")).toBe(true);
+    expect(writer.copies).toContainEqual([
+      "/build/carbon-mini.exe",
+      join("/out/wix", "carbon-mini.exe"),
+    ]);
+    expect(runner.calls[0]!.command).toBe("wix");
+    expect(result.outputPath).toBe("/out/wix/Demo App-1.2.3.msi");
+  });
+});
+
 describe("refusals", () => {
   test("an unknown target is refused", async () => {
     const { useCase: uc } = useCase();
@@ -129,10 +173,10 @@ describe("refusals", () => {
     ).rejects.toThrow(WrongPlatformError);
   });
 
-  test("nsis has a generator but no builder yet", async () => {
+  test("dmg has a generator but no builder yet — no macOS worker exists", async () => {
     const { useCase: uc } = useCase();
     await expect(
-      uc.execute({ target: "nsis", config, binaryPath: "/b", dir: "/o", platform: "win32" }),
+      uc.execute({ target: "dmg", config, binaryPath: "/b", dir: "/o", platform: "darwin" }),
     ).rejects.toThrow(TargetNotBuildableError);
   });
 });
