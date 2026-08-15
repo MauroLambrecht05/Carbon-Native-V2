@@ -42,6 +42,8 @@ export async function cloudCommand(rest: string[]): Promise<number> {
 
   try {
     switch (subcommand) {
+      case "signup":
+        return await cloudSignup(args);
       case "login":
         return await cloudLogin(args);
       case "deploy":
@@ -62,6 +64,44 @@ export async function cloudCommand(rest: string[]): Promise<number> {
     log.error(`carbon cloud failed: ${e instanceof Error ? e.message : String(e)}`);
     return 1;
   }
+}
+
+async function cloudSignup(args: string[]): Promise<number> {
+  let controlPlaneUrl = "";
+  let name = "";
+  let i = 0;
+  while (i < args.length) {
+    if (args[i] === "--url" && i + 1 < args.length) {
+      controlPlaneUrl = args[i + 1];
+      i += 2;
+    } else if (args[i] === "--name" && i + 1 < args.length) {
+      name = args[i + 1];
+      i += 2;
+    } else {
+      i++;
+    }
+  }
+
+  if (!controlPlaneUrl || !name) {
+    log.error("--url and --name are both required");
+    return 1;
+  }
+
+  const res = await fetch(`${controlPlaneUrl.replace(/\/$/, "")}/v1/orgs`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) {
+    log.error(`control plane returned ${res.status}: ${await res.text()}`);
+    return 1;
+  }
+  const { orgId, apiToken } = (await res.json()) as { orgId: string; apiToken: string };
+
+  writeCredentials({ controlPlaneUrl: controlPlaneUrl.replace(/\/$/, ""), apiToken });
+  log.success(`created org ${orgId}, saved credentials to ${CREDENTIALS_PATH}`);
+  log.warn("this token is shown once — it's already saved, but back it up if you manage secrets separately");
+  return 0;
 }
 
 async function cloudLogin(args: string[]): Promise<number> {
@@ -172,7 +212,11 @@ ${c.bold("Usage:")}
   carbon cloud <subcommand> [options]
 
 ${c.bold("Subcommands:")}
-  ${c.cyan("login")}    Save credentials for a control plane
+  ${c.cyan("signup")}   Create an org and save its token (self-hosted v1: this is the whole signup flow)
+               --url <url>                 (required)
+               --name <org-name>           (required)
+
+  ${c.cyan("login")}    Save credentials for a control plane you already have a token for
                --url <url>                 (required)
                --token <token>             (required)
 
@@ -185,6 +229,7 @@ ${c.bold("Subcommands:")}
                <build-id>                  (required)
 
 ${c.bold("Examples:")}
+  ${c.dim("$")} carbon cloud signup --url https://cloud.example.com --name "My Org"
   ${c.dim("$")} carbon cloud login --url https://cloud.example.com --token abc123
   ${c.dim("$")} carbon cloud deploy --repo https://github.com/me/app.git --commit HEAD --target deb
   ${c.dim("$")} carbon cloud status 9f2c...
@@ -197,9 +242,9 @@ export class CloudCommand extends Command {
   readonly meta: CommandMeta = {
     name: "cloud",
     summary: "Build, sign and publish through Carbon Cloud",
-    usage: "cloud <login|deploy|status> [options]",
+    usage: "cloud <signup|login|deploy|status> [options]",
     examples: [
-      "carbon cloud login --url https://cloud.example.com --token abc123",
+      "carbon cloud signup --url https://cloud.example.com --name \"My Org\"",
       "carbon cloud deploy --repo https://github.com/me/app.git --commit HEAD --target deb",
     ],
   };

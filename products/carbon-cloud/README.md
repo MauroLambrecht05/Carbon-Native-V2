@@ -21,20 +21,33 @@ docker compose up
 ```
 
 Brings up Postgres, MinIO, the control plane (`:8080`) and one Linux worker.
+The Linux worker needs `WORKER_API_TOKEN` set to a *real* token (see below —
+`docker-compose.yml`'s `dev-token` default is a placeholder and will get a
+401 until you replace it) — sign up once, then export it before `up`.
 
 ## Trigger a build
 
 ```sh
-bun products/carbon-cli/main.ts cloud login --url http://localhost:8080 --token dev-token
+# Once: create the org the worker and the CLI both authenticate as.
+bun products/carbon-cli/main.ts cloud signup --url http://localhost:8080 --name "My Org"
+# Copy the printed token into WORKER_API_TOKEN and restart worker-linux.
+
 bun products/carbon-cli/main.ts cloud deploy --repo <git-url> --commit <sha> --target deb
 bun products/carbon-cli/main.ts cloud status <build-id>
 ```
 
+Already have a token (a second machine, CI)? `cloud login --url <url> --token
+<token>` saves it without creating another org.
+
 ## What's real vs. what's next
 
 Real: the build queue (Postgres, `FOR UPDATE SKIP LOCKED` claims), the Linux
-worker (checks out, builds, packages `.deb`/`.AppImage` for real via
-`dpkg-deb`/`appimagetool`, uploads to S3-compatible storage), the dashboard.
+and Windows workers (checks out, builds, packages for real via
+`dpkg-deb`/`appimagetool`/`makensis`/`wix`, signs with Authenticode on
+Windows, uploads to S3-compatible storage), orgs + API tokens gating every
+`/v1/builds/*` request, the dashboard.
 
-Not yet: Windows/Mac workers, accounts/orgs (everything is org `"default"`
-today), billing, a real dashboard beyond build-status lookup.
+Not yet: a Mac worker, billing, per-build authorization (any valid token can
+claim/complete any org's queued work — fine for one self-hosted deployment
+you control every worker for, a real gap for multiple untrusted tenants), a
+real dashboard beyond build-status lookup.

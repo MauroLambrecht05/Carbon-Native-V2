@@ -99,6 +99,9 @@
       "@carbon/cloud-workers": [
         "../solutions/capabilities/cloud-workers/index.ts"
       ],
+      "@carbon/identity": [
+        "../solutions/capabilities/identity/index.ts"
+      ],
       "@carbon/contracts/app": [
         "../solutions/contracts/app/types/CarbonManifest.ts"
       ],

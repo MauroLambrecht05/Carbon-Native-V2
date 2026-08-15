@@ -10,6 +10,11 @@ import {
   GetBuildUseCase,
   PostgresBuildRepository,
 } from "@carbon/cloud-orchestration";
+import {
+  CreateOrganizationUseCase,
+  PostgresIdentityRepository,
+  VerifyTokenUseCase,
+} from "@carbon/identity";
 import { migrate, openDatabase } from "../infrastructure/persistence/Database.ts";
 import { buildRoutes } from "../infrastructure/http/routes.ts";
 
@@ -49,11 +54,14 @@ export async function startServer(config: CarbonCloudConfig) {
   await migrate(sql);
 
   const builds = new PostgresBuildRepository(sql);
+  const identity = new PostgresIdentityRepository(sql);
   const routes = buildRoutes({
     createBuild: new CreateBuildUseCase(builds),
     getBuild: new GetBuildUseCase(builds),
     claimNext: new ClaimNextBuildUseCase(builds),
     completeBuild: new CompleteBuildUseCase(builds),
+    createOrganization: new CreateOrganizationUseCase(identity),
+    verifyToken: new VerifyTokenUseCase(identity),
   });
 
   return Bun.serve({

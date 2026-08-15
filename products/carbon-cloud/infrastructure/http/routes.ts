@@ -13,12 +13,15 @@ import {
   type CreateBuildUseCase,
   type GetBuildUseCase,
 } from "@carbon/cloud-orchestration";
+import type { CreateOrganizationUseCase, VerifyTokenUseCase } from "@carbon/identity";
 
 export interface RouteDeps {
   readonly createBuild: CreateBuildUseCase;
   readonly getBuild: GetBuildUseCase;
   readonly claimNext: ClaimNextBuildUseCase;
   readonly completeBuild: CompleteBuildUseCase;
+  readonly createOrganization: CreateOrganizationUseCase;
+  readonly verifyToken: VerifyTokenUseCase;
 }
 
 function json(body: unknown, status = 200): Response {
@@ -30,6 +33,26 @@ function errorResponse(error: unknown): Response {
   if (error instanceof InvalidTransitionError) return json({ error: error.message }, 409);
   const message = error instanceof Error ? error.message : String(error);
   return json({ error: message }, 400);
+}
+
+/**
+ * The org a request authenticates as, or a 401 Response to send back.
+ *
+ * Gates access to /v1/builds/*: every caller (carbon-cli, a worker) needs a
+ * valid token. What it does NOT do yet is scope a worker's claim/complete
+ * calls to one org's builds specifically — any valid token can claim any
+ * org's queued work today. Fine for a single self-hosted deployment where
+ * you control every worker; a real gap once multiple untrusted tenants
+ * share one control plane.
+ */
+async function authenticate(req: Request, verifyToken: VerifyTokenUseCase): Promise<string | Response> {
+  const header = req.headers.get("authorization") ?? "";
+  const token = header.startsWith("Bearer ") ? header.slice("Bearer ".length) : null;
+  if (!token) return json({ error: "missing bearer token" }, 401);
+
+  const orgId = await verifyToken.execute(token);
+  if (!orgId) return json({ error: "invalid token" }, 401);
+  return orgId;
 }
 
 const DASHBOARD_DIR = new URL("../../presentation/dashboard/", import.meta.url);
@@ -63,21 +86,30 @@ export function buildRoutes(deps: RouteDeps) {
       GET: () => new Response(DASHBOARD_JS, { headers: { "content-type": "text/javascript" } }),
     },
 
-    "/v1/builds": {
+    "/v1/orgs": {
       POST: async (req: Bun.BunRequest) => {
         try {
+          const body = (await req.json()) as { name: string };
+          if (!body.name) return json({ error: "name is required" }, 400);
+          const result = await deps.createOrganization.execute(body.name);
+          return json(result, 201);
+        } catch (error) {
+          return errorResponse(error);
+        }
+      },
+    },
+
+    "/v1/builds": {
+      POST: async (req: Bun.BunRequest) => {
+        const orgId = await authenticate(req, deps.verifyToken);
+        if (orgId instanceof Response) return orgId;
+        try {
           const body = (await req.json()) as {
-            orgId?: string;
             repoUrl: string;
             commitSha: string;
             targets: InstallerTargetId[];
           };
-          const build = await deps.createBuild.execute({
-            orgId: body.orgId ?? "default",
-            repoUrl: body.repoUrl,
-            commitSha: body.commitSha,
-            targets: body.targets,
-          });
+          const build = await deps.createBuild.execute({ orgId, ...body });
           return json(build.toProps(), 201);
         } catch (error) {
           return errorResponse(error);
@@ -87,6 +119,8 @@ export function buildRoutes(deps: RouteDeps) {
 
     "/v1/builds/:id": {
       GET: async (req: Bun.BunRequest<"/v1/builds/:id">) => {
+        const orgId = await authenticate(req, deps.verifyToken);
+        if (orgId instanceof Response) return orgId;
         try {
           const build = await deps.getBuild.execute(req.params.id);
           return json(build.toProps());
@@ -98,6 +132,8 @@ export function buildRoutes(deps: RouteDeps) {
 
     "/v1/builds/claim": {
       POST: async (req: Bun.BunRequest) => {
+        const authed = await authenticate(req, deps.verifyToken);
+        if (authed instanceof Response) return authed;
         try {
           const body = (await req.json()) as { platform: TargetPlatform; workerId: string };
           const build = await deps.claimNext.execute(body);
@@ -110,6 +146,8 @@ export function buildRoutes(deps: RouteDeps) {
 
     "/v1/builds/:id/complete": {
       POST: async (req: Bun.BunRequest<"/v1/builds/:id/complete">) => {
+        const authed = await authenticate(req, deps.verifyToken);
+        if (authed instanceof Response) return authed;
         try {
           const body = (await req.json()) as Record<string, unknown>;
           await deps.completeBuild.execute({ ...body, buildId: req.params.id } as Parameters<
