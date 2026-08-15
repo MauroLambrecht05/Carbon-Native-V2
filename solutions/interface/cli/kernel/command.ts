@@ -5,8 +5,8 @@
 // framework testable without a project on disk, and it is why `kernel/` sits
 // below `commands/` in the dependency direction and never imports upward.
 
-import type { CommandContext } from "./command-context.ts";
-import type { FlagSpec } from "./flags.ts";
+import type { CommandContext } from "../kernel/command-context.ts";
+import type { FlagSpec } from "../dispatch/flags.ts";
 
 /**
  * Everything needed to describe a command *without loading it*.

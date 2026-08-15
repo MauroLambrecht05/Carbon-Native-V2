@@ -10,7 +10,7 @@
 // hand-written switch of dynamic imports — this keeps the property while
 // making the command list introspectable rather than trapped in a switch.
 
-import type { Command, CommandMeta } from "./command.ts";
+import type { Command, CommandMeta } from "../kernel/command.ts";
 
 export type CommandLoader = () => Promise<Command>;
 

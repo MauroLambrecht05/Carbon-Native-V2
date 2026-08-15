@@ -4,12 +4,12 @@
 // aliases, help, typo suggestions, error rendering — comes from the registry,
 // so adding a command is one registration and nothing here changes.
 
-import { Command, EXIT_FAILURE, EXIT_OK, EXIT_USAGE, type ExitCode } from "./command.ts";
-import { CommandContext } from "./command-context.ts";
-import { parseArgv } from "./flags.ts";
-import { HelpRenderer, isCommandGroup } from "./help.ts";
-import type { Io } from "./io-port.ts";
-import type { CommandRegistry } from "./command-registry.ts";
+import { Command, EXIT_FAILURE, EXIT_OK, EXIT_USAGE, type ExitCode } from "../kernel/command.ts";
+import { CommandContext } from "../kernel/command-context.ts";
+import { parseArgv } from "../dispatch/flags.ts";
+import { HelpRenderer, isCommandGroup } from "../adapters/help.ts";
+import type { Io } from "../ports/io-port.ts";
+import type { CommandRegistry } from "../dispatch/command-registry.ts";
 
 const HELP_TOKENS = new Set(["help", "--help", "-h"]);
 const VERSION_TOKENS = new Set(["--version", "-v", "version"]);

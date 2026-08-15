@@ -6,9 +6,9 @@
 // the dispatcher routes on, so a command cannot exist without appearing in
 // help, and cannot rename itself without help following.
 
-import type { Command, CommandGroup, CommandMeta } from "./command.ts";
-import type { CommandRegistry } from "./command-registry.ts";
-import type { Io } from "./io-port.ts";
+import type { Command, CommandGroup, CommandMeta } from "../kernel/command.ts";
+import type { CommandRegistry } from "../dispatch/command-registry.ts";
+import type { Io } from "../ports/io-port.ts";
 
 export class HelpRenderer {
   constructor(

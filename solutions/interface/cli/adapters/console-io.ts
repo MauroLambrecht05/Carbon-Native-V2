@@ -6,7 +6,7 @@
 // assert on output without swapping globals.
 
 import { log, c } from "@carbon/logging";
-import type { Io } from "./io-port.ts";
+import type { Io } from "../ports/io-port.ts";
 
 export const consoleIo: Io = {
   c,

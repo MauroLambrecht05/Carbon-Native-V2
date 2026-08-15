@@ -6,7 +6,7 @@
 // this layering exists to prevent — so the context depends on this interface
 // and the dispatcher injects the renderer that satisfies it.
 
-import type { Command, CommandGroup, CommandMeta } from "./command.ts";
+import type { Command, CommandGroup, CommandMeta } from "../kernel/command.ts";
 
 export interface HelpPresenter {
   renderRoot(): string;

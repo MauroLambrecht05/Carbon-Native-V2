@@ -18,15 +18,15 @@
 export {
   Command, CommandGroup, EXIT_OK, EXIT_FAILURE, EXIT_USAGE,
   type CommandMeta, type ExitCode,
-} from "./command.ts";
-export { CommandContext, type CommandContextInit } from "./command-context.ts";
-export { Flags, parseArgv, type FlagSpec, type ParsedArgv } from "./flags.ts";
+} from "./kernel/command.ts";
+export { CommandContext, type CommandContextInit } from "./kernel/command-context.ts";
+export { Flags, parseArgv, type FlagSpec, type ParsedArgv } from "./dispatch/flags.ts";
 export {
   CommandRegistry, defineCommand,
   type CommandDescriptor, type CommandLoader,
-} from "./command-registry.ts";
-export type { Io } from "./io-port.ts";
-export type { HelpPresenter } from "./help-presenter.ts";
-export { Dispatcher, type DispatcherOptions } from "./dispatcher.ts";
-export { HelpRenderer, isCommandGroup } from "./help.ts";
-export { consoleIo, BufferedIo } from "./console-io.ts";
+} from "./dispatch/command-registry.ts";
+export type { Io } from "./ports/io-port.ts";
+export type { HelpPresenter } from "./ports/help-presenter.ts";
+export { Dispatcher, type DispatcherOptions } from "./dispatch/dispatcher.ts";
+export { HelpRenderer, isCommandGroup } from "./adapters/help.ts";
+export { consoleIo, BufferedIo } from "./adapters/console-io.ts";

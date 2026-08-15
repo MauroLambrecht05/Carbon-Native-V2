@@ -4,9 +4,9 @@
 // (a cancellation signal, a progress reporter) does not change every command
 // signature.
 
-import type { Flags } from "./flags.ts";
-import type { Io } from "./io-port.ts";
-import type { HelpPresenter } from "./help-presenter.ts";
+import type { Flags } from "../dispatch/flags.ts";
+import type { Io } from "../ports/io-port.ts";
+import type { HelpPresenter } from "../ports/help-presenter.ts";
 
 export interface CommandContextInit {
   readonly args: string[];
