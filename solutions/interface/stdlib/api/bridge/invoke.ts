@@ -13,7 +13,7 @@
 //   chan.onmessage = (m) => log(m.delta);
 //   await invoke("ai_http_stream", { url, body, channel: chan });
 
-import "./hosts";
+import "../host/imports";
 
 /** Invoke an app-defined native command. The first arg is the command
  *  name registered on the engine; the second is the args object (serialised

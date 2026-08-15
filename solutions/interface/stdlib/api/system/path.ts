@@ -8,7 +8,7 @@
 // All paths come back with the OS-native separator (no normalisation —
 // callers that want forward-slash-only should `.replace(/\\/g, "/")`).
 
-import "./hosts";
+import "../host/imports";
 
 export async function homeDir(): Promise<string> {
   const v = __cm_fs_home_dir();

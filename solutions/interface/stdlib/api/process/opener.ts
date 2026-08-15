@@ -5,7 +5,7 @@
 //   await openUrl("https://example.com");
 //   await revealInFinder("C:/Users/me/notes.txt");
 
-import "./hosts";
+import "../host/imports";
 
 /** Open a URL or file path with the OS-default handler. */
 export async function openUrl(url: string): Promise<void> {

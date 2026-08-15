@@ -2,7 +2,7 @@
 // host imports are cheap (no syscalls; values resolve from cached
 // constants populated at engine startup).
 
-import "./hosts";
+import "../host/imports";
 
 export type Platform = "windows" | "macos" | "linux" | "ios" | "android" | "unknown";
 export type Family = "unix" | "windows" | "unknown";

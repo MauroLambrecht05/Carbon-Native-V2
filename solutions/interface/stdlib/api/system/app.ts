@@ -6,7 +6,7 @@
 //   await getName();      // → "terax"
 //   await getVersion();   // → "0.6.4"
 
-import "./hosts";
+import "../host/imports";
 
 export async function getName(): Promise<string> {
   return __cm_app_name();

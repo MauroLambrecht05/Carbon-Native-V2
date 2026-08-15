@@ -42,7 +42,7 @@ export {
   COMMENT_NODE,
   DOCUMENT_NODE,
   DOCUMENT_FRAGMENT_NODE,
-} from "./node.ts";
+} from "./shims/node.ts";
 
 // To install the DOM globals, side-effect-import the dedicated entry:
 //

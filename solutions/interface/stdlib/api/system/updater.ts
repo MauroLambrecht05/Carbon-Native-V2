@@ -7,7 +7,7 @@
 //   const up = await check();
 //   if (up?.available) { await up.downloadAndInstall(); await relaunch(); }
 
-import { invoke, hasCommand } from "./invoke";
+import { invoke, hasCommand } from "../bridge/invoke.ts";
 
 /** Progress event shape matches Tauri's plugin-updater so ports keep
  *  their `case "Started" / "Progress" / "Finished"` callback bodies. */

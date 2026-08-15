@@ -9,7 +9,7 @@
 //   await w.onResize(() => console.log(w.innerSize()));
 //   await openWindow({ entry: "settings", label: "settings", title: "Settings" });
 
-import "./hosts";
+import "../host/imports";
 
 export interface Size {
   width: number;
@@ -156,7 +156,7 @@ function createWindowProxy(): CarbonWindow {
     },
 
     async listen(channel, cb) {
-      const { listen: ev } = await import("./event");
+      const { listen: ev } = await import("../bridge/event.ts");
       return ev(channel, cb);
     },
   };

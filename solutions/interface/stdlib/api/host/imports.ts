@@ -3,7 +3,7 @@
 // Every @carbon/api subpath module needs to call a handful of these, and
 // declaring them locally per-module gets repetitive. We re-export the
 // types here (and rely on globalThis-side lookup at runtime); subpaths
-// `import type { ... } from "./hosts";` for TS narrowing without pulling
+// `import type { ... } from "../host/imports";` for TS narrowing without pulling
 // runtime weight, since these are zero-cost ambient globals at runtime.
 //
 // New host imports added in the engine should be added here AND

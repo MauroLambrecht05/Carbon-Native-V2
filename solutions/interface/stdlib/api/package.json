@@ -6,19 +6,20 @@
   "private": true,
   "sideEffects": false,
   "exports": {
-    "./window": "./window.ts",
-    "./store": "./store.ts",
-    "./secrets": "./secrets.ts",
-    "./event": "./event.ts",
-    "./app": "./app.ts",
-    "./path": "./path.ts",
-    "./opener": "./opener.ts",
-    "./os": "./os.ts",
-    "./process": "./process.ts",
-    "./autostart": "./autostart.ts",
-    "./updater": "./updater.ts",
-    "./invoke": "./invoke.ts",
-    "./fs": "./fs.ts",
-    "./pty": "./pty.ts"
-  }
+    "./fs": "./storage/fs.ts",
+    "./store": "./storage/store.ts",
+    "./secrets": "./storage/secrets.ts",
+    "./process": "./process/process.ts",
+    "./pty": "./process/pty.ts",
+    "./opener": "./process/opener.ts",
+    "./app": "./system/app.ts",
+    "./os": "./system/os.ts",
+    "./path": "./system/path.ts",
+    "./autostart": "./system/autostart.ts",
+    "./updater": "./system/updater.ts",
+    "./invoke": "./bridge/invoke.ts",
+    "./event": "./bridge/event.ts",
+    "./window": "./window/window.ts"
+  },
+  "//exports": "Subpaths are the public API and do not move when files do. An app writes @carbon/api/fs; which folder fs.ts sits in is this package's business."
 }

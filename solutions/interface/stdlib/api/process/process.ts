@@ -1,7 +1,7 @@
 // Process control — relaunch / exit. Sibling of @carbon/api/app's
 // process-metadata-only role; this one *acts* on the current process.
 
-import "./hosts";
+import "../host/imports";
 
 /** Restart the current process. Spawns a fresh instance with the same
  *  argv, then schedules the current process to exit after a short delay

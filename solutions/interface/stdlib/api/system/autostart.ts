@@ -5,7 +5,7 @@
 // `enable()` is called; ports of Tauri's plugin-autostart usually leave
 // them at defaults (app name + no extra args).
 
-import "./hosts";
+import "../host/imports";
 
 export async function setName(name: string): Promise<void> {
   __cm_autostart_set_name(name);

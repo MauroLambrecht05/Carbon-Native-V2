@@ -11,7 +11,7 @@
 //   await secrets.set("terax", "openai-key", "sk-…");
 //   const v = await secrets.get("terax", "openai-key");
 
-import { invoke } from "./invoke";
+import { invoke } from "../bridge/invoke.ts";
 
 /** Read a secret. Returns null when the entry doesn't exist (no throw). */
 export async function get(service: string, account: string): Promise<string | null> {

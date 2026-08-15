@@ -20,7 +20,7 @@
 // invoke channel rather than wrapping a parallel host import — fewer
 // names to keep in sync as new ops land.
 
-import { invoke } from "./invoke";
+import { invoke } from "../bridge/invoke.ts";
 
 export type JsonValue =
   | string

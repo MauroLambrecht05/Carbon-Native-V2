@@ -12,8 +12,8 @@
 // of the "real browser" APIs that real apps rely on. See the package README
 // for the explicit scope.
 
-import { attachCanvas, ensureSystemFont } from "./canvas.ts";
-import { applyStylesheetTo, registerStylesheet, hasStylesheets } from "./css.ts";
+import { attachCanvas, ensureSystemFont } from "../shims/canvas.ts";
+import { applyStylesheetTo, registerStylesheet, hasStylesheets } from "../shims/css.ts";
 
 declare const __cm_create_node: (id: number, tag: string, propsJson: string) => void;
 declare const __cm_set_text: (id: number, text: string) => void;

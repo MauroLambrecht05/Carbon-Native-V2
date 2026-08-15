@@ -8,8 +8,8 @@
   "sideEffects": true,
   "exports": {
     ".": "./index.ts",
-    "./install": "./install.ts",
-    "./css": "./css.ts"
+    "./install": "./globals/install.ts",
+    "./css": "./shims/css.ts"
   },
   "devDependencies": {
     "typescript": "^5.6.0"

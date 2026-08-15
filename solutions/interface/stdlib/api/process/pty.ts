@@ -14,7 +14,7 @@
 // commits correctly. A higher-level `subscribeOutput(id, cb)` helper
 // lives below.
 
-import "./hosts";
+import "../host/imports";
 
 export interface SpawnSpec {
   /** Command to run. "pwsh.exe" / "bash" / "/bin/zsh" etc. */

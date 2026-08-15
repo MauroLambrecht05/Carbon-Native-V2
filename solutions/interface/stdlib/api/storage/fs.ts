@@ -7,7 +7,7 @@
 //   const text = await fs.readText("./README.md");
 //   await fs.writeText("./out.log", text);
 
-import "./hosts";
+import "../host/imports";
 
 export interface DirEntry {
   /** Just the filename, not the full path. */
@@ -92,7 +92,7 @@ export async function stat(path: string): Promise<FileStat> {
 // registers. We expose them as named functions so callers don't have
 // to spell out command names.
 
-import { invoke } from "./invoke";
+import { invoke } from "../bridge/invoke.ts";
 
 export async function createFile(path: string): Promise<void> {
   await invoke("fs_create_file", { path });
