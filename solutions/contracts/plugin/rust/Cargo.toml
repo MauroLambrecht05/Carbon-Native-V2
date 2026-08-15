@@ -1,0 +1,36 @@
+# The Rust side of contracts/plugin — the extension-point registry.
+#
+# `generated.rs` is rendered from `../registry/extension-points.zig`, which is
+# the source of truth. Editing it by hand is reverted by the next
+# `carbon-ext generate`, and `//.tools/validation:workspace_test` fails on the
+# drift in the meantime.
+#
+# Zero dependencies, like every contract crate. The loader that walks this
+# table lives in infrastructure/plugin-host; a contract that named the loader
+# would not be one.
+
+[package]
+# The registry is an agreement, not a capability, so it declares no
+# carbon-kind — the kinds in solutions/README.md classify capabilities.
+name = "carbon-plugin-contract"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+description = "The Carbon plugin extension-point registry: which points exist, what each is called on the wire, and what a host app must grant before a plugin may implement one."
+# The workspace manifest lives in .tools/orchestration/bazel/cargo, beside the
+# Bazel rules that drive it. Cargo only walks UP from a crate, so it would
+# never find it — the link has to be explicit.
+workspace = "../../../../.tools/orchestration/bazel/cargo"
+
+[lib]
+name = "carbon_plugin_contract"
+# The crate root sits beside registry/ rather than under src/, like every other
+# crate in solutions/.
+path = "lib.rs"
+
+# Clippy runs with -D warnings; the shared allow-list lives in the workspace
+# root so one rationale covers every crate. See //.tools/orchestration/bazel/cargo/Cargo.toml.
+[lints]
+workspace = true
+
+[dependencies]

@@ -29,7 +29,7 @@ build error on either side** — just an app that silently stops responding to
 clicks.
 
 Before this file existed, the entire agreement was: matching string literals in
-two languages, and a comment in `hosts.ts` asking people to remember.
+two languages, and a comment in `host/imports.ts` asking people to remember.
 
 ## Two directions
 
@@ -80,7 +80,7 @@ today — an app calls the global or it does not.
 
 ## Known gap
 
-`hosts.ts` in the stdlib declares **69** of the 139 imports. The rest are
+`stdlib/api/host/imports.ts` declares **69** of the 139 imports. The rest are
 called without a type declaration, or not called from the stdlib at all (the
 scene-graph functions belong to the renderers). Reconciling that — deciding
 which side owns each name, and generating both sides from this registry rather

@@ -29,8 +29,8 @@ impl Shell {
 
     /// Load a JS file. Replaces previously-loaded shell code (hot reload).
     pub fn load_file(&self, path: &Path) -> Result<()> {
-        let source = std::fs::read_to_string(path)
-            .with_context(|| format!("read {}", path.display()))?;
+        let source =
+            std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
         self.eval(&source)?;
         Ok(())
     }
@@ -86,7 +86,9 @@ impl Shell {
             args = serde_json::to_string(args_json).unwrap_or_default()
         );
         self.ctx.with(|ctx| -> Result<String> {
-            let val: Value = ctx.eval(script.as_bytes()).map_err(|e| anyhow!("invoke: {e}"))?;
+            let val: Value = ctx
+                .eval(script.as_bytes())
+                .map_err(|e| anyhow!("invoke: {e}"))?;
             Ok(val
                 .into_string()
                 .and_then(|s| s.to_string().ok())
@@ -104,7 +106,7 @@ pub fn register_capability_imports(shell: &Arc<Mutex<Shell>>, cfg: &Config) -> R
         let global = ctx.globals();
 
         // console.log — always available
-        let console_log = Function::new(ctx.clone(), |s: String| -> () {
+        let console_log = Function::new(ctx.clone(), |s: String| {
             tracing::info!(target: "shell", "{}", s);
             println!("[shell] {s}");
         })
@@ -163,7 +165,7 @@ pub fn register_capability_imports(shell: &Arc<Mutex<Shell>>, cfg: &Config) -> R
                 ctx.clone(),
                 move |path: String| -> Result<(), rquickjs::Error> {
                     let expanded = expand_path(&path);
-                    if !allow_for_mkdir.is_match(&format!("{}/x", expanded.trim_end_matches('/'))) {
+                    if !allow_for_mkdir.is_match(format!("{}/x", expanded.trim_end_matches('/'))) {
                         return Err(rquickjs::Error::Exception);
                     }
                     std::fs::create_dir_all(&expanded).map_err(|_| rquickjs::Error::Exception)?;
@@ -203,12 +205,12 @@ pub fn register_capability_imports(shell: &Arc<Mutex<Shell>>, cfg: &Config) -> R
                     let expanded = expand_path(&dir);
                     // Match against the directory itself or any path within it.
                     if !allow_for_list.is_match(&expanded)
-                        && !allow_for_list.is_match(&format!("{}/x", expanded.trim_end_matches('/')))
+                        && !allow_for_list.is_match(format!("{}/x", expanded.trim_end_matches('/')))
                     {
                         return Err(rquickjs::Error::Exception);
                     }
-                    let entries = std::fs::read_dir(&expanded)
-                        .map_err(|_| rquickjs::Error::Exception)?;
+                    let entries =
+                        std::fs::read_dir(&expanded).map_err(|_| rquickjs::Error::Exception)?;
                     let mut names = Vec::new();
                     for e in entries.flatten() {
                         if let Some(n) = e.file_name().to_str() {
@@ -251,7 +253,7 @@ fn build_glob_set(patterns: &[String]) -> Result<globset::GlobSet> {
         let g = globset::Glob::new(&expanded).map_err(|e| anyhow!("bad glob {p}: {e}"))?;
         b.add(g);
     }
-    Ok(b.build().map_err(|e| anyhow!("globset: {e}"))?)
+    b.build().map_err(|e| anyhow!("globset: {e}"))
 }
 
 fn expand_path(p: &str) -> String {

@@ -85,7 +85,7 @@ export function backend(name: BackendName): Backend {
  * The registry key doubles as the Cargo feature name; mini additionally
  * gets "snapshot" so a plain build keeps producing a snapshot-enabled
  * binary, matching carbon-mini's old per-crate default. Mirrored by
- * .config/justfile's build-runtime/build-runtime-dev recipes — keep both
+ * the crate_features on //products/carbon:mini and :blitz — keep both
  * in sync if backend-specific default features change.
  */
 export interface RuntimeFeatureFlags {

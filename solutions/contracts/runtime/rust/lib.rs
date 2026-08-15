@@ -51,38 +51,73 @@ pub enum UserEvent {
     /// `app->push_event(...)`. The main loop forwards it to the JS-side
     /// `__carbon_on_event(name, payloadJson)` dispatcher (installed at
     /// startup, see `install_carbon_event_dispatcher`).
-    PluginEvent { name: String, payload: String },
+    PluginEvent {
+        name: String,
+        payload: String,
+    },
     // ── Networking events (from native/net.rs's tokio runtime) ──
     /// HTTP response headers received. Resolves the fetch() Promise.
-    FetchHeaders { id: u32, status: u16, headers_json: String },
+    FetchHeaders {
+        id: u32,
+        status: u16,
+        headers_json: String,
+    },
     /// HTTP response body chunk. Pushed to the Response's stream reader.
-    FetchChunk { id: u32, data: Vec<u8> },
+    FetchChunk {
+        id: u32,
+        data: Vec<u8>,
+    },
     /// HTTP response stream ended cleanly.
-    FetchEnd { id: u32 },
+    FetchEnd {
+        id: u32,
+    },
     /// HTTP request failed (network error, TLS, parse, abort).
-    FetchError { id: u32, message: String },
+    FetchError {
+        id: u32,
+        message: String,
+    },
     /// A native command pushed a chunk to a JS-side Channel (see
     /// stdlib/api/src/invoke.ts's `Channel`/`__cm_channel_dispatch`).
     /// `json` is a JSON-encoded event object, delivered to the Channel as-is
     /// — used by `ai_http_stream` (native/net.rs) to stream headers/chunk/
     /// end/error events without needing a dedicated UserEvent per command.
-    ChannelMessage { channel_id: u32, json: String },
+    ChannelMessage {
+        channel_id: u32,
+        json: String,
+    },
     /// WebSocket connection established.
-    WsOpen { id: u32 },
+    WsOpen {
+        id: u32,
+    },
     /// WebSocket text or binary message received.
-    WsMessage { id: u32, data: Vec<u8>, is_text: bool },
+    WsMessage {
+        id: u32,
+        data: Vec<u8>,
+        is_text: bool,
+    },
     /// WebSocket closed (clean or otherwise).
-    WsClose { id: u32, code: u16, reason: String },
+    WsClose {
+        id: u32,
+        code: u16,
+        reason: String,
+    },
     /// WebSocket connection error.
-    WsError { id: u32, message: String },
+    WsError {
+        id: u32,
+        message: String,
+    },
     // ── PTY events (from native/pty.rs reader threads) ──
     /// New PTY output bytes have been buffered. JS drains them via
     /// `__cm_pty_read(id)` (base64). The main loop's handler eval's
     /// a JS dispatcher so push-mode apps don't have to poll.
-    PtyOutput { id: u32 },
+    PtyOutput {
+        id: u32,
+    },
     /// PTY child exited (EOF on the master read). JS-side terminal
     /// emulators flip their session state to "closed" here.
-    PtyExit { id: u32 },
+    PtyExit {
+        id: u32,
+    },
     // ── Window control (invoke channel forwards to these) ──
     /// Show, hide, minimize, maximize, restore, toggle-maximize, close.
     WindowOp(WindowOp),

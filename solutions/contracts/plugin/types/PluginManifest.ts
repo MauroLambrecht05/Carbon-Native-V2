@@ -10,8 +10,15 @@
 // and change together. A field added to one without the other is a plugin the
 // toolchain can install and the host cannot load.
 
-/** Languages the plugin SDK ships for. */
-export type PluginLanguageId = "rust" | "zig";
+/**
+ * The language the plugin SDK ships for.
+ *
+ * One member, and a union rather than a literal so the toolchain keeps a name
+ * for the concept. Rust was the other one; see
+ * capabilities/plugins/domain/value-objects/PluginLanguage.ts for why it is
+ * not any more.
+ */
+export type PluginLanguageId = "zig";
 
 export interface PluginManifestData {
   /** Slug: lowercase and hyphenated. Becomes the key in the app's [plugins]. */
@@ -26,9 +33,22 @@ export interface PluginManifestData {
    * through, so an unknown capability is not rejected at install time.
    */
   readonly capabilities?: readonly string[];
+
+  /**
+   * Extension points the plugin implements, by id — see
+   * `registry/extension-points.zig`, and `EXTENSION_POINTS` in
+   * ./ExtensionPoints.ts for the generated list.
+   *
+   * Advisory. What a plugin actually implements is which symbols it exports,
+   * and that is what the loader binds. This list exists so the toolchain can
+   * say "you declared `paint.before` but did not export
+   * `carbon_plugin_before_paint`" at install time, and so `carbon plugin list`
+   * can show what a plugin does without loading it.
+   */
+  readonly extensionPoints?: readonly string[];
 }
 
-export const DEFAULT_PLUGIN_LANGUAGE: PluginLanguageId = "rust";
+export const DEFAULT_PLUGIN_LANGUAGE: PluginLanguageId = "zig";
 
 /**
  * The name used when a manifest omits it.
@@ -39,5 +59,5 @@ export const DEFAULT_PLUGIN_LANGUAGE: PluginLanguageId = "rust";
 export const DEFAULT_PLUGIN_NAME = "plugin";
 
 export function isPluginLanguage(value: string): value is PluginLanguageId {
-  return value === "rust" || value === "zig";
+  return value === "zig";
 }

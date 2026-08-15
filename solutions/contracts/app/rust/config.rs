@@ -56,7 +56,12 @@ pub struct RuntimeSection {
 
 impl Default for RuntimeSection {
     fn default() -> Self {
-        Self { backend: default_backend(), bytecode: false, image: false, audio: false }
+        Self {
+            backend: default_backend(),
+            bytecode: false,
+            image: false,
+            audio: false,
+        }
     }
 }
 
@@ -65,7 +70,9 @@ impl Default for RuntimeSection {
 // suite fails if these three disagree. This said "webview2" until that
 // backend was archived, which made every manifest without an explicit
 // [runtime].backend resolve to a runtime that no longer exists.
-fn default_backend() -> String { "mini".into() }
+fn default_backend() -> String {
+    "mini".into()
+}
 
 #[derive(Debug, Deserialize)]
 pub struct AppSection {
@@ -107,9 +114,15 @@ impl Default for WindowSection {
     }
 }
 
-fn default_width() -> u32 { 800 }
-fn default_height() -> u32 { 600 }
-fn yes() -> bool { true }
+fn default_width() -> u32 {
+    800
+}
+fn default_height() -> u32 {
+    600
+}
+fn yes() -> bool {
+    true
+}
 
 #[derive(Debug, Default, Deserialize)]
 pub struct CapabilitiesSection {
@@ -143,10 +156,10 @@ pub struct CapabilitiesSection {
 impl Config {
     pub fn load(project_dir: &Path) -> Result<Self> {
         let path = project_dir.join("carbon.toml");
-        let text = std::fs::read_to_string(&path)
-            .with_context(|| format!("read {}", path.display()))?;
-        let cfg: Config = toml::from_str(&text)
-            .with_context(|| format!("parse {}", path.display()))?;
+        let text =
+            std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+        let cfg: Config =
+            toml::from_str(&text).with_context(|| format!("parse {}", path.display()))?;
         Ok(cfg)
     }
 }
