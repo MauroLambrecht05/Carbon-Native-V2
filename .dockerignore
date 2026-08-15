@@ -1,0 +1,17 @@
+# products/carbon-cloud's Dockerfiles build with the repo root as context
+# (see docker-compose.yml's own note on why: @carbon/* path aliases only
+# resolve from the workspace root's node_modules junction). Without this,
+# that context was 195MB and climbing — most of it .git history, the real
+# node_modules tree symlinked in from .config/, and Cargo's target/, none of
+# which a container needs; it gets its own copies of what it needs inside
+# the Dockerfile's own RUN steps.
+
+.git/
+node_modules/
+.config/node_modules/
+.tools/orchestration/bazel/cargo/target/
+bazel-*/
+.bazel/
+dist/
+.carbon-cache/
+labs/e2e/

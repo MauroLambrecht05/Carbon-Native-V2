@@ -82,6 +82,8 @@ V2/
 ├── .env.example                       # …and the template that documents it
 ├── .gitattributes
 ├── .gitignore
+├── .dockerignore                      # products/carbon-cloud's Dockerfiles build with this
+│                                       # as context (repo root — see docker-compose.yml)
 ├── .git/                              # generated
 └── node_modules/                      # generated — a junction into .config/node_modules
 ```

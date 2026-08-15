@@ -21,13 +21,21 @@ interface Row {
   org_id: string;
   repo_url: string;
   commit_sha: string;
-  targets: string[];
+  // string | already-parsed: verified live against a real Postgres that
+  // Bun.SQL returns jsonb columns as the raw text, not auto-parsed —
+  // toBuild()'s first version assumed the opposite and every GET after a
+  // POST silently double-encoded targets/artifacts as a result.
+  targets: string[] | string;
   status: BuildStatus;
   worker_id: string | null;
-  artifacts: BuildArtifact[];
+  artifacts: BuildArtifact[] | string;
   error: string | null;
   created_at: Date;
   updated_at: Date;
+}
+
+function parseJsonColumn<T>(value: unknown): T {
+  return (typeof value === "string" ? JSON.parse(value) : value) as T;
 }
 
 function toBuild(row: Row): Build {
@@ -36,10 +44,10 @@ function toBuild(row: Row): Build {
     orgId: row.org_id,
     repoUrl: row.repo_url,
     commitSha: row.commit_sha,
-    targets: row.targets as BuildProps["targets"],
+    targets: parseJsonColumn<BuildProps["targets"]>(row.targets),
     status: row.status,
     workerId: row.worker_id,
-    artifacts: row.artifacts,
+    artifacts: parseJsonColumn<BuildArtifact[]>(row.artifacts),
     error: row.error,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
@@ -52,10 +60,16 @@ export class PostgresBuildRepository implements BuildRepository {
 
   async save(build: Build): Promise<void> {
     const p = build.toProps();
+    // The raw array, not JSON.stringify(p.targets) — verified live that
+    // Bun.SQL already JSON-encodes a JS value bound against a ::jsonb cast.
+    // Pre-stringifying double-encodes: the column ends up holding the
+    // jsonb STRING '["deb"]' (jsonb_typeof = "string") instead of the
+    // jsonb ARRAY ["deb"] (jsonb_typeof = "array"), and every ?| claim
+    // query against it silently matches nothing.
     await this.sql`
       INSERT INTO builds (id, org_id, repo_url, commit_sha, targets, status, worker_id, artifacts, error, created_at, updated_at)
-      VALUES (${p.id}, ${p.orgId}, ${p.repoUrl}, ${p.commitSha}, ${JSON.stringify(p.targets)}::jsonb,
-              ${p.status}, ${p.workerId}, ${JSON.stringify(p.artifacts)}::jsonb, ${p.error}, ${p.createdAt}, ${p.updatedAt})
+      VALUES (${p.id}, ${p.orgId}, ${p.repoUrl}, ${p.commitSha}, ${p.targets}::jsonb,
+              ${p.status}, ${p.workerId}, ${p.artifacts}::jsonb, ${p.error}, ${p.createdAt}, ${p.updatedAt})
       ON CONFLICT (id) DO UPDATE SET
         status = EXCLUDED.status,
         worker_id = EXCLUDED.worker_id,
@@ -77,12 +91,17 @@ export class PostgresBuildRepository implements BuildRepository {
     const platformTargets = INSTALLER_TARGETS.filter((t) => t.platform === platform).map((t) => t.id);
     if (platformTargets.length === 0) return null;
 
+    // sql.array(..., "text") specifically — verified live against a real
+    // Postgres. Plain string interpolation with a ::text[] cast sends
+    // "a,b" and Postgres rejects it as a malformed array literal.
+    // sql.array() with no type arg defaults to json[], which `?|` (a
+    // jsonb-vs-text[] operator) doesn't have an overload for at all.
     const rows = await this.sql<Row[]>`
       UPDATE builds
       SET status = 'claimed', worker_id = ${workerId}, updated_at = now()
       WHERE id = (
         SELECT id FROM builds
-        WHERE status = 'queued' AND targets ?| ${platformTargets}::text[]
+        WHERE status = 'queued' AND targets ?| ${this.sql.array(platformTargets, "text")}
         ORDER BY created_at ASC
         FOR UPDATE SKIP LOCKED
         LIMIT 1

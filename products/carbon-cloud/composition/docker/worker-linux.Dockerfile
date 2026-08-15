@@ -24,7 +24,7 @@ ENV RUSTUP_HOME=/usr/local/rustup \
     APPIMAGE_EXTRACT_AND_RUN=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates curl git dpkg-dev build-essential \
+        ca-certificates curl unzip git dpkg-dev build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL https://sh.rustup.rs | sh -s -- \
@@ -38,6 +38,11 @@ RUN curl -fsSL -o /usr/local/bin/appimagetool \
 
 WORKDIR /app
 COPY . .
+
+# See control-plane.Dockerfile's identical step for why this is needed at
+# all: the real node_modules lives in .config/, invisible until linked.
+RUN bun install --cwd .config --frozen-lockfile \
+    && bash .tools/automation/bootstrap/link-node-modules.sh
 
 ENV WORK_DIR=/tmp/carbon-cloud-worker
 CMD ["bun", "products/carbon-cloud/composition/worker-linux.ts"]
