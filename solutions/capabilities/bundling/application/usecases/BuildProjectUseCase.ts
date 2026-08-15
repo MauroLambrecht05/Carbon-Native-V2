@@ -65,7 +65,7 @@ export async function ensureRuntime(
     "--features", backendCargoFeatures(backend, flags),
   ];
   // Cargo's default target directory is beside the workspace manifest
-  // (.config/rust/target). TARGET_DIR says .build/rust, and the Bazel cargo
+  // (.tools/orchestration/bazel/cargo/target). TARGET_DIR says .local/rust, and the Bazel cargo
   // rules set CARGO_TARGET_DIR to match. Without this the CLI builds
   // successfully and then fails to find what it just built.
   const cargoEnv = { ...process.env, CARGO_TARGET_DIR: TARGET_DIR };

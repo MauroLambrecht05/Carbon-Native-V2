@@ -96,7 +96,10 @@ import {
   TAILWIND_CLASSES_SRC,
   CSS_ENGINE_SRC,
   MINI_REACT_SRC,
+  MINI_REACT_JSX_RUNTIME_SRC,
   MINI_SOLID_SRC,
+  MINI_SOLID_IMAGE_SRC,
+  MINI_SOLID_POLYFILLS_SRC,
   COMPAT_DOM_INSTALL_SRC,
   COMPAT_DOM_SRC,
 } from "@carbon/workspace";
@@ -883,8 +886,28 @@ export async function buildBundleWithBabel(
           b.onResolve({ filter: /^@carbon\/compat-dom$/ }, () => {
             return { path: COMPAT_DOM_SRC };
           });
-          b.onResolve({ filter: /^@carbon\/vite-tailwind\/classes$/ }, () => {
+          // `@carbon/vite/tailwind/classes` is the V2 alias. The filter here
+          // said `@carbon/vite-tailwind/classes` — V1's package name — while
+          // the injector below (search: __cm_install_class_resolver) emits the
+          // V2 form, so the two halves of one mechanism were renamed on only
+          // one side. Every app that triggered the Tailwind token injection
+          // failed to bundle: "Could not resolve @carbon/vite/tailwind/classes".
+          b.onResolve({ filter: /^@carbon\/vite\/tailwind\/classes$/ }, () => {
             return { path: _carbonClassesPath };
+          });
+          // The React renderer, injected the same way as the Solid one below.
+          // `react-dom` and `react-dom/client` were mapped above, but a project
+          // that imports the renderer BY NAME — which every React example does,
+          // and which the scaffolded React preset generates — had nothing to
+          // resolve against.
+          b.onResolve({ filter: /^@carbon\/mini-react$/ }, () => {
+            return { path: MINI_REACT_SRC };
+          });
+          // tsconfig `jsx: "react-jsx"` makes Bun emit jsx() calls against this
+          // specifier. It re-exports from the renderer; see the note at the
+          // importSource option above.
+          b.onResolve({ filter: /^@carbon\/mini-react\/jsx-runtime$/ }, () => {
+            return { path: MINI_REACT_JSX_RUNTIME_SRC };
           });
           // @carbon/mini-solid is the moduleName babel-preset-solid compiles
           // every JSX element against, so it MUST resolve — but a scaffolded
@@ -904,10 +927,10 @@ export async function buildBundleWithBabel(
             return { path: MINI_SOLID_SRC };
           });
           b.onResolve({ filter: /^@carbon\/mini-solid\/polyfills$/ }, () => {
-            return { path: join(dirname(MINI_SOLID_SRC), "polyfills.ts") };
+            return { path: MINI_SOLID_POLYFILLS_SRC };
           });
           b.onResolve({ filter: /^@carbon\/mini-solid\/image$/ }, () => {
-            return { path: join(dirname(MINI_SOLID_SRC), "image-intrinsic.ts") };
+            return { path: MINI_SOLID_IMAGE_SRC };
           });
         },
       },
