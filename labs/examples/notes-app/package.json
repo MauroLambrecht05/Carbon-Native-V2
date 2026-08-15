@@ -3,11 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "//carbon": "@carbon/* comes from the bundler, not node_modules: BunBundler resolves the renderers and DOM shim from absolute paths exported by @carbon/workspace, and tsc resolves them through the path aliases in .config/tsconfig.base.json. V2 has no bun workspace, so these must not be declared as dependencies at all — a `workspace:*` specifier outside a workspace root is an install error.",
   "dependencies": {
     "react": "^18.3.0",
-    "@carbon/mini-react": "workspace:*",
-    "@carbon/compat-dom": "workspace:*",
-    "@carbon/mini-solid": "workspace:*",
     "date-fns": "^3.6.0",
     "nanoid": "^5.0.0",
     "clsx": "^2.1.0",
