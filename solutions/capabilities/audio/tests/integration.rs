@@ -72,7 +72,11 @@ fn test_audio_buffer_allocation() {
             )?;
             Ok(())
         })();
-        assert!(result.is_ok(), "audio buffer test failed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "audio buffer test failed: {:?}",
+            result.err()
+        );
     });
 }
 
@@ -112,12 +116,8 @@ fn test_gain_node_automation() {
     let (_rt, ctx) = make_ctx();
     ctx.with(|ctx| {
         let result: rquickjs::Result<()> = (|| {
-            ctx.eval::<(), _>(
-                b"var actx = new AudioContext();" as &[u8],
-            )?;
-            ctx.eval::<(), _>(
-                b"var gainNode = actx.createGain();" as &[u8],
-            )?;
+            ctx.eval::<(), _>(b"var actx = new AudioContext();" as &[u8])?;
+            ctx.eval::<(), _>(b"var gainNode = actx.createGain();" as &[u8])?;
             // createGain returns a GainNode — test that gain getter works
             let gain_val: f32 = ctx.eval(b"gainNode.gain.value" as &[u8])?;
             if (gain_val - 1.0).abs() > 0.01 {
@@ -131,7 +131,11 @@ fn test_gain_node_automation() {
             }
             Ok(())
         })();
-        assert!(result.is_ok(), "gain automation test failed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "gain automation test failed: {:?}",
+            result.err()
+        );
     });
 }
 
@@ -194,7 +198,11 @@ fn test_connect_disconnect() {
             )?;
             Ok(())
         })();
-        assert!(result.is_ok(), "connect/disconnect test failed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "connect/disconnect test failed: {:?}",
+            result.err()
+        );
     });
 }
 
@@ -212,20 +220,17 @@ static MINIMAL_WAV: &[u8] = &[
     // fmt chunk
     0x66, 0x6D, 0x74, 0x20, // "fmt "
     0x10, 0x00, 0x00, 0x00, // chunk size = 16
-    0x01, 0x00,             // PCM format = 1
-    0x01, 0x00,             // channels = 1
+    0x01, 0x00, // PCM format = 1
+    0x01, 0x00, // channels = 1
     0x44, 0xAC, 0x00, 0x00, // sample rate = 44100
     0x88, 0x58, 0x01, 0x00, // byte rate = 88200
-    0x02, 0x00,             // block align = 2
-    0x10, 0x00,             // bits per sample = 16
+    0x02, 0x00, // block align = 2
+    0x10, 0x00, // bits per sample = 16
     // data chunk
     0x64, 0x61, 0x74, 0x61, // "data"
     0x08, 0x00, 0x00, 0x00, // data size = 8 bytes = 4 frames
     // 4 samples: 0, 16383, -16384, 0
-    0x00, 0x00,
-    0xFF, 0x3F,
-    0x00, 0xC0,
-    0x00, 0x00,
+    0x00, 0x00, 0xFF, 0x3F, 0x00, 0xC0, 0x00, 0x00,
 ];
 
 #[test]
@@ -323,6 +328,10 @@ fn test_audio_context_state() {
             )?;
             Ok(())
         })();
-        assert!(result.is_ok(), "context state test failed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "context state test failed: {:?}",
+            result.err()
+        );
     });
 }

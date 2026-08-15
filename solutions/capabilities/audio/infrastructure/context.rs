@@ -25,8 +25,8 @@ use crate::{
     buffer::{decode_audio_data, AudioBuffer},
     gain::GainNode,
     mixer::{
-        next_node_id, with_graph, with_graph_mut, Node, OscillatorKind, OscillatorState,
-        SourceState, AnalyserState,
+        next_node_id, with_graph, with_graph_mut, AnalyserState, Node, OscillatorKind,
+        OscillatorState, SourceState,
     },
     oscillator::OscillatorNode,
     routing::AudioDestinationNode,
@@ -80,7 +80,7 @@ pub struct AudioContext {
     pub state: Arc<ContextState>,
 }
 
-unsafe impl<'js> rquickjs::JsLifetime<'js> for AudioContext {
+unsafe impl rquickjs::JsLifetime<'_> for AudioContext {
     type Changed<'to> = AudioContext;
 }
 
@@ -157,7 +157,10 @@ impl<'js> JsClass<'js> for AudioContext {
                     with_graph_mut(|g| {
                         g.nodes.insert(
                             id,
-                            Node::Source(SourceState { playback_rate: 1.0, ..Default::default() }),
+                            Node::Source(SourceState {
+                                playback_rate: 1.0,
+                                ..Default::default()
+                            }),
                         );
                     });
                     Class::instance(ctx, AudioBufferSourceNode { node_id: id })
@@ -237,11 +240,8 @@ impl<'js> JsClass<'js> for AudioContext {
                  length: u32,
                  sample_rate: f32|
                  -> Result<Class<'js, AudioBuffer>> {
-                    let buf = AudioBuffer::new(
-                        channels as usize,
-                        length as usize,
-                        sample_rate as u32,
-                    );
+                    let buf =
+                        AudioBuffer::new(channels as usize, length as usize, sample_rate as u32);
                     Class::instance(ctx, buf)
                 },
             ),
@@ -318,7 +318,7 @@ impl<'js> JsClass<'js> for AudioContext {
     }
 
     fn constructor(ctx: &Ctx<'js>) -> Result<Option<Constructor<'js>>> {
-        let c = Constructor::new_class::<AudioContext, _, _>(ctx.clone(), || make_audio_context())?;
+        let c = Constructor::new_class::<AudioContext, _, _>(ctx.clone(), make_audio_context)?;
         Ok(Some(c))
     }
 }
@@ -475,7 +475,11 @@ fn resolve_promise_undefined(ctx: Ctx<'_>) -> Result<Value<'_>> {
 }
 
 /// Wrap an error string in `Promise.reject(new Error(msg))`.
-/// Used by decodeAudioData to return a rejected Promise rather than throwing.
+///
+/// Kept for `decodeAudioData`'s rejection path, which currently throws
+/// synchronously instead. Unused until that path is switched over — deleting it
+/// would mean rewriting it from scratch when it is.
+#[allow(dead_code)]
 fn reject_promise_str<'js>(ctx: Ctx<'js>, msg: &str) -> Result<Value<'js>> {
     let promise_ctor: Object<'_> = ctx.globals().get("Promise")?;
     let reject_fn: rquickjs::Function<'_> = promise_ctor.get("reject")?;

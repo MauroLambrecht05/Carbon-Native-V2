@@ -20,7 +20,7 @@ pub struct OscillatorNode {
     pub node_id: NodeId,
 }
 
-unsafe impl<'js> rquickjs::JsLifetime<'js> for OscillatorNode {
+unsafe impl rquickjs::JsLifetime<'_> for OscillatorNode {
     type Changed<'to> = OscillatorNode;
 }
 
@@ -122,7 +122,11 @@ impl<'js> JsClass<'js> for OscillatorNode {
                     let param = Class::instance(
                         ctx.clone(),
                         AudioParam {
-                            state: crate::routing::ParamState::new(current, -1200.0 * 12.0, 1200.0 * 12.0),
+                            state: crate::routing::ParamState::new(
+                                current,
+                                -1200.0 * 12.0,
+                                1200.0 * 12.0,
+                            ),
                         },
                     )?;
                     let nid = id;
@@ -217,7 +221,7 @@ impl<'js> JsClass<'js> for OscillatorNode {
     }
 
     fn constructor(ctx: &Ctx<'js>) -> Result<Option<Constructor<'js>>> {
-        let c = Constructor::new_class::<OscillatorNode, _, _>(ctx.clone(), || make_oscillator_node())?;
+        let c = Constructor::new_class::<OscillatorNode, _, _>(ctx.clone(), make_oscillator_node)?;
         Ok(Some(c))
     }
 }

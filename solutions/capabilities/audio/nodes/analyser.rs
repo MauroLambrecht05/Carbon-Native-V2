@@ -16,8 +16,8 @@
 // callback runs on the JS thread while the audio thread only holds the mutex
 // for microseconds per buffer.
 
-use crate::mixer::{with_graph, with_graph_mut, Node, NodeId, AnalyserState};
 use crate::gain::node_id_from_value;
+use crate::mixer::{with_graph, with_graph_mut, AnalyserState, Node, NodeId};
 use realfft::RealFftPlanner;
 use rquickjs::{
     class::{JsClass, Trace, Tracer, Writable},
@@ -29,7 +29,7 @@ pub struct AnalyserNode {
     pub node_id: NodeId,
 }
 
-unsafe impl<'js> rquickjs::JsLifetime<'js> for AnalyserNode {
+unsafe impl rquickjs::JsLifetime<'_> for AnalyserNode {
     type Changed<'to> = AnalyserNode;
 }
 
@@ -160,7 +160,7 @@ impl<'js> JsClass<'js> for AnalyserNode {
                     let id = this.borrow().node_id;
                     let samples = with_graph(|g| match g.nodes.get(&id) {
                         Some(Node::Analyser(a)) => {
-                            let n = arr.len() as usize;
+                            let n = arr.len();
                             let n = n.min(a.fft_size);
                             let mut out = Vec::with_capacity(n);
                             for i in 0..n {
@@ -173,7 +173,7 @@ impl<'js> JsClass<'js> for AnalyserNode {
                             }
                             out
                         }
-                        _ => vec![128u8; arr.len() as usize],
+                        _ => vec![128u8; arr.len()],
                     });
                     for (i, &b) in samples.iter().enumerate() {
                         arr.set(i, b as u32)?;
@@ -191,7 +191,7 @@ impl<'js> JsClass<'js> for AnalyserNode {
                     let id = this.borrow().node_id;
                     let samples = with_graph(|g| match g.nodes.get(&id) {
                         Some(Node::Analyser(a)) => {
-                            let n = arr.len() as usize;
+                            let n = arr.len();
                             let n = n.min(a.fft_size);
                             let mut out = Vec::with_capacity(n);
                             for i in 0..n {
@@ -200,7 +200,7 @@ impl<'js> JsClass<'js> for AnalyserNode {
                             }
                             out
                         }
-                        _ => vec![0.0f32; arr.len() as usize],
+                        _ => vec![0.0f32; arr.len()],
                     });
                     for (i, &v) in samples.iter().enumerate() {
                         arr.set(i, v)?;
@@ -217,7 +217,7 @@ impl<'js> JsClass<'js> for AnalyserNode {
                 |this: This<Class<'js, AnalyserNode>>, arr: Array<'js>| -> Result<()> {
                     let id = this.borrow().node_id;
                     let magnitudes = compute_fft_magnitudes(id);
-                    let n = (arr.len() as usize).min(magnitudes.len());
+                    let n = arr.len().min(magnitudes.len());
                     for i in 0..n {
                         let db_range = with_graph(|g| match g.nodes.get(&id) {
                             Some(Node::Analyser(a)) => (a.min_decibels, a.max_decibels),
@@ -245,7 +245,7 @@ impl<'js> JsClass<'js> for AnalyserNode {
                 |this: This<Class<'js, AnalyserNode>>, arr: Array<'js>| -> Result<()> {
                     let id = this.borrow().node_id;
                     let magnitudes = compute_fft_magnitudes(id);
-                    let n = (arr.len() as usize).min(magnitudes.len());
+                    let n = arr.len().min(magnitudes.len());
                     for i in 0..n {
                         let mag = magnitudes[i];
                         let db = if mag > 1e-10 {
@@ -294,10 +294,7 @@ impl<'js> JsClass<'js> for AnalyserNode {
     }
 
     fn constructor(ctx: &Ctx<'js>) -> Result<Option<Constructor<'js>>> {
-        let c = Constructor::new_class::<AnalyserNode, _, _>(
-            ctx.clone(),
-            || make_analyser_node(),
-        )?;
+        let c = Constructor::new_class::<AnalyserNode, _, _>(ctx.clone(), make_analyser_node)?;
         Ok(Some(c))
     }
 }

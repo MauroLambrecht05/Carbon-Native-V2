@@ -19,7 +19,7 @@ pub struct GainNode {
     pub node_id: NodeId,
 }
 
-unsafe impl<'js> rquickjs::JsLifetime<'js> for GainNode {
+unsafe impl rquickjs::JsLifetime<'_> for GainNode {
     type Changed<'to> = GainNode;
 }
 
@@ -56,11 +56,9 @@ impl<'js> JsClass<'js> for GainNode {
                  this: This<Class<'js, GainNode>>|
                  -> Result<Class<'js, AudioParam>> {
                     let id = this.borrow().node_id;
-                    let current = with_graph(|g| {
-                        match g.nodes.get(&id) {
-                            Some(Node::Gain(gs)) => gs.gain(),
-                            _ => 1.0,
-                        }
+                    let current = with_graph(|g| match g.nodes.get(&id) {
+                        Some(Node::Gain(gs)) => gs.gain(),
+                        _ => 1.0,
                     });
                     build_gain_param(ctx, id, current)
                 },
@@ -105,7 +103,7 @@ impl<'js> JsClass<'js> for GainNode {
     }
 
     fn constructor(ctx: &Ctx<'js>) -> Result<Option<Constructor<'js>>> {
-        let c = Constructor::new_class::<GainNode, _, _>(ctx.clone(), || make_gain_node())?;
+        let c = Constructor::new_class::<GainNode, _, _>(ctx.clone(), make_gain_node)?;
         Ok(Some(c))
     }
 }
@@ -119,7 +117,10 @@ impl<'js> rquickjs::IntoJs<'js> for GainNode {
 fn make_gain_node() -> GainNode {
     let id = crate::mixer::next_node_id();
     with_graph_mut(|g| {
-        g.nodes.insert(id, crate::mixer::Node::Gain(crate::mixer::GainState::new(1.0)));
+        g.nodes.insert(
+            id,
+            crate::mixer::Node::Gain(crate::mixer::GainState::new(1.0)),
+        );
     });
     GainNode { node_id: id }
 }
@@ -128,11 +129,7 @@ fn make_gain_node() -> GainNode {
 // GainParamBridge — builds a JS AudioParam-like object that proxies to GainState
 // ---------------------------------------------------------------------------
 
-fn build_gain_param<'js>(
-    ctx: Ctx<'js>,
-    node_id: NodeId,
-    current: f32,
-) -> Result<Class<'js, AudioParam>> {
+fn build_gain_param(ctx: Ctx<'_>, node_id: NodeId, current: f32) -> Result<Class<'_, AudioParam>> {
     // Build a regular AudioParam with the current value as initial.
     let param_inst = Class::instance(
         ctx.clone(),
@@ -152,11 +149,9 @@ fn build_gain_param<'js>(
         &param_inst,
         "value",
         Func::from(move || -> f32 {
-            with_graph(|g| {
-                match g.nodes.get(&node_id2) {
-                    Some(Node::Gain(gs)) => gs.gain(),
-                    _ => 1.0,
-                }
+            with_graph(|g| match g.nodes.get(&node_id2) {
+                Some(Node::Gain(gs)) => gs.gain(),
+                _ => 1.0,
             })
         }),
         Func::from(move |v: f32| {

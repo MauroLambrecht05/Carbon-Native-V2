@@ -21,7 +21,7 @@ pub struct AudioBufferSourceNode {
     pub node_id: NodeId,
 }
 
-unsafe impl<'js> rquickjs::JsLifetime<'js> for AudioBufferSourceNode {
+unsafe impl rquickjs::JsLifetime<'_> for AudioBufferSourceNode {
     type Changed<'to> = AudioBufferSourceNode;
 }
 
@@ -51,8 +51,7 @@ impl<'js> JsClass<'js> for AudioBufferSourceNode {
                 },
             ),
             Func::from(
-                |this: This<Class<'js, AudioBufferSourceNode>>,
-                 buf: Class<'js, AudioBuffer>| {
+                |this: This<Class<'js, AudioBufferSourceNode>>, buf: Class<'js, AudioBuffer>| {
                     let id = this.borrow().node_id;
                     let arc = buf.borrow().inner.clone();
                     with_graph_mut(|g| {
@@ -94,7 +93,9 @@ impl<'js> JsClass<'js> for AudioBufferSourceNode {
             Func::from(|this: This<Class<'js, AudioBufferSourceNode>>| -> f64 {
                 let id = this.borrow().node_id;
                 with_graph(|g| match g.nodes.get(&id) {
-                    Some(Node::Source(s)) => s.loop_start_frames as f64 / g.device_sample_rate as f64,
+                    Some(Node::Source(s)) => {
+                        s.loop_start_frames as f64 / g.device_sample_rate as f64
+                    }
                     _ => 0.0,
                 })
             }),
@@ -225,9 +226,7 @@ impl<'js> JsClass<'js> for AudioBufferSourceNode {
         proto.set(
             "connect",
             Func::from(
-                |this: This<Class<'js, AudioBufferSourceNode>>,
-                 dest: Value<'js>|
-                 -> Value<'js> {
+                |this: This<Class<'js, AudioBufferSourceNode>>, dest: Value<'js>| -> Value<'js> {
                     let src_id = this.borrow().node_id;
                     let dst_id = node_id_from_value(&dest);
                     with_graph_mut(|g| g.connect(src_id, dst_id));
@@ -240,8 +239,7 @@ impl<'js> JsClass<'js> for AudioBufferSourceNode {
         proto.set(
             "disconnect",
             Func::from(
-                |this: This<Class<'js, AudioBufferSourceNode>>,
-                 dest: Opt<Value<'js>>| {
+                |this: This<Class<'js, AudioBufferSourceNode>>, dest: Opt<Value<'js>>| {
                     let src_id = this.borrow().node_id;
                     if let Some(d) = dest.0 {
                         let dst_id = node_id_from_value(&d);
@@ -257,10 +255,9 @@ impl<'js> JsClass<'js> for AudioBufferSourceNode {
     }
 
     fn constructor(ctx: &Ctx<'js>) -> Result<Option<Constructor<'js>>> {
-        let c = Constructor::new_class::<AudioBufferSourceNode, _, _>(
-            ctx.clone(),
-            || make_source_node(),
-        )?;
+        let c = Constructor::new_class::<AudioBufferSourceNode, _, _>(ctx.clone(), || {
+            make_source_node()
+        })?;
         Ok(Some(c))
     }
 }
@@ -274,10 +271,13 @@ impl<'js> rquickjs::IntoJs<'js> for AudioBufferSourceNode {
 fn make_source_node() -> AudioBufferSourceNode {
     let id = crate::mixer::next_node_id();
     with_graph_mut(|g| {
-        g.nodes.insert(id, Node::Source(SourceState {
-            playback_rate: 1.0,
-            ..Default::default()
-        }));
+        g.nodes.insert(
+            id,
+            Node::Source(SourceState {
+                playback_rate: 1.0,
+                ..Default::default()
+            }),
+        );
     });
     AudioBufferSourceNode { node_id: id }
 }

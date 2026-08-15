@@ -30,12 +30,8 @@ use rquickjs::{
 };
 use std::sync::Arc;
 use symphonia::core::{
-    audio::SampleBuffer,
-    codecs::DecoderOptions,
-    formats::FormatOptions,
-    io::MediaSourceStream,
-    meta::MetadataOptions,
-    probe::Hint,
+    audio::SampleBuffer, codecs::DecoderOptions, formats::FormatOptions, io::MediaSourceStream,
+    meta::MetadataOptions, probe::Hint,
 };
 
 // ---------------------------------------------------------------------------
@@ -64,7 +60,7 @@ impl AudioBuffer {
     }
 }
 
-unsafe impl<'js> rquickjs::JsLifetime<'js> for AudioBuffer {
+unsafe impl rquickjs::JsLifetime<'_> for AudioBuffer {
     type Changed<'to> = AudioBuffer;
 }
 
@@ -171,7 +167,7 @@ impl<'js> JsClass<'js> for AudioBuffer {
                     // We use unsafe here because the alternative (Mutex wrap)
                     // would add latency on every audio-thread read.
                     let data_ptr = b.inner.data.as_ptr() as *mut f32;
-                    let len = source.len() as usize;
+                    let len = source.len();
                     for i in 0..len {
                         let dst_frame = buf_off + i;
                         if dst_frame >= frames {
@@ -179,7 +175,9 @@ impl<'js> JsClass<'js> for AudioBuffer {
                         }
                         let v: f32 = source.get(i).unwrap_or(0.0);
                         let idx = ch * frames + dst_frame;
-                        unsafe { *data_ptr.add(idx) = v; }
+                        unsafe {
+                            *data_ptr.add(idx) = v;
+                        }
                     }
                 },
             ),
@@ -192,7 +190,8 @@ impl<'js> JsClass<'js> for AudioBuffer {
                 |this: This<Class<'js, AudioBuffer>>,
                  dest: Array<'js>,
                  channel_number: u32,
-                 buffer_offset: rquickjs::function::Opt<u32>| -> Result<()> {
+                 buffer_offset: rquickjs::function::Opt<u32>|
+                 -> Result<()> {
                     let b = this.borrow();
                     let ch = channel_number as usize;
                     let frames = b.inner.frames;
@@ -201,7 +200,7 @@ impl<'js> JsClass<'js> for AudioBuffer {
                         return Ok(());
                     }
                     let buf_off = buffer_offset.0.unwrap_or(0) as usize;
-                    let len = dest.len() as usize;
+                    let len = dest.len();
                     let offset = ch * frames;
                     for i in 0..len {
                         let src_frame = buf_off + i;
@@ -271,17 +270,11 @@ pub fn decode_audio_data(bytes: Vec<u8>) -> Result<AudioBuffer> {
         .map_err(|_e| rquickjs::Error::Unknown)?;
 
     let mut format = probed.format;
-    let track = format
-        .default_track()
-        .ok_or(rquickjs::Error::Unknown)?;
+    let track = format.default_track().ok_or(rquickjs::Error::Unknown)?;
 
     let track_id = track.id;
     let sample_rate = track.codec_params.sample_rate.unwrap_or(44100);
-    let channels_count = track
-        .codec_params
-        .channels
-        .map(|c| c.count())
-        .unwrap_or(1);
+    let channels_count = track.codec_params.channels.map(|c| c.count()).unwrap_or(1);
 
     let mut decoder = symphonia::default::get_codecs()
         .make(&track.codec_params, &decoder_opts)

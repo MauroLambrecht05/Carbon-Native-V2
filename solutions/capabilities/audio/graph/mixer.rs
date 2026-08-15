@@ -310,6 +310,12 @@ impl Graph {
         }
     }
 
+    /// Frames rendered since the context started.
+    ///
+    /// Part of the mixer's public surface but not called inside this crate —
+    /// it backs `AudioContext.currentTime` on the JS side, which reads it
+    /// through the host binding rather than through Rust.
+    #[allow(dead_code)]
     pub fn current_frame(&self) -> u64 {
         self.current_frame.load(Ordering::Relaxed)
     }
@@ -409,7 +415,16 @@ pub fn render_destination(graph: &mut Graph, out: &mut [f32], out_frames: usize)
     // mutating, so collect the IDs first.
     let inputs: Vec<NodeId> = graph.destination_inputs.clone();
     for nid in inputs {
-        render_node(graph, nid, start_frame, out, out_frames, channels, device_sr, &mut HashSet::new());
+        render_node(
+            graph,
+            nid,
+            start_frame,
+            out,
+            out_frames,
+            channels,
+            device_sr,
+            &mut HashSet::new(),
+        );
     }
 
     // Update analyser node ring buffers AFTER mixing. We push the
@@ -452,10 +467,44 @@ fn render_node(
         _ => 0,
     };
     match kind {
-        1 => render_source_into(graph, nid, start_frame, out, out_frames, channels, device_sr),
-        2 => render_gain_into(graph, nid, start_frame, out, out_frames, channels, device_sr, visited),
-        3 => render_osc_into(graph, nid, start_frame, out, out_frames, channels, device_sr),
-        4 => render_analyser_into(graph, nid, start_frame, out, out_frames, channels, device_sr, visited),
+        1 => render_source_into(
+            graph,
+            nid,
+            start_frame,
+            out,
+            out_frames,
+            channels,
+            device_sr,
+        ),
+        2 => render_gain_into(
+            graph,
+            nid,
+            start_frame,
+            out,
+            out_frames,
+            channels,
+            device_sr,
+            visited,
+        ),
+        3 => render_osc_into(
+            graph,
+            nid,
+            start_frame,
+            out,
+            out_frames,
+            channels,
+            device_sr,
+        ),
+        4 => render_analyser_into(
+            graph,
+            nid,
+            start_frame,
+            out,
+            out_frames,
+            channels,
+            device_sr,
+            visited,
+        ),
         _ => {}
     }
     visited.remove(&nid);
@@ -470,7 +519,9 @@ fn render_source_into(
     channels: usize,
     device_sr: u32,
 ) {
-    let Some(Node::Source(s)) = graph.nodes.get_mut(&nid) else { return };
+    let Some(Node::Source(s)) = graph.nodes.get_mut(&nid) else {
+        return;
+    };
     if s.finished {
         return;
     }
@@ -522,7 +573,10 @@ fn render_source_into(
         // Stereo->stereo: pass through.
         if channels == 2 {
             let (l, r) = if buffer.channels >= 2 {
-                (buffer.sample_lerp(0, playhead), buffer.sample_lerp(1, playhead))
+                (
+                    buffer.sample_lerp(0, playhead),
+                    buffer.sample_lerp(1, playhead),
+                )
             } else {
                 let m = buffer.sample_lerp(0, playhead);
                 (m, m)
@@ -552,7 +606,9 @@ fn render_osc_into(
     channels: usize,
     device_sr: u32,
 ) {
-    let Some(Node::Oscillator(o)) = graph.nodes.get_mut(&nid) else { return };
+    let Some(Node::Oscillator(o)) = graph.nodes.get_mut(&nid) else {
+        return;
+    };
     if o.finished {
         return;
     }
@@ -633,9 +689,20 @@ fn render_gain_into(
     let mut scratch = vec![0.0f32; out_frames * channels];
     let inputs = graph.inputs.get(&nid).cloned().unwrap_or_default();
     for src in inputs {
-        render_node(graph, src, start_frame, &mut scratch, out_frames, channels, device_sr, visited);
+        render_node(
+            graph,
+            src,
+            start_frame,
+            &mut scratch,
+            out_frames,
+            channels,
+            device_sr,
+            visited,
+        );
     }
-    let Some(Node::Gain(g)) = graph.nodes.get(&nid) else { return };
+    let Some(Node::Gain(g)) = graph.nodes.get(&nid) else {
+        return;
+    };
 
     // Branch: ramp active vs steady.
     if g.ramp_active.load(Ordering::Relaxed) {
@@ -701,14 +768,25 @@ fn render_analyser_into(
     let mut scratch = vec![0.0f32; out_frames * channels];
     let inputs = graph.inputs.get(&nid).cloned().unwrap_or_default();
     for src in inputs {
-        render_node(graph, src, start_frame, &mut scratch, out_frames, channels, device_sr, visited);
+        render_node(
+            graph,
+            src,
+            start_frame,
+            &mut scratch,
+            out_frames,
+            channels,
+            device_sr,
+            visited,
+        );
     }
     // Forward through.
     for i in 0..scratch.len() {
         out[i] += scratch[i];
     }
     // Update analyser ring buffer.
-    let Some(Node::Analyser(a)) = graph.nodes.get_mut(&nid) else { return };
+    let Some(Node::Analyser(a)) = graph.nodes.get_mut(&nid) else {
+        return;
+    };
     for f in 0..out_frames {
         let m = if channels >= 2 {
             (scratch[f * 2] + scratch[f * 2 + 1]) * 0.5

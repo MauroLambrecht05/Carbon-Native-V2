@@ -34,10 +34,23 @@ use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub enum AutomationEvent {
-    SetValueAtTime { value: f32, start_time: f64 },
-    LinearRampToValueAtTime { value: f32, end_time: f64 },
-    ExponentialRampToValueAtTime { value: f32, end_time: f64 },
-    SetTargetAtTime { target: f32, start_time: f64, time_constant: f64 },
+    SetValueAtTime {
+        value: f32,
+        start_time: f64,
+    },
+    LinearRampToValueAtTime {
+        value: f32,
+        end_time: f64,
+    },
+    ExponentialRampToValueAtTime {
+        value: f32,
+        end_time: f64,
+    },
+    SetTargetAtTime {
+        target: f32,
+        start_time: f64,
+        time_constant: f64,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -87,11 +100,13 @@ pub struct AudioParam {
 
 impl AudioParam {
     pub fn new(default: f32, min: f32, max: f32) -> Self {
-        Self { state: ParamState::new(default, min, max) }
+        Self {
+            state: ParamState::new(default, min, max),
+        }
     }
 }
 
-unsafe impl<'js> rquickjs::JsLifetime<'js> for AudioParam {
+unsafe impl rquickjs::JsLifetime<'_> for AudioParam {
     type Changed<'to> = AudioParam;
 }
 
@@ -111,9 +126,7 @@ impl<'js> JsClass<'js> for AudioParam {
             ctx,
             &proto,
             "value",
-            Func::from(|this: This<Class<'js, AudioParam>>| -> f32 {
-                this.borrow().state.get()
-            }),
+            Func::from(|this: This<Class<'js, AudioParam>>| -> f32 { this.borrow().state.get() }),
             Func::from(|this: This<Class<'js, AudioParam>>, v: f32| {
                 this.borrow().state.set(v);
             }),
@@ -192,10 +205,7 @@ impl<'js> JsClass<'js> for AudioParam {
                         .state
                         .events
                         .lock()
-                        .push(AutomationEvent::ExponentialRampToValueAtTime {
-                            value,
-                            end_time,
-                        });
+                        .push(AutomationEvent::ExponentialRampToValueAtTime { value, end_time });
                 },
             ),
         )?;
@@ -246,13 +256,21 @@ pub struct AudioDestinationNode {
     pub node_id: NodeId,
 }
 
-impl AudioDestinationNode {
-    pub fn new() -> Self {
-        Self { node_id: DESTINATION_ID }
+impl Default for AudioDestinationNode {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
-unsafe impl<'js> rquickjs::JsLifetime<'js> for AudioDestinationNode {
+impl AudioDestinationNode {
+    pub fn new() -> Self {
+        Self {
+            node_id: DESTINATION_ID,
+        }
+    }
+}
+
+unsafe impl rquickjs::JsLifetime<'_> for AudioDestinationNode {
     type Changed<'to> = AudioDestinationNode;
 }
 
@@ -311,4 +329,3 @@ impl<'js> rquickjs::IntoJs<'js> for AudioDestinationNode {
         Class::instance(ctx.clone(), self)?.into_js(ctx)
     }
 }
-
