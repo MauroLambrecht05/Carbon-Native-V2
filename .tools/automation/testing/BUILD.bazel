@@ -1,0 +1,18 @@
+# The shared test harness.
+#
+# `:preload` is the default `preload` attribute of every `bun_test` target (see
+# //.tools/orchestration/bazel/bun:defs.bzl). It is exported as its own
+# filegroup rather than lumped into `:srcs` because the rule needs a single
+# file, not a set — `allow_single_file` rejects a multi-file target.
+
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "preload",
+    srcs = ["src/preload.ts"],
+)
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["src/**/*.ts"]) + ["package.json"],
+)

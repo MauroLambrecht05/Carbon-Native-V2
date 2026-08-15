@@ -11,7 +11,7 @@ solutions/
 ├── contracts/       agreements between things that must not drift apart
 │   ├── core/            core.fbs
 │   ├── app/             carbon.toml — schema, types, errors
-│   ├── plugin/          the C ABI, the manifest, permissions
+│   ├── plugin/          the extension points, the C ABI, the manifest
 │   ├── host/            api · events · ipc
 │   ├── security/        keyring, signature format, minisign byte lengths
 │   ├── versioning/      versioning.fbs
@@ -24,14 +24,18 @@ solutions/
 │   ├── updating/        keeping an install current without bricking it
 │   ├── scaffolding/     a name and a preset into a working project
 │   ├── plugins/         authoring, building and installing native plugins
+│   ├── extension-points/ the plugin registry, and its C/Rust/TS renderings
 │   ├── bundling/        source into a runnable bundle
 │   ├── packaging/       an artifact into an OS installer
 │   └── publishing/      announcing a release and shipping its artifacts
 │
-├── infrastructure/  vendor-neutral technical services, behind ports
+├── infrastructure/  vendor-neutral technical services — ports/ + adapters/
 │   ├── logging/         the Logger port, and a console adapter
 │   ├── process/         the ProcessRunner port, and a node adapter
-│   └── workspace/       where things live, and reading carbon.toml
+│   ├── workspace/       where things live, and reading carbon.toml
+│   ├── os/              nineteen host-function adapters over the OS
+│   ├── platform/        one adapter per target OS
+│   └── plugin-host/     the frozen plugin ABI, and the loader
 │
 ├── integrations/    outside technologies, named by ROLE then vendor
 │   ├── bundler/vite/       our Vite integration (was nine packages)
@@ -43,8 +47,13 @@ solutions/
 └── interface/       how application code and developers reach the runtime
     ├── cli/             the command framework: Command, Dispatcher, flags, help
     ├── renderer/        solid · react — JSX into scene-graph host calls
-    └── stdlib/          api · dom — the app-facing surface over __cm_*
+    └── stdlib/          api · bindings · dom — the app-facing surface over __cm_*
 ```
+
+Every tier states its internal shape below, and every package follows the one
+its tier declares. Where a package does not, the reason is written down in
+that package and holds up to measurement — see the capability kinds, and
+`three-fiber`'s missing `domain/`.
 
 ## Which tier may depend on which
 
@@ -153,6 +162,126 @@ library that ties the model to a runtime:
 ```
 [FAIL] domain imports outward: .../domain/entities/_probe.ts -> /infrastructure/
 ```
+
+## The other three tiers have shapes too
+
+`capabilities/` was the only tier this file described from the inside, and it
+showed: the other three had grown packages that were a directory of loose
+files with a 1,700-line `index.ts` in them. Each tier now states its shape,
+and `.tools/validation/check_workspace.py` checks the parts with teeth.
+
+### `infrastructure/` — `ports/` and `adapters/`
+
+```
+<service>/
+├── ports/      the interface this service promises. Omit when there is one
+│               implementation and no second candidate to shape it against.
+├── adapters/   the implementations — per vendor, per platform, per OS
+│               facility. Grouped into subdirectories once there are many:
+│               os/adapters/{desktop,filesystem,net,process,storage,…}/
+├── tests/
+└── index.ts    (TypeScript) or lib.rs (Rust)
+```
+
+Two words, in both languages. `os/` had `modules/`, `platform/` had
+`targets/`, `plugin-host/` had `loader/` — three names for one idea, and
+`modules/` in particular said only that they were Rust modules, which the
+`mod` keyword beside it already said. `plugin-host/abi/` keeps its own name
+and is the deliberate exception: a port is an interface the service calls
+*outward* through, and that is an interface other people's prebuilt binaries
+were compiled *against*.
+
+`WorkspaceLayout.ts` sat loose at its package root, which read as "this is
+the package" rather than "this is one adapter of two". It walks the
+filesystem, so it is an adapter.
+
+### `integrations/` — `domain/` and `infrastructure/`
+
+```
+<role>/<vendor>/
+├── domain/          what the integration means, with the vendor absent
+├── infrastructure/  the vendor-facing code
+├── tests/
+└── index.ts
+```
+
+The same two words `capabilities/` uses, for the same reason. `vite/` already
+had it. The others now do:
+
+| Integration | `domain/` holds | `infrastructure/` holds |
+|---|---|---|
+| `bundler/vite` | the module graph, the Tailwind class table, the theme extractor | the Vite plugins and Babel passes |
+| `scene3d/three` | the `DrawCommand` schema — both sides of the JS↔Rust boundary agree on it, so it may drag neither in | the scene-walking renderer, the executors |
+| `terminal/xterm` | the escape-sequence parser, the cell grid, the emitter, the xterm.js types | the `Terminal` that paints the grid as scene nodes, and the addons |
+| `transpiler/babel` | `styles.css` → a `class -> styleProps` map | the Babel visitor that rewrites JSX, and the `.csx` pre-processor |
+| `scene3d/three-fiber` | — | everything: the intrinsic registry, the renderer, the builder, `<Canvas>` |
+
+`three-fiber` has no `domain/` and that is a measurement, not an omission:
+every file in it imports three.js, so the directory would be a label rather
+than a boundary. **Where nothing is vendor-free, `domain/` is omitted rather
+than invented** — the same honesty the capability kinds are built on.
+
+`javascript/quickjs` is exempt entirely: it is a vendored upstream fork
+(`Cargo.toml.orig` and all), and it keeps rquickjs's layout so the diff
+against upstream stays readable.
+
+### `interface/` — named for what the surface is made of
+
+The driving edge has no single shape, because a command framework and a
+React reconciler are not the same kind of thing. What each package does have
+is directories named for a role, and no file loose at the root except
+`index.ts`:
+
+```
+interface/cli/              kernel/ · ports/ · adapters/ · dispatch/
+interface/renderer/<vendor> host/ · scene/ · styling/ · reconciler/ · runtime/ · testing/
+interface/stdlib/api        host/ · bridge/ · process/ · storage/ · system/ · window/
+interface/stdlib/bindings   bridge/ · desktop/ · filesystem/ · net/ · process/ · storage/ · system/ · window/
+interface/stdlib/dom        shims/ · globals/
+```
+
+Two things are load-bearing here:
+
+**The two renderers have the same shape.** `react/` and `solid/` were a
+1,730-line and a 1,091-line `index.ts` solving the same problem twice, and
+comparing them meant scrolling both. They now carry the same six directory
+names, so a fix in one has an obvious address in the other. `solid/` has one
+the other does not — `intrinsics/`, for `<canvas>` and `<image>`, which React
+reaches through props on a host component instead.
+
+**`stdlib/bindings` and `infrastructure/os` use the same eight area names.**
+That is the same boundary seen from its two sides, so a host function and its
+TypeScript wrapper are always in same-named directories, and "where does this
+new binding go" answers itself.
+
+Everything else follows from "no loose files": `stdlib/dom`'s `install.ts`
+was 1,376 lines, of which the streams polyfill and four installers touched
+nothing but `globalThis` and are now their own modules; what remains is
+what genuinely needs `document` and `window` in one closure.
+
+## The plugin architecture crosses every tier
+
+Worth reading as one path, because no single directory holds it:
+
+| Tier | Holds |
+|---|---|
+| `contracts/plugin/` | `registry/extension-points.zig` — **the source of truth**, plus the C, Rust and TS renderings generated from it |
+| `capabilities/extension-points/` | parsing that Zig, and rendering the three |
+| `capabilities/plugin-sdk/` | the Zig SDK's implementation — the surface is `products/carbon-ext` |
+| `capabilities/plugins/` | scaffold, build, check, install, preflight |
+| `infrastructure/plugin-host/` | the loader: dlopen, bind by symbol, enforce capabilities, dispatch |
+| `products/carbon-ext` | the SDK itself: the C ABI header, the templates, the package definition |
+| `products/carbon-cli` | every command: `carbon plugin *`, `carbon ext *`, and the preflight `carbon run` calls |
+| `products/carbon` | the dispatch sites — where each point is actually called |
+
+The rule that shapes it: **a plugin is a shared library that exports C symbols,
+and the export is the registration.** No callback table, no register call. That
+is what makes every point individually optional, and appending one to the
+registry a MINOR ABI bump rather than a break.
+
+The direction is enforced the usual way — `contracts/plugin/rust` depends on
+nothing, so the generated table names an opaque `CarbonApp` and the host casts
+its own descriptor to it at the dispatch site.
 
 ## Why the CLI is not in here
 

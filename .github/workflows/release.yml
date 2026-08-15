@@ -1,0 +1,263 @@
+name: Release Pipeline
+
+# Tag-triggered. Builds the runtime for three targets, wraps each in its
+# platform's installer, signs it, publishes to the update bucket at a 10%
+# rollout, and cuts a GitHub release.
+#
+# Ported from V1. What changed: paths (tools/cli -> products/carbon-cli,
+# scripts/ci -> .tools/automation/ci), the CLI is invoked through Bazel like
+# everything else, and the signing steps no longer silently pass. See the note
+# on each.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  ZIG_VERSION: 0.13.0
+  CARGO_TERM_COLOR: always
+  # What a root .cargo/config.toml and a rust-toolchain.toml would carry. The
+  # root is Bazel's, so the Bazel cargo launcher exports these instead — and
+  # the cross-compile step below calls cargo-zigbuild directly rather than
+  # through Bazel, so it needs the same set. Keep in step with _CARGO_ENV in
+  # .tools/orchestration/bazel/cargo/defs.bzl; that is the definition.
+  CARGO_TARGET_DIR: .local/rust
+  CARGO_INCREMENTAL: "0"
+  CARGO_BUILD_RUSTFLAGS: "--remap-path-prefix=.=carbon-native"
+  CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS: fallback
+  RUSTUP_TOOLCHAIN: "1.86"
+
+jobs:
+  build-matrix:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            installer: appimage
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            installer: dmg
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            installer: nsis
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 1.86 here matches RUSTUP_TOOLCHAIN in env above, which in turn matches
+      # _CARGO_ENV in the Bazel cargo launcher. Three places, because a GitHub
+      # action cannot read a .bzl file — the launcher is the definition and the
+      # others follow it. `rust-version` in the workspace manifest is an MSRV
+      # assertion, not a toolchain selector, so it does not substitute for this.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.86"
+          targets: ${{ matrix.target }}
+
+      - uses: bazel-contrib/setup-bazel@v0.8.0
+        with:
+          bazelrc: build --enable_bzlmod
+
+      - uses: mlugg/setup-zig@v1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.10"
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: install cargo-zigbuild
+        run: cargo install cargo-zigbuild --locked
+
+      - name: linux system deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libxrandr-dev \
+            libxi-dev libgl1-mesa-dev libasound2-dev pkg-config
+
+      - name: activate MSVC
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./.tools/automation/bootstrap/activate-msvc.ps1
+
+      - name: install js deps
+        shell: bash
+        run: |
+          bun install --cwd .config --frozen-lockfile
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            pwsh -File ./.tools/automation/bootstrap/link-node-modules.ps1
+          else
+            ./.tools/automation/bootstrap/link-node-modules.sh
+          fi
+
+      # The `dist` profile — opt-level "z", fat LTO, one codegen unit,
+      # panic = "unwind". Every published benchmark number describes this build.
+      - name: build runtime
+        run: >
+          cargo zigbuild --manifest-path .tools/orchestration/bazel/cargo/Cargo.toml
+          --profile dist -p carbon-runtime --bin carbon-mini
+          --no-default-features --features mini,snapshot
+          --target ${{ matrix.target }}
+
+      - name: generate installer
+        run: bazel run //products/carbon-cli:carbon -- bundle --target ${{ matrix.installer }} --version ${{ github.ref_name }}
+
+      # ── Signing ──────────────────────────────────────────────────────────
+      # Each signing step is skipped when its secret is absent, rather than
+      # failing the release or — worse — appearing to succeed. V1 used
+      # `continue-on-error: true` on the manifest and Linux steps, which meant
+      # an unsigned artifact shipped and the log said nothing.
+      - name: sign (windows)
+        if: runner.os == 'Windows' && env.CARBON_CERT_PATH != ''
+        env:
+          CARBON_CERT_PATH: ${{ secrets.CARBON_CERT_PATH }}
+          CARBON_CERT_PASSWORD: ${{ secrets.CARBON_CERT_PASSWORD }}
+        shell: pwsh
+        # -File is mandatory on the script; it signs one artifact per call.
+        run: |
+          Get-ChildItem dist -Filter *.exe -Recurse | ForEach-Object {
+            ./.tools/automation/ci/sign-windows.ps1 -File $_.FullName
+          }
+
+      - name: sign (macos)
+        if: runner.os == 'macOS' && env.CARBON_DEVELOPER_ID != ''
+        env:
+          CARBON_DEVELOPER_ID: ${{ secrets.CARBON_DEVELOPER_ID }}
+        run: |
+          chmod +x ./.tools/automation/ci/sign-macos.sh
+          ./.tools/automation/ci/sign-macos.sh dist/*.app
+
+      - name: notarize (macos)
+        if: runner.os == 'macOS' && env.CARBON_APPLE_ID != ''
+        env:
+          CARBON_APPLE_ID: ${{ secrets.CARBON_APPLE_ID }}
+          CARBON_APP_PASSWORD: ${{ secrets.CARBON_APP_PASSWORD }}
+          CARBON_TEAM_ID: ${{ secrets.CARBON_TEAM_ID }}
+        run: |
+          chmod +x ./.tools/automation/ci/notarize-poll.sh
+          ./.tools/automation/ci/notarize-poll.sh dist/*.app
+
+      - name: sign update manifest
+        if: env.CARBON_SIGNING_KEY != ''
+        env:
+          CARBON_SIGNING_KEY: ${{ secrets.CARBON_SIGNING_KEY }}
+        shell: bash
+        run: |
+          printf '%s' "$CARBON_SIGNING_KEY" > signing.key
+          bazel run //products/carbon-cli:carbon -- signer sign dist/manifest.json --key signing.key
+          rm -f signing.key
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.target }}
+          path: dist/
+          retention-days: 5
+
+  publish:
+    needs: build-matrix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.10"
+      - uses: bazel-contrib/setup-bazel@v0.8.0
+        with:
+          bazelrc: build --enable_bzlmod
+
+      - name: install js deps
+        shell: bash
+        run: |
+          bun install --cwd .config --frozen-lockfile
+          ./.tools/automation/bootstrap/link-node-modules.sh
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: ./build-artifacts
+
+      - name: stage release assets
+        run: |
+          mkdir -p releases/${{ github.ref_name }}
+          cp -r build-artifacts/*/* releases/${{ github.ref_name }}/
+
+      # Delta generation shells out to carbon-delta, built from source,
+      # which are Windows x64 builds. On this Linux runner the natively
+      # installed tools are used instead, via the documented overrides.
+      - name: install delta tools
+        run: sudo apt-get update && sudo apt-get install -y bsdiff zstd
+
+      - name: publish to update bucket
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: us-east-1
+          BSDIFF: /usr/bin/bsdiff
+          ZSTD: /usr/bin/zstd
+        run: >
+          bazel run //products/carbon-cli:carbon -- publish app
+          --version ${{ github.ref_name }}
+          --channel stable
+          --input releases/${{ github.ref_name }}
+          --rollout 10
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: releases/${{ github.ref_name }}/*
+          draft: false
+          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: notify slack
+        if: always() && env.SLACK_WEBHOOK != ''
+        uses: 8398a7/action-slack@v3
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+        with:
+          status: ${{ job.status }}
+          text: |
+            Release ${{ github.ref_name }} — ${{ job.status }}
+            <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View details>
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+
+  # Rollout starts at 10% (set above). Widening it is a deliberate act, not a
+  # timer — V1 had a `canary-deploy` job whose "Wait for Metrics (24h)" step was
+  # `sleep 60` and whose health check echoed "All systems nominal"
+  # unconditionally. A green check that means nothing is worse than no check, so
+  # this reports the current state and stops.
+  rollout-status:
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.10"
+      - uses: bazel-contrib/setup-bazel@v0.8.0
+        with:
+          bazelrc: build --enable_bzlmod
+      - name: install js deps
+        shell: bash
+        run: |
+          bun install --cwd .config --frozen-lockfile
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            pwsh -File ./.tools/automation/bootstrap/link-node-modules.ps1
+          else
+            ./.tools/automation/bootstrap/link-node-modules.sh
+          fi
+      - name: report rollout state
+        run: |
+          bazel run //products/carbon-cli:carbon -- publish status --channel stable
+          echo "Published at 10%. The CLI exposes app / status / rollback / yank —"
+          echo "widen by re-running 'publish app' with a higher --rollout, and use"
+          echo "'publish rollback' or 'publish yank' if the canary looks wrong."

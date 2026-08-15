@@ -1,0 +1,4 @@
+# The workspace-check rule. See defs.bzl for why these cannot be sandboxed.
+package(default_visibility = ["//visibility:public"])
+
+exports_files(["defs.bzl"])

@@ -50,7 +50,7 @@ def generate_flatbuffers(schema_dir: Path, output_dir: Path, languages: list):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Carbon Native V2 FlatBuffers Generator")
     parser.add_argument("--schema-dir", default="solutions/shared/idl", help="Directory containing .fbs files")
-    parser.add_argument("--output-dir", default=".build/generated/idl", help="Output directory for generated bindings")
+    parser.add_argument("--output-dir", default=".tools/generators/out/idl", help="Output directory for generated bindings")
     parser.add_argument("--langs", nargs="+", default=["cpp", "rust", "go", "ts", "csharp"], help="Languages to generate")
     
     args = parser.parse_args()

@@ -39,7 +39,7 @@ Every target here names a package and a feature list, which is what a
 
 ## Where the manifest lives
 
-`.config/rust/Cargo.toml`, not the repository root.
+`.tools/orchestration/bazel/cargo/Cargo.toml`, not the repository root.
 
 Cargo only walks *up* looking for a workspace, so each crate carries an explicit
 `workspace = "<relative path>"` key pointing back at it. That is the same

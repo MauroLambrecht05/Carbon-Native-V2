@@ -2,6 +2,12 @@
  * carbon-native layered publish + patch tool.
  * Voltframe win ported: 563× smaller patches via bsdiff on uncompressed tars.
  *
+ * NOTE on patch_size: it is the UNCOMPRESSED patch now. The vendored bsdiff
+ * this replaced bzip2'd its streams internally, so its output was already
+ * compressed; carbon-delta emits raw streams and the compression is the
+ * explicit zstd step after it. `patch_compressed_size` is unchanged, and it is
+ * what the full-versus-patch decision reads.
+ *
  *   bun publish.ts build <srcDir> <outDir> [version]
  *   bun publish.ts diff  <oldDir> <newDir> <outDir>
  *
@@ -16,15 +22,33 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync, copyFileS
 import { join, basename } from "node:path";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { VENDOR_DIR } from "@carbon/workspace";
+import { resolveDeltaTool } from "@carbon/workspace";
 
-// Delta-update tools are vendored in tooling/vendor/ so this CLI is
-// self-contained; see that directory's README for provenance and checksums.
-// The vendored builds are Windows-only, hence the env overrides — a
-// contributor on another platform installs bsdiff/zstd natively and points
-// BSDIFF / ZSTD at them.
-const BSDIFF = process.env.BSDIFF ?? join(VENDOR_DIR, "bsdiff.exe");
-const ZSTD = process.env.ZSTD ?? join(VENDOR_DIR, "zig-zstd.exe");
+// Binary diff and compression come from `carbon-delta`, built from
+// solutions/capabilities/publishing/rust. It replaced two prebuilt Windows
+// executables committed at .tools/vendor — which worked, and meant this script
+// only ran on Windows.
+//
+// Resolved lazily, at the first delta operation rather than at import: `build`
+// needs compression and `diff` needs both, but neither should fail to LOAD on
+// a machine that has not built the tool yet.
+let deltaToolPath: string | null = null;
+function deltaTool(): string {
+	if (deltaToolPath) return deltaToolPath;
+	const found = process.env.CARBON_DELTA ?? resolveDeltaTool();
+	if (!found) {
+		throw new Error(
+			[
+				"carbon-delta is not built.",
+				"  cargo build --release -p carbon-delta \\",
+				"    --manifest-path .tools/orchestration/bazel/cargo/Cargo.toml",
+				"  (or set CARBON_DELTA to a built one)",
+			].join("\n"),
+		);
+	}
+	deltaToolPath = found;
+	return found;
+}
 
 interface LayerSpec { name: string; matcher: (relPath: string) => boolean; }
 
@@ -79,12 +103,12 @@ function makeTar(files: FileEntry[], outPath: string, baseDir: string) {
 }
 
 function zstdCompress(input: string, output: string) {
-	const r = spawnSync(ZSTD, ["compress", "-i", input, "-o", output, "--no-timing"], { encoding: "utf8" });
+	const r = spawnSync(deltaTool(), ["compress", input, output], { encoding: "utf8" });
 	if (r.status !== 0) throw new Error(`zstd compress failed: ${r.stderr}`);
 }
 
 function bsdiff(from: string, to: string, patchOut: string) {
-	const r = spawnSync(BSDIFF, [from, to, patchOut], { encoding: "utf8" });
+	const r = spawnSync(deltaTool(), ["diff", from, to, patchOut], { encoding: "utf8" });
 	if (r.status !== 0) throw new Error(`bsdiff failed: ${r.stderr}`);
 }
 

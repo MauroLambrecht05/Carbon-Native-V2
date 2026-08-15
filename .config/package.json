@@ -3,7 +3,6 @@
   "version": "0.2.0",
   "private": true,
   "description": "Carbon Native V2 \u2014 third-party npm dependencies for the TypeScript tier.",
-  "license": "Apache-2.0",
   "type": "module",
   "//": "Not a bun workspace root: no `workspaces` array and no `workspace:*` anywhere. Internal @carbon/* wiring is path aliases in ./tsconfig.base.json, so nothing is installed or symlinked for it \u2014 this is purely the flat list of third-party packages the TypeScript tier needs. Install with `bun install --cwd .config` from the workspace root, which puts node_modules HERE. Bun then resolves it through the `node_modules` junction at the workspace root, because module resolution walks UP from each importing file and would otherwise never look inside .config/. Create that junction with .tools/automation/bootstrap/link-node-modules.{ps1,sh}.",
   "scripts": {

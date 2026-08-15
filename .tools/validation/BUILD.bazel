@@ -1,0 +1,76 @@
+# The workspace's own checks, as Bazel targets.
+#
+# Two BUILD files already pointed at `//.tools/validation:host_boundary_test`
+# before this package existed — solutions/contracts/runtime and
+# solutions/infrastructure/os both cite it as what verifies their surface. The
+# label was aspirational; this is it.
+#
+# `bazel test //...` gates on all three, which is the point: Bazel is the
+# entrypoint here, so a rule only a separate task runner could invoke is a rule
+# that does not run.
+
+load("//.tools/orchestration/bazel/checks:defs.bzl", "workspace_check_binary", "workspace_check_test")
+
+package(default_visibility = ["//visibility:public"])
+
+# Tier direction, contract shape, product template, package layout, toolchain
+# versions, and the three declarations of the cargo target directory — plus it
+# delegates to check_host_boundary.py, check_typescript.py,
+# check_extension_points.py and check_readme_layout.py, so this one target
+# transitively covers all of them.
+workspace_check_test(
+    name = "workspace_test",
+    command = ["$PY", ".tools/validation/check_workspace.py"],
+)
+
+# The JS <-> Rust boundary alone: 139 imports Rust installs for JS to call and
+# 34 dispatchers JS installs for Rust to call, compared against
+# contracts/runtime/registry/host-boundary.toml in both directions.
+#
+# Also reached via workspace_test. Kept separate because it is the label the
+# contracts and os BUILD files name, and because a boundary failure should be
+# readable without the rest of the structural output.
+workspace_check_test(
+    name = "host_boundary_test",
+    command = ["$PY", ".tools/validation/check_host_boundary.py"],
+)
+
+# Discovers every tsconfig and runs all of them. One project reporting zero
+# errors looks identical whether it covers the tree or half of it — which is how
+# a stale `include` hid work three separate times during the migration.
+workspace_check_test(
+    name = "typescript_test",
+    command = ["$PY", ".tools/validation/check_typescript.py"],
+)
+
+# The Zig extension-point registry against the C, Rust and TypeScript rendered
+# from it. Nothing in a compiler notices when one drifts, because each of the
+# three is internally consistent; the symptom is a plugin compiled against a
+# prototype the runtime does not dispatch.
+#
+# Also reached via workspace_test, and separate for the same reason
+# host_boundary_test is: a contract failure should be readable on its own.
+workspace_check_test(
+    name = "extension_points_test",
+    command = ["$PY", ".tools/validation/check_extension_points.py"],
+)
+
+# README.md section 3 against the tree, in both directions. The document is the
+# only statement of what the root, .config/ and .tools/ hold, and it is the one
+# that goes stale — while it described directories that no longer existed, four
+# undeclared ones accumulated in the two it did describe.
+workspace_check_test(
+    name = "readme_layout_test",
+    command = ["$PY", ".tools/validation/check_readme_layout.py"],
+)
+
+# The 139 host functions, 9 cargo features and 23 env vars, diffed against a V1
+# checkout. NOT a test: it needs ../V1 beside this checkout and fails outright
+# without one, so as a test it would break the build for anyone who cloned only
+# V2. Migration verification, run explicitly:
+#
+#   bazel run //.tools/validation:baseline_check
+workspace_check_binary(
+    name = "baseline_check",
+    command = ["$PY", ".tools/validation/capture_baseline.py", "--check", "../V1"],
+)

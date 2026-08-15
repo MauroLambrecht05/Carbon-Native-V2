@@ -6,8 +6,47 @@
       "@carbon/testing": [
         "../.tools/automation/testing/src/index.ts"
       ],
-      "@carbon/api/*": [
-        "../solutions/interface/stdlib/api/*"
+      "@carbon/api/app": [
+        "../solutions/interface/stdlib/api/system/app.ts"
+      ],
+      "@carbon/api/autostart": [
+        "../solutions/interface/stdlib/api/system/autostart.ts"
+      ],
+      "@carbon/api/event": [
+        "../solutions/interface/stdlib/api/bridge/event.ts"
+      ],
+      "@carbon/api/fs": [
+        "../solutions/interface/stdlib/api/storage/fs.ts"
+      ],
+      "@carbon/api/invoke": [
+        "../solutions/interface/stdlib/api/bridge/invoke.ts"
+      ],
+      "@carbon/api/opener": [
+        "../solutions/interface/stdlib/api/process/opener.ts"
+      ],
+      "@carbon/api/os": [
+        "../solutions/interface/stdlib/api/system/os.ts"
+      ],
+      "@carbon/api/path": [
+        "../solutions/interface/stdlib/api/system/path.ts"
+      ],
+      "@carbon/api/process": [
+        "../solutions/interface/stdlib/api/process/process.ts"
+      ],
+      "@carbon/api/pty": [
+        "../solutions/interface/stdlib/api/process/pty.ts"
+      ],
+      "@carbon/api/secrets": [
+        "../solutions/interface/stdlib/api/storage/secrets.ts"
+      ],
+      "@carbon/api/store": [
+        "../solutions/interface/stdlib/api/storage/store.ts"
+      ],
+      "@carbon/api/updater": [
+        "../solutions/interface/stdlib/api/system/updater.ts"
+      ],
+      "@carbon/api/window": [
+        "../solutions/interface/stdlib/api/window/window.ts"
       ],
       "@carbon/runtime-bindings": [
         "../solutions/interface/stdlib/bindings/index.ts"
@@ -35,6 +74,12 @@
       ],
       "@carbon/babel/css": [
         "../solutions/integrations/transpiler/babel/infrastructure/css.ts"
+      ],
+      "@carbon/extension-points": [
+        "../solutions/capabilities/extension-points/index.ts"
+      ],
+      "@carbon/contracts/plugin/extension-points": [
+        "../solutions/contracts/plugin/types/ExtensionPoints.ts"
       ],
       "@carbon/bundling": [
         "../solutions/capabilities/bundling/index.ts"

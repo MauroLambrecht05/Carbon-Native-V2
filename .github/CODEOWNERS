@@ -1,0 +1,9 @@
+# Default owner for everything.
+*                       @mauro
+
+# Contracts other tiers depend on — changes here ripple outward.
+/shared/                @mauro
+/Cargo.toml             @mauro
+/package.json           @mauro
+/Justfile               @mauro
+/scripts/ci/            @mauro

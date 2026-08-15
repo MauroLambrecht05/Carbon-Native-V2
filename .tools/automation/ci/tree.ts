@@ -1,50 +1,73 @@
 #!/usr/bin/env bun
-// `just tree` — what the repository looks like to someone opening it for the
-// first time, with the rule that decides what goes where.
+// `bazel run //.tools/automation/ci:tree` — what the repository looks like to
+// someone opening it for the first time, with the rule that decides what goes
+// where.
+//
+// Hand-written rather than generated from the filesystem. A `find` dump is a
+// list; this is the shape, and the annotations are the part worth reading.
+// Keep it in step with solutions/README.md and products/README.md.
 
 const TREE = `
-carbon-native/
+V2/
 │
-├── runtime/     ── code that runs when the APP runs. This is what ships.
-│   ├── mini/         carbon-mini · tiny-skia + taffy + fontdue + rquickjs
-│   │   ├── native/       the Rust engine
-│   │   ├── renderers/    Solid + React universal renderers
-│   │   └── bindings/     TS declarations for its host imports
-│   ├── blitz/        carbon-blitz · stylo + parley + vello   [experimental]
-│   ├── host/         native host API both backends include (fs net shell pty …)
-│   ├── features/     compiled into a backend: audio · image · math
-│   ├── plugins/      loaded at runtime over the C ABI: sdk · clipboard
-│   └── stdlib/       what an app imports: api · three · term · compat
+├── products/    ── the shipped binaries. Compose and present, nothing else.
+│   ├── carbon/       carbon-mini · carbon-blitz — one Cargo package, two bins
+│   │   ├── composition/  what gets built and injected; both entry points
+│   │   └── presentation/ host functions, the JS pump, the startup trace
+│   └── carbon-cli/   the carbon command — argv in, exit code out
 │
-├── tooling/     ── code that runs when you BUILD. Never ships.
-│   ├── cli/          the carbon command
-│   ├── vite/         build plugins        babel/    build transforms
-│   ├── editor/       ts-plugin · vscode   testing/  shared test fixtures
-│   ├── vendor/       checksummed third-party release binaries
-│   └── scripts/      benchmarks/ · ci/ · setup/ · fonts/
+├── solutions/   ── reusable code the products compose. Ordered by dependency
+│   │             direction: each tier may depend leftward, never rightward.
+│   ├── contracts/      agreements. Depend on nothing.
+│   │                     runtime/  the 139 host fns + 34 dispatchers
+│   │                     plugin/   carbon_abi.h — frozen, ships in the wild
+│   │                     app/      carbon.toml: schema + TS + Rust
+│   ├── capabilities/   what carbon DOES
+│   │                     layout · painting · text · imaging · audio · math
+│   │                     snapshot · gpu-canvas · bundling · packaging
+│   │                     signing · publishing · updating · scaffolding
+│   │                     plugins · plugin-sdk
+│   ├── infrastructure/ vendor-neutral technical services
+│   │                     os/ (the 19 host modules) · platform · plugin-host
+│   │                     logging · process · workspace
+│   ├── integrations/   named outside technologies, role-then-vendor
+│   │                     javascript/quickjs · bundler/vite · transpiler/babel
+│   │                     scene3d/three · terminal/xterm
+│   └── interface/      surfaces something reaches carbon through
+│                         cli/ (the command kernel) · renderer/{solid,react}
+│                         stdlib/ (api · dom · bindings)
 │
-├── shared/      ── contracts BOTH of the above depend on.
-│   ├── schema/       carbon.toml JSON Schema — the source of truth
-│   ├── ts/           @carbon/shared — config · paths · backend registry
-│   ├── core/         the Rust manifest parser + IPC envelope
-│   └── signer/       ed25519 signing        updater/  A/B update client
+├── .tools/      ── developer automation. Never ships.
+│   ├── orchestration/bazel/  the cargo, bun and checks rules
+│   ├── validation/           structure, host boundary, tsconfigs, baselines
+│   ├── automation/           benchmarks · ci · bootstrap · release
+│   ├── vendor/               checksummed third-party binaries
+│   └── .build/               cargo output (CARGO_TARGET_DIR). Gitignored,
+│                             and here rather than at the root so nothing
+│                             generated lands beside MODULE.bazel.
 │
-├── local/       ── nothing here is source. Entirely gitignored.
-│   └── target/ · archive/ · docs/ · examples/
+├── labs/        ── experiments and things parked with their reasoning.
+│                    examples/ · clipboard-plugin/ · editor/ · term/
 │
-├── .config/     ── every config file: justfile · rust/ · typescript/
+├── .config/     ── every config file. rust/Cargo.toml · tsconfig.base.json
+│                    package.json · bunfig.toml · platforms/ · toolchains/
 │
-└── package.json  bun.lock     the only config the root keeps (Bun requires it)
+└── MODULE.bazel  BUILD.bazel  .bazelrc  .bazelversion
+                  The root holds Bazel's files and the tiers. Nothing else —
+                  //.tools/validation:workspace_test enforces it.
 `;
 
 console.log(TREE);
-console.log(`Three source trees, one question:
+console.log(`Two questions, in order:
 
-    "When does this code run?"
+    "Does this SHIP?"        -> products/
+    "Is it REUSED?"          -> solutions/, by what KIND of thing it is
+    neither                  -> .tools/ (automation) or labs/ (experiments)
 
-    …when the app runs   -> runtime/
-    …when you build      -> tooling/
-    …both                -> shared/
+A product composes and presents; it has no domain or application layer. If you
+are writing a business rule in products/, it belongs in a solution. If you are
+writing a user interface in solutions/, it belongs in a product.
 
-Anything generated or machine-local goes in local/. See CONTRIBUTING.md.
+Bazel is the entrypoint: \`bazel test //...\` is what CI runs.
+See .github/CONTRIBUTING.md.
 `);

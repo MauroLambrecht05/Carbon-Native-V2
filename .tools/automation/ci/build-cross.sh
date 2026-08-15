@@ -25,7 +25,7 @@ cd "$PROJECT_DIR"
 
 cargo zigbuild --release \
   --target "$TARGET" \
-  --manifest-path "$PROJECT_DIR/.config/rust/Cargo.toml" \
+  --manifest-path "$PROJECT_DIR/.tools/orchestration/bazel/cargo/Cargo.toml" \
   -p carbon-runtime \
   --bin carbon-mini \
   --no-default-features \

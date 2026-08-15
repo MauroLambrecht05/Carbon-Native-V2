@@ -19,3 +19,28 @@
 # instead of trading one for the other.
 [install]
 linker = "isolated"
+
+# ── Tests ───────────────────────────────────────────────────────────────────
+# Tests live beside the code they cover as `*.test.ts`. Rust crates use `tests/`
+# (Cargo's convention). `bazel test //...` runs both; a bare `bun test` here
+# reads this file and covers the TypeScript side only.
+#
+# `root = ".."` because this file is in .config/ and the tests are not — without
+# it a bare `bun test` here would find nothing.
+#
+# preload is the important line. .tools/automation/testing/src/preload.ts makes
+# runs deterministic regardless of the developer's environment — NO_COLOR and
+# FORCE_COLOR=0 (colour codes in captured output make assertions fragile and
+# diffs unreadable), TZ=UTC and LC_ALL=C (date formatting and collation differ
+# between a laptop and CI, and the failures look like logic bugs). The file
+# migrated from V1 but nothing loaded it: this block was dropped, the `test`
+# script has no `-r`, and the Bazel bun_test rule does not pass one. Declaring
+# it here covers every path that reads bunfig, including a bare `bun test`.
+[test]
+root = ".."
+preload = ["../.tools/automation/testing/src/preload.ts"]
+
+# Coverage is reported but not gated. A threshold on a young codebase mostly
+# produces tests written to satisfy the threshold.
+coverage = false
+coverageSkipTestFiles = true

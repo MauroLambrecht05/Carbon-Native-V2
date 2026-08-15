@@ -50,65 +50,119 @@ Carbon Native V2 is engineered as an interface-first, zero-copy native architect
 
 ## 3. Directory Layout & Architecture Rules
 
-The workspace strictly enforces a clean tier system. **The workspace root
-holds Bazel files and nothing else** — every other config lives in `.config/`.
+**The workspace root holds Bazel's files and the tiers.** Configuration lives
+in `.config/` and developer tooling in `.tools/`. Generated output lives beside
+whatever produces it — cargo's `target/` next to the Cargo workspace manifest,
+the FlatBuffers bindings next to the generator — and every such directory is
+gitignored.
 
-```
+The blocks below are **checked**, not decorative.
+`//.tools/validation:workspace_test` parses them and fails when the tree and
+this document disagree — in either direction. Every path declared here must
+exist, and every entry at the root, in `.config/` and in `.tools/` must be
+declared here. That check exists because this section spent the migration
+describing a tree that had stopped being true, and four directories
+accumulated in it that nobody had decided to add.
+
+```text
 V2/
-├── MODULE.bazel                             # Multi-language Bazel Bzlmod configuration
-├── BUILD.bazel                              # Root build rules and visibility packages
-├── .bazelrc                                 # Compiler flags, platform profiles, caching
-├── .bazelversion                            # Pinned Bazel release (bazelisk reads this)
-│
-├── .config/                                 # Central Project Configuration Registry
-│   ├── _identity.json                       # System identity & language ABI metadata
-│   ├── build.json                           # Build profiles (debug, release, profile)
-│   ├── dependencies.json                    # Toolchain & library version matrix
-│   ├── features.json                        # Feature flags (SIMD, zero-copy, Zig plugins)
-│   ├── package.json                         # Third-party npm deps for the TypeScript tier
-│   ├── bun.lock                             # …and its lockfile
-│   ├── tsconfig.base.json                   # @carbon/* path aliases (replaces bun workspaces)
-│   ├── platforms/                           # OS configs (windows.toml, linux.toml, macos.toml)
-│   └── toolchains/                          # Toolchain specs (cpp, rust, zig)
-│
-├── .tools/                                  # Developer Automation & Workspace Utilities
-│   ├── automation/bootstrap/                # Environment setup + link-node-modules
-│   ├── generators/                          # FlatBuffers python binding generator
-│   ├── orchestration/bazel/bun/             # The Bun toolchain: bun_binary / bun_test
-│   └── validation/                          # Workspace boundary validator (check_workspace.py)
-│
-├── labs/                                    # Experimental Sandboxes & Polyglot Spikes
-│                                            #   (a tier, kept even when empty)
-│
-├── products/                                # Final Executable Binaries & CLI Applications
-│   ├── carbon/                              # Core runtime binary
-│   ├── carbon-cli/                          # Developer CLI interface (ported from V1)
-│   ├── carbon-builder/                      # Build engine
-│   └── carbon-studio/                       # IDE & visual tools
-│
-└── solutions/                               # Reusable Code, Libraries & Infrastructures
-    ├── shared/                              # Shared Public Interfaces (Zero internal dependencies)
-    │   ├── contracts/                       # Modular System Contracts & Binary ABIs
-    │   │   ├── abi/                         # Native C-ABI Header (carbon_abi.h & BUILD.bazel)
-    │   │   ├── api/                         # API Descriptor Contracts (api.fbs & BUILD.bazel)
-    │   │   ├── events/                      # System Event Bus Contracts (events.fbs & BUILD.bazel)
-    │   │   ├── ipc/                         # Inter-Process Communication (ipc.fbs & BUILD.bazel)
-    │   │   ├── manifest/                    # Component & Plugin Manifest (manifest.fbs & BUILD.bazel)
-    │   │   ├── permissions/                 # Capability Security & Grants (permissions.fbs & BUILD.bazel)
-    │   │   ├── schemas/                     # Core Primitive Schemas (core_types.fbs & BUILD.bazel)
-    │   │   ├── security/                    # Crypto Tokens & Signatures (security.fbs & BUILD.bazel)
-    │   │   └── versioning/                  # Compatibility & Versioning (versioning.fbs & BUILD.bazel)
-    │   │
-    │   └── infrastructure/                  # Containerization (docker/Dockerfile, devcontainer/devcontainer.json)
-    ├── tsconfig.json                        # extends .config/tsconfig.base.json for this tree
-    ├── internal/                            # split by SUBSYSTEM, not by use case
-    │   └── toolchain/                       # build · sign · package · ship · update · CLI
-    │       └── src/domain · application · ports · infrastructure
-    │                                        #   (the runtime subsystem lands beside this,
-    │                                        #    migration phases 3-5)
-    └── external/                            # integrations with tools we do not own
-        └── build-plugins/                   # Babel + Vite plugins applied at build time
+├── MODULE.bazel                       # Bzlmod: external deps and toolchain registration
+├── BUILD.bazel                        # Root visibility packages
+├── .bazelrc                           # Compiler flags, platform profiles, caching
+├── .bazelversion                      # Pinned Bazel release (bazelisk reads this)
+├── README.md                          # This file
+├── .cargo/                            # Cargo's own config — it walks UP from cwd to find it
+├── .config/                           # Configuration, and nothing that is not
+├── .github/                           # Workflows, CONTRIBUTING, SECURITY, issue templates
+├── .tools/                            # Developer automation that never ships
+├── labs/                              # Experiments. Disposable contents, permanent directory
+├── products/                          # Shipping deliverables
+├── solutions/                         # Everything the products are built out of
+├── .env                               # Machine-local, gitignored
+├── .env.example                       # …and the template that documents it
+├── .gitattributes
+├── .gitignore
+├── .git/                              # generated
+└── node_modules/                      # generated — a junction into .config/node_modules
 ```
+
+### `.config/` — configuration, and nothing that is not
+
+```text
+.config/
+├── _identity.json                     # System identity and language ABI metadata
+├── build.json                         # Build profiles (debug, release, dist)
+├── dependencies.json                  # Toolchain and library version matrix
+├── features.json                      # Feature flags (SIMD, zero-copy, Zig plugins)
+├── package.json                       # Third-party npm deps for the TypeScript tier
+├── bun.lock                           # …and its lockfile
+├── bunfig.toml                        # Bun's own settings
+├── tsconfig.base.json                 # @carbon/* path aliases (this replaces bun workspaces)
+├── BUILD.bazel                        # Exposes the tsconfig to Bazel targets
+├── platforms/                         # windows.toml · linux.toml · macos.toml
+├── toolchains/                        # Toolchain specs: cpp · rust · zig
+└── node_modules/                      # generated by `bun install --cwd .config`
+```
+
+There is **no `rust/` here.** The Cargo workspace manifest used to sit at
+`.config/rust/Cargo.toml`, next to `.config/toolchains/rust/` — two directories
+called `rust` in one place, one a toolchain spec and one a 17-member workspace.
+A workspace manifest is a build definition, so it moved to
+`.tools/orchestration/bazel/cargo/`, beside the rules that invoke it.
+
+### `.tools/` — developer automation that never ships
+
+```text
+.tools/
+├── automation/                        # bootstrap · build · release · testing · ci · benchmarks
+├── environments/                      # docker · devcontainer
+├── generators/                        # FlatBuffers binding generator (Python)
+├── integrations/                      # Editor and external-tool glue
+├── orchestration/                     # Bazel rules: bazel/bun · bazel/cargo (Cargo.toml + target/)
+└── validation/                        # The workspace validators (Python)
+```
+
+Three things are **not** here, and each was:
+
+- **`.build/`** held 11 GB of Cargo output under a name the root README never
+  declared, that only one line in `defs.bzl` pointed at, and that a hand-typed
+  `cargo build` never wrote to. Cargo's output is now `target/` beside the
+  workspace manifest in `orchestration/bazel/cargo/`, which is Cargo's own
+  default.
+- **`vendor/`** held two committed Windows `.exe` files, `bsdiff.exe` and
+  `zig-zstd.exe`, which made `carbon publish` a Windows-only command. They are
+  `carbon-delta` now, built from `solutions/capabilities/publishing/rust`, and
+  the no-committed-binaries rule has no exception left.
+- **`tsconfig.json`** claimed the whole tier as one TypeScript project. Only
+  `automation/` is TypeScript — `orchestration/` is Starlark, `generators/` and
+  `validation/` are Python — and its own `include` already said so. It now sits
+  at `.tools/automation/tsconfig.json`.
+
+### The tiers
+
+```text
+products/
+├── carbon/                            # The runtime: carbon-mini and carbon-blitz
+├── carbon-cli/                        # The app developer's surface
+├── carbon-ext/                        # The plugin SDK: header, templates, package definition
+└── README.md                          # The product template every one of them follows
+```
+
+```text
+solutions/
+├── contracts/                         # Agreements that must not drift apart
+├── capabilities/                      # What carbon can do
+├── infrastructure/                    # Vendor-neutral technical services — ports/ + adapters/
+├── integrations/                      # Outside technologies, named by ROLE then vendor
+├── interface/                         # How application code and developers reach the runtime
+├── tsconfig.json                      # extends .config/tsconfig.base.json for this tree
+└── README.md                          # The shape each tier's packages follow
+```
+
+Products depend on solutions; solutions never depend back. Within `solutions/`
+the direction is a DAG rather than a line, and
+`//.tools/validation:workspace_test` enforces the two edges with teeth:
+contracts import nothing, and nothing imports `interface/`.
 
 ### Why there is no `package.json` at the root
 
@@ -129,26 +183,44 @@ Internal `@carbon/*` wiring is **not** a package-manager concern: it is path
 aliases in `.config/tsconfig.base.json`. There is no `workspaces` array and no
 `workspace:*` dependency anywhere. Each tree that imports `@carbon/*` needs a
 `tsconfig.json` extending that base, because Bun resolves aliases from the
-tsconfig nearest the *importing* file — currently `products/carbon-cli/` and
-`solutions/`.
+tsconfig nearest the *importing* file.
+
+### Why `.cargo/config.toml` is at the root and cannot move
+
+Cargo finds it by walking up from the **current directory**, not from the
+manifest. Without it, a `cargo build` typed inside this workspace kept walking
+into the V1 checkout above it and used *that* config — sending 5.9 GB of output
+to a directory outside the tree, while Bazel and `carbon run` looked somewhere
+else entirely. It declares
+`target-dir = ".tools/orchestration/bazel/cargo/target"`, and the validator
+compares that declaration against the two others naming the same path.
 
 ---
 
-## 4. Contract Package Taxonomy (`solutions/shared/contracts/`)
+## 4. Contract Packages (`solutions/contracts/`)
 
-The contract layer is organized into 9 independent, self-contained contract packages:
+Ten contracts, one directory each, every one carrying a definition, a
+`BUILD.bazel` and a `README.md` stating its compatibility policy — which
+`//.tools/validation:workspace_test` enforces.
 
-| Contract Package | Location | Primary Responsibility |
+| Contract | Holds | Honoured by |
 | :--- | :--- | :--- |
-| **`abi`** | [`contracts/abi`](file:///c:/Users/mauro/Desktop/carbon-native/V2/solutions/shared/contracts/abi) | Native C-ABI header definitions (`carbon_abi.h`), function pointers, allocator handles. |
-| **`api`** | [`contracts/api`](file:///c:/Users/mauro/Desktop/carbon-native/V2/solutions/shared/contracts/api) | High-level API endpoint descriptors and RPC contract schemas (`api.fbs`). |
-| **`events`** | [`contracts/events`](file:///c:/Users/mauro/Desktop/carbon-native/V2/solutions/shared/contracts/events) | System-wide event bus payload schemas (`events.fbs`). |
-| **`ipc`** | [`contracts/ipc`](file:///c:/Users/mauro/Desktop/carbon-native/V2/solutions/shared/contracts/ipc) | Cross-process communication & RPC header contracts (`ipc.fbs`). |
-| **`manifest`** | [`contracts/manifest`](file:///c:/Users/mauro/Desktop/carbon-native/V2/solutions/shared/contracts/manifest) | Plugin and package manifest metadata contracts (`manifest.fbs`). |
-| **`permissions`** | [`contracts/permissions`](file:///c:/Users/mauro/Desktop/carbon-native/V2/solutions/shared/contracts/permissions) | Security capability flags, permission bitmasks, and grants (`permissions.fbs`). |
-| **`schemas`** | [`contracts/schemas`](file:///c:/Users/mauro/Desktop/carbon-native/V2/solutions/shared/contracts/schemas) | Core data primitives, vectors, transforms, and memory buffers (`core_types.fbs`). |
-| **`security`** | [`contracts/security`](file:///c:/Users/mauro/Desktop/carbon-native/V2/solutions/shared/contracts/security) | Cryptographic signatures, auth tokens, and security headers (`security.fbs`). |
-| **`versioning`** | [`contracts/versioning`](file:///c:/Users/mauro/Desktop/carbon-native/V2/solutions/shared/contracts/versioning) | Protocol version negotiation and compatibility triples (`versioning.fbs`). |
+| **`core`** | `core.fbs` — the primitive schemas | every language tier |
+| **`app`** | `carbon.toml`: schema, TypeScript types, errors, and the Rust reader | the CLI and the runtime |
+| **`plugin`** | the extension-point registry, the C ABI, the manifest, permissions | the runtime and every plugin author |
+| **`host`** | `api.fbs` · `events.fbs` · `ipc.fbs` | the host layer |
+| **`runtime`** | the `__cm_*` host-boundary registry, and the event vocabulary | JS and Rust, across a boundary no compiler sees |
+| **`security`** | keyring shape, signature format, minisign byte lengths | signing and verification |
+| **`versioning`** | `versioning.fbs` — compatibility triples | update negotiation |
+| **`update`** | what a release announces to an installed app | publishing and updating |
+| **`distribution`** | which installer formats exist, and where each may be built | packaging |
+| **`toolchain`** | the versions this workspace is built against | bootstrap and CI |
+
+Two of these are checked against reality rather than trusted:
+`check_host_boundary.py` compares the `__cm_*` registry against what the Rust
+actually registers, and `check_extension_points.py` re-renders the plugin
+extension-point registry and fails if the generated C, Rust or TypeScript has
+drifted from the Zig that declares it.
 
 ---
 

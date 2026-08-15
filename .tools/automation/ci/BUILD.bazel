@@ -1,0 +1,25 @@
+# CI scripts that are also Bazel targets.
+#
+# boundaries.ts is the one that gates. The rest of this directory (signing,
+# notarization, symbol upload, cross-compilation) is driven by
+# .github/workflows/release.yml and has no meaning outside a release, so it is
+# exported as sources rather than wrapped in targets nothing would run.
+
+load("//.tools/orchestration/bazel/checks:defs.bzl", "workspace_check_test")
+
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["*.ts", "*.sh", "*.ps1"]),
+)
+
+# Naming, one lockfile per ecosystem, no committed binaries outside the
+# checksummed vendor directory, and embedded fonts carrying their licenses.
+#
+# The structural rules check_workspace.py does not cover — see the header of
+# boundaries.ts for which V1 rules moved there instead of being reimplemented.
+workspace_check_test(
+    name = "boundaries_test",
+    command = ["bun", ".tools/automation/ci/boundaries.ts"],
+)

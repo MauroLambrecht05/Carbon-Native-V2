@@ -1,6 +1,7 @@
 {
   "toolchain": "zig",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "mode": "ReleaseFast",
-  "cAbiExport": true
+  "cAbiExport": true,
+  "//version": "Matches build.zig.zon's minimum_zig_version in the plugin SDK. These disagreed \u2014 the toolchain said 0.12.0 and the SDK required 0.13.0 \u2014 and nothing compared them, so a machine provisioned from this file could not build a plugin."
 }

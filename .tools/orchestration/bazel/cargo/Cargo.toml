@@ -1,0 +1,212 @@
+# carbon-native V2 — Rust workspace root.
+#
+# ── WHY IT LIVES HERE ───────────────────────────────────────────────────────
+# Beside the Bazel rules that drive it. This is a BUILD definition, not
+# configuration: the header below already says Bazel is the entrypoint and
+# Cargo is only the compiler driver, and //.tools/orchestration/bazel/cargo is
+# the thing that invokes it. Its `_MANIFEST` names this file.
+#
+# It was .tools/orchestration/bazel/cargo/Cargo.toml, which put it in the tier that holds
+# configuration — beside .config/toolchains/rust/, so the tree had two
+# directories called `rust` in .config/, one a toolchain spec and one a
+# 17-member workspace, and the root README's declared layout listed neither.
+#
+# Cargo supports living anywhere: members are reached by relative path, and
+# each member carries a `workspace = "<relative path to this directory>"` key
+# so that a bare `cargo build` inside a crate still finds this file. Cargo only
+# walks *up* from a crate, and walking up would never reach here.
+#
+# The one file that CANNOT move is .cargo/config.toml at the workspace root —
+# Cargo discovers that by walking up from the CURRENT DIRECTORY, not from the
+# manifest. See the note in it for what happened when it was absent.
+#
+# Bazel is the entrypoint (see .tools/orchestration/bazel/cargo). This manifest
+# exists because Cargo remains the compiler driver, not because there are two
+# build systems: no target here is built except through a `cargo_binary` or
+# `cargo_test` rule.
+#
+# ONE lockfile, ONE target/ directory. V1 learned this the hard way — before its
+# workspace manifest existed, eleven crates resolved dependencies in isolation,
+# producing eleven lockfiles, eleven copies of every shared dependency, and no
+# way to run tests across the project.
+#
+# Members are listed explicitly rather than globbed. Adding a crate should be a
+# deliberate act, and an explicit list makes an orphaned crate impossible to
+# miss in review.
+
+[workspace]
+resolver = "2"
+members = [
+  # Populated per migration phase. See products/carbon/MIGRATION.md.
+  #
+  # Phase 2 — leaf capabilities (no runtime dependency, own tests):
+  "../../../../solutions/capabilities/math",
+  "../../../../solutions/capabilities/updating/rust",
+  "../../../../solutions/capabilities/publishing/rust",
+  "../../../../solutions/capabilities/text",
+  "../../../../solutions/capabilities/snapshot",
+  "../../../../solutions/capabilities/imaging",
+  "../../../../solutions/capabilities/audio",
+  #
+  # Phase 3 — engines:
+  "../../../../solutions/capabilities/layout",
+  "../../../../solutions/capabilities/painting",
+  "../../../../solutions/capabilities/gpu-canvas",
+  #
+  # Phase 4 — host and platform:
+  "../../../../solutions/contracts/runtime/rust",
+  "../../../../solutions/contracts/plugin/rust",
+  "../../../../solutions/contracts/app/rust",
+  "../../../../solutions/infrastructure/os",
+  "../../../../solutions/infrastructure/platform",
+  "../../../../solutions/infrastructure/plugin-host",
+  #
+  # Phase 5 — the binaries:
+  "../../../../products/carbon",
+  #
+  # No plugin members. Plugins are Zig now — see
+  # solutions/capabilities/plugins/domain/value-objects/PluginLanguage.ts —
+  # so a plugin is built by `zig build` and never enters this workspace.
+  # labs/clipboard-plugin was the last Cargo member here.
+]
+
+[workspace.package]
+edition = "2021"
+repository = "https://github.com/carbon-native/carbon-native"
+# wgpu 27 is what sets this. The tree declared 1.86 and never built on it: `cargo build --workspace` with RUSTUP_TOOLCHAIN=1.86 fails with 'wgpu@27.0.1 requires rustc 1.88'. It had been compiling on whatever `rustup default` happened to be — 1.96 on this machine — so the declaration was decorative.
+rust-version = "1.88"
+
+# Hoisted so a version bump happens in one place. Crates opt in with
+# `serde = { workspace = true }`; a crate needing different features still
+# declares its own line rather than widening this one for everybody.
+[workspace.dependencies]
+anyhow = { version = "1", default-features = false, features = ["std"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = { version = "0.8", default-features = false, features = ["parse"] }
+tracing = "0.1"
+libloading = "0.8"
+
+# ── Lints ───────────────────────────────────────────────────────────────────
+# //:clippy_test runs clippy with `-D warnings`, so anything not allowed here
+# fails the build. Crates opt in with `[lints] workspace = true`.
+#
+# Only two lints are allowed, both because they are wrong about THIS codebase
+# rather than because they are inconvenient. Anything else gets fixed.
+[workspace.lints.clippy]
+
+# The C ABI is the safety contract, and it is not one a Rust signature can
+# express. Functions in the plugin SDK take `*mut CarbonApp` — a pointer the
+# RUNTIME creates, guarantees valid from carbon_plugin_register until
+# on_shutdown returns (contracts/plugin/abi/carbon_abi.h), and that plugin
+# authors only ever receive and hand back. Every such function null-checks
+# first, which is the only misuse a plugin can cause.
+#
+# Marking them `unsafe fn` to satisfy the lint would force an `unsafe {}` block
+# into every plugin's call site — including the templates this SDK ships — to
+# restate a guarantee the runtime already made, and would buy no extra checking.
+not_unsafe_ptr_arg_deref = "allow"
+
+# Paint and layout dispatch genuinely take many arguments: a draw call carries
+# its rect, transform, clip, colour, radius and font state, and host-function
+# registration carries the whole context. Bundling them into structs purely to
+# satisfy a threshold moves the argument list somewhere else and adds a
+# construction per call on the hot path — the runtime's frame budget is the
+# reason this code is shaped the way it is.
+too_many_arguments = "allow"
+
+# ── Inherited debt, not policy ──────────────────────────────────────────────
+# Everything below is a lint the migrated code does not currently satisfy. It
+# was inherited from V1 verbatim — V1's CI declared the same `-D warnings` gate
+# and never passed it either, so this is the first time the gate is real.
+#
+# They are listed individually rather than hidden behind a blanket `-A clippy::
+# all` so that the debt is countable and each one can be paid off and deleted
+# from this list. New code is held to every lint NOT named here.
+#
+# Paying these down is ordinary cleanup with one exception: missing_safety_doc
+# covers 10 unsafe fns across the FFI and snapshot layers, and a safety comment
+# that is *wrong* is worse than one that is absent. Those need the author's
+# knowledge of the ABI contract, not a plausible-sounding paragraph.
+missing_safety_doc = "allow"          # 10 — FFI + snapshot; needs ABI knowledge
+field_reassign_with_default = "allow" # 7  — mechanical
+while_let_loop = "allow"              # 5  — mechanical
+needless_range_loop = "allow"         # 5  — mechanical, hot-path: verify codegen
+doc_lazy_continuation = "allow"       # 3  — doc formatting only
+manual_clamp = "allow"                # 2  — check NaN behaviour before changing
+drop_non_drop = "allow"               # 2  — mechanical
+type_complexity = "allow"             # 1  — wants a type alias
+manual_c_str_literals = "allow"       # 1  — mechanical
+unusual_byte_groupings = "allow"      # 1  — cosmetic
+
+# ── Profiles ────────────────────────────────────────────────────────────────
+# In a workspace only the ROOT profile applies — a per-crate [profile] table is
+# ignored silently. The crates disagree about what `release` should mean:
+# carbon-mini wants size (its binary size IS the product claim), while
+# carbon-blitz (wgpu + stylo + vello) and the plugin cdylibs want build speed.
+# Rather than force one to lose, `release` is the everyday profile and `dist` is
+# what ships.
+#
+#   cargo build --release        fast enough to iterate on
+#   cargo build --profile dist   what //products/carbon:mini and the release
+#                                workflow use, and what every published
+#                                benchmark number describes
+#
+# lto, panic and strip cannot be overridden per-package, which is exactly why
+# this is two profiles rather than one profile plus overrides.
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 16
+debug = false
+incremental = false
+
+[profile.dist]
+inherits = "release"
+# One codegen unit lets LLVM inline across the entire crate graph. Slow to
+# build, and worth roughly a megabyte here.
+codegen-units = 1
+lto = "fat"
+opt-level = "z"
+strip = "symbols"
+# panic = "unwind", NOT "abort". This is load-bearing and easy to get wrong.
+#
+# `abort` makes std::panic::catch_unwind a no-op, and the runtime's crash
+# resilience is built on it: the event loop wraps each event's handling in
+# catch_unwind so that a bad unwrap, an out-of-bounds index or a poisoned lock
+# in ONE event is logged and survived instead of taking the whole window down.
+# See the catch_unwind wrappers in products/carbon/composition/mini.rs and
+# composition/blitz.rs, and the panic hook in presentation/js/pump.rs that
+# captures the message for them.
+#
+# Unwinding costs a modest amount of landing-pad code. Losing the ability to
+# keep an app alive after a native panic costs more.
+panic = "unwind"
+
+# Debug builds: the crate being edited stays at opt-level 0 for fast rebuilds,
+# but dependencies go to 1 — without this a debug carbon-mini paints one frame
+# every few seconds instead of at a usable frame rate, which makes the debug
+# binary useless for exactly the interactive work it exists for.
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.dev.package."*"]
+opt-level = 1
+
+# ── Vendored rquickjs-core ──────────────────────────────────────────────────
+# A registry PATCH, not a path dependency: every crate in the graph asks for
+# `rquickjs-core` from crates.io, and this redirects all of them at once. A
+# path dependency would only redirect the crates that named it, leaving the
+# rest on the registry version and producing two incompatible copies of the
+# same types in one binary.
+#
+# [patch] is only honoured in a workspace root, which is why it lives here
+# rather than beside the crate that needs it.
+#
+# The fork adds ONE method: `Runtime::from_raw_restored`, which adopts a
+# JSRuntime whose heap was memory-mapped back from a snapshot. Without it the
+# `snapshot` feature cannot compile — see
+# solutions/integrations/javascript/quickjs.
+[patch.crates-io]
+rquickjs-core = { path = "../../../../solutions/integrations/javascript/quickjs" }

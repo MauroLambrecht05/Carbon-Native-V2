@@ -31,7 +31,7 @@ def validate_workspace(root: Path) -> bool:
     CAPABILITIES = [
         # TypeScript
         "signing", "updating", "bundling", "packaging", "publishing",
-        "scaffolding", "plugins",
+        "scaffolding", "plugins", "extension-points",
         # Rust, migrated from V1's carbon/ — see products/carbon/MIGRATION.md
         "math", "text", "snapshot", "imaging", "audio",
     ]
@@ -49,6 +49,12 @@ def validate_workspace(root: Path) -> bool:
     # composition layer because standing a runtime up for a particular app is
     # most of what it does.
     product_dirs = [
+        # carbon-ext: the extension-point registry tool. A product rather than
+        # tooling because it owns a runtime CONTRACT — see its main.ts.
+        "products/carbon-ext",
+        "products/carbon-ext/composition",
+        "products/carbon-ext/presentation",
+        "products/carbon-ext/tests",
         "products/carbon-cli",
         "products/carbon-cli/composition",
         "products/carbon-cli/presentation",
@@ -94,25 +100,16 @@ def validate_workspace(root: Path) -> bool:
         else:
             print(f"[OK] Directory verified: {d}")
 
-    # Root hygiene. Container/dev-env files belong in
-    # solutions/shared/infrastructure. The npm manifests belong in .config —
-    # the workspace root is Bazel's, and only Bazel's.
-    root_prohibited = [
-        "Dockerfile",
-        "docker-compose.yml",
-        ".devcontainer",
-        "package.json",
-        "bun.lock",
-        "bun.lockb",
-        "tsconfig.json",
-    ]
-    for item in root_prohibited:
-        p = root / item
-        if p.exists():
-            print(f"[FAIL] Prohibited item in workspace root: {item}")
-            passed = False
-        else:
-            print(f"[OK] Clean workspace root (no {item})")
+    # Root hygiene is checked against README.md, not against a list here.
+    #
+    # This used to be an allow-list of ~20 names with a paragraph explaining the
+    # rule. It worked, and it was a second declaration of something README.md
+    # section 3 already stated — so the two could disagree, and the document
+    # was the copy that went stale. check_readme_layout.py now reads the
+    # README's own layout blocks and checks the root, .config/ and .tools/ in
+    # both directions: nothing declared may be missing, and nothing present may
+    # be undeclared. It is delegated to at the bottom of this file.
+
 
     required_files = [
         # Bazel — the only source files permitted at the workspace root.
@@ -120,6 +117,15 @@ def validate_workspace(root: Path) -> bool:
         "BUILD.bazel",
         ".bazelrc",
         ".bazelversion",
+        # No LICENSE. It was required here because every Cargo.toml and
+        # package.json declared `license = "Apache-2.0"`, so its absence meant
+        # the repository asserted a license it did not ship. Those claims have
+        # been removed from every manifest instead, so there is no assertion
+        # left for a notice to back.
+        # Governance. GitHub reads CONTRIBUTING and SECURITY from .github/ as
+        # readily as from the root, and the root is Bazel's.
+        ".github/CONTRIBUTING.md",
+        ".github/SECURITY.md",
         # Central configuration, including the relocated npm manifest and the
         # path aliases that replaced bun workspaces.
         ".config/_identity.json",
@@ -129,6 +135,20 @@ def validate_workspace(root: Path) -> bool:
         "labs/README.md",
         # Contracts.
         "solutions/contracts/plugin/abi/carbon_abi.h",
+        # The extension-point registry, and the three renderings generated
+        # from it. Listed because check_extension_points.py compares them
+        # against the Zig and would report "nothing to compare" rather than a
+        # failure if one were simply deleted.
+        "solutions/contracts/plugin/registry/extension-points.zig",
+        "solutions/contracts/plugin/abi/carbon_extension_points.h",
+        "solutions/contracts/plugin/rust/generated.rs",
+        "solutions/contracts/plugin/types/ExtensionPoints.ts",
+        # carbon-ext is the plugin SDK, so what makes it a product is its
+        # surface and its wiring, not an entrypoint — see the note on the
+        # product template below.
+        "products/carbon-ext/composition/build.zig",
+        "products/carbon-ext/presentation/include/carbon_plugin.h",
+        "solutions/capabilities/extension-points/index.ts",
         "solutions/README.md",
         "solutions/contracts/defs.bzl",
         "solutions/contracts/BUILD.bazel",
@@ -331,6 +351,20 @@ def validate_workspace(root: Path) -> bool:
     # domain/ or application/ layer inside products/ means business logic has
     # leaked out of solutions/, which is the drift this whole layout exists to
     # prevent.
+    # ── Executable products ─────────────────────────────────────────────────
+    #
+    # Applied to every product that has a package.json, which is what makes it
+    # a Bun program. carbon-ext deliberately has none: it is the plugin SDK, a
+    # LIBRARY deliverable — a C header, Zig modules and scaffold templates —
+    # and a library has no entrypoint to require. It is still a product,
+    # because a product is a shipping deliverable and that is exactly what an
+    # SDK is, and it still has composition/ and presentation/, which the
+    # required-directory list above checks.
+    #
+    # The template used to demand a main.ts of everything, and carbon-ext was
+    # briefly given one — a second CLI, with its own dispatcher and command
+    # registry, for commands that belonged in carbon-cli. The rule was part of
+    # what made that look correct.
     template_violations = 0
     for manifest in sorted(root.glob("products/*/package.json")):
         product = manifest.parent
@@ -435,6 +469,100 @@ def validate_workspace(root: Path) -> bool:
     if boundary.is_file():
         result = subprocess.run(
             [sys.executable, str(boundary)],
+            capture_output=True,
+            text=True,
+        )
+        for line in result.stdout.strip().splitlines():
+            print(line)
+        if result.returncode != 0:
+            passed = False
+
+    # ── The declared layout ─────────────────────────────────────────────────
+    #
+    # Delegated to check_readme_layout.py. README.md section 3 is the only
+    # statement of what the root, .config/ and .tools/ hold, and for most of
+    # the migration it described a tree that no longer existed while four
+    # undeclared directories accumulated inside the two it did describe.
+    readme_layout = Path(__file__).resolve().parent / "check_readme_layout.py"
+    if readme_layout.is_file():
+        result = subprocess.run(
+            [sys.executable, str(readme_layout)],
+            capture_output=True,
+            text=True,
+        )
+        for line in result.stdout.strip().splitlines():
+            print(line)
+        if result.returncode != 0:
+            passed = False
+
+    # ── One build output directory, declared three times ────────────────────
+    #
+    # `cargo build` reads .cargo/config.toml. The Bazel rules set
+    # CARGO_TARGET_DIR themselves. `carbon run` looks for the built binary
+    # through TARGET_DIR in solutions/infrastructure/workspace. All three must
+    # name the same directory, and nothing makes them: they are three files in
+    # three languages, and the symptom of disagreement is a binary that builds
+    # successfully and cannot be found.
+    #
+    # They have disagreed twice. TARGET_DIR's own comment records the first.
+    target_dir_sources = {
+        ".cargo/config.toml": r'target-dir\s*=\s*"([^"]+)"',
+        ".tools/orchestration/bazel/cargo/defs.bzl": r'"CARGO_TARGET_DIR":\s*"([^"]+)"',
+    }
+    declared_targets = {}
+    for rel, pattern in target_dir_sources.items():
+        path = root / rel
+        if not path.is_file():
+            print(f"[FAIL] missing {rel} — it declares where cargo writes")
+            passed = False
+            continue
+        # Comments stripped first. The .cargo config QUOTES the V1 value it
+        # replaced, in the comment explaining why this file exists, and a bare
+        # search found that before the real assignment — a checker that reads
+        # documentation as configuration.
+        text = re.sub(r"^\s*#.*$", "", path.read_text(encoding="utf-8"), flags=re.M)
+        match = re.search(pattern, text)
+        if not match:
+            print(f"[FAIL] {rel} no longer declares a cargo target directory")
+            passed = False
+            continue
+        declared_targets[rel] = match.group(1)
+
+    # The TypeScript one is composed from CARGO_WORKSPACE_DIR rather than
+    # written out, so it is matched on the segment and recomposed.
+    layout = root / "solutions/infrastructure/workspace/adapters/WorkspaceLayout.ts"
+    if layout.is_file():
+        text = layout.read_text(encoding="utf-8")
+        match = re.search(r'export const TARGET_DIR = join\(CARGO_WORKSPACE_DIR, "([^"]+)"\);', text)
+        if match:
+            declared_targets["WorkspaceLayout.ts"] = (
+                f".tools/orchestration/bazel/cargo/{match.group(1)}"
+            )
+        else:
+            print("[FAIL] WorkspaceLayout no longer derives TARGET_DIR from CARGO_WORKSPACE_DIR")
+            passed = False
+
+    if len(set(declared_targets.values())) > 1:
+        print("[FAIL] cargo's target directory is declared inconsistently:")
+        for rel, value in sorted(declared_targets.items()):
+            print(f"         {value}   ({rel})")
+        print("       A binary built by one and looked for by another is not found.")
+        passed = False
+    elif declared_targets:
+        only = next(iter(declared_targets.values()))
+        print(f"[OK] Build output: {len(declared_targets)} declarations, all {only}")
+
+    # ── The extension-point registry ────────────────────────────────────────
+    #
+    # Delegated to check_extension_points.py, which delegates in turn to
+    # `carbon ext check`. Three languages hold a rendering of one Zig
+    # declaration; nothing in a compiler notices when one stops matching,
+    # because each is internally consistent. Same shape of problem as the
+    # JS<->Rust boundary above, same answer.
+    extension_points = Path(__file__).resolve().parent / "check_extension_points.py"
+    if extension_points.is_file():
+        result = subprocess.run(
+            [sys.executable, str(extension_points)],
             capture_output=True,
             text=True,
         )
@@ -583,6 +711,139 @@ def validate_workspace(root: Path) -> bool:
     if shape_violations == 0:
         print("[OK] Internal shape: services have a model, engines and libraries "
               "depend downward only")
+
+    # ── Package layout ──────────────────────────────────────────────────────
+    #
+    # The rules above are all about capabilities/, because for a long time that
+    # was the only tier this repository described from the inside. It showed.
+    # The other three had grown packages that were a pile of files in a
+    # directory: interface/renderer/react was four files, one of them 1,730
+    # lines; interface/stdlib/dom's install.ts was 1,376; interface/stdlib/
+    # bindings was one 778-line module covering nine unrelated OS facilities.
+    #
+    # Nothing was wrong with any of them by the checks above, because the
+    # checks above never looked. These three do.
+
+    # A package is a directory carrying a manifest.
+    def packages(tier):
+        seen = set()
+        for pattern in ("**/package.json", "**/Cargo.toml"):
+            for manifest in sorted((root / "solutions" / tier).glob(pattern)):
+                if "node_modules" in manifest.parts:
+                    continue
+                seen.add(manifest.parent)
+        return sorted(seen)
+
+    # integrations/javascript/quickjs is a vendored upstream fork, kept in
+    # rquickjs's own layout so the diff against upstream stays readable. It is
+    # exempt from all three rules, and that exemption is the whole reason it
+    # sits under a vendor-named directory.
+    VENDORED = (root / "solutions" / "integrations" / "javascript" / "quickjs").resolve()
+
+    def is_vendored(path):
+        resolved = path.resolve()
+        return resolved == VENDORED or VENDORED in resolved.parents
+
+    # Rule 1: nothing but an entrypoint, a manifest and prose at a package root.
+    #
+    # "A folder structure, not just a bunch of files" is the whole point, and
+    # this is the shape of it that can be checked: source at a package root is
+    # a file that has not been given a role yet.
+    ROOT_FILES_OK = {
+        "index.ts", "lib.rs", "main.ts", "build.rs",          # entrypoints
+        "package.json", "Cargo.toml", "BUILD.bazel",          # manifests
+        "tsconfig.json", "build.zig", "build.zig.zon",
+    }
+    SOURCE_SUFFIXES = {".ts", ".tsx", ".js", ".jsx", ".rs", ".zig"}
+
+    layout_violations = 0
+    for tier in ("capabilities", "infrastructure", "integrations", "interface"):
+        for package in packages(tier):
+            if is_vendored(package):
+                continue
+            # A library is defined by being flat — pure computation with no
+            # layers to name. carbon-plugin-sdk is four files at its root and
+            # that is its declared shape, not drift.
+            manifests = "".join(
+                (package / name).read_text(encoding="utf-8", errors="replace")
+                for name in ("package.json", "Cargo.toml")
+                if (package / name).is_file()
+            )
+            if re.search(r'carbon[.\-_]?kind["\s:=]+"?library"?', manifests):
+                continue
+
+            for entry in sorted(package.iterdir()):
+                if not entry.is_file():
+                    continue
+                if entry.name in ROOT_FILES_OK or entry.suffix not in SOURCE_SUFFIXES:
+                    continue
+                rel = entry.relative_to(root).as_posix()
+                print(f"[FAIL] loose source at a package root: {rel}")
+                print( "       Give it a role: a directory named for what it does.")
+                print( "       Only an entrypoint belongs at a package root.")
+                layout_violations += 1
+                passed = False
+
+    # Rule 2: one vocabulary per tier, for the two tiers that have one.
+    #
+    # infrastructure/ had `modules/`, `targets/` and `loader/` for the same
+    # idea. integrations/ had `model/` + `core/` + `addons/` in one package,
+    # `executors/` loose in another, and a `build/` holding two files that run
+    # every frame. The names were each defensible alone and meant nothing
+    # together.
+    #
+    # capabilities/ is deliberately absent: its shape is per-KIND, and the
+    # rules that matter there are about dependencies (above). interface/ is
+    # absent too, and that is stated in solutions/README.md rather than fudged
+    # — a command framework and a React reconciler are not made of the same
+    # parts, so a shared vocabulary would be invented rather than observed.
+    TIER_DIRS = {
+        "infrastructure": {"ports", "adapters", "tests", "abi"},
+        "integrations": {"domain", "infrastructure", "tests", "types"},
+    }
+    for tier, allowed in TIER_DIRS.items():
+        for package in packages(tier):
+            if is_vendored(package):
+                continue
+            for entry in sorted(package.iterdir()):
+                if not entry.is_dir() or entry.name.startswith("."):
+                    continue
+                if entry.name in allowed:
+                    continue
+                rel = entry.relative_to(root).as_posix()
+                print(f"[FAIL] {tier}/ package has a directory outside its "
+                      f"vocabulary: {rel}")
+                print(f"       {tier}/ packages are made of "
+                      f"{' + '.join(sorted(allowed))}. Nest below one of those.")
+                layout_violations += 1
+                passed = False
+
+    # Rule 3: no src/ anywhere in solutions/.
+    #
+    # Layers sit at the package root — the same rule products/ has, for the
+    # same reason: `src/` is a directory that says a file is source, which its
+    # extension already said, and it pushes every meaningful name one level
+    # down. Fourteen Rust crates put lib.rs at their root; carbon-plugin-sdk
+    # was the fifteenth and did not, and nothing noticed.
+    #
+    # Two exceptions, both about code that is not ours to lay out. Zig's
+    # convention is `src/`, and `templates/` scaffolds a plugin author's own
+    # crate — where Cargo's convention is `src/lib.rs` and this repository's
+    # preference is none of their business.
+    for src in sorted((root / "solutions").rglob("src")):
+        if not src.is_dir() or "node_modules" in src.parts:
+            continue
+        if is_vendored(src) or "zig" in src.parts or "templates" in src.parts:
+            continue
+        rel = src.relative_to(root).as_posix()
+        print(f"[FAIL] src/ in solutions/: {rel}")
+        print( "       Layers sit at the package root — see products/README.md.")
+        layout_violations += 1
+        passed = False
+
+    if layout_violations == 0:
+        print("[OK] Package layout: no loose source at a package root, one "
+              "vocabulary per tier, no src/")
 
     if passed:
         print("\n[+] Workspace structure validation PASSED successfully!")

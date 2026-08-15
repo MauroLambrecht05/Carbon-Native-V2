@@ -58,6 +58,7 @@ rem absolute path, which also lets bun walk up to node_modules.
 rem The "./" prefix is only correct for the workspace-relative form; the
 rem MANIFEST yields an absolute path, which must be passed as-is.
 set "ENTRY={entry_prefix}{entry}"
+set "PRELOAD={preload}"
 if not "%BUILD_WORKSPACE_DIRECTORY%"=="" (
   cd /d "%BUILD_WORKSPACE_DIRECTORY%"
 ) else (
@@ -65,9 +66,19 @@ if not "%BUILD_WORKSPACE_DIRECTORY%"=="" (
     for /f "tokens=1,*" %%a in ('findstr /b /l /c:"{entry_rlocation} " "%RUNFILES_DIR%\\MANIFEST"') do (
       set "ENTRY=%%b"
     )
+    rem The preload needs the same MANIFEST resolution as the entry, for the
+    rem same reason: a workspace-relative path is meaningless once bazel test
+    rem has moved us out of the source tree.
+    if not "!PRELOAD!"=="" (
+      for /f "tokens=1,*" %%a in ('findstr /b /l /c:"{preload_rlocation} " "%RUNFILES_DIR%\\MANIFEST"') do (
+        set "PRELOAD=%%b"
+      )
+    )
   )
 )
-"!BUN_EXE!" {subcommand}"!ENTRY!" {trailing} %*
+set "PRELOAD_ARG="
+if not "!PRELOAD!"=="" set "PRELOAD_ARG=--preload "!PRELOAD!""
+"!BUN_EXE!" {subcommand}!PRELOAD_ARG! "!ENTRY!" {trailing} %*
 """
 
 _SH_LAUNCHER = """\
@@ -87,14 +98,23 @@ fi
 # The "./" prefix is only correct for the workspace-relative form; the
 # MANIFEST yields an absolute path, which must be passed as-is.
 ENTRY="{entry_prefix}{entry}"
+PRELOAD="{preload}"
 if [ -n "${{BUILD_WORKSPACE_DIRECTORY:-}}" ]; then
   cd "$BUILD_WORKSPACE_DIRECTORY"
 elif [ -f "$RUNFILES_DIR/MANIFEST" ]; then
   ENTRY="$(grep -m1 "^{entry_rlocation} " "$RUNFILES_DIR/MANIFEST" | cut -d' ' -f2-)"
+  # The preload needs the same treatment as the entry, and for the same reason:
+  # a workspace-relative path is meaningless once bazel test has moved us out of
+  # the source tree. Resolved through MANIFEST to an absolute path.
+  if [ -n "$PRELOAD" ]; then
+    PRELOAD="$(grep -m1 "^{preload_rlocation} " "$RUNFILES_DIR/MANIFEST" | cut -d' ' -f2-)"
+  fi
 else
   cd "$RUNFILES_DIR/{workspace}"
 fi
-exec "$BUN_EXE" {subcommand}"$ENTRY" {trailing} "$@"
+PRELOAD_ARG=""
+if [ -n "$PRELOAD" ]; then PRELOAD_ARG="--preload"; fi
+exec "$BUN_EXE" {subcommand}${{PRELOAD_ARG:+$PRELOAD_ARG "$PRELOAD"}} "$ENTRY" {trailing} "$@"
 """
 
 def _rlocation(ctx, file):
@@ -111,7 +131,7 @@ def _rlocation(ctx, file):
         return file.short_path[3:]
     return ctx.workspace_name + "/" + file.short_path
 
-def _launcher_impl(ctx, subcommand, entry_prefix = "", trailing = ""):
+def _launcher_impl(ctx, subcommand, entry_prefix = "", trailing = "", extra_files = [], preload = None):
     bun = ctx.toolchains[_TOOLCHAIN_TYPE].buninfo.bun
 
     # Two forms of the entry are baked in, and the launcher picks at runtime:
@@ -121,6 +141,9 @@ def _launcher_impl(ctx, subcommand, entry_prefix = "", trailing = ""):
     entry = ctx.file.entry.short_path
     entry_rlocation = _rlocation(ctx, ctx.file.entry)
     bun_path = _rlocation(ctx, bun)
+    # Empty strings when there is no preload; both launchers treat "" as absent.
+    preload_path = preload.short_path if preload else ""
+    preload_rlocation = _rlocation(ctx, preload) if preload else ""
 
     if ctx.attr.is_windows:
         launcher = ctx.actions.declare_file(ctx.label.name + ".bat")
@@ -131,6 +154,8 @@ def _launcher_impl(ctx, subcommand, entry_prefix = "", trailing = ""):
             entry = entry,
             entry_rlocation = entry_rlocation,
             entry_prefix = entry_prefix,
+            preload = preload_path,
+            preload_rlocation = preload_rlocation,
             subcommand = subcommand,
             trailing = trailing,
             workspace = ctx.workspace_name,
@@ -142,6 +167,8 @@ def _launcher_impl(ctx, subcommand, entry_prefix = "", trailing = ""):
             entry = entry,
             entry_rlocation = entry_rlocation,
             entry_prefix = entry_prefix,
+            preload = preload_path,
+            preload_rlocation = preload_rlocation,
             subcommand = subcommand,
             trailing = trailing,
             workspace = ctx.workspace_name,
@@ -156,7 +183,7 @@ def _launcher_impl(ctx, subcommand, entry_prefix = "", trailing = ""):
     ctx.actions.write(launcher, content, is_executable = True)
 
     runfiles = ctx.runfiles(
-        files = [bun, ctx.file.entry] + ctx.files.srcs + ctx.files.data,
+        files = [bun, ctx.file.entry] + ctx.files.srcs + ctx.files.data + extra_files,
     )
     for dep in ctx.attr.deps:
         runfiles = runfiles.merge(dep[DefaultInfo].default_runfiles)
@@ -167,7 +194,23 @@ def _bun_binary_impl(ctx):
     return _launcher_impl(ctx, "")
 
 def _bun_test_impl(ctx):
-    return _launcher_impl(ctx, "test ", entry_prefix = "./")
+    # `--preload` is passed on the command line rather than left to
+    # .config/bunfig.toml. Under `bazel test` the working directory is the
+    # execroot, not the workspace root, so bun's upward search for a bunfig
+    # never reaches .config/ and any [test] preload there is silently skipped.
+    # An explicit flag is the only form that survives the sandbox.
+    #
+    # The file makes runs deterministic (NO_COLOR, TZ=UTC, LC_ALL=C) — see
+    # .tools/automation/testing/src/preload.ts. Skipping it does not fail a
+    # test, it just makes failures depend on the machine, which is worse.
+    extra = [ctx.file.preload] if ctx.file.preload else []
+    return _launcher_impl(
+        ctx,
+        "test ",
+        entry_prefix = "./",
+        extra_files = extra,
+        preload = ctx.file.preload,
+    )
 
 def _bun_compile_impl(ctx):
     """`bun build --compile` — bundles the program AND the Bun runtime into one
@@ -231,7 +274,14 @@ _bun_binary = rule(
 _bun_test = rule(
     implementation = _bun_test_impl,
     test = True,
-    attrs = _COMMON_ATTRS,
+    attrs = dict(_COMMON_ATTRS, **{
+        "preload": attr.label(
+            allow_single_file = True,
+            default = "//.tools/automation/testing:preload",
+            doc = "Module bun evaluates before every suite. Defaults to the " +
+                  "workspace determinism preload; set to None to opt out.",
+        ),
+    }),
     toolchains = [_TOOLCHAIN_TYPE],
 )
 
@@ -277,5 +327,14 @@ def bun_compile(name, **kwargs):
     builder, not a dev-loop step. The compiled binary is *slower* to start than
     `bun src/main.ts` (Bun's single-file-executable startup costs ~250 ms on
     Windows); its only advantage is running where Bun is not installed.
+
+    Tagged `manual`, which is load-bearing rather than tidiness: `bun build`
+    needs a real node_modules and writes into the source tree, and Bazel
+    provides neither. Without the tag a plain `bazel build //...` picks this
+    target up and fails on a clean checkout — which is what CI did, despite a
+    comment in the BUILD file claiming the target was already excluded.
     """
-    _bun_compile(name = name, is_windows = _IS_WINDOWS, **kwargs)
+    tags = kwargs.pop("tags", [])
+    if "manual" not in tags:
+        tags = tags + ["manual"]
+    _bun_compile(name = name, is_windows = _IS_WINDOWS, tags = tags, **kwargs)

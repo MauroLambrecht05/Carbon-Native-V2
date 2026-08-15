@@ -2,6 +2,28 @@
 
 package(default_visibility = ["//visibility:public"])
 
+load("//.tools/orchestration/bazel/cargo:defs.bzl", "cargo_clippy_test", "cargo_fmt", "cargo_fmt_test")
+
+# ── Quality gates ───────────────────────────────────────────────────────────
+# Bazel is the entrypoint in this workspace, so formatting and lints have to be
+# Bazel targets — otherwise they are things only a separate task runner could
+# invoke, which in practice means things that never run. Both are `bazel test`
+# targets, so `bazel test //...` gates on them.
+#
+#   bazel test //:fmt_test      is the tree rustfmt-clean?
+#   bazel run  //:fmt           make it so
+#   bazel test //:clippy_test   clippy with -D warnings
+#
+# The clippy allow-list lives in [workspace.lints.clippy] in
+# .tools/orchestration/bazel/cargo/Cargo.toml, named lint by lint with a reason and a count, so the
+# inherited debt is countable rather than hidden behind -A clippy::all.
+
+cargo_fmt_test(name = "fmt_test")
+
+cargo_fmt(name = "fmt")
+
+cargo_clippy_test(name = "clippy_test")
+
 package_group(
     name = "carbon_internal",
     packages = [

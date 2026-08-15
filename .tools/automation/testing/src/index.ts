@@ -106,7 +106,7 @@ export async function runCli(args: string[], cwd?: string): Promise<CliResult> {
 
 /**
  * True when a runtime binary has been built. Suites that launch a backend
- * should skip rather than fail on a checkout that has not run `just build`.
+ * should skip rather than fail on a checkout that has not run `bazel build`.
  */
 export function hasRuntimeBinary(crate = "carbon-mini"): boolean {
   const exe = process.platform === "win32" ? ".exe" : "";

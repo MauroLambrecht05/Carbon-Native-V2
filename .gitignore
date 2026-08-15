@@ -16,13 +16,30 @@ node_modules/
 /node_modules
 
 # ── Build output ────────────────────────────────────────────────────────────
-/.build/
+# Cargo's target directory, beside the workspace manifest that produces it.
+/.tools/orchestration/bazel/cargo/target/
+# Generated FlatBuffers bindings, beside the generator that writes them.
+/.tools/generators/out/
 dist/
 # Per-app build cache the CLI pipeline writes next to a project's dist/.
 .carboncache/
 
+# EXCEPTION: the launch test's fixture bundle is an INPUT, not build output.
+#
+# products/carbon/tests/launch.rs starts the real runtime binary against this
+# bundle and asserts exit 0, first paint, and the 27 startup phases in order —
+# it is the only end-to-end proof the runtime works, and `bazel test //...`
+# runs it. Swept up by `dist/` above, it was untracked, so the test had no
+# input on a fresh clone even though MIGRATION.md describes it as checked in.
+#
+# Committed deliberately, and small: a hello-world bundle plus its QuickJS
+# bytecode. Regenerate if the bundle format changes, with
+#   bazel run //products/carbon-cli:carbon -- build products/carbon/tests/fixtures/hello-app
+# the bytecode must match the runtime that reads it.
+!/products/carbon/tests/fixtures/hello-app/dist/
+!/products/carbon/tests/fixtures/hello-app/dist/**
+
 # ── Local / machine-specific ────────────────────────────────────────────────
-/.local/
 # .env is machine-specific and the natural place a cache token or signing
 # password ends up. .env.example is the committed template — keep them in sync.
 .env
@@ -37,3 +54,9 @@ Thumbs.db
 # labs/e2e holds the throwaway project `carbon init` creates when the CLI loop
 # is exercised end to end. Reproducible in one command; not source.
 /labs/e2e/
+
+# A carbon app is its own npm project: `carbon build` runs `bun install` in the
+# app directory, so every example under labs/ grows a lockfile and a
+# node_modules when it is built. The app's package.json is source; what the
+# installer resolves from it is not.
+/labs/examples/*/bun.lock

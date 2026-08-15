@@ -1,0 +1,37 @@
+name: Bug report
+description: Something behaves differently than documented
+labels: [bug]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - runtime/mini (the tiny-skia backend)
+        - runtime/blitz (the stylo/vello backend)
+        - runtime/host (native host APIs)
+        - stdlib (@carbon/api and friends)
+        - tooling/cli (carbon build/run/dev)
+        - plugins (native extension system)
+        - other / not sure
+    validations: { required: true }
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you expected, and what happened instead.
+    validations: { required: true }
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: Smallest app or command that shows it. A carbon.toml plus one component beats a description.
+      render: shell
+    validations: { required: true }
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: "Output of `carbon doctor`, plus your OS."
+      render: shell
+    validations: { required: true }

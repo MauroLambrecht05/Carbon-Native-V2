@@ -57,7 +57,7 @@ is the crate_universe project described above.
 
 load("@carbon_cargo//:defs.bzl", "CARGO_PATH", "WORKSPACE_ROOT")
 
-_MANIFEST = ".config/rust/Cargo.toml"
+_MANIFEST = ".tools/orchestration/bazel/cargo/Cargo.toml"
 
 # Cargo settings that would otherwise need a .cargo/config.toml in the
 # repository root.
@@ -68,8 +68,12 @@ _MANIFEST = ".config/rust/Cargo.toml"
 # CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS a bad value makes cargo reject it,
 # which proves it is read), so the launcher sets them and the root stays clean.
 #
-#   CARGO_TARGET_DIR      build output into .build/, which .gitignore already
-#                         covers, instead of a target/ beside the manifest
+#   CARGO_TARGET_DIR      target/ beside this directory's Cargo.toml, which is
+#                         Cargo's own default. It was .tools/.build/rust, a
+#                         directory the root README never declared and that
+#                         nothing but this line pointed at.
+#                         NOT at the workspace root: the root holds Bazel's
+#                         files and the tiers, and generated output is neither.
 #   CARGO_INCREMENTAL     off: every shipped binary is lto = "fat", which
 #                         incremental defeats, and release builds are the ones
 #                         that get measured
@@ -81,11 +85,31 @@ _MANIFEST = ".config/rust/Cargo.toml"
 #                         crates that bumped their MSRV past ours — which is
 #                         exactly what happened in V1 the first time these
 #                         crates shared one lockfile.
+#   RUSTUP_TOOLCHAIN     which toolchain rustup hands the `cargo` shim. This is
+#                        the env equivalent of a rust-toolchain.toml, and it is
+#                        here for the same reason as the keys above: rustup
+#                        discovers that file by walking up from the current
+#                        directory, so it would have to sit at the workspace
+#                        root, and the root is Bazel's.
+#
+#                        Not decorative. `rust-version = "1.86"` in
+#                        .tools/orchestration/bazel/cargo/Cargo.toml is an MSRV *assertion* — it
+#                        makes Cargo complain about a dependency needing more,
+#                        but it does not select a toolchain. Without this, the
+#                        build silently uses whatever `rustup default` happens
+#                        to be, which is how a tree that declares 1.86 ends up
+#                        only ever compiled on something far newer.
+#
+#                        That is exactly what was happening. Pinning 1.86 made
+#                        `cargo build --workspace` fail with 'wgpu@27.0.1
+#                        requires rustc 1.88' — the declared version had never
+#                        been the one in use.
 _CARGO_ENV = {
-    "CARGO_TARGET_DIR": ".build/rust",
+    "CARGO_TARGET_DIR": ".tools/orchestration/bazel/cargo/target",
     "CARGO_INCREMENTAL": "0",
     "CARGO_BUILD_RUSTFLAGS": "--remap-path-prefix=.=carbon-native",
     "CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS": "fallback",
+    "RUSTUP_TOOLCHAIN": "1.88",
 }
 
 # Locating cargo is identical on both platforms in intent, so the two launchers
@@ -173,6 +197,11 @@ exit /b 1
 
 def _cargo_args(ctx):
     """The argv shared by build and test: which package, which features."""
+    if not ctx.attr.package:
+        # Workspace-wide targets (fmt, clippy) name no package; they pass their
+        # whole argv through `extra_args` instead.
+        return []
+
     args = ["-p", ctx.attr.package]
 
     if ctx.attr.bin:
@@ -235,8 +264,13 @@ def _launcher(ctx, subcommand, extra_args = []):
 
 _COMMON_ATTRS = {
     "package": attr.string(
-        mandatory = True,
-        doc = "Cargo package name, as it appears in its Cargo.toml [package].",
+        doc = "Cargo package name, as it appears in its Cargo.toml [package]. " +
+              "Omitted by workspace-wide targets like fmt and clippy.",
+    ),
+    "extra_args": attr.string_list(
+        doc = "Raw argv appended after the subcommand. Used by the " +
+              "workspace-wide quality targets, which select crates with " +
+              "--workspace/--exclude rather than -p.",
     ),
     "bin": attr.string(
         doc = "Which [[bin]] target. Omit for a library, or for the only bin.",
@@ -269,6 +303,27 @@ _cargo_test = rule(
     implementation = lambda ctx: _launcher(ctx, "test"),
     attrs = _COMMON_ATTRS,
     test = True,
+)
+
+# Quality gates. Separate rules from cargo_test only so a BUILD file reads
+# honestly — the launcher is identical, and both are `bazel test` targets so
+# `bazel test //...` gates on them the way CI needs.
+_cargo_fmt_test = rule(
+    implementation = lambda ctx: _launcher(ctx, "fmt", ctx.attr.extra_args),
+    attrs = _COMMON_ATTRS,
+    test = True,
+)
+
+_cargo_clippy_test = rule(
+    implementation = lambda ctx: _launcher(ctx, "clippy", ctx.attr.extra_args),
+    attrs = _COMMON_ATTRS,
+    test = True,
+)
+
+_cargo_fmt_fix = rule(
+    implementation = lambda ctx: _launcher(ctx, "fmt", ctx.attr.extra_args),
+    attrs = _COMMON_ATTRS,
+    executable = True,
 )
 
 def cargo_binary(name, **kwargs):
@@ -307,5 +362,66 @@ def cargo_test(name, **kwargs):
             "@platforms//os:windows": True,
             "//conditions:default": False,
         }),
+        **kwargs
+    )
+
+# ── Workspace-wide quality gates ────────────────────────────────────────────
+# These replace what a task runner would otherwise own. Bazel is the entrypoint
+# in this workspace, so `bazel test //...` has to be able to fail on formatting
+# and lints — not just on unit tests.
+#
+# They select crates with --workspace/--exclude rather than -p, which is why the
+# rules accept `extra_args` and no `package`.
+
+_WINDOWS = select({
+    "@platforms//os:windows": True,
+    "//conditions:default": False,
+})
+
+# These run cargo against the real source tree rather than a declared input set,
+# so Bazel has no way to know the tree changed and will serve a cached PASS
+# forever. Verified the hard way: without `no-cache`, `bazel test //:fmt_test`
+# reported "(cached) PASSED" on a file that had just been deliberately
+# misformatted. A gate that cannot fail is worse than no gate.
+#
+# Same reasoning and same tags as //.tools/orchestration/bazel/checks.
+_UNCACHEABLE = ["no-sandbox", "no-cache", "external"]
+
+def _with_tags(kwargs):
+    tags = kwargs.pop("tags", [])
+    return tags + [t for t in _UNCACHEABLE if t not in tags]
+
+# carbon-gpu-canvas is excluded from clippy for the same reason it is excluded
+# from `bazel test`: its wgpu stack needs a real GPU adapter. Lint it explicitly
+# on a machine that has one.
+_LINT_SCOPE = ["--workspace", "--exclude", "carbon-gpu-canvas"]
+
+def cargo_fmt_test(name, **kwargs):
+    """Fails if any file in the workspace is not rustfmt-clean."""
+    _cargo_fmt_test(
+        name = name,
+        extra_args = ["--all", "--", "--check"],
+        is_windows = _WINDOWS,
+        tags = _with_tags(kwargs),
+        **kwargs
+    )
+
+def cargo_fmt(name, **kwargs):
+    """`bazel run` this to reformat the workspace in place."""
+    _cargo_fmt_fix(
+        name = name,
+        extra_args = ["--all"],
+        is_windows = _WINDOWS,
+        tags = _with_tags(kwargs),
+        **kwargs
+    )
+
+def cargo_clippy_test(name, **kwargs):
+    """Clippy with -D warnings. The allow-list is [workspace.lints.clippy]."""
+    _cargo_clippy_test(
+        name = name,
+        extra_args = _LINT_SCOPE + ["--all-targets", "--", "-D", "warnings"],
+        is_windows = _WINDOWS,
+        tags = _with_tags(kwargs),
         **kwargs
     )

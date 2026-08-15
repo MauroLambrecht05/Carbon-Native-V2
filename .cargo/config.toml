@@ -1,0 +1,57 @@
+# Cargo configuration for this workspace.
+#
+# ── WHY THIS FILE EXISTS AT THE ROOT ────────────────────────────────────────
+# Cargo discovers `.cargo/config.toml` by walking UP from the CURRENT
+# DIRECTORY, not from the manifest. Without this file, a `cargo build` typed
+# inside V2 kept walking — past V2, into the V1 checkout above it — and found
+# `carbon-native/.cargo/config.toml`, which says:
+#
+#     target-dir = "carbon/bin"
+#
+# So every plain cargo command run here wrote 5.9 GB into a V1 directory
+# OUTSIDE this workspace, while `WorkspaceLayout.TARGET_DIR` and the Bazel
+# cargo rules pointed somewhere else entirely. `carbon run` looked for a
+# runtime binary in a directory a hand-run cargo had never written to — the
+# exact failure the comment on TARGET_DIR warns about, live, for a different
+# reason than the one it describes.
+#
+# It also silently applied V1's `--remap-path-prefix` and an
+# `incompatible-rust-versions = "fallback"` resolver policy pinned to a
+# rust-version this workspace has already measured as wrong.
+#
+# The root's allow-list in //.tools/validation:workspace_test used to argue
+# that anything a tool finds by walking up from cwd should be expressed as
+# environment in the Bazel launcher instead. That is true for Bazel and false
+# for a developer: `bazel run` sets CARGO_TARGET_DIR itself, and `cargo build`
+# typed by hand does not. Half the invocations were covered.
+
+[build]
+# Must match CARGO_TARGET_DIR in .tools/orchestration/bazel/cargo/defs.bzl and
+# TARGET_DIR in solutions/infrastructure/workspace exactly. Three declarations
+# of one path, and the workspace validator compares them — they have disagreed
+# before, and the symptom is a binary that builds and cannot be found.
+#
+# `target/` beside the workspace manifest, which is Cargo's own default now
+# that the manifest lives in .tools/orchestration/bazel/cargo. Declared
+# explicitly anyway so the validator has three values to compare rather than
+# two and an implicit one.
+target-dir = ".tools/orchestration/bazel/cargo/target"
+
+# Strip the absolute checkout path out of panic messages, backtraces and debug
+# info so binaries are reproducible across machines and do not leak the
+# builder's home directory. `.` is the workspace root at build time.
+rustflags = ["--remap-path-prefix=.=carbon-native"]
+
+[resolver]
+# Prefer dependency versions compatible with the workspace `rust-version`
+# (1.88, in .tools/orchestration/bazel/cargo/Cargo.toml) over the newest
+# published version. Without this, resolving picks the latest release of
+# everything and the build dies on transitive crates that have bumped their own
+# MSRV past ours.
+incompatible-rust-versions = "fallback"
+
+[env]
+# Incremental compilation trades binary quality for rebuild speed. Every
+# runtime binary we ship is built with lto = "fat", which incremental defeats.
+# Release builds are the ones we measure, so keep it off globally.
+CARGO_INCREMENTAL = "0"

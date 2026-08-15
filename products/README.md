@@ -3,6 +3,12 @@
 Shipping deliverables. One directory per product, and every one has the same
 shape.
 
+| Product | Surface for |
+|---|---|
+| `carbon` | the runtime an app runs on |
+| `carbon-cli` | an app developer: init, run, build, publish, plugin |
+| `carbon-ext` | an extension author — the plugin SDK itself |
+
 ```
 products/<name>/
 ├── README.md          what it is, how to run it, how it is released
@@ -54,6 +60,25 @@ and an object store are *driven* adapters and belong to a solution's
 nothing and makes the tree noisier. The table is the contract for where a thing
 goes *when* you have one.
 
+## A product need not be a program
+
+`carbon-ext` is the plugin SDK: a C header, scaffold templates and a Zig
+package definition. A shipping deliverable, which is what this tier means —
+but a library, so it has no `main.ts` and no commands.
+
+It still has the two slots that matter. `presentation/` is what an author
+touches, and `composition/` is `build.zig`, which names every module and joins
+the surface to the implementation in `solutions/capabilities/plugin-sdk` and
+the registry in `solutions/contracts/plugin`. That is a composition root in the
+same sense `main.ts` is.
+
+`check_workspace.py` applies the `main.ts` requirement only to products
+carrying a `package.json`, which is what makes one a Bun program. The rule used
+to apply to everything, and carbon-ext was briefly given a `main.ts` to satisfy
+it — a second CLI, with its own dispatcher and command registry, for commands
+that belonged in `carbon-cli`. **Everything CLI is `carbon-cli`.** Being about
+plugins is not a reason for a command to leave.
+
 ## Why `presentation/framework/` and not a shared package
 
 `carbon-cli`'s framework — `Command`, `Dispatcher`, `CommandRegistry`, flag
@@ -90,6 +115,12 @@ exit code.
 
 ## The other product directories
 
-`carbon`, `carbon-builder`, `carbon-studio`, `carbon-cloud`, `carbon-hub` and
-the rest are empty placeholders. They take this shape when they get code; until
-then they are names, not products.
+There are none. `carbon-builder`, `carbon-studio`, `carbon-cloud`, `carbon-hub`,
+`carbon-marketplace`, `carbon-registry`, `carbon-identity`, `carbon-playground`,
+`carbon-templates`, `carbon-updater`, `carbon-docs` and `graphite` used to exist
+here as empty directories, which contradicted this file's own rule two sections
+up — *unused slots are omitted, not created empty* — and made `products/` read
+as twelve unfinished products rather than two finished ones.
+
+They are names on a roadmap, and a roadmap is not a directory tree. When one of
+them gets code it gets a directory, in the shape described above.

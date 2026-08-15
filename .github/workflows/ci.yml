@@ -1,46 +1,175 @@
-name: Carbon Native V2 CI
+name: CI
+
+# Bazel is the entrypoint. Every gate below is a Bazel target, so a contributor
+# reproduces any job with the same command CI runs — no wrapper script that can
+# drift from the workflow, and no second task runner.
+#
+#   bazel test //...                       everything
+#   bazel test //:fmt_test //:clippy_test   the Rust quality gates
+#   bazel test //.tools/validation/...      structure, host boundary, tsconfigs
+#   bazel test //.tools/automation/ci:boundaries_test
+#
+# The one thing that is not a Bazel target is dependency installation: the bun
+# rules shell out to a real node_modules, and Bazel does not create it.
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [main]
   pull_request:
-    branches: [ main, develop ]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
-  workspace-validation:
-    name: Workspace Structure & Tooling Check
+  # Cheap, platform-independent gates. Fails in under a minute and says what is
+  # wrong before anyone waits on a Rust build.
+  structure:
+    name: structure & format
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.10"
+      # rustfmt only — this job does not compile anything. The toolchain
+      # VERSION comes from RUSTUP_TOOLCHAIN in the Bazel cargo launcher, not
+      # from here; naming it in both places is how the two drift apart.
+      - uses: dtolnay/rust-toolchain@1.86
+        with:
+          components: rustfmt
+      - uses: bazel-contrib/setup-bazel@v0.8.0
+        with:
+          bazelrc: build --enable_bzlmod
 
-      - name: Run Workspace Structure Validator
-        run: python .tools/validation/check_workspace.py
+      # check_typescript.py runs tsc, so the deps have to exist first.
+      - name: install js deps
+        run: |
+          bun install --cwd .config --frozen-lockfile
+          ./.tools/automation/bootstrap/link-node-modules.sh
 
-  bazel-build:
-    name: Bazel Build & Test (${{ matrix.os }})
-    needs: workspace-validation
-    runs-on: ${{ matrix.os }}
+      - name: structure, contracts, host boundary, typescript
+        run: bazel test //.tools/validation/... --test_output=errors
+
+      - name: boundary rules
+        run: bazel test //.tools/automation/ci:boundaries_test --test_output=errors
+
+      - name: rustfmt
+        run: bazel test //:fmt_test --test_output=errors
+
+  test:
+    name: test (${{ matrix.os }})
+    needs: structure
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup Bazel
-        uses: bazel-contrib/setup-bazel@v0.8.0
+      - uses: oven-sh/setup-bun@v2
         with:
-          bazelrc: |
-            build --enable_bzlmod
+          bun-version: "1.3.10"
+      - uses: dtolnay/rust-toolchain@1.86
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: bazel-contrib/setup-bazel@v0.8.0
+        with:
+          bazelrc: build --enable_bzlmod
 
-      - name: Build All V2 Targets
+      # carbon-mini's Linux build links against X11/Wayland, GL and ALSA through
+      # tao, softbuffer and cpal. //products/carbon:mini is inside //... .
+      - name: linux system deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libxrandr-dev \
+            libxi-dev libgl1-mesa-dev libasound2-dev pkg-config
+
+      - name: install js deps
+        shell: bash
+        run: |
+          bun install --cwd .config --frozen-lockfile
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            pwsh -File ./.tools/automation/bootstrap/link-node-modules.ps1
+          else
+            ./.tools/automation/bootstrap/link-node-modules.sh
+          fi
+
+      - name: clippy
+        run: bazel test //:clippy_test --test_output=errors
+
+      # //products/carbon-cli:compile is tagged `manual` (it needs node_modules
+      # and writes into the source tree), so //... skips it. carbon-gpu-canvas's
+      # tests need a real GPU adapter and are excluded at the rule level.
+      - name: build
         run: bazel build //...
 
-      - name: Run All V2 Tests
-        run: bazel test //...
+      - name: test
+        run: bazel test //... --test_output=errors
+
+  # The end-to-end evidence: the CLI, the build pipeline, both renderers and a
+  # backend binary working together. Nothing else exercises that combination.
+  examples:
+    name: build examples (${{ matrix.os }})
+    needs: structure
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.10"
+      - uses: dtolnay/rust-toolchain@1.86
+      - uses: Swatinem/rust-cache@v2
+      - uses: bazel-contrib/setup-bazel@v0.8.0
+        with:
+          bazelrc: build --enable_bzlmod
+
+      - name: linux system deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libxrandr-dev \
+            libxi-dev libgl1-mesa-dev libasound2-dev pkg-config
+
+      - name: install js deps
+        shell: bash
+        run: |
+          bun install --cwd .config --frozen-lockfile
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            pwsh -File ./.tools/automation/bootstrap/link-node-modules.ps1
+          else
+            ./.tools/automation/bootstrap/link-node-modules.sh
+          fi
+
+      - name: build the mini backend
+        run: bazel build //products/carbon:mini
+
+      - name: build every example
+        shell: bash
+        run: |
+          set -e
+          built=0
+          for app in labs/examples/*/; do
+            [ -f "$app/carbon.toml" ] || continue
+            # terax-ai is a checkout of a separate repository
+            # (github.com/crynta/terax-ai). This repo carries its manifest so the
+            # runtime can be pointed at it, not its source.
+            [ -f "$app/package.json" ] || { echo "── skip $app (not this repo's source)"; continue; }
+            echo "── $app"
+            bazel run //products/carbon-cli:carbon -- build "$PWD/$app"
+            built=$((built+1))
+          done
+          if [ "$built" -eq 0 ]; then
+            echo "::error title=No examples built::labs/examples/ produced nothing buildable."
+            exit 1
+          fi
+          echo "built $built example(s)"

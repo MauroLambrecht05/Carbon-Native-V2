@@ -18,19 +18,30 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$root = Join-Path $PSScriptRoot ".."
-$crate = Join-Path $root "packages/carbon-fast-math"
+# Workspace root is four levels up: phases/ -> benchmarks/ -> automation/ ->
+# .tools/ -> root. V1 had `".."` here and a crate path of
+# "packages/carbon-fast-math", neither of which resolved in V1's own layout
+# either — this driver has been broken since before the migration.
+$root = (Resolve-Path (Join-Path $PSScriptRoot "../../../..")).Path
+$manifest = Join-Path $root ".tools/orchestration/bazel/cargo/Cargo.toml"
 
 Write-Host "[bench-phase3] building carbon-fast-math bench_runner (release)..."
 # Cargo writes "Finished" to stderr even on success. PowerShell's native-
 # command error trapping treats any stderr output as a non-terminating
 # error under $ErrorActionPreference='Stop'. Temporarily relax that for
 # the build step so we don't false-fail.
-Push-Location $crate
+Push-Location $root
 $prev = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
 try {
-  cmd /c "cargo build --release --bin bench_runner 2>&1" | Out-Null
+  # Bazel is the entrypoint for builds, but this driver measures in-process JS
+  # rather than a build, so it calls Cargo directly. The env vars below are the
+  # ones .tools/orchestration/bazel/cargo/defs.bzl exports — set here too, or a
+  # by-hand cargo writes to a target/ Bazel does not know about.
+  $env:CARGO_TARGET_DIR = ".local/rust"
+  $env:CARGO_INCREMENTAL = "0"
+  $env:CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS = "fallback"
+  cmd /c "cargo build --manifest-path `"$manifest`" --release -p carbon-fast-math --bin bench_runner 2>&1" | Out-Null
   if ($LASTEXITCODE -ne 0) {
     throw "cargo build failed (exit $LASTEXITCODE)"
   }
@@ -39,7 +50,7 @@ try {
   $ErrorActionPreference = $prev
 }
 
-$exe = Join-Path $crate "target/release/bench_runner.exe"
+$exe = Join-Path $root ".local/rust/release/bench_runner.exe"
 if (-not (Test-Path $exe)) { throw "bench_runner.exe not found at $exe" }
 
 Write-Host "[bench-phase3] running bench_runner (this takes ~1-2 minutes)..."
@@ -106,7 +117,7 @@ $lines += "timings are inside the SAME rquickjs context -- only the math"
 $lines += "implementation differs. JS baseline mirrors three.js's source for"
 $lines += "the exercised methods bit-for-bit."
 $lines += ""
-$lines += "Bench source: ``packages/carbon-fast-math/src/bin/bench_runner.rs``"
+$lines += "Bench source: ``solutions/capabilities/math/tools/bench_runner.rs``"
 $lines += "Driver: ``scripts/bench-phase3.ps1``"
 $lines += ""
 $lines += "| Scenario | iters | JS (ms) | Rust (ms) | JS ns/op | Rust ns/op | speedup |"
