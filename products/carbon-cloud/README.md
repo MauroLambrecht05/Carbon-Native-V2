@@ -52,7 +52,12 @@ Not real yet: `@carbon/billing`'s `PaymentProvider` — `UpgradePlanUseCase`
 changes the stored plan on a successful charge, but the only implementation
 is `FakePaymentProvider`, which always succeeds without moving any money.
 
+The dashboard (`presentation/dashboard`, React) covers signup, pasting an
+existing token, usage against the plan, queuing a build, and checking one's
+status — a token typed in lives in the browser's localStorage for the tab's
+session; there's no cookie session yet.
+
 Not yet: a Mac worker, per-build authorization (any valid token can
 claim/complete any org's queued work — fine for one self-hosted deployment
 you control every worker for, a real gap for multiple untrusted tenants), a
-real dashboard beyond build-status lookup.
+build list/history view (only look-up-by-id exists).

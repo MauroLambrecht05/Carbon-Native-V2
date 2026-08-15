@@ -102,6 +102,18 @@ export function buildRoutes(deps: RouteDeps) {
       },
     },
 
+    "/v1/usage": {
+      GET: async (req: Bun.BunRequest) => {
+        const orgId = await authenticate(req, deps.verifyToken);
+        if (orgId instanceof Response) return orgId;
+        try {
+          return json(await deps.checkUsageLimit.execute(orgId));
+        } catch (error) {
+          return errorResponse(error);
+        }
+      },
+    },
+
     "/v1/builds": {
       POST: async (req: Bun.BunRequest) => {
         const orgId = await authenticate(req, deps.verifyToken);

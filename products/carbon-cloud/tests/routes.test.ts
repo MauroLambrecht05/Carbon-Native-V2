@@ -171,6 +171,24 @@ describe("the claim -> complete loop", () => {
   });
 });
 
+describe("GET /v1/usage", () => {
+  test("reports the org's plan and usage", async () => {
+    const { server, authed } = await harness();
+    const res = await authed("/v1/usage");
+    expect(res.status).toBe(200);
+    const status = await res.json();
+    expect(status).toEqual({ withinLimit: true, usedMinutes: 0, includedMinutes: 60 });
+    server.stop(true);
+  });
+
+  test("requires auth", async () => {
+    const { server, base } = await harness();
+    const res = await fetch(`${base}/v1/usage`);
+    expect(res.status).toBe(401);
+    server.stop(true);
+  });
+});
+
 describe("usage limits", () => {
   test("a build completing successfully records usage", async () => {
     const { server, authed, orgId, billing } = await harness();
