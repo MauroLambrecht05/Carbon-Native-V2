@@ -13,15 +13,21 @@
 // pieces that are genuinely swappable functions — the shell command a
 // backend spawns, how a persistent shell session recovers its exit code and
 // cwd, how "reveal in file manager" is implemented.
+//
+// ── Layout ──────────────────────────────────────────────────────────────────
+// One adapter per target OS, selected by cfg. `adapters/`, like every other
+// crate in this tier: a per-platform implementation of a swappable operation
+// is a driven adapter, and calling the directory `targets/` named the axis
+// the files vary along rather than what they are.
 
 #[cfg(windows)]
-#[path = "targets/windows.rs"]
+#[path = "adapters/windows.rs"]
 pub mod windows;
 
 #[cfg(target_os = "macos")]
-#[path = "targets/macos.rs"]
+#[path = "adapters/macos.rs"]
 pub mod macos;
 
 #[cfg(not(windows))]
-#[path = "targets/unix.rs"]
+#[path = "adapters/unix.rs"]
 pub mod unix;

@@ -21,5 +21,8 @@ pub fn wrap_with_sentinel(command: &str, cwd_sentinel: &str) -> String {
 /// Reveals `path` in Explorer with the file highlighted. Fire-and-forget:
 /// a failed spawn is silently ignored, matching the pre-extraction behavior.
 pub fn reveal_in_file_manager(path: &Path) {
-    let _ = Command::new("explorer.exe").arg("/select,").arg(path).spawn();
+    let _ = Command::new("explorer.exe")
+        .arg("/select,")
+        .arg(path)
+        .spawn();
 }
