@@ -2,14 +2,30 @@
 //
 // Most plugin authors only need:
 //   * `CarbonApp` (the host descriptor)
-//   * `Manifest` (typed manifest builder, JSON-serialized at runtime)
+//   * `manifest.build` (the manifest, composed at comptime)
+//   * `ext.expect` (comptime-check an extension point id)
 //   * `setGlobalString` / `setGlobalNumber` / `setGlobalFunction` helpers
 //   * `pushEvent` for cross-thread events
 //
 // The C ABI itself is in `../include/carbon_plugin.h`. We re-import it via
 // @cInclude inside this module so the constants stay in lockstep.
+//
+// The EXTENSION POINTS — what a plugin can actually plug into — are in
+// `extension_points.zig`, which re-exports
+// `contracts/plugin/registry/extension-points.zig` verbatim. A plugin author
+// reading that file is reading the same declaration the runtime's dispatch
+// table was generated from.
 
 const std = @import("std");
+
+/// The extension-point registry, and the comptime helpers that check an id.
+pub const ext = @import("extension_points.zig");
+
+/// The comptime manifest builder.
+pub const manifest = @import("manifest.zig");
+
+/// Cross-thread event helpers.
+pub const push = @import("push.zig");
 
 pub const c = @cImport({
     @cInclude("carbon_plugin.h");
@@ -84,9 +100,12 @@ pub const CarbonApp = struct {
     }
 };
 
-/// Compose a manifest JSON string at comptime. We don't try to mirror the
-/// full Rust builder — Zig comptime makes it natural to hand-build the
-/// JSON, and the schema is small enough that this stays readable.
+/// Compose a manifest JSON string at comptime.
+///
+/// DEPRECATED — use `manifest.build`, which derives the capability list from
+/// the extension points the plugin declares instead of asking the author to
+/// keep the two in agreement by hand. Kept because plugins written against
+/// ABI 1.0 call it, and it still produces a manifest the loader accepts.
 pub fn buildManifestJson(comptime cfg: ManifestConfig) []const u8 {
     @setEvalBranchQuota(10_000);
     return std.fmt.comptimePrint(
@@ -125,7 +144,7 @@ fn jsonStringArray(comptime arr: []const []const u8) []const u8 {
     return out;
 }
 
-test "manifest json shape" {
+test "the deprecated manifest builder still produces what the loader parses" {
     const want =
         \\{"name":"hello","version":"0.1.0","abi_version_major":1,"abi_version_minor":0,"capabilities":{"required":[],"optional":["fs.read"]},"modules":["carbon:hello"],"lifecycle_hooks":["register"]}
     ;
