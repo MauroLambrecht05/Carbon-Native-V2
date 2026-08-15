@@ -1,0 +1,93 @@
+// @@NAME@@ — a Carbon plugin, scaffolded by `carbon plugin new`.
+//
+//   zig build                 build it
+//   carbon plugin install     copy it into the app and declare it
+//   carbon plugin check       verify this file against the registry
+//
+// ── HOW A PLUGIN WORKS ──────────────────────────────────────────────────────
+// A plugin is a shared library that exports C symbols. The runtime looks each
+// one up by name after loading the library; a symbol it finds is an extension
+// point the plugin implements, and one it does not find is a point the plugin
+// simply does not take part in. Nothing is registered at runtime and there is
+// no callback table to fill in — the export IS the registration.
+//
+// Which symbols exist, what each one is called and when the runtime calls it
+// is the registry:
+//
+//   solutions/contracts/plugin/registry/extension-points.zig
+//
+// You can read it directly, or ask:
+//
+//   carbon ext list           every point, one line each
+//   carbon ext show <id>      one point, with the Zig to implement it
+
+const std = @import("std");
+const sdk = @import("carbon_sdk");
+
+// ── The manifest ────────────────────────────────────────────────────────────
+//
+// Returned to the runtime BEFORE any of this plugin's code runs, so the
+// loader can check the ABI and the capability grants first. Built at comptime,
+// so `.points` is checked against the registry when you compile: a misspelled
+// id fails the build rather than producing a plugin that loads and does
+// nothing.
+//
+// The capability list is derived — a point that needs a grant contributes it
+// automatically, so `required` here is only for things that are not extension
+// points.
+const MANIFEST = sdk.manifest.build(.{
+    .name = "@@NAME@@",
+    .version = "0.1.0",
+    .points = &.{"lifecycle.register"},
+    .modules = &.{"carbon:@@NAME@@"},
+});
+
+export fn carbon_plugin_manifest() callconv(.C) [*:0]const u8 {
+    return MANIFEST;
+}
+
+// ── lifecycle.register ──────────────────────────────────────────────────────
+//
+// Called once, after the app bundle has been evaluated. Install JS globals,
+// start threads, take handles.
+//
+// The `comptime` line below is not ceremony: it asserts that the id in the
+// manifest is real AND that the symbol name on the next line is the one the
+// registry expects for it. Get either wrong and this fails to compile, which
+// is the only way to catch it — a wrong `export fn` name compiles perfectly
+// and yields a plugin the runtime silently never calls.
+comptime {
+    const point = sdk.ext.expect("lifecycle.register");
+    std.debug.assert(std.mem.eql(u8, point.symbol, "carbon_plugin_register"));
+}
+
+export fn carbon_plugin_register(app_raw: *sdk.RawApp) callconv(.C) void {
+    const app = sdk.CarbonApp.fromRaw(app_raw);
+
+    // A major ABI mismatch means the struct layout differs; every field read
+    // after this point would be garbage. The loader checks it too, from the
+    // manifest — this is the belt to that pair of braces.
+    if (!app.abiCompatible()) return;
+
+    _ = app.setGlobalString("hello_from_@@NAME@@", "@@NAME@@ plugin loaded");
+}
+
+// ── Add another point ───────────────────────────────────────────────────────
+//
+// Two edits: add the id to `.points` above, and export its symbol. For
+// example, to be told when the OS theme changes:
+//
+//     comptime { _ = sdk.ext.expect("window.theme_changed"); }
+//
+//     export fn carbon_ext_window_theme_changed(
+//         app_raw: *sdk.RawApp,
+//         is_dark: i32,
+//     ) callconv(.C) void {
+//         const app = sdk.CarbonApp.fromRaw(app_raw);
+//         _ = app.setGlobalString(
+//             "theme_from_@@NAME@@",
+//             if (is_dark != 0) "dark" else "light",
+//         );
+//     }
+//
+// `carbon ext show window.theme_changed` prints that signature for any point.

@@ -1,0 +1,19 @@
+// The SDK is referenced by path, not fetched: it lives in this workspace and
+// a plugin built against a downloaded copy would be built against a different
+// extension-point registry than the runtime it loads into.
+.{
+    .name = "@@NAME@@",
+    .version = "0.1.0",
+    .minimum_zig_version = "0.13.0",
+    .dependencies = .{
+        .@"carbon-plugin-sdk" = .{
+            .path = "@@SDK_PATH@@",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "carbon-plugin.toml",
+    },
+}

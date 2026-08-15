@@ -1,0 +1,34 @@
+// The Carbon plugin SDK as a Zig package.
+//
+// A plugin author depends on it by path:
+//
+//   .dependencies = .{
+//       .@"carbon-plugin-sdk" = .{ .path = "<workspace>/products/carbon-ext/composition" },
+//   },
+//
+// `carbon plugin new` writes that path for you, computed relative to wherever
+// the plugin was scaffolded.
+//
+// `paths` reaches outside this directory three times, and each is deliberate:
+//   ../presentation                    the C ABI header and the templates
+//   ../../../solutions/capabilities/plugin-sdk/zig/src
+//                                      the implementation this composes
+//   ../../../solutions/contracts/plugin/registry
+//                                      the extension-point source of truth
+//
+// Copying any of them in would create a second version of a contract, which is
+// the failure the registry exists to prevent.
+.{
+    .name = "carbon-plugin-sdk",
+    .version = "0.2.0",
+    // Zig 0.13 is what .config/toolchains/zig pins. The SDK uses
+    // `std.fmt.comptimePrint` and `b.addModule`, both stable since 0.12.
+    .minimum_zig_version = "0.13.0",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "../presentation",
+        "../../../solutions/capabilities/plugin-sdk/zig/src",
+        "../../../solutions/contracts/plugin/registry",
+    },
+}

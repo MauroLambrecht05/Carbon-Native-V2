@@ -1,0 +1,26 @@
+# @@NAME@@ — what this plugin tells the toolchain about itself.
+#
+# `carbon plugin install` and `carbon plugin list` read this. The RUNTIME
+# reads the manifest returned by `carbon_plugin_manifest()` in src/main.zig
+# instead, because by then this file is not shipped — so the two must agree,
+# and `carbon plugin check` is what verifies they do.
+name = "@@NAME@@"
+version = "0.1.0"
+language = "zig"
+
+[abi]
+major = 1
+minor = 1
+
+# Extension points this plugin implements. Every id must exist in
+# solutions/contracts/plugin/registry/extension-points.zig — run
+# `carbon ext list` to see them, or `carbon plugin check` to verify these.
+extension-points = ["lifecycle.register"]
+
+[capabilities]
+# Points that gate on a capability contribute it automatically; anything here
+# is for what the plugin does BESIDES its extension points.
+required = []
+optional = []
+
+modules = ["carbon:@@NAME@@"]

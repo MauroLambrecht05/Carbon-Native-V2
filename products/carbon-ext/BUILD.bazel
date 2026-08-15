@@ -1,0 +1,42 @@
+# Carbon Native V2 - carbon-ext
+#
+# The plugin SDK, as a Bazel package.
+#
+# Unlike the other two products this builds no binary: it is a LIBRARY
+# deliverable — a C header, scaffold templates and a Zig package definition.
+# There is nothing to run, so there is no bun_binary and no bun_test here; the
+# commands that once lived in this product are `carbon ext *` in carbon-cli.
+#
+# The Zig build is not driven by Bazel. `zig build` inside composition/ is what
+# a plugin author runs, and there is no Zig toolchain registered in
+# MODULE.bazel — see .config/toolchains/zig. Wiring one up is separate work
+# from making the SDK a product.
+
+package(default_visibility = ["//visibility:public"])
+
+# The surface an author compiles against and scaffolds from. Depended on by
+# //solutions/capabilities/plugins, which reads the templates, and by any
+# plugin build.
+filegroup(
+    name = "surface",
+    srcs = glob([
+        "presentation/include/*.h",
+        "presentation/templates/**",
+    ]),
+)
+
+# The package definition that joins the surface to the implementation in
+# solutions/capabilities/plugin-sdk and the registry in
+# solutions/contracts/plugin.
+filegroup(
+    name = "package",
+    srcs = glob(["composition/*.zig", "composition/*.zon"]),
+)
+
+filegroup(
+    name = "srcs",
+    srcs = [
+        ":package",
+        ":surface",
+    ],
+)
