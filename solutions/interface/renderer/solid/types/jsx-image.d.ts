@@ -44,7 +44,7 @@ export interface ImageIntrinsicProps {
    */
   fit?: "contain" | "cover" | "fill" | "none";
   /** Called once when the image has decoded successfully. */
-  onLoad?: (img: import("./image-intrinsic").CarbonImageObj) => void;
+  onLoad?: (img: import("../intrinsics/image.ts").CarbonImageObj) => void;
   /** Called if the image fails to load or decode. */
   onError?: (err: Error) => void;
   /** Optional style overrides (applied to the container view). */

@@ -7,8 +7,8 @@
   "types": "./index.ts",
   "exports": {
     ".": "./index.ts",
-    "./jsx-runtime": "./jsx-runtime.ts",
-    "./jsx-dev-runtime": "./jsx-runtime.ts",
+    "./jsx-runtime": "./runtime/jsx-runtime.ts",
+    "./jsx-dev-runtime": "./runtime/jsx-runtime.ts",
     "./types": "./types/index.d.ts"
   },
   "peerDependencies": {

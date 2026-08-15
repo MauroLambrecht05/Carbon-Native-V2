@@ -7,8 +7,8 @@
   "types": "./index.ts",
   "exports": {
     ".": "./index.ts",
-    "./polyfills": "./polyfills.ts",
-    "./image": "./image-intrinsic.ts",
+    "./polyfills": "./runtime/polyfills.ts",
+    "./image": "./intrinsics/image.ts",
     "./types": "./types/jsx.d.ts",
     "./types/jsx-image": "./types/jsx-image.d.ts"
   },

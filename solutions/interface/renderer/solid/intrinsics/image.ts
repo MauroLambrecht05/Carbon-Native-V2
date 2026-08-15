@@ -1,6 +1,7 @@
-// image-intrinsic.ts — Solid intrinsic factory for <image> elements.
+// The <image> intrinsic — a Solid intrinsic factory for <image> elements.
 //
-// This file is a sibling of index.ts and must NOT be imported from it.
+// Opt-in: index.ts must NOT import this, because registering the intrinsic
+// pulls in a decode path most apps never use.
 // Apps opt-in by calling `registerImageIntrinsic()` once at startup.
 //
 // Usage:
@@ -29,7 +30,7 @@
 //   See IMAGE_IMPL.md for the interface contract.
 
 import { createEffect, createSignal } from "solid-js";
-import { createElement, setProp, insertNode } from "./index.js";
+import { createElement, setProp, insertNode } from "../reconciler/renderer.ts";
 
 // ─── Host bindings ────────────────────────────────────────────────────────
 // These are registered by register_image() in carbon/runtime/mini.rs
