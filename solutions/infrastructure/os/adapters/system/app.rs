@@ -24,12 +24,24 @@ pub fn set_metadata(name: &str, version: &str) {
 pub fn register(js_ctx: &JsContext) -> Result<()> {
     js_ctx.with(|ctx| -> Result<()> {
         let g = ctx.globals();
-        g.set("__cm_app_name", Function::new(ctx.clone(), || -> String {
-            name_slot().lock().unwrap_or_else(|e| e.into_inner()).clone()
-        })?)?;
-        g.set("__cm_app_version", Function::new(ctx.clone(), || -> String {
-            version_slot().lock().unwrap_or_else(|e| e.into_inner()).clone()
-        })?)?;
+        g.set(
+            "__cm_app_name",
+            Function::new(ctx.clone(), || -> String {
+                name_slot()
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone()
+            })?,
+        )?;
+        g.set(
+            "__cm_app_version",
+            Function::new(ctx.clone(), || -> String {
+                version_slot()
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone()
+            })?,
+        )?;
         Ok(())
     })?;
     Ok(())

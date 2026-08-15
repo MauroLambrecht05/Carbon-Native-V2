@@ -12,24 +12,41 @@ use rquickjs::{Context as JsContext, Function};
 use std::sync::OnceLock;
 
 fn platform_str() -> &'static str {
-    if cfg!(target_os = "windows") { "windows" }
-    else if cfg!(target_os = "macos") { "macos" }
-    else if cfg!(target_os = "linux") { "linux" }
-    else if cfg!(target_os = "freebsd") { "freebsd" }
-    else if cfg!(target_os = "openbsd") { "openbsd" }
-    else if cfg!(target_os = "netbsd") { "netbsd" }
-    else if cfg!(target_os = "dragonfly") { "dragonfly" }
-    else if cfg!(target_os = "android") { "android" }
-    else if cfg!(target_os = "ios") { "ios" }
-    else { "unknown" }
+    if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(target_os = "linux") {
+        "linux"
+    } else if cfg!(target_os = "freebsd") {
+        "freebsd"
+    } else if cfg!(target_os = "openbsd") {
+        "openbsd"
+    } else if cfg!(target_os = "netbsd") {
+        "netbsd"
+    } else if cfg!(target_os = "dragonfly") {
+        "dragonfly"
+    } else if cfg!(target_os = "android") {
+        "android"
+    } else if cfg!(target_os = "ios") {
+        "ios"
+    } else {
+        "unknown"
+    }
 }
 
 fn arch_str() -> &'static str {
-    if cfg!(target_arch = "x86_64") { "x86_64" }
-    else if cfg!(target_arch = "aarch64") { "aarch64" }
-    else if cfg!(target_arch = "x86") { "x86" }
-    else if cfg!(target_arch = "arm") { "arm" }
-    else { "unknown" }
+    if cfg!(target_arch = "x86_64") {
+        "x86_64"
+    } else if cfg!(target_arch = "aarch64") {
+        "aarch64"
+    } else if cfg!(target_arch = "x86") {
+        "x86"
+    } else if cfg!(target_arch = "arm") {
+        "arm"
+    } else {
+        "unknown"
+    }
 }
 
 fn hostname_cached() -> String {
@@ -77,13 +94,10 @@ pub fn register(js_ctx: &JsContext) -> Result<()> {
             "__cm_os_arch",
             Function::new(ctx.clone(), || arch_str().to_string())?,
         )?;
-        g.set(
-            "__cm_os_version",
-            Function::new(ctx.clone(), || os_version())?,
-        )?;
+        g.set("__cm_os_version", Function::new(ctx.clone(), os_version)?)?;
         g.set(
             "__cm_os_hostname",
-            Function::new(ctx.clone(), || hostname_cached())?,
+            Function::new(ctx.clone(), hostname_cached)?,
         )?;
         g.set(
             "__cm_os_temp_dir",
@@ -94,7 +108,9 @@ pub fn register(js_ctx: &JsContext) -> Result<()> {
         g.set(
             "__cm_os_home_dir",
             Function::new(ctx.clone(), || {
-                dirs::home_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default()
+                dirs::home_dir()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_default()
             })?,
         )?;
         g.set(
@@ -112,7 +128,12 @@ pub fn register(js_ctx: &JsContext) -> Result<()> {
         g.set(
             "__cm_os_eol",
             Function::new(ctx.clone(), || {
-                if cfg!(target_os = "windows") { "\r\n" } else { "\n" }.to_string()
+                if cfg!(target_os = "windows") {
+                    "\r\n"
+                } else {
+                    "\n"
+                }
+                .to_string()
             })?,
         )?;
         g.set(
@@ -128,9 +149,13 @@ pub fn register(js_ctx: &JsContext) -> Result<()> {
         g.set(
             "__cm_os_family",
             Function::new(ctx.clone(), || {
-                if cfg!(target_family = "windows") { "windows" }
-                else if cfg!(target_family = "unix") { "unix" }
-                else { "unknown" }
+                if cfg!(target_family = "windows") {
+                    "windows"
+                } else if cfg!(target_family = "unix") {
+                    "unix"
+                } else {
+                    "unknown"
+                }
                 .to_string()
             })?,
         )?;
@@ -140,7 +165,7 @@ pub fn register(js_ctx: &JsContext) -> Result<()> {
         // update the slot). Falls back to "light" when unknown.
         g.set(
             "__cm_os_theme",
-            Function::new(ctx.clone(), || crate::os_theme::current())?,
+            Function::new(ctx.clone(), crate::os_theme::current)?,
         )?;
 
         Ok(())

@@ -62,7 +62,11 @@ fn proxy_slot() -> &'static Mutex<Option<EventLoopProxy<UserEvent>>> {
 }
 
 pub fn post(ev: UserEvent) {
-    if let Some(p) = proxy_slot().lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+    if let Some(p) = proxy_slot()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+    {
         let _ = p.send_event(ev);
     }
 }
@@ -130,7 +134,10 @@ fn start_fetch(id: u32, url: String, init_json: String) {
         let method_parsed = match reqwest::Method::from_bytes(method.as_bytes()) {
             Ok(m) => m,
             Err(e) => {
-                post(UserEvent::FetchError { id, message: format!("bad method: {e}") });
+                post(UserEvent::FetchError {
+                    id,
+                    message: format!("bad method: {e}"),
+                });
                 return;
             }
         };
@@ -144,7 +151,10 @@ fn start_fetch(id: u32, url: String, init_json: String) {
                 match base64::engine::general_purpose::STANDARD.decode(b64) {
                     Ok(bytes) => req = req.body(bytes),
                     Err(e) => {
-                        post(UserEvent::FetchError { id, message: format!("body base64: {e}") });
+                        post(UserEvent::FetchError {
+                            id,
+                            message: format!("body base64: {e}"),
+                        });
                         return;
                     }
                 }
@@ -157,8 +167,14 @@ fn start_fetch(id: u32, url: String, init_json: String) {
         let resp = match req.send().await {
             Ok(r) => r,
             Err(e) => {
-                post(UserEvent::FetchError { id, message: e.to_string() });
-                fetch_registry().lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+                post(UserEvent::FetchError {
+                    id,
+                    message: e.to_string(),
+                });
+                fetch_registry()
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(&id);
                 return;
             }
         };
@@ -170,30 +186,53 @@ fn start_fetch(id: u32, url: String, init_json: String) {
             }
         }
         let headers_json = serde_json::to_string(&headers_pairs).unwrap_or("[]".to_string());
-        post(UserEvent::FetchHeaders { id, status, headers_json });
+        post(UserEvent::FetchHeaders {
+            id,
+            status,
+            headers_json,
+        });
 
         // Stream body chunks
         let mut stream = resp.bytes_stream();
         while let Some(item) = stream.next().await {
             match item {
                 Ok(chunk) => {
-                    post(UserEvent::FetchChunk { id, data: chunk.to_vec() });
+                    post(UserEvent::FetchChunk {
+                        id,
+                        data: chunk.to_vec(),
+                    });
                 }
                 Err(e) => {
-                    post(UserEvent::FetchError { id, message: e.to_string() });
-                    fetch_registry().lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+                    post(UserEvent::FetchError {
+                        id,
+                        message: e.to_string(),
+                    });
+                    fetch_registry()
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .remove(&id);
                     return;
                 }
             }
         }
         post(UserEvent::FetchEnd { id });
-        fetch_registry().lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+        fetch_registry()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&id);
     });
-    fetch_registry().lock().unwrap_or_else(|e| e.into_inner()).insert(id, task.abort_handle());
+    fetch_registry()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(id, task.abort_handle());
 }
 
 fn abort_fetch(id: u32) {
-    if let Some(h) = fetch_registry().lock().unwrap_or_else(|e| e.into_inner()).remove(&id) {
+    if let Some(h) = fetch_registry()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&id)
+    {
         h.abort();
     }
 }
@@ -256,7 +295,7 @@ fn start_ws(id: u32, url: String) {
                 cmd = rx.recv() => {
                     match cmd {
                         Some(WsCommand::SendText(s)) => {
-                            if sink.send(WsMsg::Text(s.into())).await.is_err() { break; }
+                            if sink.send(WsMsg::Text(s)).await.is_err() { break; }
                         }
                         Some(WsCommand::SendBinary(b)) => {
                             if sink.send(WsMsg::Binary(b)).await.is_err() { break; }
@@ -279,13 +318,28 @@ fn start_ws(id: u32, url: String) {
         }
         ws_registry().lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
     });
-    ws_registry().lock().unwrap_or_else(|e| e.into_inner()).insert(id, WsHandle { tx, abort: task.abort_handle() });
+    ws_registry()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(
+            id,
+            WsHandle {
+                tx,
+                abort: task.abort_handle(),
+            },
+        );
 }
 
 fn ws_send_text(id: u32, text: String) -> bool {
-    if let Some(h) = ws_registry().lock().unwrap_or_else(|e| e.into_inner()).get(&id) {
+    if let Some(h) = ws_registry()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&id)
+    {
         h.tx.send(WsCommand::SendText(text)).is_ok()
-    } else { false }
+    } else {
+        false
+    }
 }
 
 fn ws_send_binary_b64(id: u32, b64: String) -> bool {
@@ -294,13 +348,23 @@ fn ws_send_binary_b64(id: u32, b64: String) -> bool {
         Ok(b) => b,
         Err(_) => return false,
     };
-    if let Some(h) = ws_registry().lock().unwrap_or_else(|e| e.into_inner()).get(&id) {
+    if let Some(h) = ws_registry()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&id)
+    {
         h.tx.send(WsCommand::SendBinary(bytes)).is_ok()
-    } else { false }
+    } else {
+        false
+    }
 }
 
 fn ws_close(id: u32, code: u16, reason: String) {
-    if let Some(h) = ws_registry().lock().unwrap_or_else(|e| e.into_inner()).get(&id) {
+    if let Some(h) = ws_registry()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&id)
+    {
         let _ = h.tx.send(WsCommand::Close { code, reason });
     }
 }
@@ -322,13 +386,24 @@ fn ws_close(id: u32, code: u16, reason: String) {
 // blocked unconditionally either way — see `ip_kind`.
 
 const HEADER_BLOCKLIST: &[&str] = &[
-    "host", "content-length", "connection", "proxy-authorization",
-    "proxy-connection", "te", "transfer-encoding", "upgrade", "trailer", "expect",
+    "host",
+    "content-length",
+    "connection",
+    "proxy-authorization",
+    "proxy-connection",
+    "te",
+    "transfer-encoding",
+    "upgrade",
+    "trailer",
+    "expect",
 ];
 
 fn is_blocked_host_name(host: &str) -> bool {
     let host = host.to_ascii_lowercase();
-    matches!(host.as_str(), "metadata.google.internal" | "metadata" | "metadata.azure.com")
+    matches!(
+        host.as_str(),
+        "metadata.google.internal" | "metadata" | "metadata.azure.com"
+    )
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -384,7 +459,9 @@ async fn classify_host(host: &str) -> Result<IpKind, String> {
     }
     let host = host.to_string();
     let lookup = tokio::task::spawn_blocking(move || {
-        (host.as_str(), 0u16).to_socket_addrs().map(|it| it.map(|a| a.ip()).collect::<Vec<_>>())
+        (host.as_str(), 0u16)
+            .to_socket_addrs()
+            .map(|it| it.map(|a| a.ip()).collect::<Vec<_>>())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -415,7 +492,9 @@ fn validate_url(url: &str) -> Result<reqwest::Url, String> {
     if !parsed.username().is_empty() || parsed.password().is_some() {
         return Err("userinfo in url is not allowed".into());
     }
-    let host = parsed.host_str().ok_or_else(|| "missing host".to_string())?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "missing host".to_string())?;
     if is_blocked_host_name(host) {
         return Err(format!("host not allowed: {host}"));
     }
@@ -423,12 +502,14 @@ fn validate_url(url: &str) -> Result<reqwest::Url, String> {
 }
 
 async fn enforce_host_policy(parsed: &reqwest::Url, allow_private: bool) -> Result<(), String> {
-    let host = parsed.host_str().ok_or_else(|| "missing host".to_string())?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "missing host".to_string())?;
     match classify_host(host).await? {
         IpKind::BlockedMetadata => Err(format!("host not allowed: {host}")),
-        IpKind::Loopback | IpKind::Private if !allow_private => {
-            Err(format!("host {host} resolves to a private/loopback address; not allowed"))
-        }
+        IpKind::Loopback | IpKind::Private if !allow_private => Err(format!(
+            "host {host} resolves to a private/loopback address; not allowed"
+        )),
         _ => Ok(()),
     }
 }
@@ -468,7 +549,9 @@ fn build_safe_client(allow_private: bool) -> Result<reqwest::Client, String> {
             if !next.username().is_empty() || next.password().is_some() {
                 return attempt.stop();
             }
-            let Some(host) = next.host_str() else { return attempt.stop() };
+            let Some(host) = next.host_str() else {
+                return attempt.stop();
+            };
             if is_blocked_host_name(host) {
                 return attempt.stop();
             }
@@ -510,7 +593,9 @@ fn headers_from_args(args: &Value) -> Vec<(String, String)> {
 
 fn body_from_args(args: &Value) -> Option<Vec<u8>> {
     args.get("body").and_then(|v| v.as_array()).map(|arr| {
-        arr.iter().filter_map(|n| n.as_u64().map(|b| b as u8)).collect()
+        arr.iter()
+            .filter_map(|n| n.as_u64().map(|b| b as u8))
+            .collect()
     })
 }
 
@@ -534,7 +619,10 @@ pub(crate) fn lm_ping(args: &Value) -> Result<Value, String> {
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|e| e.to_string())?;
-        client.get(parsed).send().await
+        client
+            .get(parsed)
+            .send()
+            .await
             .map(|r| Value::Number(r.status().as_u16().into()))
             .map_err(|e| e.to_string())
     })
@@ -548,18 +636,26 @@ pub(crate) fn lm_ping(args: &Value) -> Result<Value, String> {
 /// The invoke() call itself just reports whether the request *started*;
 /// resolves immediately, matching `proxyFetch.ts`'s expectations.
 pub(crate) fn ai_http_stream_invoke(args: &Value) -> Result<Value, String> {
-    let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let url = args
+        .get("url")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     if url.is_empty() {
         return Err("ai_http_stream: missing url".into());
     }
-    let method = args.get("method").and_then(|v| v.as_str()).unwrap_or("GET").to_string();
+    let method = args
+        .get("method")
+        .and_then(|v| v.as_str())
+        .unwrap_or("GET")
+        .to_string();
     let headers = headers_from_args(args);
     let body = body_from_args(args);
-    let channel_id = args
-        .get("onEvent")
-        .and_then(|v| v.get("id"))
-        .and_then(|v| v.as_u64())
-        .ok_or_else(|| "ai_http_stream: missing onEvent.id".to_string())? as u32;
+    let channel_id =
+        args.get("onEvent")
+            .and_then(|v| v.get("id"))
+            .and_then(|v| v.as_u64())
+            .ok_or_else(|| "ai_http_stream: missing onEvent.id".to_string())? as u32;
 
     let parsed = match validate_url(&url) {
         Ok(p) => p,
@@ -591,7 +687,10 @@ pub(crate) fn ai_http_stream_invoke(args: &Value) -> Result<Value, String> {
         let method_parsed = match reqwest::Method::from_bytes(method.as_bytes()) {
             Ok(m) => m,
             Err(e) => {
-                emit_channel(channel_id, &serde_json::json!({"kind":"error","message":format!("bad method: {e}")}));
+                emit_channel(
+                    channel_id,
+                    &serde_json::json!({"kind":"error","message":format!("bad method: {e}")}),
+                );
                 return;
             }
         };
@@ -602,22 +701,34 @@ pub(crate) fn ai_http_stream_invoke(args: &Value) -> Result<Value, String> {
         let resp = match req.send().await {
             Ok(r) => r,
             Err(e) => {
-                emit_channel(channel_id, &serde_json::json!({"kind":"error","message":e.to_string()}));
+                emit_channel(
+                    channel_id,
+                    &serde_json::json!({"kind":"error","message":e.to_string()}),
+                );
                 return;
             }
         };
         let status = resp.status().as_u16();
         let headers_out = header_map_to_pairs(resp.headers());
-        emit_channel(channel_id, &serde_json::json!({"kind":"headers","status":status,"headers":headers_out}));
+        emit_channel(
+            channel_id,
+            &serde_json::json!({"kind":"headers","status":status,"headers":headers_out}),
+        );
 
         let mut stream = resp.bytes_stream();
         while let Some(item) = stream.next().await {
             match item {
                 Ok(chunk) => {
-                    emit_channel(channel_id, &serde_json::json!({"kind":"chunk","bytes":chunk.to_vec()}));
+                    emit_channel(
+                        channel_id,
+                        &serde_json::json!({"kind":"chunk","bytes":chunk.to_vec()}),
+                    );
                 }
                 Err(e) => {
-                    emit_channel(channel_id, &serde_json::json!({"kind":"error","message":e.to_string()}));
+                    emit_channel(
+                        channel_id,
+                        &serde_json::json!({"kind":"error","message":e.to_string()}),
+                    );
                     return;
                 }
             }
@@ -639,33 +750,51 @@ pub fn register(js_ctx: &JsContext) -> Result<()> {
     js_ctx.with(|ctx| -> Result<()> {
         let g = ctx.globals();
 
-        g.set("__cm_fetch_start", Function::new(ctx.clone(), |url: String, init_json: String| -> u32 {
-            let id = next_id();
-            start_fetch(id, url, init_json);
-            id
-        })?)?;
+        g.set(
+            "__cm_fetch_start",
+            Function::new(ctx.clone(), |url: String, init_json: String| -> u32 {
+                let id = next_id();
+                start_fetch(id, url, init_json);
+                id
+            })?,
+        )?;
 
-        g.set("__cm_fetch_abort", Function::new(ctx.clone(), |id: u32| -> () {
-            abort_fetch(id);
-        })?)?;
+        g.set(
+            "__cm_fetch_abort",
+            Function::new(ctx.clone(), |id: u32| {
+                abort_fetch(id);
+            })?,
+        )?;
 
-        g.set("__cm_ws_connect", Function::new(ctx.clone(), |url: String| -> u32 {
-            let id = next_id();
-            start_ws(id, url);
-            id
-        })?)?;
+        g.set(
+            "__cm_ws_connect",
+            Function::new(ctx.clone(), |url: String| -> u32 {
+                let id = next_id();
+                start_ws(id, url);
+                id
+            })?,
+        )?;
 
-        g.set("__cm_ws_send_text", Function::new(ctx.clone(), |id: u32, text: String| -> bool {
-            ws_send_text(id, text)
-        })?)?;
+        g.set(
+            "__cm_ws_send_text",
+            Function::new(ctx.clone(), |id: u32, text: String| -> bool {
+                ws_send_text(id, text)
+            })?,
+        )?;
 
-        g.set("__cm_ws_send_binary_b64", Function::new(ctx.clone(), |id: u32, b64: String| -> bool {
-            ws_send_binary_b64(id, b64)
-        })?)?;
+        g.set(
+            "__cm_ws_send_binary_b64",
+            Function::new(ctx.clone(), |id: u32, b64: String| -> bool {
+                ws_send_binary_b64(id, b64)
+            })?,
+        )?;
 
-        g.set("__cm_ws_close", Function::new(ctx.clone(), |id: u32, code: u16, reason: String| -> () {
-            ws_close(id, code, reason);
-        })?)?;
+        g.set(
+            "__cm_ws_close",
+            Function::new(ctx.clone(), |id: u32, code: u16, reason: String| {
+                ws_close(id, code, reason);
+            })?,
+        )?;
 
         Ok(())
     })?;

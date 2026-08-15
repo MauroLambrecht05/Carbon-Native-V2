@@ -44,32 +44,47 @@ pub fn register(js_ctx: &JsContext) -> Result<()> {
     js_ctx.with(|ctx| -> Result<()> {
         let g = ctx.globals();
 
-        g.set("__cm_autostart_set_name", Function::new(ctx.clone(), |name: String| -> () {
-            let mut guard = cfg().lock().unwrap_or_else(|e| e.into_inner());
-            guard.0 = name;
-        })?)?;
+        g.set(
+            "__cm_autostart_set_name",
+            Function::new(ctx.clone(), |name: String| {
+                let mut guard = cfg().lock().unwrap_or_else(|e| e.into_inner());
+                guard.0 = name;
+            })?,
+        )?;
 
         // args_json: a JSON-encoded array of strings; the args the OS
         // should pass to the binary on autostart. Useful for "open
         // minimized" or per-instance hints.
-        g.set("__cm_autostart_set_args", Function::new(ctx.clone(), |args_json: String| -> () {
-            let mut guard = cfg().lock().unwrap_or_else(|e| e.into_inner());
-            guard.1 = serde_json::from_str(&args_json).unwrap_or_default();
-        })?)?;
+        g.set(
+            "__cm_autostart_set_args",
+            Function::new(ctx.clone(), |args_json: String| {
+                let mut guard = cfg().lock().unwrap_or_else(|e| e.into_inner());
+                guard.1 = serde_json::from_str(&args_json).unwrap_or_default();
+            })?,
+        )?;
 
-        g.set("__cm_autostart_enable", Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<()> {
-            let a = build().ok_or_else(|| throw(&ctx, "no current_exe"))?;
-            a.enable().map_err(|e| throw(&ctx, e))
-        })?)?;
+        g.set(
+            "__cm_autostart_enable",
+            Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<()> {
+                let a = build().ok_or_else(|| throw(&ctx, "no current_exe"))?;
+                a.enable().map_err(|e| throw(&ctx, e))
+            })?,
+        )?;
 
-        g.set("__cm_autostart_disable", Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<()> {
-            let a = build().ok_or_else(|| throw(&ctx, "no current_exe"))?;
-            a.disable().map_err(|e| throw(&ctx, e))
-        })?)?;
+        g.set(
+            "__cm_autostart_disable",
+            Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<()> {
+                let a = build().ok_or_else(|| throw(&ctx, "no current_exe"))?;
+                a.disable().map_err(|e| throw(&ctx, e))
+            })?,
+        )?;
 
-        g.set("__cm_autostart_is_enabled", Function::new(ctx.clone(), || -> bool {
-            build().and_then(|a| a.is_enabled().ok()).unwrap_or(false)
-        })?)?;
+        g.set(
+            "__cm_autostart_is_enabled",
+            Function::new(ctx.clone(), || -> bool {
+                build().and_then(|a| a.is_enabled().ok()).unwrap_or(false)
+            })?,
+        )?;
 
         Ok(())
     })?;

@@ -47,7 +47,10 @@ pub fn set_handler<F>(name: &str, handler: F)
 where
     F: Fn(&Value) -> Result<Value, String> + Send + Sync + 'static,
 {
-    registry().lock().unwrap_or_else(|e| e.into_inner()).insert(name.to_string(), Arc::new(handler));
+    registry()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(name.to_string(), Arc::new(handler));
 }
 
 /// Throw a real JS Error with `e`'s message, instead of misusing
@@ -70,29 +73,32 @@ pub fn register(js_ctx: &JsContext) -> Result<()> {
         // thrown as native JS Error objects.
         g.set(
             "__cm_invoke",
-            Function::new(ctx.clone(), |ctx: Ctx<'_>, name: String, args_json: String| -> rquickjs::Result<String> {
-                let args: Value = if args_json.is_empty() {
-                    Value::Null
-                } else {
-                    serde_json::from_str(&args_json).map_err(|e| throw(&ctx, e))?
-                };
-                // Clone the Arc out under the lock, then release the lock
-                // before calling — the handler stays alive via the Arc no
-                // matter what happens to the map, and long-running handlers
-                // don't hold the registry lock while they run.
-                let handler = {
-                    let reg = registry().lock().unwrap_or_else(|e| e.into_inner());
-                    reg.get(&name).cloned()
-                };
-                let Some(handler) = handler else {
-                    return Err(throw(&ctx, format!("invoke: unknown command '{name}'")));
-                };
-                let result = handler(&args);
-                match result {
-                    Ok(v) => Ok(v.to_string()),
-                    Err(msg) => Err(throw(&ctx, msg)),
-                }
-            })?,
+            Function::new(
+                ctx.clone(),
+                |ctx: Ctx<'_>, name: String, args_json: String| -> rquickjs::Result<String> {
+                    let args: Value = if args_json.is_empty() {
+                        Value::Null
+                    } else {
+                        serde_json::from_str(&args_json).map_err(|e| throw(&ctx, e))?
+                    };
+                    // Clone the Arc out under the lock, then release the lock
+                    // before calling — the handler stays alive via the Arc no
+                    // matter what happens to the map, and long-running handlers
+                    // don't hold the registry lock while they run.
+                    let handler = {
+                        let reg = registry().lock().unwrap_or_else(|e| e.into_inner());
+                        reg.get(&name).cloned()
+                    };
+                    let Some(handler) = handler else {
+                        return Err(throw(&ctx, format!("invoke: unknown command '{name}'")));
+                    };
+                    let result = handler(&args);
+                    match result {
+                        Ok(v) => Ok(v.to_string()),
+                        Err(msg) => Err(throw(&ctx, msg)),
+                    }
+                },
+            )?,
         )?;
 
         // __cm_invoke_register(name) — does NOT define a handler
@@ -101,7 +107,10 @@ pub fn register(js_ctx: &JsContext) -> Result<()> {
         g.set(
             "__cm_invoke_has",
             Function::new(ctx.clone(), |name: String| -> bool {
-                registry().lock().unwrap_or_else(|e| e.into_inner()).contains_key(&name)
+                registry()
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .contains_key(&name)
             })?,
         )?;
 
@@ -138,15 +147,15 @@ fn register_builtins() {
         post(UserEvent::WindowOp(op));
         Ok(Value::Null)
     }
-    set_handler("window:show",       |_| op(WindowOp::Show));
-    set_handler("window:hide",       |_| op(WindowOp::Hide));
-    set_handler("window:minimize",   |_| op(WindowOp::Minimize));
-    set_handler("window:maximize",   |_| op(WindowOp::Maximize));
+    set_handler("window:show", |_| op(WindowOp::Show));
+    set_handler("window:hide", |_| op(WindowOp::Hide));
+    set_handler("window:minimize", |_| op(WindowOp::Minimize));
+    set_handler("window:maximize", |_| op(WindowOp::Maximize));
     set_handler("window:unmaximize", |_| op(WindowOp::Unmaximize));
     set_handler("window:toggle_maximize", |_| op(WindowOp::ToggleMaximize));
-    set_handler("window:restore",    |_| op(WindowOp::Restore));
-    set_handler("window:close",      |_| op(WindowOp::Close));
-    set_handler("window:focus",      |_| op(WindowOp::Focus));
+    set_handler("window:restore", |_| op(WindowOp::Restore));
+    set_handler("window:close", |_| op(WindowOp::Close));
+    set_handler("window:focus", |_| op(WindowOp::Focus));
 
     set_handler("window:set_title", |args| {
         let title = args
@@ -177,16 +186,23 @@ fn register_builtins() {
         if path.is_empty() {
             return Err("fs_read_dir: missing path".into());
         }
-        let show_hidden = args.get("showHidden").and_then(|v| v.as_bool()).unwrap_or(false);
+        let show_hidden = args
+            .get("showHidden")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let it = fs::read_dir(path).map_err(|e| e.to_string())?;
         let mut out: Vec<Value> = Vec::new();
         for entry in it.flatten() {
-            let Some(name) = entry.file_name().to_str().map(|s| s.to_string()) else { continue; };
+            let Some(name) = entry.file_name().to_str().map(|s| s.to_string()) else {
+                continue;
+            };
             // Skip dotfiles unless showHidden is set. Windows hidden-attribute
             // detection (the more correct behavior on this OS) would need
             // FILE_ATTRIBUTE_HIDDEN — for parity with the Tauri impl, dot-prefix
             // is good enough for the file tree's first cut.
-            if !show_hidden && name.starts_with('.') { continue; }
+            if !show_hidden && name.starts_with('.') {
+                continue;
+            }
             let meta = match entry.metadata() {
                 Ok(m) => m,
                 Err(_) => continue,
@@ -199,7 +215,9 @@ fn register_builtins() {
                 "file"
             };
             let size = if meta.is_file() { meta.len() } else { 0 };
-            let mtime = meta.modified().ok()
+            let mtime = meta
+                .modified()
+                .ok()
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| d.as_millis() as u64)
                 .unwrap_or(0);
@@ -239,7 +257,9 @@ fn register_builtins() {
         const MAX_READ_BYTES: u64 = 10 * 1024 * 1024;
         const BINARY_SNIFF_BYTES: usize = 8 * 1024;
         let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
-        if path.is_empty() { return Err("fs_read_file: missing path".into()); }
+        if path.is_empty() {
+            return Err("fs_read_file: missing path".into());
+        }
 
         let meta = fs::metadata(path).map_err(|e| e.to_string())?;
         let size = meta.len();
@@ -275,9 +295,13 @@ fn register_builtins() {
     set_handler("fs_create_file", |args| {
         use std::fs;
         let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
-        if path.is_empty() { return Err("fs_create_file: missing path".into()); }
+        if path.is_empty() {
+            return Err("fs_create_file: missing path".into());
+        }
         if let Some(parent) = std::path::Path::new(path).parent() {
-            if !parent.as_os_str().is_empty() { let _ = fs::create_dir_all(parent); }
+            if !parent.as_os_str().is_empty() {
+                let _ = fs::create_dir_all(parent);
+            }
         }
         fs::write(path, "").map_err(|e| e.to_string())?;
         Ok(Value::Null)
@@ -294,9 +318,13 @@ fn register_builtins() {
             .or_else(|| args.get("contents"))
             .and_then(|v| v.as_str())
             .unwrap_or("");
-        if path.is_empty() { return Err("fs_write_file: missing path".into()); }
+        if path.is_empty() {
+            return Err("fs_write_file: missing path".into());
+        }
         if let Some(parent) = std::path::Path::new(path).parent() {
-            if !parent.as_os_str().is_empty() { let _ = fs::create_dir_all(parent); }
+            if !parent.as_os_str().is_empty() {
+                let _ = fs::create_dir_all(parent);
+            }
         }
         fs::write(path, contents).map_err(|e| e.to_string())?;
         Ok(Value::Null)
@@ -305,14 +333,18 @@ fn register_builtins() {
     set_handler("fs_rename", |args| {
         let from = args.get("from").and_then(|v| v.as_str()).unwrap_or("");
         let to = args.get("to").and_then(|v| v.as_str()).unwrap_or("");
-        if from.is_empty() || to.is_empty() { return Err("fs_rename: missing from/to".into()); }
+        if from.is_empty() || to.is_empty() {
+            return Err("fs_rename: missing from/to".into());
+        }
         std::fs::rename(from, to).map_err(|e| e.to_string())?;
         Ok(Value::Null)
     });
 
     set_handler("fs_delete", |args| {
         let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
-        if path.is_empty() { return Err("fs_delete: missing path".into()); }
+        if path.is_empty() {
+            return Err("fs_delete: missing path".into());
+        }
         let p = std::path::Path::new(path);
         if p.is_dir() {
             std::fs::remove_dir_all(p).map_err(|e| e.to_string())?;
@@ -400,7 +432,10 @@ fn register_builtins() {
     set_handler("shell_run_command", crate::shell_exec::shell_run_command);
     set_handler("shell_session_open", crate::shell_exec::shell_session_open);
     set_handler("shell_session_run", crate::shell_exec::shell_session_run);
-    set_handler("shell_session_close", crate::shell_exec::shell_session_close);
+    set_handler(
+        "shell_session_close",
+        crate::shell_exec::shell_session_close,
+    );
     set_handler("shell_bg_spawn", crate::shell_exec::shell_bg_spawn);
     set_handler("shell_bg_logs", crate::shell_exec::shell_bg_logs);
     set_handler("shell_bg_kill", crate::shell_exec::shell_bg_kill);

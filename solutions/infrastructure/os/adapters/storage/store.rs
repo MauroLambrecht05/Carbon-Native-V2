@@ -56,8 +56,10 @@ fn resolve_path(file: &str) -> Option<PathBuf> {
     let _ = std::fs::create_dir_all(&base);
     // Strip any leading separators the caller might have included so
     // we always anchor under the app config dir.
-    let trimmed = file.trim_start_matches(|c: char| c == '/' || c == '\\');
-    if trimmed.is_empty() { return None; }
+    let trimmed = file.trim_start_matches(['/', '\\']);
+    if trimmed.is_empty() {
+        return None;
+    }
     Some(base.join(trimmed))
 }
 
@@ -116,34 +118,46 @@ pub fn register(js_ctx: &JsContext) -> Result<()> {
 
         g.set(
             "__cm_store_set",
-            Function::new(ctx.clone(), |ctx: Ctx<'_>, file: String, key: String, value_json: String| -> rquickjs::Result<()> {
-                ensure_loaded(&file);
-                let v: Value = serde_json::from_str(&value_json).map_err(|e| throw(&ctx, e))?;
-                let mut reg = registry().lock().unwrap_or_else(|e| e.into_inner());
-                if let Some(state) = reg.get_mut(&file) {
-                    state.cache.insert(key, v);
-                    if let Err(e) = persist(state) {
-                        return Err(throw(&ctx, e));
+            Function::new(
+                ctx.clone(),
+                |ctx: Ctx<'_>,
+                 file: String,
+                 key: String,
+                 value_json: String|
+                 -> rquickjs::Result<()> {
+                    ensure_loaded(&file);
+                    let v: Value = serde_json::from_str(&value_json).map_err(|e| throw(&ctx, e))?;
+                    let mut reg = registry().lock().unwrap_or_else(|e| e.into_inner());
+                    if let Some(state) = reg.get_mut(&file) {
+                        state.cache.insert(key, v);
+                        if let Err(e) = persist(state) {
+                            return Err(throw(&ctx, e));
+                        }
                     }
-                }
-                Ok(())
-            })?,
+                    Ok(())
+                },
+            )?,
         )?;
 
         g.set(
             "__cm_store_delete",
-            Function::new(ctx.clone(), |ctx: Ctx<'_>, file: String, key: String| -> rquickjs::Result<bool> {
-                ensure_loaded(&file);
-                let mut reg = registry().lock().unwrap_or_else(|e| e.into_inner());
-                let Some(state) = reg.get_mut(&file) else { return Ok(false); };
-                let existed = state.cache.remove(&key).is_some();
-                if existed {
-                    if let Err(e) = persist(state) {
-                        return Err(throw(&ctx, e));
+            Function::new(
+                ctx.clone(),
+                |ctx: Ctx<'_>, file: String, key: String| -> rquickjs::Result<bool> {
+                    ensure_loaded(&file);
+                    let mut reg = registry().lock().unwrap_or_else(|e| e.into_inner());
+                    let Some(state) = reg.get_mut(&file) else {
+                        return Ok(false);
+                    };
+                    let existed = state.cache.remove(&key).is_some();
+                    if existed {
+                        if let Err(e) = persist(state) {
+                            return Err(throw(&ctx, e));
+                        }
                     }
-                }
-                Ok(existed)
-            })?,
+                    Ok(existed)
+                },
+            )?,
         )?;
 
         g.set(
@@ -151,7 +165,9 @@ pub fn register(js_ctx: &JsContext) -> Result<()> {
             Function::new(ctx.clone(), |file: String, key: String| -> bool {
                 ensure_loaded(&file);
                 let reg = registry().lock().unwrap_or_else(|e| e.into_inner());
-                reg.get(&file).map(|s| s.cache.contains_key(&key)).unwrap_or(false)
+                reg.get(&file)
+                    .map(|s| s.cache.contains_key(&key))
+                    .unwrap_or(false)
             })?,
         )?;
 
@@ -182,17 +198,20 @@ pub fn register(js_ctx: &JsContext) -> Result<()> {
 
         g.set(
             "__cm_store_clear",
-            Function::new(ctx.clone(), |ctx: Ctx<'_>, file: String| -> rquickjs::Result<()> {
-                ensure_loaded(&file);
-                let mut reg = registry().lock().unwrap_or_else(|e| e.into_inner());
-                if let Some(state) = reg.get_mut(&file) {
-                    state.cache.clear();
-                    if let Err(e) = persist(state) {
-                        return Err(throw(&ctx, e));
+            Function::new(
+                ctx.clone(),
+                |ctx: Ctx<'_>, file: String| -> rquickjs::Result<()> {
+                    ensure_loaded(&file);
+                    let mut reg = registry().lock().unwrap_or_else(|e| e.into_inner());
+                    if let Some(state) = reg.get_mut(&file) {
+                        state.cache.clear();
+                        if let Err(e) = persist(state) {
+                            return Err(throw(&ctx, e));
+                        }
                     }
-                }
-                Ok(())
-            })?,
+                    Ok(())
+                },
+            )?,
         )?;
 
         // save(file) — explicit flush. Currently a no-op since every
@@ -200,16 +219,19 @@ pub fn register(js_ctx: &JsContext) -> Result<()> {
         // can call this to force a flush before exit.
         g.set(
             "__cm_store_save",
-            Function::new(ctx.clone(), |ctx: Ctx<'_>, file: String| -> rquickjs::Result<()> {
-                ensure_loaded(&file);
-                let reg = registry().lock().unwrap_or_else(|e| e.into_inner());
-                if let Some(state) = reg.get(&file) {
-                    if let Err(e) = persist(state) {
-                        return Err(throw(&ctx, e));
+            Function::new(
+                ctx.clone(),
+                |ctx: Ctx<'_>, file: String| -> rquickjs::Result<()> {
+                    ensure_loaded(&file);
+                    let reg = registry().lock().unwrap_or_else(|e| e.into_inner());
+                    if let Some(state) = reg.get(&file) {
+                        if let Err(e) = persist(state) {
+                            return Err(throw(&ctx, e));
+                        }
                     }
-                }
-                Ok(())
-            })?,
+                    Ok(())
+                },
+            )?,
         )?;
 
         // reload(file) — drop the cache and re-read from disk. Useful

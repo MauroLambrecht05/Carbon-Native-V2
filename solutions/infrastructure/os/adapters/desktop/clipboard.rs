@@ -27,31 +27,43 @@ pub fn register(js_ctx: &JsContext) -> Result<()> {
     js_ctx.with(|ctx| -> Result<()> {
         let g = ctx.globals();
 
-        g.set("__cm_clipboard_read_text", Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<String> {
-            let mut guard = clipboard().lock().unwrap_or_else(|e| e.into_inner());
-            match guard.as_mut() {
-                Some(c) => c.get_text().map_err(|e| throw(&ctx, e)),
-                None => Ok(String::new()),
-            }
-        })?)?;
+        g.set(
+            "__cm_clipboard_read_text",
+            Function::new(ctx.clone(), |ctx: Ctx<'_>| -> rquickjs::Result<String> {
+                let mut guard = clipboard().lock().unwrap_or_else(|e| e.into_inner());
+                match guard.as_mut() {
+                    Some(c) => c.get_text().map_err(|e| throw(&ctx, e)),
+                    None => Ok(String::new()),
+                }
+            })?,
+        )?;
 
-        g.set("__cm_clipboard_write_text", Function::new(ctx.clone(), |ctx: Ctx<'_>, text: String| -> rquickjs::Result<()> {
-            let mut guard = clipboard().lock().unwrap_or_else(|e| e.into_inner());
-            match guard.as_mut() {
-                Some(c) => c.set_text(text).map_err(|e| throw(&ctx, e)),
-                None => Ok(()),
-            }
-        })?)?;
+        g.set(
+            "__cm_clipboard_write_text",
+            Function::new(
+                ctx.clone(),
+                |ctx: Ctx<'_>, text: String| -> rquickjs::Result<()> {
+                    let mut guard = clipboard().lock().unwrap_or_else(|e| e.into_inner());
+                    match guard.as_mut() {
+                        Some(c) => c.set_text(text).map_err(|e| throw(&ctx, e)),
+                        None => Ok(()),
+                    }
+                },
+            )?,
+        )?;
 
         // Convenience: clear the clipboard. arboard doesn't expose a
         // dedicated clear() — setting empty text is the same observable
         // behavior for our needs.
-        g.set("__cm_clipboard_clear", Function::new(ctx.clone(), || -> () {
-            let mut guard = clipboard().lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(c) = guard.as_mut() {
-                let _ = c.set_text(String::new());
-            }
-        })?)?;
+        g.set(
+            "__cm_clipboard_clear",
+            Function::new(ctx.clone(), || {
+                let mut guard = clipboard().lock().unwrap_or_else(|e| e.into_inner());
+                if let Some(c) = guard.as_mut() {
+                    let _ = c.set_text(String::new());
+                }
+            })?,
+        )?;
 
         Ok(())
     })?;

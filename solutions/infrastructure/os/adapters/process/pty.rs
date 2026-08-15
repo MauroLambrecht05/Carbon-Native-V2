@@ -79,8 +79,12 @@ struct SpawnArgs {
     rows: u16,
 }
 
-fn default_cols() -> u16 { 80 }
-fn default_rows() -> u16 { 24 }
+fn default_cols() -> u16 {
+    80
+}
+fn default_rows() -> u16 {
+    24
+}
 
 pub fn register(js_ctx: &JsContext) -> Result<()> {
     js_ctx.with(|ctx| -> Result<()> {
@@ -91,84 +95,94 @@ pub fn register(js_ctx: &JsContext) -> Result<()> {
         //     cols?: number, rows?: number }
         g.set(
             "__cm_pty_spawn",
-            Function::new(ctx.clone(), |ctx: Ctx<'_>, cmd: String, opts_json: String| -> rquickjs::Result<u32> {
-                let opts: SpawnArgs = serde_json::from_str(&opts_json).unwrap_or_default();
-                let pty_system = native_pty_system();
-                let pair = pty_system
-                    .openpty(PtySize {
-                        rows: opts.rows.max(1),
-                        cols: opts.cols.max(1),
-                        pixel_width: 0,
-                        pixel_height: 0,
-                    })
-                    .map_err(|e| throw(&ctx, e))?;
+            Function::new(
+                ctx.clone(),
+                |ctx: Ctx<'_>, cmd: String, opts_json: String| -> rquickjs::Result<u32> {
+                    let opts: SpawnArgs = serde_json::from_str(&opts_json).unwrap_or_default();
+                    let pty_system = native_pty_system();
+                    let pair = pty_system
+                        .openpty(PtySize {
+                            rows: opts.rows.max(1),
+                            cols: opts.cols.max(1),
+                            pixel_width: 0,
+                            pixel_height: 0,
+                        })
+                        .map_err(|e| throw(&ctx, e))?;
 
-                let mut command = CommandBuilder::new(&cmd);
-                for a in &opts.args {
-                    command.arg(a);
-                }
-                if let Some(cwd) = opts.cwd.as_ref() {
-                    if !cwd.is_empty() {
-                        command.cwd(cwd);
+                    let mut command = CommandBuilder::new(&cmd);
+                    for a in &opts.args {
+                        command.arg(a);
                     }
-                }
-                if let Some(env) = opts.env.as_ref() {
-                    for (k, v) in env {
-                        command.env(k, v);
+                    if let Some(cwd) = opts.cwd.as_ref() {
+                        if !cwd.is_empty() {
+                            command.cwd(cwd);
+                        }
                     }
-                }
+                    if let Some(env) = opts.env.as_ref() {
+                        for (k, v) in env {
+                            command.env(k, v);
+                        }
+                    }
 
-                let child = pair.slave.spawn_command(command).map_err(|e| throw(&ctx, e))?;
-                // Drop the slave handle — the child holds its own copy
-                // of the slave fd. Keeping it open here would leave a
-                // descriptor that prevents the master from seeing EOF.
-                drop(pair.slave);
+                    let child = pair
+                        .slave
+                        .spawn_command(command)
+                        .map_err(|e| throw(&ctx, e))?;
+                    // Drop the slave handle — the child holds its own copy
+                    // of the slave fd. Keeping it open here would leave a
+                    // descriptor that prevents the master from seeing EOF.
+                    drop(pair.slave);
 
-                let reader = pair.master.try_clone_reader().map_err(|e| throw(&ctx, e))?;
-                let writer = pair.master.take_writer().map_err(|e| throw(&ctx, e))?;
-                let master = Arc::new(Mutex::new(pair.master));
+                    let reader = pair.master.try_clone_reader().map_err(|e| throw(&ctx, e))?;
+                    let writer = pair.master.take_writer().map_err(|e| throw(&ctx, e))?;
+                    let master = Arc::new(Mutex::new(pair.master));
 
-                let id = next_id();
-                let buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+                    let id = next_id();
+                    let buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
 
-                // Reader thread: drains master output into the buffer
-                // and posts a UserEvent so JS can flush via the
-                // dispatcher. Exits cleanly on EOF.
-                {
-                    let buf = buf.clone();
-                    thread::Builder::new()
-                        .name(format!("carbon-mini-pty-{id}"))
-                        .spawn(move || {
-                            let mut reader = reader;
-                            let mut chunk = [0u8; 8192];
-                            loop {
-                                match reader.read(&mut chunk) {
-                                    Ok(0) | Err(_) => break,
-                                    Ok(n) => {
-                                        {
-                                            let mut g = buf.lock().unwrap_or_else(|e| e.into_inner());
-                                            g.extend_from_slice(&chunk[..n]);
+                    // Reader thread: drains master output into the buffer
+                    // and posts a UserEvent so JS can flush via the
+                    // dispatcher. Exits cleanly on EOF.
+                    {
+                        let buf = buf.clone();
+                        thread::Builder::new()
+                            .name(format!("carbon-mini-pty-{id}"))
+                            .spawn(move || {
+                                let mut reader = reader;
+                                let mut chunk = [0u8; 8192];
+                                loop {
+                                    match reader.read(&mut chunk) {
+                                        Ok(0) | Err(_) => break,
+                                        Ok(n) => {
+                                            {
+                                                let mut g =
+                                                    buf.lock().unwrap_or_else(|e| e.into_inner());
+                                                g.extend_from_slice(&chunk[..n]);
+                                            }
+                                            post(UserEvent::PtyOutput { id });
                                         }
-                                        post(UserEvent::PtyOutput { id });
                                     }
                                 }
-                            }
-                            // EOF — emit a final signal so the JS side
-                            // can mark the session as closed.
-                            post(UserEvent::PtyExit { id });
-                        })
-                        .ok();
-                }
+                                // EOF — emit a final signal so the JS side
+                                // can mark the session as closed.
+                                post(UserEvent::PtyExit { id });
+                            })
+                            .ok();
+                    }
 
-                let handle = Arc::new(PtyHandle {
-                    master,
-                    writer: Mutex::new(writer),
-                    buf,
-                    child: Mutex::new(child),
-                });
-                registry().lock().unwrap_or_else(|e| e.into_inner()).insert(id, handle);
-                Ok(id)
-            })?,
+                    let handle = Arc::new(PtyHandle {
+                        master,
+                        writer: Mutex::new(writer),
+                        buf,
+                        child: Mutex::new(child),
+                    });
+                    registry()
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .insert(id, handle);
+                    Ok(id)
+                },
+            )?,
         )?;
 
         // write(id, data) → bytes_written. Data is raw UTF-8 text or
@@ -178,37 +192,43 @@ pub fn register(js_ctx: &JsContext) -> Result<()> {
         // string as bytes here.
         g.set(
             "__cm_pty_write",
-            Function::new(ctx.clone(), |ctx: Ctx<'_>, id: u32, data: String| -> rquickjs::Result<u32> {
-                let reg = registry().lock().unwrap_or_else(|e| e.into_inner());
-                if let Some(h) = reg.get(&id) {
-                    let mut w = h.writer.lock().unwrap_or_else(|e| e.into_inner());
-                    let bytes = data.as_bytes();
-                    w.write_all(bytes).map_err(|e| throw(&ctx, e))?;
-                    let _ = w.flush();
-                    return Ok(bytes.len() as u32);
-                }
-                Ok(0)
-            })?,
+            Function::new(
+                ctx.clone(),
+                |ctx: Ctx<'_>, id: u32, data: String| -> rquickjs::Result<u32> {
+                    let reg = registry().lock().unwrap_or_else(|e| e.into_inner());
+                    if let Some(h) = reg.get(&id) {
+                        let mut w = h.writer.lock().unwrap_or_else(|e| e.into_inner());
+                        let bytes = data.as_bytes();
+                        w.write_all(bytes).map_err(|e| throw(&ctx, e))?;
+                        let _ = w.flush();
+                        return Ok(bytes.len() as u32);
+                    }
+                    Ok(0)
+                },
+            )?,
         )?;
 
         // resize(id, cols, rows). Sends SIGWINCH on Unix / equivalent
         // on Windows so the child redraws at the new size.
         g.set(
             "__cm_pty_resize",
-            Function::new(ctx.clone(), |ctx: Ctx<'_>, id: u32, cols: u32, rows: u32| -> rquickjs::Result<()> {
-                let reg = registry().lock().unwrap_or_else(|e| e.into_inner());
-                if let Some(h) = reg.get(&id) {
-                    let m = h.master.lock().unwrap_or_else(|e| e.into_inner());
-                    m.resize(PtySize {
-                        rows: (rows.max(1).min(u16::MAX as u32)) as u16,
-                        cols: (cols.max(1).min(u16::MAX as u32)) as u16,
-                        pixel_width: 0,
-                        pixel_height: 0,
-                    })
-                    .map_err(|e| throw(&ctx, e))?;
-                }
-                Ok(())
-            })?,
+            Function::new(
+                ctx.clone(),
+                |ctx: Ctx<'_>, id: u32, cols: u32, rows: u32| -> rquickjs::Result<()> {
+                    let reg = registry().lock().unwrap_or_else(|e| e.into_inner());
+                    if let Some(h) = reg.get(&id) {
+                        let m = h.master.lock().unwrap_or_else(|e| e.into_inner());
+                        m.resize(PtySize {
+                            rows: (rows.max(1).min(u16::MAX as u32)) as u16,
+                            cols: (cols.max(1).min(u16::MAX as u32)) as u16,
+                            pixel_width: 0,
+                            pixel_height: 0,
+                        })
+                        .map_err(|e| throw(&ctx, e))?;
+                    }
+                    Ok(())
+                },
+            )?,
         )?;
 
         // read(id) → base64. Drains the buffered output bytes and
@@ -220,7 +240,9 @@ pub fn register(js_ctx: &JsContext) -> Result<()> {
                 let reg = registry().lock().unwrap_or_else(|e| e.into_inner());
                 if let Some(h) = reg.get(&id) {
                     let mut buf = h.buf.lock().unwrap_or_else(|e| e.into_inner());
-                    if buf.is_empty() { return String::new(); }
+                    if buf.is_empty() {
+                        return String::new();
+                    }
                     let bytes = std::mem::take(&mut *buf);
                     return base64::engine::general_purpose::STANDARD.encode(&bytes);
                 }
@@ -263,20 +285,25 @@ pub fn register(js_ctx: &JsContext) -> Result<()> {
         // status code (signaled exits on Unix).
         g.set(
             "__cm_pty_wait",
-            Function::new(ctx.clone(), |ctx: Ctx<'_>, id: u32| -> rquickjs::Result<i32> {
-                let handle = {
-                    let reg = registry().lock().unwrap_or_else(|e| e.into_inner());
-                    reg.get(&id).cloned()
-                };
-                let Some(h) = handle else { return Ok(-1); };
-                // Wait outside the registry lock so other PTY calls
-                // (e.g. resize from a render loop) don't block.
-                let status = {
-                    let mut c = h.child.lock().unwrap_or_else(|e| e.into_inner());
-                    c.wait().map_err(|e| throw(&ctx, e))?
-                };
-                Ok(status.exit_code() as i32)
-            })?,
+            Function::new(
+                ctx.clone(),
+                |ctx: Ctx<'_>, id: u32| -> rquickjs::Result<i32> {
+                    let handle = {
+                        let reg = registry().lock().unwrap_or_else(|e| e.into_inner());
+                        reg.get(&id).cloned()
+                    };
+                    let Some(h) = handle else {
+                        return Ok(-1);
+                    };
+                    // Wait outside the registry lock so other PTY calls
+                    // (e.g. resize from a render loop) don't block.
+                    let status = {
+                        let mut c = h.child.lock().unwrap_or_else(|e| e.into_inner());
+                        c.wait().map_err(|e| throw(&ctx, e))?
+                    };
+                    Ok(status.exit_code() as i32)
+                },
+            )?,
         )?;
 
         Ok(())

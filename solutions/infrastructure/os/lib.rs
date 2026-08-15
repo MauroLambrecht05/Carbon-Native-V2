@@ -20,45 +20,56 @@ use tao::event_loop::EventLoopProxy;
 
 use carbon_runtime_contract::UserEvent;
 
-#[path = "modules/os_theme.rs"]
-pub mod os_theme;
-#[path = "modules/app.rs"]
+// ── Layout ──────────────────────────────────────────────────────────────────
+// Nineteen driven adapters, grouped by what they actually touch rather than
+// left as nineteen files in one directory. The groups answer "where does a new
+// host function go" — a clipboard call is desktop, a PTY call is process — and
+// they are the SAME eight names interface/stdlib/bindings uses on the
+// JavaScript side, so a host function and its wrapper always sit in same-named
+// directories on both sides of the boundary.
+//
+// `adapters/`, not `modules/`: every file under it is a driven adapter over
+// one piece of the OS, which is what this tier is for. "modules" said only
+// that they were Rust modules, which the `mod` keyword next to it already did.
+#[path = "adapters/system/app.rs"]
 pub mod app;
-#[path = "modules/autostart.rs"]
+#[path = "adapters/system/autostart.rs"]
 pub mod autostart;
-#[path = "modules/clipboard.rs"]
+#[path = "adapters/desktop/clipboard.rs"]
 pub mod clipboard;
-#[path = "modules/dialog.rs"]
+#[path = "adapters/desktop/dialog.rs"]
 pub mod dialog;
-#[path = "modules/fs.rs"]
+#[path = "adapters/filesystem/fs.rs"]
 pub mod fs;
-#[path = "modules/fs_search.rs"]
+#[path = "adapters/filesystem/fs_search.rs"]
 pub mod fs_search;
-#[path = "modules/keychain.rs"]
-pub mod keychain;
-#[path = "modules/net.rs"]
-pub mod net;
-#[path = "modules/notification.rs"]
-pub mod notification;
-#[path = "modules/invoke.rs"]
+#[path = "adapters/bridge/invoke.rs"]
 pub mod invoke;
-#[path = "modules/log.rs"]
+#[path = "adapters/storage/keychain.rs"]
+pub mod keychain;
+#[path = "adapters/system/log.rs"]
 pub mod log;
-#[path = "modules/os.rs"]
+#[path = "adapters/net/net.rs"]
+pub mod net;
+#[path = "adapters/desktop/notification.rs"]
+pub mod notification;
+#[path = "adapters/system/os.rs"]
 pub mod os;
-#[path = "modules/process.rs"]
+#[path = "adapters/system/os_theme.rs"]
+pub mod os_theme;
+#[path = "adapters/process/process.rs"]
 pub mod process;
-#[path = "modules/pty.rs"]
+#[path = "adapters/process/pty.rs"]
 pub mod pty;
-#[path = "modules/shell.rs"]
+#[path = "adapters/process/shell.rs"]
 pub mod shell;
-#[path = "modules/shell_exec.rs"]
+#[path = "adapters/process/shell_exec.rs"]
 pub mod shell_exec;
-#[path = "modules/store.rs"]
+#[path = "adapters/storage/store.rs"]
 pub mod store;
-#[path = "modules/window.rs"]
+#[path = "adapters/window/window.rs"]
 pub mod window;
-#[path = "modules/window_state.rs"]
+#[path = "adapters/window/window_state.rs"]
 pub mod window_state;
 
 /// A startup-phase tracer, supplied by whoever is composing the runtime.
@@ -117,7 +128,7 @@ pub fn register_all(
     net::set_proxy(proxy);
     net::register(js_ctx)?;
     tlog("native.net");
-    static NET_SHIM: &str = include_str!("modules/net_shim.js");
+    static NET_SHIM: &str = include_str!("adapters/net/net_shim.js");
     js_ctx.with(|ctx| -> Result<()> {
         match ctx.eval::<(), _>(NET_SHIM.as_bytes()) {
             Ok(()) => Ok(()),
@@ -132,7 +143,9 @@ pub fn register_all(
                     let s = if cstr.is_null() {
                         format!("{e}")
                     } else {
-                        let m = std::ffi::CStr::from_ptr(cstr).to_string_lossy().into_owned();
+                        let m = std::ffi::CStr::from_ptr(cstr)
+                            .to_string_lossy()
+                            .into_owned();
                         qjs::JS_FreeCString(raw, cstr);
                         m
                     };

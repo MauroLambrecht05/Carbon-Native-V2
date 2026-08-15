@@ -36,9 +36,19 @@ fn flag(slot: &'static OnceLock<Mutex<bool>>) -> &'static Mutex<bool> {
     slot.get_or_init(|| Mutex::new(false))
 }
 
-pub fn set_is_maximized(v: bool) { *flag(&IS_MAXIMIZED).lock().unwrap_or_else(|e| e.into_inner()) = v; }
-pub fn set_is_minimized(v: bool) { *flag(&IS_MINIMIZED).lock().unwrap_or_else(|e| e.into_inner()) = v; }
-pub fn set_is_focused(v: bool)   { *flag(&IS_FOCUSED).lock().unwrap_or_else(|e| e.into_inner())   = v; }
+pub fn set_is_maximized(v: bool) {
+    *flag(&IS_MAXIMIZED)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = v;
+}
+pub fn set_is_minimized(v: bool) {
+    *flag(&IS_MINIMIZED)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = v;
+}
+pub fn set_is_focused(v: bool) {
+    *flag(&IS_FOCUSED).lock().unwrap_or_else(|e| e.into_inner()) = v;
+}
 
 /// Mirror the current physical inner size of the window so JS-side
 /// `__cm_window_inner_size()` resolves without blocking on the event
@@ -56,19 +66,31 @@ pub fn set_scale_factor(s: f64) {
 }
 
 fn current_size() -> (u32, u32) {
-    *INNER_SIZE.get_or_init(|| Mutex::new((0, 0))).lock().unwrap_or_else(|e| e.into_inner())
+    *INNER_SIZE
+        .get_or_init(|| Mutex::new((0, 0)))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
 }
 
 fn current_scale() -> f64 {
-    *SCALE_FACTOR.get_or_init(|| Mutex::new(1.0)).lock().unwrap_or_else(|e| e.into_inner())
+    *SCALE_FACTOR
+        .get_or_init(|| Mutex::new(1.0))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
 }
 
 pub fn set_window_label(label: String) {
-    *WINDOW_LABEL.get_or_init(|| Mutex::new(String::from("main"))).lock().unwrap_or_else(|e| e.into_inner()) = label;
+    *WINDOW_LABEL
+        .get_or_init(|| Mutex::new(String::from("main")))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = label;
 }
 
 pub fn set_window_opts_json(opts: String) {
-    *WINDOW_OPTS_JSON.get_or_init(|| Mutex::new(String::from("{}"))).lock().unwrap_or_else(|e| e.into_inner()) = opts;
+    *WINDOW_OPTS_JSON
+        .get_or_init(|| Mutex::new(String::from("{}")))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = opts;
 }
 
 pub fn window_label() -> String {
@@ -99,7 +121,11 @@ pub fn set_proxy(proxy: EventLoopProxy<UserEvent>) {
 }
 
 fn post(ev: UserEvent) {
-    if let Some(p) = proxy_slot().lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+    if let Some(p) = proxy_slot()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+    {
         let _ = p.send_event(ev);
     }
 }
@@ -131,60 +157,109 @@ pub fn register(js_ctx: &JsContext) -> Result<()> {
         let g = ctx.globals();
 
         // ── Fire-and-forget ops ─────────────────────────────────────────
-        g.set("__cm_window_show", Function::new(ctx.clone(), || {
-            post(UserEvent::WindowOp(WindowOp::Show));
-        })?)?;
-        g.set("__cm_window_hide", Function::new(ctx.clone(), || {
-            post(UserEvent::WindowOp(WindowOp::Hide));
-        })?)?;
-        g.set("__cm_window_minimize", Function::new(ctx.clone(), || {
-            post(UserEvent::WindowOp(WindowOp::Minimize));
-        })?)?;
-        g.set("__cm_window_maximize", Function::new(ctx.clone(), || {
-            post(UserEvent::WindowOp(WindowOp::Maximize));
-        })?)?;
-        g.set("__cm_window_unmaximize", Function::new(ctx.clone(), || {
-            post(UserEvent::WindowOp(WindowOp::Unmaximize));
-        })?)?;
-        g.set("__cm_window_toggle_maximize", Function::new(ctx.clone(), || {
-            post(UserEvent::WindowOp(WindowOp::ToggleMaximize));
-        })?)?;
-        g.set("__cm_window_close", Function::new(ctx.clone(), || {
-            post(UserEvent::WindowOp(WindowOp::Close));
-        })?)?;
-        g.set("__cm_window_focus", Function::new(ctx.clone(), || {
-            post(UserEvent::WindowOp(WindowOp::Focus));
-        })?)?;
-        g.set("__cm_window_set_title", Function::new(ctx.clone(), |title: String| {
-            post(UserEvent::WindowSetTitle(title));
-        })?)?;
-        g.set("__cm_window_set_fullscreen", Function::new(ctx.clone(), |on: bool| {
-            post(UserEvent::WindowSetFullscreen(on));
-        })?)?;
-        g.set("__cm_window_start_drag", Function::new(ctx.clone(), || {
-            // Posts a request to the main loop to call window.drag_window().
-            // tao's API only supports this from the event-loop thread.
-            post(UserEvent::WindowStartDrag);
-        })?)?;
+        g.set(
+            "__cm_window_show",
+            Function::new(ctx.clone(), || {
+                post(UserEvent::WindowOp(WindowOp::Show));
+            })?,
+        )?;
+        g.set(
+            "__cm_window_hide",
+            Function::new(ctx.clone(), || {
+                post(UserEvent::WindowOp(WindowOp::Hide));
+            })?,
+        )?;
+        g.set(
+            "__cm_window_minimize",
+            Function::new(ctx.clone(), || {
+                post(UserEvent::WindowOp(WindowOp::Minimize));
+            })?,
+        )?;
+        g.set(
+            "__cm_window_maximize",
+            Function::new(ctx.clone(), || {
+                post(UserEvent::WindowOp(WindowOp::Maximize));
+            })?,
+        )?;
+        g.set(
+            "__cm_window_unmaximize",
+            Function::new(ctx.clone(), || {
+                post(UserEvent::WindowOp(WindowOp::Unmaximize));
+            })?,
+        )?;
+        g.set(
+            "__cm_window_toggle_maximize",
+            Function::new(ctx.clone(), || {
+                post(UserEvent::WindowOp(WindowOp::ToggleMaximize));
+            })?,
+        )?;
+        g.set(
+            "__cm_window_close",
+            Function::new(ctx.clone(), || {
+                post(UserEvent::WindowOp(WindowOp::Close));
+            })?,
+        )?;
+        g.set(
+            "__cm_window_focus",
+            Function::new(ctx.clone(), || {
+                post(UserEvent::WindowOp(WindowOp::Focus));
+            })?,
+        )?;
+        g.set(
+            "__cm_window_set_title",
+            Function::new(ctx.clone(), |title: String| {
+                post(UserEvent::WindowSetTitle(title));
+            })?,
+        )?;
+        g.set(
+            "__cm_window_set_fullscreen",
+            Function::new(ctx.clone(), |on: bool| {
+                post(UserEvent::WindowSetFullscreen(on));
+            })?,
+        )?;
+        g.set(
+            "__cm_window_start_drag",
+            Function::new(ctx.clone(), || {
+                // Posts a request to the main loop to call window.drag_window().
+                // tao's API only supports this from the event-loop thread.
+                post(UserEvent::WindowStartDrag);
+            })?,
+        )?;
 
         // ── Sync state queries (mirror updated by the event loop) ───────
-        g.set("__cm_window_is_maximized", Function::new(ctx.clone(), || -> bool {
-            *flag(&IS_MAXIMIZED).lock().unwrap_or_else(|e| e.into_inner())
-        })?)?;
-        g.set("__cm_window_is_minimized", Function::new(ctx.clone(), || -> bool {
-            *flag(&IS_MINIMIZED).lock().unwrap_or_else(|e| e.into_inner())
-        })?)?;
-        g.set("__cm_window_is_focused", Function::new(ctx.clone(), || -> bool {
-            *flag(&IS_FOCUSED).lock().unwrap_or_else(|e| e.into_inner())
-        })?)?;
+        g.set(
+            "__cm_window_is_maximized",
+            Function::new(ctx.clone(), || -> bool {
+                *flag(&IS_MAXIMIZED)
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+            })?,
+        )?;
+        g.set(
+            "__cm_window_is_minimized",
+            Function::new(ctx.clone(), || -> bool {
+                *flag(&IS_MINIMIZED)
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+            })?,
+        )?;
+        g.set(
+            "__cm_window_is_focused",
+            Function::new(ctx.clone(), || -> bool {
+                *flag(&IS_FOCUSED).lock().unwrap_or_else(|e| e.into_inner())
+            })?,
+        )?;
 
         // ── Resize-tick query ───────────────────────────────────────────
         // The JS wrapper subscribes by polling this counter or by
         // hooking the __cm_window_dispatch_resize global (called from
         // the event loop after each Resized).
-        g.set("__cm_window_resize_tick", Function::new(ctx.clone(), || -> u32 {
-            *resize_tick().lock().unwrap_or_else(|e| e.into_inner())
-        })?)?;
+        g.set(
+            "__cm_window_resize_tick",
+            Function::new(ctx.clone(), || -> u32 {
+                *resize_tick().lock().unwrap_or_else(|e| e.into_inner())
+            })?,
+        )?;
 
         // ── Logical inner size (CSS pixels) ────────────────────────────
         // Returns the current viewport size in CSS pixels — what JS
@@ -193,31 +268,48 @@ pub fn register(js_ctx: &JsContext) -> Result<()> {
         // scale factor so high-DPI screens don't double the reported
         // size. The dom-shim wires `window.innerWidth/innerHeight` and
         // `document.documentElement.clientWidth/Height` to these.
-        g.set("__cm_window_inner_width", Function::new(ctx.clone(), || -> u32 {
-            let (w, _) = current_size();
-            let s = current_scale();
-            if s > 0.0 { (w as f64 / s).round() as u32 } else { w }
-        })?)?;
-        g.set("__cm_window_inner_height", Function::new(ctx.clone(), || -> u32 {
-            let (_, h) = current_size();
-            let s = current_scale();
-            if s > 0.0 { (h as f64 / s).round() as u32 } else { h }
-        })?)?;
-        g.set("__cm_window_device_pixel_ratio", Function::new(ctx.clone(), || -> f64 {
-            current_scale()
-        })?)?;
+        g.set(
+            "__cm_window_inner_width",
+            Function::new(ctx.clone(), || -> u32 {
+                let (w, _) = current_size();
+                let s = current_scale();
+                if s > 0.0 {
+                    (w as f64 / s).round() as u32
+                } else {
+                    w
+                }
+            })?,
+        )?;
+        g.set(
+            "__cm_window_inner_height",
+            Function::new(ctx.clone(), || -> u32 {
+                let (_, h) = current_size();
+                let s = current_scale();
+                if s > 0.0 {
+                    (h as f64 / s).round() as u32
+                } else {
+                    h
+                }
+            })?,
+        )?;
+        g.set(
+            "__cm_window_device_pixel_ratio",
+            Function::new(ctx.clone(), || -> f64 { current_scale() })?,
+        )?;
 
         // ── Identity (process-per-window multi-window v1) ──────────────
         // `__cm_window_label()` returns "main" in the primary process,
         // or whatever label the parent process passed via
         // __cm_window_open("settings", …) for child processes.
         // The app's bundle reads this to decide which page to render.
-        g.set("__cm_window_label", Function::new(ctx.clone(), || -> String {
-            window_label()
-        })?)?;
-        g.set("__cm_window_opts_json", Function::new(ctx.clone(), || -> String {
-            window_opts_json()
-        })?)?;
+        g.set(
+            "__cm_window_label",
+            Function::new(ctx.clone(), || -> String { window_label() })?,
+        )?;
+        g.set(
+            "__cm_window_opts_json",
+            Function::new(ctx.clone(), || -> String { window_opts_json() })?,
+        )?;
 
         // ── Open a new window — spawns a child carbon-mini process ────
         // The child runs the SAME bundle as the parent (no per-window
@@ -232,32 +324,38 @@ pub fn register(js_ctx: &JsContext) -> Result<()> {
         // happens through process spawn (errors surface on next OS API
         // call). For richer feedback the parent can listen for an
         // app-defined event the child emits on mount.
-        g.set("__cm_window_open", Function::new(ctx.clone(), |ctx: Ctx<'_>, label: String, opts_json: String| -> rquickjs::Result<()> {
-            let exe = match std::env::current_exe() {
-                Ok(p) => p,
-                Err(e) => return Err(Exception::throw_message(&ctx, &e.to_string())),
-            };
-            // Forward original argv, stripping --window-label /
-            // --window-opts pairs so we don't double-set them.
-            let mut argv: Vec<String> = std::env::args().skip(1).collect();
-            let mut filtered: Vec<String> = Vec::with_capacity(argv.len());
-            let mut iter = argv.drain(..);
-            while let Some(a) = iter.next() {
-                if a == "--window-label" || a == "--window-opts" {
-                    let _ = iter.next();  // skip its value
-                    continue;
-                }
-                filtered.push(a);
-            }
-            let mut cmd = std::process::Command::new(&exe);
-            cmd.args(&filtered);
-            cmd.arg("--window-label").arg(&label);
-            cmd.arg("--window-opts").arg(&opts_json);
-            match cmd.spawn() {
-                Ok(_) => Ok(()),
-                Err(e) => Err(Exception::throw_message(&ctx, &e.to_string())),
-            }
-        })?)?;
+        g.set(
+            "__cm_window_open",
+            Function::new(
+                ctx.clone(),
+                |ctx: Ctx<'_>, label: String, opts_json: String| -> rquickjs::Result<()> {
+                    let exe = match std::env::current_exe() {
+                        Ok(p) => p,
+                        Err(e) => return Err(Exception::throw_message(&ctx, &e.to_string())),
+                    };
+                    // Forward original argv, stripping --window-label /
+                    // --window-opts pairs so we don't double-set them.
+                    let mut argv: Vec<String> = std::env::args().skip(1).collect();
+                    let mut filtered: Vec<String> = Vec::with_capacity(argv.len());
+                    let mut iter = argv.drain(..);
+                    while let Some(a) = iter.next() {
+                        if a == "--window-label" || a == "--window-opts" {
+                            let _ = iter.next(); // skip its value
+                            continue;
+                        }
+                        filtered.push(a);
+                    }
+                    let mut cmd = std::process::Command::new(&exe);
+                    cmd.args(&filtered);
+                    cmd.arg("--window-label").arg(&label);
+                    cmd.arg("--window-opts").arg(&opts_json);
+                    match cmd.spawn() {
+                        Ok(_) => Ok(()),
+                        Err(e) => Err(Exception::throw_message(&ctx, &e.to_string())),
+                    }
+                },
+            )?,
+        )?;
 
         Ok(())
     })?;

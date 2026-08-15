@@ -17,7 +17,11 @@ fn slot() -> &'static Mutex<&'static str> {
 }
 
 pub fn set(theme: &str) {
-    let s = if theme.eq_ignore_ascii_case("dark") { "dark" } else { "light" };
+    let s = if theme.eq_ignore_ascii_case("dark") {
+        "dark"
+    } else {
+        "light"
+    };
     *slot().lock().unwrap_or_else(|e| e.into_inner()) = s;
 }
 

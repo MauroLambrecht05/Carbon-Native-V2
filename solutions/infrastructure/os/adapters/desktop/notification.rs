@@ -24,14 +24,20 @@ pub fn register(js_ctx: &JsContext) -> Result<()> {
 
         // title + body + optional icon path. Icon is a file path on
         // disk (or the empty string to use the system default icon).
-        g.set("__cm_notification_send", Function::new(ctx.clone(), |ctx: Ctx<'_>, title: String, body: String, icon: String| -> rquickjs::Result<()> {
-            let mut n = Notification::new();
-            n.summary(&title).body(&body);
-            if !icon.is_empty() {
-                n.icon(&icon);
-            }
-            n.show().map(|_| ()).map_err(|e| throw(&ctx, e))
-        })?)?;
+        g.set(
+            "__cm_notification_send",
+            Function::new(
+                ctx.clone(),
+                |ctx: Ctx<'_>, title: String, body: String, icon: String| -> rquickjs::Result<()> {
+                    let mut n = Notification::new();
+                    n.summary(&title).body(&body);
+                    if !icon.is_empty() {
+                        n.icon(&icon);
+                    }
+                    n.show().map(|_| ()).map_err(|e| throw(&ctx, e))
+                },
+            )?,
+        )?;
 
         Ok(())
     })?;

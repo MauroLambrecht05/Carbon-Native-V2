@@ -45,7 +45,10 @@ fn to_value<T: Serialize>(v: &T) -> Result<Value, String> {
 }
 
 fn timeout_dur(args: &Value) -> Duration {
-    let secs = args.get("timeoutSecs").and_then(|v| v.as_u64()).unwrap_or(DEFAULT_TIMEOUT_SECS);
+    let secs = args
+        .get("timeoutSecs")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(DEFAULT_TIMEOUT_SECS);
     Duration::from_secs(secs.clamp(1, MAX_TIMEOUT_SECS))
 }
 
@@ -95,9 +98,15 @@ struct CommandOutput {
     truncated: bool,
 }
 
-fn run_blocking(command: String, cwd: Option<String>, dur: Duration) -> Result<CommandOutput, String> {
+fn run_blocking(
+    command: String,
+    cwd: Option<String>,
+    dur: Duration,
+) -> Result<CommandOutput, String> {
     let mut cmd = build_oneshot_command(&command, cwd.as_deref());
-    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
 
     let mut child = cmd.spawn().map_err(|e| e.to_string())?;
     let mut stdout_pipe = child.stdout.take().ok_or("no stdout pipe")?;
@@ -143,11 +152,19 @@ fn run_blocking(command: String, cwd: Option<String>, dur: Duration) -> Result<C
 /// fight the user's own typing; AI tool calls get their own structured
 /// result instead.
 pub fn shell_run_command(args: &Value) -> Result<Value, String> {
-    let command = args.get("command").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let command = args
+        .get("command")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
     if command.is_empty() {
         return Err("empty command".into());
     }
-    let cwd = args.get("cwd").and_then(|v| v.as_str()).filter(|s| !s.is_empty());
+    let cwd = args
+        .get("cwd")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty());
     if let Some(dir) = cwd {
         if !std::path::Path::new(dir).is_dir() {
             return Err(format!("cwd is not a directory: {dir}"));
@@ -187,13 +204,21 @@ fn strip_cwd_sentinel(stdout: &str) -> (String, Option<String>) {
         let before = &stdout[..idx];
         let after = &stdout[idx + CWD_SENTINEL.len()..];
         let cwd_line = after.lines().next().unwrap_or("").trim();
-        return (before.trim_end_matches('\n').to_string(), Some(cwd_line.to_string()));
+        return (
+            before.trim_end_matches('\n').to_string(),
+            Some(cwd_line.to_string()),
+        );
     }
     (stdout.to_string(), None)
 }
 
 impl ShellSession {
-    fn run(&self, command: String, cwd_hint: Option<String>, dur: Duration) -> Result<SessionRunOutput, String> {
+    fn run(
+        &self,
+        command: String,
+        cwd_hint: Option<String>,
+        dur: Duration,
+    ) -> Result<SessionRunOutput, String> {
         let trimmed = command.trim().to_string();
         if trimmed.is_empty() {
             return Err("empty command".into());
@@ -222,7 +247,11 @@ impl ShellSession {
                 *self.cwd.lock().unwrap_or_else(|e| e.into_inner()) = new_cwd.clone();
             }
         }
-        let resolved_cwd = self.cwd.lock().unwrap_or_else(|e| e.into_inner()).replace('\\', "/");
+        let resolved_cwd = self
+            .cwd
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .replace('\\', "/");
 
         Ok(SessionRunOutput {
             stdout: stdout_clean,
@@ -253,7 +282,10 @@ fn state() -> &'static ShellState {
 }
 
 pub fn shell_session_open(args: &Value) -> Result<Value, String> {
-    let cwd_arg = args.get("cwd").and_then(|v| v.as_str()).filter(|s| !s.is_empty());
+    let cwd_arg = args
+        .get("cwd")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty());
     let initial = match cwd_arg {
         Some(c) => {
             if !std::path::Path::new(c).is_dir() {
@@ -275,18 +307,33 @@ pub fn shell_session_open(args: &Value) -> Result<Value, String> {
 }
 
 pub fn shell_session_run(args: &Value) -> Result<Value, String> {
-    let id = args.get("id").and_then(|v| v.as_u64()).ok_or("shell_session_run: missing id")? as u32;
-    let command = args.get("command").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let id = args
+        .get("id")
+        .and_then(|v| v.as_u64())
+        .ok_or("shell_session_run: missing id")? as u32;
+    let command = args
+        .get("command")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     let cwd_hint = args.get("cwd").and_then(|v| v.as_str()).map(str::to_string);
     let dur = timeout_dur(args);
-    let session = state().sessions.read().unwrap().get(&id).cloned()
+    let session = state()
+        .sessions
+        .read()
+        .unwrap()
+        .get(&id)
+        .cloned()
         .ok_or_else(|| "no shell session".to_string())?;
     let out = session.run(command, cwd_hint, dur)?;
     to_value(&out)
 }
 
 pub fn shell_session_close(args: &Value) -> Result<Value, String> {
-    let id = args.get("id").and_then(|v| v.as_u64()).ok_or("shell_session_close: missing id")? as u32;
+    let id = args
+        .get("id")
+        .and_then(|v| v.as_u64())
+        .ok_or("shell_session_close: missing id")? as u32;
     state().sessions.write().unwrap().remove(&id);
     Ok(Value::Null)
 }
@@ -301,20 +348,29 @@ struct BoundedRingBuffer {
 }
 impl BoundedRingBuffer {
     fn new(cap: usize) -> Self {
-        Self { buf: VecDeque::with_capacity(cap.min(64 * 1024)), cap, next_offset: 0, dropped: 0 }
+        Self {
+            buf: VecDeque::with_capacity(cap.min(64 * 1024)),
+            cap,
+            next_offset: 0,
+            dropped: 0,
+        }
     }
     fn push(&mut self, data: &[u8]) {
         self.next_offset = self.next_offset.saturating_add(data.len() as u64);
         if data.len() >= self.cap {
             let keep_from = data.len() - self.cap;
-            self.dropped = self.dropped.saturating_add((self.buf.len() + keep_from) as u64);
+            self.dropped = self
+                .dropped
+                .saturating_add((self.buf.len() + keep_from) as u64);
             self.buf.clear();
             self.buf.extend(&data[keep_from..]);
             return;
         }
         let overflow = (self.buf.len() + data.len()).saturating_sub(self.cap);
         if overflow > 0 {
-            for _ in 0..overflow { self.buf.pop_front(); }
+            for _ in 0..overflow {
+                self.buf.pop_front();
+            }
             self.dropped = self.dropped.saturating_add(overflow as u64);
         }
         self.buf.extend(data);
@@ -360,24 +416,39 @@ struct BackgroundProcInfo {
 
 impl BackgroundProc {
     fn read_logs(&self, since: u64) -> BackgroundLogResponse {
-        let (bytes, next_offset, dropped) = self.buffer.lock().unwrap_or_else(|e| e.into_inner()).read_from(since);
+        let (bytes, next_offset, dropped) = self
+            .buffer
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .read_from(since);
         let exited = self.exited.load(Ordering::Acquire);
         let exit_code = if exited && !self.exit_unknown.load(Ordering::Acquire) {
             Some(self.exit_code.load(Ordering::Acquire))
-        } else { None };
+        } else {
+            None
+        };
         BackgroundLogResponse {
             bytes: String::from_utf8_lossy(&bytes).into_owned(),
-            next_offset, dropped, exited, exit_code,
+            next_offset,
+            dropped,
+            exited,
+            exit_code,
         }
     }
     fn info(&self, handle: u32) -> BackgroundProcInfo {
         let exited = self.exited.load(Ordering::Acquire);
         let exit_code = if exited && !self.exit_unknown.load(Ordering::Acquire) {
             Some(self.exit_code.load(Ordering::Acquire))
-        } else { None };
+        } else {
+            None
+        };
         BackgroundProcInfo {
-            handle, command: self.command.clone(), cwd: self.cwd.clone(),
-            started_at_ms: self.started_at_ms, exited, exit_code,
+            handle,
+            command: self.command.clone(),
+            cwd: self.cwd.clone(),
+            started_at_ms: self.started_at_ms,
+            exited,
+            exit_code,
         }
     }
 }
@@ -398,15 +469,19 @@ fn spawn_background(command: String, cwd: Option<String>) -> Result<Arc<Backgrou
         }
     }
     let mut cmd = build_oneshot_command(&trimmed, cwd.as_deref());
-    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
 
     let shared = SharedChild::spawn(&mut cmd).map_err(|e| e.to_string())?;
     let stdout_pipe = shared.take_stdout().ok_or("no stdout pipe")?;
     let stderr_pipe = shared.take_stderr().ok_or("no stderr pipe")?;
     let child = Arc::new(shared);
 
-    let started_at_ms = SystemTime::now().duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64).unwrap_or(0);
+    let started_at_ms = SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
 
     let proc = Arc::new(BackgroundProc {
         command: trimmed,
@@ -427,7 +502,11 @@ fn spawn_background(command: String, cwd: Option<String>) -> Result<Arc<Backgrou
             loop {
                 match pipe.read(&mut buf) {
                     Ok(0) | Err(_) => break,
-                    Ok(n) => proc_ref.buffer.lock().unwrap_or_else(|e| e.into_inner()).push(&buf[..n]),
+                    Ok(n) => proc_ref
+                        .buffer
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .push(&buf[..n]),
                 }
             }
         });
@@ -440,7 +519,11 @@ fn spawn_background(command: String, cwd: Option<String>) -> Result<Arc<Backgrou
             loop {
                 match pipe.read(&mut buf) {
                     Ok(0) | Err(_) => break,
-                    Ok(n) => proc_ref.buffer.lock().unwrap_or_else(|e| e.into_inner()).push(&buf[..n]),
+                    Ok(n) => proc_ref
+                        .buffer
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .push(&buf[..n]),
                 }
             }
         });
@@ -464,8 +547,16 @@ fn spawn_background(command: String, cwd: Option<String>) -> Result<Arc<Backgrou
 }
 
 pub fn shell_bg_spawn(args: &Value) -> Result<Value, String> {
-    let command = args.get("command").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let cwd = args.get("cwd").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(str::to_string);
+    let command = args
+        .get("command")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let cwd = args
+        .get("cwd")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
     let proc = spawn_background(command, cwd)?;
     let id = state().next_bg_id.fetch_add(1, Ordering::Relaxed);
     state().bg.write().unwrap().insert(id, proc);
@@ -473,15 +564,29 @@ pub fn shell_bg_spawn(args: &Value) -> Result<Value, String> {
 }
 
 pub fn shell_bg_logs(args: &Value) -> Result<Value, String> {
-    let handle = args.get("handle").and_then(|v| v.as_u64()).ok_or("shell_bg_logs: missing handle")? as u32;
-    let since_offset = args.get("sinceOffset").and_then(|v| v.as_u64()).unwrap_or(0);
-    let proc = state().bg.read().unwrap().get(&handle).cloned()
+    let handle = args
+        .get("handle")
+        .and_then(|v| v.as_u64())
+        .ok_or("shell_bg_logs: missing handle")? as u32;
+    let since_offset = args
+        .get("sinceOffset")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let proc = state()
+        .bg
+        .read()
+        .unwrap()
+        .get(&handle)
+        .cloned()
         .ok_or_else(|| "no background handle".to_string())?;
     to_value(&proc.read_logs(since_offset))
 }
 
 pub fn shell_bg_kill(args: &Value) -> Result<Value, String> {
-    let handle = args.get("handle").and_then(|v| v.as_u64()).ok_or("shell_bg_kill: missing handle")? as u32;
+    let handle = args
+        .get("handle")
+        .and_then(|v| v.as_u64())
+        .ok_or("shell_bg_kill: missing handle")? as u32;
     if let Some(proc) = state().bg.read().unwrap().get(&handle).cloned() {
         let _ = proc.child.kill();
     }

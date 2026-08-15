@@ -54,7 +54,9 @@ fn resolve_log_path() -> Option<PathBuf> {
 
 fn ensure_open() -> Option<()> {
     let mut s = state().lock().unwrap_or_else(|e| e.into_inner());
-    if s.is_some() { return Some(()); }
+    if s.is_some() {
+        return Some(());
+    }
     let path = resolve_log_path()?;
     let mut file = OpenOptions::new()
         .create(true)
@@ -63,7 +65,11 @@ fn ensure_open() -> Option<()> {
         .open(&path)
         .ok()?;
     let bytes_written = file.seek(SeekFrom::End(0)).unwrap_or(0);
-    *s = Some(LogState { file, path, bytes_written });
+    *s = Some(LogState {
+        file,
+        path,
+        bytes_written,
+    });
     Some(())
 }
 
@@ -86,9 +92,13 @@ fn write_line(level: &str, target: &str, message: &str) {
     // Console mirror — always on. Apps typically run with stderr
     // attached during dev; in production it's a no-op.
     eprintln!("[{level}] {target}: {message}");
-    if ensure_open().is_none() { return; }
+    if ensure_open().is_none() {
+        return;
+    }
     let mut guard = state().lock().unwrap_or_else(|e| e.into_inner());
-    let Some(s) = guard.as_mut() else { return; };
+    let Some(s) = guard.as_mut() else {
+        return;
+    };
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -110,9 +120,12 @@ pub fn register(js_ctx: &JsContext) -> Result<()> {
         // JS wrapper exposes `log.trace/.debug/.info/.warn/.error`.
         g.set(
             "__cm_log",
-            Function::new(ctx.clone(), |level: String, target: String, message: String| {
-                write_line(&level, &target, &message);
-            })?,
+            Function::new(
+                ctx.clone(),
+                |level: String, target: String, message: String| {
+                    write_line(&level, &target, &message);
+                },
+            )?,
         )?;
         g.set(
             "__cm_log_path",

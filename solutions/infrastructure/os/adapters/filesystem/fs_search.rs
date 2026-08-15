@@ -30,8 +30,16 @@ const MAX_SCANNED: usize = 50_000;
 /// Directory names pruned unconditionally — dominate scan time on roots
 /// with no .gitignore (e.g. searching from $HOME).
 const PRUNE_DIRS: &[&str] = &[
-    "node_modules", ".git", "target", "dist", "build",
-    ".next", ".turbo", ".cache", ".venv", "__pycache__",
+    "node_modules",
+    ".git",
+    "target",
+    "dist",
+    "build",
+    ".next",
+    ".turbo",
+    ".cache",
+    ".venv",
+    "__pycache__",
 ];
 
 fn to_canon(p: &Path) -> String {
@@ -60,14 +68,24 @@ pub fn fs_grep(args: &Value) -> Result<Value, String> {
     if !root_path.is_dir() {
         return Err(format!("not a directory: {root}"));
     }
-    let case_insensitive = args.get("caseInsensitive").and_then(|v| v.as_bool()).unwrap_or(false);
-    let cap = args.get("maxResults").and_then(|v| v.as_u64())
+    let case_insensitive = args
+        .get("caseInsensitive")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let cap = args
+        .get("maxResults")
+        .and_then(|v| v.as_u64())
         .map(|n| n as usize)
         .unwrap_or(DEFAULT_MAX_RESULTS)
         .clamp(1, HARD_MAX_RESULTS);
-    let glob_patterns: Vec<String> = args.get("glob")
+    let glob_patterns: Vec<String> = args
+        .get("glob")
         .and_then(|v| v.as_array())
-        .map(|a| a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
         .unwrap_or_default();
 
     let matcher = RegexMatcherBuilder::new()
@@ -103,12 +121,16 @@ pub fn fs_grep(args: &Value) -> Result<Value, String> {
             if truncated.load(Ordering::Relaxed) {
                 return WalkState::Quit;
             }
-            let Ok(dent) = dent_res else { return WalkState::Continue };
+            let Ok(dent) = dent_res else {
+                return WalkState::Continue;
+            };
             if !dent.file_type().map(|t| t.is_file()).unwrap_or(false) {
                 return WalkState::Continue;
             }
             let path = dent.path();
-            let Ok(rel_path) = path.strip_prefix(&root_path) else { return WalkState::Continue };
+            let Ok(rel_path) = path.strip_prefix(&root_path) else {
+                return WalkState::Continue;
+            };
             let rel = to_canon(rel_path);
             if let Some(set) = globs.as_ref() {
                 if !set.is_match(&rel) {
@@ -127,30 +149,42 @@ pub fn fs_grep(args: &Value) -> Result<Value, String> {
                 .binary_detection(BinaryDetection::quit(b'\x00'))
                 .line_number(true)
                 .build();
-            let _ = searcher.search_path(&matcher, path, UTF8(|line_num, text| {
-                let line_text = text.trim_end_matches('\n').to_string();
-                let mut guard = hits.lock().unwrap_or_else(|e| e.into_inner());
-                if guard.len() >= cap {
-                    truncated.store(true, Ordering::Relaxed);
-                    return Ok(false);
-                }
-                let mut obj = serde_json::Map::new();
-                obj.insert("path".into(), Value::String(abs.clone()));
-                obj.insert("rel".into(), Value::String(rel.clone()));
-                obj.insert("line".into(), Value::Number(line_num.into()));
-                obj.insert("text".into(), Value::String(line_text));
-                guard.push(Value::Object(obj));
-                Ok(true)
-            }));
+            let _ = searcher.search_path(
+                &matcher,
+                path,
+                UTF8(|line_num, text| {
+                    let line_text = text.trim_end_matches('\n').to_string();
+                    let mut guard = hits.lock().unwrap_or_else(|e| e.into_inner());
+                    if guard.len() >= cap {
+                        truncated.store(true, Ordering::Relaxed);
+                        return Ok(false);
+                    }
+                    let mut obj = serde_json::Map::new();
+                    obj.insert("path".into(), Value::String(abs.clone()));
+                    obj.insert("rel".into(), Value::String(rel.clone()));
+                    obj.insert("line".into(), Value::Number(line_num.into()));
+                    obj.insert("text".into(), Value::String(line_text));
+                    guard.push(Value::Object(obj));
+                    Ok(true)
+                }),
+            );
             WalkState::Continue
         })
     });
 
-    let final_hits = Arc::try_unwrap(hits).map(|m| m.into_inner().unwrap()).unwrap_or_default();
+    let final_hits = Arc::try_unwrap(hits)
+        .map(|m| m.into_inner().unwrap())
+        .unwrap_or_default();
     let mut out = serde_json::Map::new();
     out.insert("hits".into(), Value::Array(final_hits));
-    out.insert("truncated".into(), Value::Bool(truncated.load(Ordering::Relaxed)));
-    out.insert("files_scanned".into(), Value::Number(scanned.load(Ordering::Relaxed).into()));
+    out.insert(
+        "truncated".into(),
+        Value::Bool(truncated.load(Ordering::Relaxed)),
+    );
+    out.insert(
+        "files_scanned".into(),
+        Value::Number(scanned.load(Ordering::Relaxed).into()),
+    );
     Ok(Value::Object(out))
 }
 
@@ -164,7 +198,9 @@ pub fn fs_glob(args: &Value) -> Result<Value, String> {
     if !root_path.is_dir() {
         return Err(format!("not a directory: {root}"));
     }
-    let cap = args.get("maxResults").and_then(|v| v.as_u64())
+    let cap = args
+        .get("maxResults")
+        .and_then(|v| v.as_u64())
         .map(|n| n as usize)
         .unwrap_or(500)
         .clamp(1, HARD_MAX_RESULTS);
@@ -195,7 +231,9 @@ pub fn fs_glob(args: &Value) -> Result<Value, String> {
             continue;
         }
         let path = dent.path();
-        let Ok(rel_path) = path.strip_prefix(root_path) else { continue };
+        let Ok(rel_path) = path.strip_prefix(root_path) else {
+            continue;
+        };
         let rel = to_canon(rel_path);
         if !set.is_match(&rel) {
             continue;
@@ -213,7 +251,12 @@ pub fn fs_glob(args: &Value) -> Result<Value, String> {
 }
 
 pub fn fs_search(args: &Value) -> Result<Value, String> {
-    let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("").trim().to_lowercase();
+    let query = args
+        .get("query")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_lowercase();
     if query.is_empty() {
         let mut out = serde_json::Map::new();
         out.insert("hits".into(), Value::Array(vec![]));
@@ -225,8 +268,16 @@ pub fn fs_search(args: &Value) -> Result<Value, String> {
     if !root_path.is_dir() {
         return Err(format!("not a directory: {root}"));
     }
-    let cap = args.get("limit").and_then(|v| v.as_u64()).map(|n| n as usize).unwrap_or(200).min(1000);
-    let show_hidden = args.get("showHidden").and_then(|v| v.as_bool()).unwrap_or(false);
+    let cap = args
+        .get("limit")
+        .and_then(|v| v.as_u64())
+        .map(|n| n as usize)
+        .unwrap_or(200)
+        .min(1000);
+    let show_hidden = args
+        .get("showHidden")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     let mut out_hits: Vec<Value> = Vec::with_capacity(cap.min(64));
     let mut scanned: usize = 0;
@@ -241,7 +292,9 @@ pub fn fs_search(args: &Value) -> Result<Value, String> {
         .parents(true)
         .follow_links(false)
         .filter_entry(|dent| {
-            if dent.depth() == 0 { return true; }
+            if dent.depth() == 0 {
+                return true;
+            }
             match dent.file_name().to_str() {
                 Some(name) => !PRUNE_DIRS.contains(&name),
                 None => true,
@@ -265,12 +318,17 @@ pub fn fs_search(args: &Value) -> Result<Value, String> {
         if path == root_path {
             continue;
         }
-        let Ok(rel_path) = path.strip_prefix(root_path) else { continue };
+        let Ok(rel_path) = path.strip_prefix(root_path) else {
+            continue;
+        };
         let rel = to_canon(rel_path);
         if !rel.to_lowercase().contains(&query) {
             continue;
         }
-        let name = path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let name = path
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
         let is_dir = dent.file_type().map(|t| t.is_dir()).unwrap_or(false);
         let name_matches = name.to_lowercase().contains(&query);
         let mut obj = serde_json::Map::new();
@@ -295,14 +353,19 @@ pub fn fs_search(args: &Value) -> Result<Value, String> {
 /// semantics). Hidden entries are filtered by dot-prefix only.
 pub fn list_subdirs(args: &Value) -> Result<Value, String> {
     let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
-    let show_hidden = args.get("showHidden").and_then(|v| v.as_bool()).unwrap_or(false);
+    let show_hidden = args
+        .get("showHidden")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let read = std::fs::read_dir(path).map_err(|e| e.to_string())?;
 
     let mut dirs: Vec<String> = read
         .filter_map(Result::ok)
         .filter(|entry| match entry.file_type() {
             Ok(t) if t.is_dir() => true,
-            Ok(t) if t.is_symlink() => std::fs::metadata(entry.path()).map(|m| m.is_dir()).unwrap_or(false),
+            Ok(t) if t.is_symlink() => std::fs::metadata(entry.path())
+                .map(|m| m.is_dir())
+                .unwrap_or(false),
             _ => false,
         })
         .filter_map(|entry| entry.file_name().into_string().ok())

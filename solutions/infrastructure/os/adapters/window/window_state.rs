@@ -45,28 +45,43 @@ pub fn register(js_ctx: &JsContext) -> Result<()> {
         // Override the app name (defaults to the binary's file stem).
         // Apps that ship under a custom name should call this once at
         // startup so the state file lands in the expected folder.
-        g.set("__cm_window_state_set_app_name", Function::new(ctx.clone(), |name: String| -> () {
-            let mut g = app_name().lock().unwrap_or_else(|e| e.into_inner());
-            *g = name;
-        })?)?;
+        g.set(
+            "__cm_window_state_set_app_name",
+            Function::new(ctx.clone(), |name: String| {
+                let mut g = app_name().lock().unwrap_or_else(|e| e.into_inner());
+                *g = name;
+            })?,
+        )?;
 
-        g.set("__cm_window_state_save", Function::new(ctx.clone(), |ctx: Ctx<'_>, json: String| -> rquickjs::Result<()> {
-            let p = state_path().ok_or_else(|| throw(&ctx, "no config_dir"))?;
-            std::fs::write(&p, json).map_err(|e| throw(&ctx, e))
-        })?)?;
+        g.set(
+            "__cm_window_state_save",
+            Function::new(
+                ctx.clone(),
+                |ctx: Ctx<'_>, json: String| -> rquickjs::Result<()> {
+                    let p = state_path().ok_or_else(|| throw(&ctx, "no config_dir"))?;
+                    std::fs::write(&p, json).map_err(|e| throw(&ctx, e))
+                },
+            )?,
+        )?;
 
         // Returns the saved JSON string, or null if no state has been
         // persisted yet.
-        g.set("__cm_window_state_load", Function::new(ctx.clone(), || -> Option<String> {
-            let p = state_path()?;
-            std::fs::read_to_string(&p).ok()
-        })?)?;
+        g.set(
+            "__cm_window_state_load",
+            Function::new(ctx.clone(), || -> Option<String> {
+                let p = state_path()?;
+                std::fs::read_to_string(&p).ok()
+            })?,
+        )?;
 
-        g.set("__cm_window_state_clear", Function::new(ctx.clone(), || -> () {
-            if let Some(p) = state_path() {
-                let _ = std::fs::remove_file(&p);
-            }
-        })?)?;
+        g.set(
+            "__cm_window_state_clear",
+            Function::new(ctx.clone(), || {
+                if let Some(p) = state_path() {
+                    let _ = std::fs::remove_file(&p);
+                }
+            })?,
+        )?;
 
         Ok(())
     })?;
