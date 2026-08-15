@@ -105,28 +105,24 @@ impl Gpu {
 
         // request_adapter is async but typically resolves in <1ms once the
         // backend is loaded. pollster::block_on with a noop waker is fine.
-        let adapter = pollster::block_on(instance.request_adapter(
-            &wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                compatible_surface: None,
-                force_fallback_adapter: false,
-            },
-        ))
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            compatible_surface: None,
+            force_fallback_adapter: false,
+        }))
         .map_err(|e| anyhow!("wgpu request_adapter failed: {e:?}"))?;
 
-        let (device, queue) = pollster::block_on(adapter.request_device(
-            &wgpu::DeviceDescriptor {
-                label: Some("carbon-mini-gpu"),
-                required_features: wgpu::Features::empty(),
-                // Conservative limits — we're targeting offscreen
-                // canvases up to ~4k². Defaults already cover this and
-                // are what the docs recommend for "broad compat".
-                required_limits: wgpu::Limits::downlevel_defaults(),
-                memory_hints: wgpu::MemoryHints::default(),
-                trace: wgpu::Trace::Off,
-                experimental_features: wgpu::ExperimentalFeatures::default(),
-            },
-        ))
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: Some("carbon-mini-gpu"),
+            required_features: wgpu::Features::empty(),
+            // Conservative limits — we're targeting offscreen
+            // canvases up to ~4k². Defaults already cover this and
+            // are what the docs recommend for "broad compat".
+            required_limits: wgpu::Limits::downlevel_defaults(),
+            memory_hints: wgpu::MemoryHints::default(),
+            trace: wgpu::Trace::Off,
+            experimental_features: wgpu::ExperimentalFeatures::default(),
+        }))
         .map_err(|e| anyhow!("wgpu request_device failed: {e:?}"))?;
 
         if std::env::var_os("CARBON_MINI_TIMING").is_some() {
@@ -214,7 +210,8 @@ impl CanvasSurface {
     /// View into the surface's color texture, used by the executor as a render
     /// pass attachment. `&Self` because TextureView creation is read-only.
     pub fn texture_view(&self) -> wgpu::TextureView {
-        self.texture.create_view(&wgpu::TextureViewDescriptor::default())
+        self.texture
+            .create_view(&wgpu::TextureViewDescriptor::default())
     }
 
     /// Used by the executor after submitting GPU work, so the next paint
@@ -502,7 +499,11 @@ pub fn execute_commands_json(id: u32, json: &str) {
     // `reg.executors` only when we destructure (or borrow each field
     // through separate &mut references). Going through one `&mut reg`
     // twice triggers E0499. We rebind via field access.
-    let CanvasRegistry { surfaces, executors, .. } = &mut *reg;
+    let CanvasRegistry {
+        surfaces,
+        executors,
+        ..
+    } = &mut *reg;
     let surface = surfaces.get_mut(&id).unwrap();
     let executor = executors.get_mut(&id).unwrap();
     executor.execute(gpu, surface, &cmds);

@@ -63,8 +63,8 @@ pub const CAMERA_UBO_SIZE: u64 = 160;
 ///   point[8]       @ 48         = 384
 ///   ─────────────────────────────────
 ///   total                        = 544 bytes
-pub const LIGHTS_UBO_SIZE: u64 = 16 + 4 + 4 + 8 + 32 * MAX_DIRECTIONAL_LIGHTS as u64
-    + 48 * MAX_POINT_LIGHTS as u64;
+pub const LIGHTS_UBO_SIZE: u64 =
+    16 + 4 + 4 + 8 + 32 * MAX_DIRECTIONAL_LIGHTS as u64 + 48 * MAX_POINT_LIGHTS as u64;
 
 /// Per-mesh Transform UBO logical size: mat4 model + 3×vec4 normalMatrix
 /// 64 + 48 = 112 → padded to 128.
@@ -116,10 +116,10 @@ unsafe impl bytemuck::Pod for PointStd140 {}
 #[repr(C)]
 #[derive(Copy, Clone)]
 struct LightsStd140 {
-    ambient: [f32; 4],              // 16 B  offset 0
-    directional_count: u32,         //  4 B  offset 16
-    point_count: u32,               //  4 B  offset 20
-    _pad: [u32; 2],                 //  8 B  offset 24
+    ambient: [f32; 4],                                        // 16 B  offset 0
+    directional_count: u32,                                   //  4 B  offset 16
+    point_count: u32,                                         //  4 B  offset 20
+    _pad: [u32; 2],                                           //  8 B  offset 24
     directional: [DirectionalStd140; MAX_DIRECTIONAL_LIGHTS], // 128 B offset 32
     point: [PointStd140; MAX_POINT_LIGHTS],                   // 384 B offset 160
 }
@@ -132,14 +132,14 @@ unsafe impl bytemuck::Pod for LightsStd140 {}
 #[repr(C)]
 #[derive(Copy, Clone)]
 struct TransformStd140 {
-    model: [f32; 16],          // 64 B  offset 0
+    model: [f32; 16], // 64 B  offset 0
     // mat3 stored as 3×vec4. Each row of the normal matrix occupies 16 B
     // with 4 B trailing pad. WGSL `mat3x3<f32>` requires this layout when
     // used inside a uniform buffer.
-    normal_row0: [f32; 4],     // 16 B  offset 64
-    normal_row1: [f32; 4],     // 16 B  offset 80
-    normal_row2: [f32; 4],     // 16 B  offset 96
-    _tail_pad: [f32; 4],       // 16 B  offset 112 — total 128
+    normal_row0: [f32; 4], // 16 B  offset 64
+    normal_row1: [f32; 4], // 16 B  offset 80
+    normal_row2: [f32; 4], // 16 B  offset 96
+    _tail_pad: [f32; 4],   // 16 B  offset 112 — total 128
 }
 
 unsafe impl bytemuck::Zeroable for TransformStd140 {}
@@ -404,23 +404,21 @@ pub struct MeshUniforms {
 
 impl MeshUniforms {
     pub fn new(device: &wgpu::Device) -> Self {
-        let bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("carbon-mesh-uniforms-layout"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: true,
-                        min_binding_size: wgpu::BufferSize::new(TRANSFORM_UBO_SIZE),
-                    },
-                    count: None,
-                }],
-            });
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("carbon-mesh-uniforms-layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: true,
+                    min_binding_size: wgpu::BufferSize::new(TRANSFORM_UBO_SIZE),
+                },
+                count: None,
+            }],
+        });
 
-        let buf_size =
-            (UNIFORM_OFFSET_ALIGNMENT as u64) * (MAX_MESHES_PER_FRAME as u64);
+        let buf_size = (UNIFORM_OFFSET_ALIGNMENT as u64) * (MAX_MESHES_PER_FRAME as u64);
         let transform_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("carbon-mesh-transform-ubo"),
             size: buf_size,
@@ -515,24 +513,9 @@ impl MeshUniforms {
         // each with a trailing zero pad.
         let payload = TransformStd140 {
             model: *model,
-            normal_row0: [
-                normal_matrix[0],
-                normal_matrix[1],
-                normal_matrix[2],
-                0.0,
-            ],
-            normal_row1: [
-                normal_matrix[3],
-                normal_matrix[4],
-                normal_matrix[5],
-                0.0,
-            ],
-            normal_row2: [
-                normal_matrix[6],
-                normal_matrix[7],
-                normal_matrix[8],
-                0.0,
-            ],
+            normal_row0: [normal_matrix[0], normal_matrix[1], normal_matrix[2], 0.0],
+            normal_row1: [normal_matrix[3], normal_matrix[4], normal_matrix[5], 0.0],
+            normal_row2: [normal_matrix[6], normal_matrix[7], normal_matrix[8], 0.0],
             _tail_pad: [0.0; 4],
         };
         queue.write_buffer(
@@ -583,7 +566,11 @@ mod tests {
     // payload directly. Production code calls `queue.write_buffer` on the
     // same payload.
 
-    fn build_camera_payload(view: &[f32; 16], proj: &[f32; 16], position: [f32; 3]) -> CameraStd140 {
+    fn build_camera_payload(
+        view: &[f32; 16],
+        proj: &[f32; 16],
+        position: [f32; 3],
+    ) -> CameraStd140 {
         CameraStd140 {
             view: *view,
             proj: *proj,
@@ -647,24 +634,20 @@ mod tests {
             flags: wgpu::InstanceFlags::default(),
             memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
         });
-        let adapter = pollster::block_on(instance.request_adapter(
-            &wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::LowPower,
-                compatible_surface: None,
-                force_fallback_adapter: false,
-            },
-        ))
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::LowPower,
+            compatible_surface: None,
+            force_fallback_adapter: false,
+        }))
         .ok()?;
-        let (device, queue) = pollster::block_on(adapter.request_device(
-            &wgpu::DeviceDescriptor {
-                label: Some("carbon-mini-uniforms-tests"),
-                required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::downlevel_defaults(),
-                memory_hints: wgpu::MemoryHints::default(),
-                trace: wgpu::Trace::Off,
-                experimental_features: wgpu::ExperimentalFeatures::default(),
-            },
-        ))
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: Some("carbon-mini-uniforms-tests"),
+            required_features: wgpu::Features::empty(),
+            required_limits: wgpu::Limits::downlevel_defaults(),
+            memory_hints: wgpu::MemoryHints::default(),
+            trace: wgpu::Trace::Off,
+            experimental_features: wgpu::ExperimentalFeatures::default(),
+        }))
         .ok()?;
         Some((device, queue))
     }
@@ -672,16 +655,11 @@ mod tests {
     #[test]
     fn camera_payload_byte_layout_matches_contract() {
         let view: [f32; 16] = [
-            1.0, 2.0, 3.0, 4.0,
-            5.0, 6.0, 7.0, 8.0,
-            9.0, 10.0, 11.0, 12.0,
-            13.0, 14.0, 15.0, 16.0,
+            1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0,
         ];
         let proj: [f32; 16] = [
-            17.0, 18.0, 19.0, 20.0,
-            21.0, 22.0, 23.0, 24.0,
-            25.0, 26.0, 27.0, 28.0,
-            29.0, 30.0, 31.0, 32.0,
+            17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0, 25.0, 26.0, 27.0, 28.0, 29.0, 30.0,
+            31.0, 32.0,
         ];
         let position = [100.0_f32, 200.0, 300.0];
         let payload = build_camera_payload(&view, &proj, position);
@@ -816,10 +794,7 @@ mod tests {
     #[test]
     fn transform_payload_byte_layout_matches_contract() {
         let model: [f32; 16] = [
-            1.0, 0.0, 0.0, 0.0,
-            0.0, 1.0, 0.0, 0.0,
-            0.0, 0.0, 1.0, 0.0,
-            5.0, 6.0, 7.0, 1.0,
+            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 5.0, 6.0, 7.0, 1.0,
         ];
         let nm: [f32; 9] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0];
         let payload = build_transform_payload(&model, &nm);
@@ -853,10 +828,7 @@ mod tests {
         mesh.reset_for_frame();
 
         let identity: [f32; 16] = [
-            1.0, 0.0, 0.0, 0.0,
-            0.0, 1.0, 0.0, 0.0,
-            0.0, 0.0, 1.0, 0.0,
-            0.0, 0.0, 0.0, 1.0,
+            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
         ];
         let nm: [f32; 9] = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
 

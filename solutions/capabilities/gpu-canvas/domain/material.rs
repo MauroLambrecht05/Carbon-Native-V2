@@ -27,9 +27,9 @@ use bytemuck::{Pod, Zeroable};
 // source file. Keep these constants module-public so tests (and the
 // integrator) can `naga`-validate them without re-reading from disk.
 
-pub const SHADER_BASIC:    &str = include_str!("shaders/basic.wgsl");
+pub const SHADER_BASIC: &str = include_str!("shaders/basic.wgsl");
 pub const SHADER_STANDARD: &str = include_str!("shaders/standard.wgsl");
-pub const SHADER_PHONG:    &str = include_str!("shaders/phong.wgsl");
+pub const SHADER_PHONG: &str = include_str!("shaders/phong.wgsl");
 
 // ─── Public types ──────────────────────────────────────────────────────────
 
@@ -46,7 +46,9 @@ pub enum Side {
 }
 
 impl Default for Side {
-    fn default() -> Self { Side::Front }
+    fn default() -> Self {
+        Side::Front
+    }
 }
 
 /// One reference material per shader. The optional `map` field is a
@@ -56,26 +58,26 @@ impl Default for Side {
 #[derive(Clone, Debug)]
 pub enum Material {
     Basic {
-        color:   [f32; 4],
+        color: [f32; 4],
         opacity: f32,
-        side:    Side,
-        map:     Option<u32>,
+        side: Side,
+        map: Option<u32>,
     },
     Standard {
-        color:     [f32; 4],
+        color: [f32; 4],
         metalness: f32,
         roughness: f32,
-        opacity:   f32,
-        side:      Side,
-        map:       Option<u32>,
+        opacity: f32,
+        side: Side,
+        map: Option<u32>,
     },
     Phong {
-        color:     [f32; 4],
-        specular:  [f32; 4],
+        color: [f32; 4],
+        specular: [f32; 4],
         shininess: f32,
-        opacity:   f32,
-        side:      Side,
-        map:       Option<u32>,
+        opacity: f32,
+        side: Side,
+        map: Option<u32>,
     },
 }
 
@@ -92,31 +94,31 @@ pub enum Material {
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 pub struct MaterialBasicUniform {
-    pub color:   [f32; 4],
+    pub color: [f32; 4],
     pub opacity: f32,
-    pub _pad:    [f32; 3],
+    pub _pad: [f32; 3],
 }
 const _: () = assert!(std::mem::size_of::<MaterialBasicUniform>() == 32);
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 pub struct MaterialStandardUniform {
-    pub color:     [f32; 4],
+    pub color: [f32; 4],
     pub metalness: f32,
     pub roughness: f32,
-    pub opacity:   f32,
-    pub _pad:      f32,
+    pub opacity: f32,
+    pub _pad: f32,
 }
 const _: () = assert!(std::mem::size_of::<MaterialStandardUniform>() == 32);
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 pub struct MaterialPhongUniform {
-    pub color:     [f32; 4],
-    pub specular:  [f32; 4],
+    pub color: [f32; 4],
+    pub specular: [f32; 4],
     pub shininess: f32,
-    pub opacity:   f32,
-    pub _pad:      [f32; 2],
+    pub opacity: f32,
+    pub _pad: [f32; 2],
 }
 const _: () = assert!(std::mem::size_of::<MaterialPhongUniform>() == 48);
 
@@ -164,9 +166,9 @@ pub fn vertex_buffer_layout() -> wgpu::VertexBufferLayout<'static> {
 /// module around for any number of pipelines built against it.
 pub fn create_shader_module(device: &wgpu::Device, kind: MaterialKind) -> wgpu::ShaderModule {
     let (label, source) = match kind {
-        MaterialKind::Basic    => ("carbon-mat-basic",    SHADER_BASIC),
+        MaterialKind::Basic => ("carbon-mat-basic", SHADER_BASIC),
         MaterialKind::Standard => ("carbon-mat-standard", SHADER_STANDARD),
-        MaterialKind::Phong    => ("carbon-mat-phong",    SHADER_PHONG),
+        MaterialKind::Phong => ("carbon-mat-phong", SHADER_PHONG),
     };
     device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some(label),
@@ -188,33 +190,33 @@ pub enum MaterialKind {
 impl Material {
     pub fn kind(&self) -> MaterialKind {
         match self {
-            Material::Basic    { .. } => MaterialKind::Basic,
+            Material::Basic { .. } => MaterialKind::Basic,
             Material::Standard { .. } => MaterialKind::Standard,
-            Material::Phong    { .. } => MaterialKind::Phong,
+            Material::Phong { .. } => MaterialKind::Phong,
         }
     }
 
     pub fn side(&self) -> Side {
         match *self {
-            Material::Basic    { side, .. } => side,
+            Material::Basic { side, .. } => side,
             Material::Standard { side, .. } => side,
-            Material::Phong    { side, .. } => side,
+            Material::Phong { side, .. } => side,
         }
     }
 
     pub fn opacity(&self) -> f32 {
         match *self {
-            Material::Basic    { opacity, .. } => opacity,
+            Material::Basic { opacity, .. } => opacity,
             Material::Standard { opacity, .. } => opacity,
-            Material::Phong    { opacity, .. } => opacity,
+            Material::Phong { opacity, .. } => opacity,
         }
     }
 
     pub fn map(&self) -> Option<u32> {
         match *self {
-            Material::Basic    { map, .. } => map,
+            Material::Basic { map, .. } => map,
             Material::Standard { map, .. } => map,
-            Material::Phong    { map, .. } => map,
+            Material::Phong { map, .. } => map,
         }
     }
 
@@ -222,9 +224,9 @@ impl Material {
     /// the integrator to size the per-material uniform buffer.
     pub fn uniform_size(&self) -> usize {
         match self {
-            Material::Basic    { .. } => std::mem::size_of::<MaterialBasicUniform>(),
+            Material::Basic { .. } => std::mem::size_of::<MaterialBasicUniform>(),
             Material::Standard { .. } => std::mem::size_of::<MaterialStandardUniform>(),
-            Material::Phong    { .. } => std::mem::size_of::<MaterialPhongUniform>(),
+            Material::Phong { .. } => std::mem::size_of::<MaterialPhongUniform>(),
         }
     }
 
@@ -234,20 +236,44 @@ impl Material {
     pub fn write_uniform(&self, dst: &mut [u8]) {
         match *self {
             Material::Basic { color, opacity, .. } => {
-                let u = MaterialBasicUniform { color, opacity, _pad: [0.0; 3] };
-                let bytes = bytemuck::bytes_of(&u);
-                dst[..bytes.len()].copy_from_slice(bytes);
-            }
-            Material::Standard { color, metalness, roughness, opacity, .. } => {
-                let u = MaterialStandardUniform {
-                    color, metalness, roughness, opacity, _pad: 0.0,
+                let u = MaterialBasicUniform {
+                    color,
+                    opacity,
+                    _pad: [0.0; 3],
                 };
                 let bytes = bytemuck::bytes_of(&u);
                 dst[..bytes.len()].copy_from_slice(bytes);
             }
-            Material::Phong { color, specular, shininess, opacity, .. } => {
+            Material::Standard {
+                color,
+                metalness,
+                roughness,
+                opacity,
+                ..
+            } => {
+                let u = MaterialStandardUniform {
+                    color,
+                    metalness,
+                    roughness,
+                    opacity,
+                    _pad: 0.0,
+                };
+                let bytes = bytemuck::bytes_of(&u);
+                dst[..bytes.len()].copy_from_slice(bytes);
+            }
+            Material::Phong {
+                color,
+                specular,
+                shininess,
+                opacity,
+                ..
+            } => {
                 let u = MaterialPhongUniform {
-                    color, specular, shininess, opacity, _pad: [0.0; 2],
+                    color,
+                    specular,
+                    shininess,
+                    opacity,
+                    _pad: [0.0; 2],
                 };
                 let bytes = bytemuck::bytes_of(&u);
                 dst[..bytes.len()].copy_from_slice(bytes);
@@ -279,17 +305,17 @@ impl Material {
 
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some(match kind {
-                MaterialKind::Basic    => "carbon-mat-basic-layout",
+                MaterialKind::Basic => "carbon-mat-basic-layout",
                 MaterialKind::Standard => "carbon-mat-standard-layout",
-                MaterialKind::Phong    => "carbon-mat-phong-layout",
+                MaterialKind::Phong => "carbon-mat-phong-layout",
             }),
             bind_group_layouts,
             push_constant_ranges: &[],
         });
 
         let cull_mode = match self.side() {
-            Side::Front  => Some(wgpu::Face::Back),
-            Side::Back   => Some(wgpu::Face::Front),
+            Side::Front => Some(wgpu::Face::Back),
+            Side::Back => Some(wgpu::Face::Front),
             Side::Double => None,
         };
 
@@ -297,9 +323,9 @@ impl Material {
 
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some(match kind {
-                MaterialKind::Basic    => "carbon-mat-basic-pipeline",
+                MaterialKind::Basic => "carbon-mat-basic-pipeline",
                 MaterialKind::Standard => "carbon-mat-standard-pipeline",
-                MaterialKind::Phong    => "carbon-mat-phong-pipeline",
+                MaterialKind::Phong => "carbon-mat-phong-pipeline",
             }),
             layout: Some(&layout),
             vertex: wgpu::VertexState {
@@ -351,62 +377,68 @@ impl Material {
 mod tests {
     use super::*;
 
-    // Round-trip `write_uniform` → bytemuck::from_bytes → assert fields.
+    // Round-trip `write_uniform` -> read back -> assert fields.
+    //
+    // pod_read_unaligned, not from_bytes: from_bytes casts in place and so
+    // demands the buffer meet the struct's alignment. A stack [u8; N] is
+    // 1-aligned and only incidentally lands on a 16-byte boundary — these
+    // three tests passed on rustc 1.96 and panicked on 1.88 for exactly that
+    // reason. Production writes into wgpu buffers, which are aligned.
 
     #[test]
     fn write_uniform_basic_round_trip() {
         let m = Material::Basic {
-            color:   [0.25, 0.5, 0.75, 0.9],
+            color: [0.25, 0.5, 0.75, 0.9],
             opacity: 0.5,
-            side:    Side::Front,
-            map:     None,
+            side: Side::Front,
+            map: None,
         };
         assert_eq!(m.uniform_size(), 32);
         let mut buf = [0u8; 32];
         m.write_uniform(&mut buf);
-        let parsed: &MaterialBasicUniform = bytemuck::from_bytes(&buf);
-        assert_eq!(parsed.color,   [0.25, 0.5, 0.75, 0.9]);
+        let parsed: MaterialBasicUniform = bytemuck::pod_read_unaligned(&buf);
+        assert_eq!(parsed.color, [0.25, 0.5, 0.75, 0.9]);
         assert_eq!(parsed.opacity, 0.5);
     }
 
     #[test]
     fn write_uniform_standard_round_trip() {
         let m = Material::Standard {
-            color:     [0.1, 0.2, 0.3, 0.4],
+            color: [0.1, 0.2, 0.3, 0.4],
             metalness: 0.6,
             roughness: 0.7,
-            opacity:   0.8,
-            side:      Side::Double,
-            map:       Some(7),
+            opacity: 0.8,
+            side: Side::Double,
+            map: Some(7),
         };
         assert_eq!(m.uniform_size(), 32);
         let mut buf = [0u8; 32];
         m.write_uniform(&mut buf);
-        let parsed: &MaterialStandardUniform = bytemuck::from_bytes(&buf);
-        assert_eq!(parsed.color,     [0.1, 0.2, 0.3, 0.4]);
+        let parsed: MaterialStandardUniform = bytemuck::pod_read_unaligned(&buf);
+        assert_eq!(parsed.color, [0.1, 0.2, 0.3, 0.4]);
         assert_eq!(parsed.metalness, 0.6);
         assert_eq!(parsed.roughness, 0.7);
-        assert_eq!(parsed.opacity,   0.8);
+        assert_eq!(parsed.opacity, 0.8);
     }
 
     #[test]
     fn write_uniform_phong_round_trip() {
         let m = Material::Phong {
-            color:     [0.1, 0.2, 0.3, 1.0],
-            specular:  [0.9, 0.8, 0.7, 1.0],
+            color: [0.1, 0.2, 0.3, 1.0],
+            specular: [0.9, 0.8, 0.7, 1.0],
             shininess: 32.0,
-            opacity:   1.0,
-            side:      Side::Back,
-            map:       None,
+            opacity: 1.0,
+            side: Side::Back,
+            map: None,
         };
         assert_eq!(m.uniform_size(), 48);
         let mut buf = [0u8; 48];
         m.write_uniform(&mut buf);
-        let parsed: &MaterialPhongUniform = bytemuck::from_bytes(&buf);
-        assert_eq!(parsed.color,     [0.1, 0.2, 0.3, 1.0]);
-        assert_eq!(parsed.specular,  [0.9, 0.8, 0.7, 1.0]);
+        let parsed: MaterialPhongUniform = bytemuck::pod_read_unaligned(&buf);
+        assert_eq!(parsed.color, [0.1, 0.2, 0.3, 1.0]);
+        assert_eq!(parsed.specular, [0.9, 0.8, 0.7, 1.0]);
         assert_eq!(parsed.shininess, 32.0);
-        assert_eq!(parsed.opacity,   1.0);
+        assert_eq!(parsed.opacity, 1.0);
     }
 
     #[test]

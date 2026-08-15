@@ -25,19 +25,21 @@ use std::collections::HashMap;
 
 use crate::geometry::GeometryCache;
 use crate::gpu::{CanvasSurface, Gpu};
-use crate::material::{
-    create_shader_module, vertex_buffer_layout, Material, MaterialKind, Side,
-};
-use crate::uniforms::{
-    DirectionalLight, FrameUniforms, Lights, MeshUniforms, PointLight,
-};
+use crate::material::{create_shader_module, vertex_buffer_layout, Material, MaterialKind, Side};
+use crate::uniforms::{DirectionalLight, FrameUniforms, Lights, MeshUniforms, PointLight};
 
 // ─── DrawCommand parsed form ──────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
 pub enum DrawCommand {
-    Clear { rgba: [f32; 4] },
-    SetCamera { view: [f32; 16], proj: [f32; 16], position: [f32; 3] },
+    Clear {
+        rgba: [f32; 4],
+    },
+    SetCamera {
+        view: [f32; 16],
+        proj: [f32; 16],
+        position: [f32; 3],
+    },
     SetLights(Lights),
     Mesh(MeshCommand),
     Line(LineCommand),
@@ -108,7 +110,12 @@ impl DepthTarget {
             view_formats: &[],
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        Self { texture, view, width: w, height: h }
+        Self {
+            texture,
+            view,
+            width: w,
+            height: h,
+        }
     }
 }
 
@@ -127,7 +134,11 @@ impl DefaultTextures {
     fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("carbon-default-white"),
-            size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -148,7 +159,11 @@ impl DefaultTextures {
                 bytes_per_row: Some(4),
                 rows_per_image: Some(1),
             },
-            wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
         );
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -180,11 +195,7 @@ struct BindGroupLayouts {
     phong: MaterialBgl,
 }
 
-fn make_material_bgl(
-    device: &wgpu::Device,
-    label: &str,
-    uniform_size: u64,
-) -> MaterialBgl {
+fn make_material_bgl(device: &wgpu::Device, label: &str, uniform_size: u64) -> MaterialBgl {
     let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some(label),
         entries: &[
@@ -242,7 +253,9 @@ fn b64_decode(s: &str) -> Option<Vec<u8>> {
     let bytes = s.as_bytes();
     let mut clean: Vec<u8> = Vec::with_capacity(bytes.len());
     for &b in bytes {
-        if b == b'=' || b == b'\n' || b == b'\r' || b == b' ' || b == b'\t' { continue; }
+        if b == b'=' || b == b'\n' || b == b'\r' || b == b' ' || b == b'\t' {
+            continue;
+        }
         clean.push(b);
     }
     let mut out = Vec::with_capacity(clean.len() * 3 / 4 + 3);
@@ -313,7 +326,12 @@ impl MatRing {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        Self { buf, slot_size, capacity: MAX_MAT_SLOTS, next: std::cell::Cell::new(0) }
+        Self {
+            buf,
+            slot_size,
+            capacity: MAX_MAT_SLOTS,
+            next: std::cell::Cell::new(0),
+        }
     }
     fn reset(&self) {
         self.next.set(0);
@@ -358,40 +376,52 @@ impl CanvasExecutor {
             std::mem::size_of::<crate::material::MaterialPhongUniform>() as u64,
         );
         let bgls = BindGroupLayouts {
-            frame: clone_layout_via_recreate(device, "carbon-frame-uniforms-layout-clone", &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: wgpu::BufferSize::new(crate::uniforms::CAMERA_UBO_SIZE),
+            frame: clone_layout_via_recreate(
+                device,
+                "carbon-frame-uniforms-layout-clone",
+                &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(
+                                crate::uniforms::CAMERA_UBO_SIZE,
+                            ),
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: wgpu::BufferSize::new(crate::uniforms::LIGHTS_UBO_SIZE),
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(
+                                crate::uniforms::LIGHTS_UBO_SIZE,
+                            ),
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-            ]),
-            mesh: clone_layout_via_recreate(device, "carbon-mesh-uniforms-layout-clone", &[
-                wgpu::BindGroupLayoutEntry {
+                ],
+            ),
+            mesh: clone_layout_via_recreate(
+                device,
+                "carbon-mesh-uniforms-layout-clone",
+                &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: true,
-                        min_binding_size: wgpu::BufferSize::new(crate::uniforms::TRANSFORM_UBO_SIZE),
+                        min_binding_size: wgpu::BufferSize::new(
+                            crate::uniforms::TRANSFORM_UBO_SIZE,
+                        ),
                     },
                     count: None,
-                },
-            ]),
+                }],
+            ),
             basic,
             standard,
             phong,
@@ -413,7 +443,12 @@ impl CanvasExecutor {
     }
 
     fn ensure_depth(&mut self, device: &wgpu::Device, w: u32, h: u32) -> &DepthTarget {
-        if self.depth.as_ref().map(|d| d.width != w || d.height != h).unwrap_or(true) {
+        if self
+            .depth
+            .as_ref()
+            .map(|d| d.width != w || d.height != h)
+            .unwrap_or(true)
+        {
             self.depth = Some(DepthTarget::new(device, w, h));
         }
         self.depth.as_ref().unwrap()
@@ -444,11 +479,8 @@ impl CanvasExecutor {
         let key = (kind, side, topo_key);
         if !self.pipelines.contains_key(&key) {
             let module = create_shader_module(device, kind);
-            let bgls: [&wgpu::BindGroupLayout; 3] = [
-                &self.bgls.frame,
-                &self.bgls.mesh,
-                self.material_bgl(kind),
-            ];
+            let bgls: [&wgpu::BindGroupLayout; 3] =
+                [&self.bgls.frame, &self.bgls.mesh, self.material_bgl(kind)];
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("carbon-pipeline-layout"),
                 bind_group_layouts: &bgls,
@@ -559,7 +591,11 @@ impl CanvasExecutor {
         // Apply camera / lights from the command list before opening the pass.
         for c in commands {
             match c {
-                DrawCommand::SetCamera { view, proj, position } => {
+                DrawCommand::SetCamera {
+                    view,
+                    proj,
+                    position,
+                } => {
                     self.frame_u.write_camera(queue, view, proj, *position);
                 }
                 DrawCommand::SetLights(lights) => {
@@ -591,8 +627,7 @@ impl CanvasExecutor {
 
         let depth_view = &self.depth.as_ref().unwrap().view;
 
-        let color_view = surface
-            .texture_view();
+        let color_view = surface.texture_view();
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("carbon-canvas-execute"),
@@ -616,7 +651,10 @@ impl CanvasExecutor {
                     view: &color_view,
                     resolve_target: None,
                     depth_slice: None,
-                    ops: wgpu::Operations { load, store: wgpu::StoreOp::Store },
+                    ops: wgpu::Operations {
+                        load,
+                        store: wgpu::StoreOp::Store,
+                    },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: depth_view,
@@ -655,9 +693,11 @@ impl CanvasExecutor {
                         };
 
                         // 2. Mesh transform
-                        let (mesh_offset, _bg_throwaway) = self
-                            .mesh_u
-                            .write_transform_with_offset(queue, &m.model, &m.normal_matrix);
+                        let (mesh_offset, _bg_throwaway) = self.mesh_u.write_transform_with_offset(
+                            queue,
+                            &m.model,
+                            &m.normal_matrix,
+                        );
                         let mesh_bg = self.mesh_u.bind_group.clone();
 
                         // 3. Material UBO + bind group
@@ -681,21 +721,26 @@ impl CanvasExecutor {
                                 },
                                 wgpu::BindGroupEntry {
                                     binding: 1,
-                                    resource: wgpu::BindingResource::TextureView(&self.default_tex.view),
+                                    resource: wgpu::BindingResource::TextureView(
+                                        &self.default_tex.view,
+                                    ),
                                 },
                                 wgpu::BindGroupEntry {
                                     binding: 2,
-                                    resource: wgpu::BindingResource::Sampler(&self.default_tex.sampler),
+                                    resource: wgpu::BindingResource::Sampler(
+                                        &self.default_tex.sampler,
+                                    ),
                                 },
                             ],
                         });
 
                         // 4. Pipeline (pre-warmed above; immutable lookup only)
                         let topo_key: u8 = 0; // TriangleList
-                        let pipeline = match self
-                            .pipelines
-                            .get(&(m.material.kind(), m.material.side(), topo_key))
-                        {
+                        let pipeline = match self.pipelines.get(&(
+                            m.material.kind(),
+                            m.material.side(),
+                            topo_key,
+                        )) {
                             Some(p) => p,
                             None => continue,
                         };
@@ -721,7 +766,6 @@ impl CanvasExecutor {
         queue.submit(Some(encoder.finish()));
         surface.mark_dirty();
     }
-
 }
 
 // Helper: rebuild a layout matching the one inside FrameUniforms / MeshUniforms.
@@ -748,7 +792,9 @@ fn clone_layout_via_recreate(
 
 pub fn parse_commands(json: &str) -> Result<Vec<DrawCommand>, String> {
     let v: serde_json::Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
-    let arr = v.as_array().ok_or_else(|| "expected array of commands".to_string())?;
+    let arr = v
+        .as_array()
+        .ok_or_else(|| "expected array of commands".to_string())?;
     let mut out = Vec::with_capacity(arr.len());
     for cmd in arr {
         match parse_one(cmd) {
@@ -760,7 +806,10 @@ pub fn parse_commands(json: &str) -> Result<Vec<DrawCommand>, String> {
 }
 
 fn parse_one(v: &serde_json::Value) -> Result<DrawCommand, String> {
-    let ty = v.get("type").and_then(|x| x.as_str()).ok_or("missing type")?;
+    let ty = v
+        .get("type")
+        .and_then(|x| x.as_str())
+        .ok_or("missing type")?;
     match ty {
         "clear" => {
             let rgba = parse_f32_array4(v.get("rgba"))?;
@@ -771,36 +820,52 @@ fn parse_one(v: &serde_json::Value) -> Result<DrawCommand, String> {
             let view = parse_f32_buffer16(cam.get("view"))?;
             let proj = parse_f32_buffer16(cam.get("projection"))?;
             let position = parse_f32_array3(cam.get("position"))?;
-            Ok(DrawCommand::SetCamera { view, proj, position })
+            Ok(DrawCommand::SetCamera {
+                view,
+                proj,
+                position,
+            })
         }
         "setLights" => {
-            let arr = v.get("lights").and_then(|x| x.as_array()).ok_or("missing lights array")?;
+            let arr = v
+                .get("lights")
+                .and_then(|x| x.as_array())
+                .ok_or("missing lights array")?;
             let mut lights = Lights::default();
             for l in arr {
                 let lty = l.get("type").and_then(|x| x.as_str()).unwrap_or("");
                 match lty {
                     "ambient" => {
                         let color = parse_f32_array3(l.get("color")).unwrap_or([0.0; 3]);
-                        let intensity = l.get("intensity").and_then(|x| x.as_f64()).unwrap_or(0.0) as f32;
+                        let intensity =
+                            l.get("intensity").and_then(|x| x.as_f64()).unwrap_or(0.0) as f32;
                         // Combine: store color in xyz, intensity in w
                         lights.ambient = [color[0], color[1], color[2], intensity];
                     }
                     "directional" => {
                         let color = parse_f32_array3(l.get("color")).unwrap_or([1.0; 3]);
-                        let intensity = l.get("intensity").and_then(|x| x.as_f64()).unwrap_or(1.0) as f32;
-                        let direction = parse_f32_array3(l.get("direction")).unwrap_or([0.0, -1.0, 0.0]);
+                        let intensity =
+                            l.get("intensity").and_then(|x| x.as_f64()).unwrap_or(1.0) as f32;
+                        let direction =
+                            parse_f32_array3(l.get("direction")).unwrap_or([0.0, -1.0, 0.0]);
                         lights.directional.push(DirectionalLight {
-                            direction, color, intensity,
+                            direction,
+                            color,
+                            intensity,
                         });
                     }
                     "point" => {
                         let color = parse_f32_array3(l.get("color")).unwrap_or([1.0; 3]);
-                        let intensity = l.get("intensity").and_then(|x| x.as_f64()).unwrap_or(1.0) as f32;
+                        let intensity =
+                            l.get("intensity").and_then(|x| x.as_f64()).unwrap_or(1.0) as f32;
                         let position = parse_f32_array3(l.get("position")).unwrap_or([0.0; 3]);
-                        let distance = l.get("distance").and_then(|x| x.as_f64()).unwrap_or(0.0) as f32;
+                        let distance =
+                            l.get("distance").and_then(|x| x.as_f64()).unwrap_or(0.0) as f32;
                         let decay = l.get("decay").and_then(|x| x.as_f64()).unwrap_or(2.0) as f32;
                         lights.point.push(PointLight {
-                            position, color, intensity,
+                            position,
+                            color,
+                            intensity,
                             range: if distance <= 0.0 { 1000.0 } else { distance },
                             decay,
                         });
@@ -818,13 +883,19 @@ fn parse_one(v: &serde_json::Value) -> Result<DrawCommand, String> {
 }
 
 fn parse_mesh(v: &serde_json::Value) -> Result<DrawCommand, String> {
-    let geometry_id = v.get("geometryId").and_then(|x| x.as_i64()).ok_or("missing geometryId")? as u64;
+    let geometry_id = v
+        .get("geometryId")
+        .and_then(|x| x.as_i64())
+        .ok_or("missing geometryId")? as u64;
     // Optional: `verticesB64` — base64 of the interleaved vertex stream.
     // Optional: `indicesB64` — base64 of u16 or u32 index buffer.
     // If omitted the executor relies on its cache (hit by geometry_id).
     let vertices = decode_b64_field(v, "verticesB64");
     let indices = decode_b64_field(v, "indicesB64");
-    let index_is_u32 = v.get("indexIsU32").and_then(|x| x.as_bool()).unwrap_or(false);
+    let index_is_u32 = v
+        .get("indexIsU32")
+        .and_then(|x| x.as_bool())
+        .unwrap_or(false);
     let vertex_count = v.get("vertexCount").and_then(|x| x.as_u64()).unwrap_or(0) as u32;
     let index_count = v.get("indexCount").and_then(|x| x.as_u64()).unwrap_or(0) as u32;
     let model = parse_f32_buffer16(v.get("transform"))?;
@@ -844,10 +915,16 @@ fn parse_mesh(v: &serde_json::Value) -> Result<DrawCommand, String> {
 }
 
 fn parse_line(v: &serde_json::Value) -> Result<DrawCommand, String> {
-    let geometry_id = v.get("geometryId").and_then(|x| x.as_i64()).ok_or("missing geometryId")? as u64;
+    let geometry_id = v
+        .get("geometryId")
+        .and_then(|x| x.as_i64())
+        .ok_or("missing geometryId")? as u64;
     let vertices = decode_b64_field(v, "verticesB64");
     let indices = decode_b64_field(v, "indicesB64");
-    let index_is_u32 = v.get("indexIsU32").and_then(|x| x.as_bool()).unwrap_or(false);
+    let index_is_u32 = v
+        .get("indexIsU32")
+        .and_then(|x| x.as_bool())
+        .unwrap_or(false);
     let vertex_count = v.get("vertexCount").and_then(|x| x.as_u64()).unwrap_or(0) as u32;
     let index_count = v.get("indexCount").and_then(|x| x.as_u64()).unwrap_or(0) as u32;
     let model = parse_f32_buffer16(v.get("transform"))?;
@@ -868,7 +945,10 @@ fn parse_line(v: &serde_json::Value) -> Result<DrawCommand, String> {
 }
 
 fn parse_points(v: &serde_json::Value) -> Result<DrawCommand, String> {
-    let geometry_id = v.get("geometryId").and_then(|x| x.as_i64()).ok_or("missing geometryId")? as u64;
+    let geometry_id = v
+        .get("geometryId")
+        .and_then(|x| x.as_i64())
+        .ok_or("missing geometryId")? as u64;
     let vertices = decode_b64_field(v, "verticesB64");
     let vertex_count = v.get("vertexCount").and_then(|x| x.as_u64()).unwrap_or(0) as u32;
     let model = parse_f32_buffer16(v.get("transform"))?;
@@ -886,33 +966,63 @@ fn parse_points(v: &serde_json::Value) -> Result<DrawCommand, String> {
 }
 
 fn parse_material(v: &serde_json::Value) -> Result<Material, String> {
-    let ty = v.get("type").and_then(|x| x.as_str()).ok_or("material missing type")?;
+    let ty = v
+        .get("type")
+        .and_then(|x| x.as_str())
+        .ok_or("material missing type")?;
     let color3 = parse_f32_array3(v.get("color")).unwrap_or([1.0; 3]);
     let opacity = v.get("opacity").and_then(|x| x.as_f64()).unwrap_or(1.0) as f32;
     let side_n = v.get("side").and_then(|x| x.as_u64()).unwrap_or(0);
-    let side = match side_n { 0 => Side::Front, 1 => Side::Back, _ => Side::Double };
+    let side = match side_n {
+        0 => Side::Front,
+        1 => Side::Back,
+        _ => Side::Double,
+    };
     let map = None; // texture binding handled later
     let color = [color3[0], color3[1], color3[2], 1.0];
     match ty {
-        "basic" => Ok(Material::Basic { color, opacity, side, map }),
+        "basic" => Ok(Material::Basic {
+            color,
+            opacity,
+            side,
+            map,
+        }),
         "standard" => {
             let metalness = v.get("metalness").and_then(|x| x.as_f64()).unwrap_or(0.0) as f32;
             let roughness = v.get("roughness").and_then(|x| x.as_f64()).unwrap_or(1.0) as f32;
-            Ok(Material::Standard { color, metalness, roughness, opacity, side, map })
+            Ok(Material::Standard {
+                color,
+                metalness,
+                roughness,
+                opacity,
+                side,
+                map,
+            })
         }
         "phong" => {
             let shininess = v.get("shininess").and_then(|x| x.as_f64()).unwrap_or(30.0) as f32;
             let s = parse_f32_array3(v.get("specular")).unwrap_or([0.07; 3]);
             let specular = [s[0], s[1], s[2], 1.0];
-            Ok(Material::Phong { color, specular, shininess, opacity, side, map })
+            Ok(Material::Phong {
+                color,
+                specular,
+                shininess,
+                opacity,
+                side,
+                map,
+            })
         }
         _ => Err(format!("unknown material type {ty}")),
     }
 }
 
 fn parse_f32_array3(v: Option<&serde_json::Value>) -> Result<[f32; 3], String> {
-    let arr = v.and_then(|x| x.as_array()).ok_or("expected array of length 3")?;
-    if arr.len() < 3 { return Err("array too short".into()); }
+    let arr = v
+        .and_then(|x| x.as_array())
+        .ok_or("expected array of length 3")?;
+    if arr.len() < 3 {
+        return Err("array too short".into());
+    }
     Ok([
         arr[0].as_f64().unwrap_or(0.0) as f32,
         arr[1].as_f64().unwrap_or(0.0) as f32,
@@ -921,8 +1031,12 @@ fn parse_f32_array3(v: Option<&serde_json::Value>) -> Result<[f32; 3], String> {
 }
 
 fn parse_f32_array4(v: Option<&serde_json::Value>) -> Result<[f32; 4], String> {
-    let arr = v.and_then(|x| x.as_array()).ok_or("expected array of length 4")?;
-    if arr.len() < 4 { return Err("array too short".into()); }
+    let arr = v
+        .and_then(|x| x.as_array())
+        .ok_or("expected array of length 4")?;
+    if arr.len() < 4 {
+        return Err("array too short".into());
+    }
     Ok([
         arr[0].as_f64().unwrap_or(0.0) as f32,
         arr[1].as_f64().unwrap_or(0.0) as f32,
@@ -935,16 +1049,23 @@ fn parse_f32_buffer16(v: Option<&serde_json::Value>) -> Result<[f32; 16], String
     // Accepts a JSON array of 16 numbers, or a base64-encoded f32 buffer.
     if let Some(s) = v.and_then(|x| x.as_str()) {
         let bytes = b64_decode(s).ok_or("bad base64 in matrix16")?;
-        if bytes.len() < 64 { return Err("matrix16 too short".into()); }
+        if bytes.len() < 64 {
+            return Err("matrix16 too short".into());
+        }
         let mut out = [0.0f32; 16];
         for i in 0..16 {
             let off = i * 4;
-            out[i] = f32::from_le_bytes([bytes[off], bytes[off+1], bytes[off+2], bytes[off+3]]);
+            out[i] =
+                f32::from_le_bytes([bytes[off], bytes[off + 1], bytes[off + 2], bytes[off + 3]]);
         }
         return Ok(out);
     }
-    let arr = v.and_then(|x| x.as_array()).ok_or("expected array of length 16")?;
-    if arr.len() < 16 { return Err("matrix16 too short".into()); }
+    let arr = v
+        .and_then(|x| x.as_array())
+        .ok_or("expected array of length 16")?;
+    if arr.len() < 16 {
+        return Err("matrix16 too short".into());
+    }
     let mut out = [0.0f32; 16];
     for i in 0..16 {
         out[i] = arr[i].as_f64().unwrap_or(0.0) as f32;
@@ -955,16 +1076,23 @@ fn parse_f32_buffer16(v: Option<&serde_json::Value>) -> Result<[f32; 16], String
 fn parse_f32_buffer9(v: Option<&serde_json::Value>) -> Result<[f32; 9], String> {
     if let Some(s) = v.and_then(|x| x.as_str()) {
         let bytes = b64_decode(s).ok_or("bad base64 in matrix9")?;
-        if bytes.len() < 36 { return Err("matrix9 too short".into()); }
+        if bytes.len() < 36 {
+            return Err("matrix9 too short".into());
+        }
         let mut out = [0.0f32; 9];
         for i in 0..9 {
             let off = i * 4;
-            out[i] = f32::from_le_bytes([bytes[off], bytes[off+1], bytes[off+2], bytes[off+3]]);
+            out[i] =
+                f32::from_le_bytes([bytes[off], bytes[off + 1], bytes[off + 2], bytes[off + 3]]);
         }
         return Ok(out);
     }
-    let arr = v.and_then(|x| x.as_array()).ok_or("expected array of length 9")?;
-    if arr.len() < 9 { return Err("matrix9 too short".into()); }
+    let arr = v
+        .and_then(|x| x.as_array())
+        .ok_or("expected array of length 9")?;
+    if arr.len() < 9 {
+        return Err("matrix9 too short".into());
+    }
     let mut out = [0.0f32; 9];
     for i in 0..9 {
         out[i] = arr[i].as_f64().unwrap_or(0.0) as f32;

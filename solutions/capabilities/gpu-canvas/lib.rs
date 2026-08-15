@@ -33,13 +33,13 @@
 //
 // `#[path]` keeps every module name where it was, so the public API is
 // unchanged.
-#[path = "infrastructure/gpu.rs"]
-pub mod gpu;
 #[path = "infrastructure/executor.rs"]
 pub mod executor;
-#[path = "domain/material.rs"]
-pub mod material;
 #[path = "domain/geometry.rs"]
 pub mod geometry;
+#[path = "infrastructure/gpu.rs"]
+pub mod gpu;
+#[path = "domain/material.rs"]
+pub mod material;
 #[path = "domain/uniforms.rs"]
 pub mod uniforms;
