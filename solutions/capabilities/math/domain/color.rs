@@ -35,7 +35,7 @@ impl Color {
     }
 }
 
-unsafe impl<'js> JsLifetime<'js> for Color {
+unsafe impl JsLifetime<'_> for Color {
     type Changed<'to> = Color;
 }
 
@@ -70,67 +70,75 @@ impl<'js> JsClass<'js> for Color {
 
         proto.set(
             "set",
-            Func::from(|this: This<Class<'js, Color>>, v: Value<'js>| -> Result<Class<'js, Color>> {
-                // three.js's `Color.set` is overloaded:
-                //   set(0xff00ff) — hex int
-                //   set("#ff00ff") / set("red") — string  (we only handle "#rrggbb" + "rgb()")
-                //   set(otherColor) — copy
-                //   set("rgb(255, 0, 255)") — also string parser (we handle the basic form)
-                if let Some(n) = v.as_number() {
-                    let h = n as u32;
-                    let mut c = this.borrow_mut();
-                    c.r = ((h >> 16) & 0xff) as f32 / 255.0;
-                    c.g = ((h >> 8) & 0xff) as f32 / 255.0;
-                    c.b = (h & 0xff) as f32 / 255.0;
-                } else if let Some(s) = v.as_string() {
-                    let raw = s.to_string()?;
-                    parse_color_string(&raw, &mut this.borrow_mut());
-                } else if let Ok(other) = Class::<Color>::from_value(&v) {
-                    let o = *other.borrow();
-                    *this.borrow_mut() = o;
-                }
-                Ok(this.0.clone())
-            }),
+            Func::from(
+                |this: This<Class<'js, Color>>, v: Value<'js>| -> Result<Class<'js, Color>> {
+                    // three.js's `Color.set` is overloaded:
+                    //   set(0xff00ff) — hex int
+                    //   set("#ff00ff") / set("red") — string  (we only handle "#rrggbb" + "rgb()")
+                    //   set(otherColor) — copy
+                    //   set("rgb(255, 0, 255)") — also string parser (we handle the basic form)
+                    if let Some(n) = v.as_number() {
+                        let h = n as u32;
+                        let mut c = this.borrow_mut();
+                        c.r = ((h >> 16) & 0xff) as f32 / 255.0;
+                        c.g = ((h >> 8) & 0xff) as f32 / 255.0;
+                        c.b = (h & 0xff) as f32 / 255.0;
+                    } else if let Some(s) = v.as_string() {
+                        let raw = s.to_string()?;
+                        parse_color_string(&raw, &mut this.borrow_mut());
+                    } else if let Ok(other) = Class::<Color>::from_value(&v) {
+                        let o = *other.borrow();
+                        *this.borrow_mut() = o;
+                    }
+                    Ok(this.0.clone())
+                },
+            ),
         )?;
 
         proto.set(
             "setHex",
-            Func::from(|this: This<Class<'js, Color>>, hex: u32| -> Class<'js, Color> {
-                {
-                    let mut c = this.borrow_mut();
-                    c.r = ((hex >> 16) & 0xff) as f32 / 255.0;
-                    c.g = ((hex >> 8) & 0xff) as f32 / 255.0;
-                    c.b = (hex & 0xff) as f32 / 255.0;
-                }
-                this.0.clone()
-            }),
+            Func::from(
+                |this: This<Class<'js, Color>>, hex: u32| -> Class<'js, Color> {
+                    {
+                        let mut c = this.borrow_mut();
+                        c.r = ((hex >> 16) & 0xff) as f32 / 255.0;
+                        c.g = ((hex >> 8) & 0xff) as f32 / 255.0;
+                        c.b = (hex & 0xff) as f32 / 255.0;
+                    }
+                    this.0.clone()
+                },
+            ),
         )?;
 
         proto.set(
             "setRGB",
-            Func::from(|this: This<Class<'js, Color>>, r: f32, g: f32, b: f32| -> Class<'js, Color> {
-                {
-                    let mut c = this.borrow_mut();
-                    c.r = r;
-                    c.g = g;
-                    c.b = b;
-                }
-                this.0.clone()
-            }),
+            Func::from(
+                |this: This<Class<'js, Color>>, r: f32, g: f32, b: f32| -> Class<'js, Color> {
+                    {
+                        let mut c = this.borrow_mut();
+                        c.r = r;
+                        c.g = g;
+                        c.b = b;
+                    }
+                    this.0.clone()
+                },
+            ),
         )?;
 
         proto.set(
             "setHSL",
-            Func::from(|this: This<Class<'js, Color>>, h: f32, s: f32, l: f32| -> Class<'js, Color> {
-                let (r, g, b) = hsl_to_rgb(h, s, l);
-                {
-                    let mut c = this.borrow_mut();
-                    c.r = r;
-                    c.g = g;
-                    c.b = b;
-                }
-                this.0.clone()
-            }),
+            Func::from(
+                |this: This<Class<'js, Color>>, h: f32, s: f32, l: f32| -> Class<'js, Color> {
+                    let (r, g, b) = hsl_to_rgb(h, s, l);
+                    {
+                        let mut c = this.borrow_mut();
+                        c.r = r;
+                        c.g = g;
+                        c.b = b;
+                    }
+                    this.0.clone()
+                },
+            ),
         )?;
 
         proto.set(
@@ -157,35 +165,44 @@ impl<'js> JsClass<'js> for Color {
 
         proto.set(
             "copy",
-            Func::from(|this: This<Class<'js, Color>>, other: Class<'js, Color>| -> Class<'js, Color> {
-                {
-                    let o = *other.borrow();
-                    *this.borrow_mut() = o;
-                }
-                this.0.clone()
-            }),
+            Func::from(
+                |this: This<Class<'js, Color>>, other: Class<'js, Color>| -> Class<'js, Color> {
+                    {
+                        let o = *other.borrow();
+                        *this.borrow_mut() = o;
+                    }
+                    this.0.clone()
+                },
+            ),
         )?;
 
         proto.set(
             "clone",
-            Func::from(|ctx: Ctx<'js>, this: This<Class<'js, Color>>| -> Result<Class<'js, Color>> {
-                let c = *this.borrow();
-                Class::instance(ctx, c)
-            }),
+            Func::from(
+                |ctx: Ctx<'js>, this: This<Class<'js, Color>>| -> Result<Class<'js, Color>> {
+                    let c = *this.borrow();
+                    Class::instance(ctx, c)
+                },
+            ),
         )?;
 
         proto.set(
             "lerp",
-            Func::from(|this: This<Class<'js, Color>>, color: Class<'js, Color>, alpha: f32| -> Class<'js, Color> {
-                {
-                    let o = *color.borrow();
-                    let mut c = this.borrow_mut();
-                    c.r += (o.r - c.r) * alpha;
-                    c.g += (o.g - c.g) * alpha;
-                    c.b += (o.b - c.b) * alpha;
-                }
-                this.0.clone()
-            }),
+            Func::from(
+                |this: This<Class<'js, Color>>,
+                 color: Class<'js, Color>,
+                 alpha: f32|
+                 -> Class<'js, Color> {
+                    {
+                        let o = *color.borrow();
+                        let mut c = this.borrow_mut();
+                        c.r += (o.r - c.r) * alpha;
+                        c.g += (o.g - c.g) * alpha;
+                        c.b += (o.b - c.b) * alpha;
+                    }
+                    this.0.clone()
+                },
+            ),
         )?;
 
         proto.set(
@@ -211,52 +228,60 @@ impl<'js> JsClass<'js> for Color {
 
         proto.set(
             "multiply",
-            Func::from(|this: This<Class<'js, Color>>, other: Class<'js, Color>| -> Class<'js, Color> {
-                {
-                    let o = *other.borrow();
-                    let mut c = this.borrow_mut();
-                    c.r *= o.r;
-                    c.g *= o.g;
-                    c.b *= o.b;
-                }
-                this.0.clone()
-            }),
+            Func::from(
+                |this: This<Class<'js, Color>>, other: Class<'js, Color>| -> Class<'js, Color> {
+                    {
+                        let o = *other.borrow();
+                        let mut c = this.borrow_mut();
+                        c.r *= o.r;
+                        c.g *= o.g;
+                        c.b *= o.b;
+                    }
+                    this.0.clone()
+                },
+            ),
         )?;
 
         proto.set(
             "multiplyScalar",
-            Func::from(|this: This<Class<'js, Color>>, s: f32| -> Class<'js, Color> {
-                {
-                    let mut c = this.borrow_mut();
-                    c.r *= s;
-                    c.g *= s;
-                    c.b *= s;
-                }
-                this.0.clone()
-            }),
+            Func::from(
+                |this: This<Class<'js, Color>>, s: f32| -> Class<'js, Color> {
+                    {
+                        let mut c = this.borrow_mut();
+                        c.r *= s;
+                        c.g *= s;
+                        c.b *= s;
+                    }
+                    this.0.clone()
+                },
+            ),
         )?;
 
         proto.set(
             "add",
-            Func::from(|this: This<Class<'js, Color>>, other: Class<'js, Color>| -> Class<'js, Color> {
-                {
-                    let o = *other.borrow();
-                    let mut c = this.borrow_mut();
-                    c.r += o.r;
-                    c.g += o.g;
-                    c.b += o.b;
-                }
-                this.0.clone()
-            }),
+            Func::from(
+                |this: This<Class<'js, Color>>, other: Class<'js, Color>| -> Class<'js, Color> {
+                    {
+                        let o = *other.borrow();
+                        let mut c = this.borrow_mut();
+                        c.r += o.r;
+                        c.g += o.g;
+                        c.b += o.b;
+                    }
+                    this.0.clone()
+                },
+            ),
         )?;
 
         proto.set(
             "equals",
-            Func::from(|this: This<Class<'js, Color>>, other: Class<'js, Color>| -> bool {
-                let a = *this.borrow();
-                let b = *other.borrow();
-                a.r == b.r && a.g == b.g && a.b == b.b
-            }),
+            Func::from(
+                |this: This<Class<'js, Color>>, other: Class<'js, Color>| -> bool {
+                    let a = *this.borrow();
+                    let b = *other.borrow();
+                    a.r == b.r && a.g == b.g && a.b == b.b
+                },
+            ),
         )?;
 
         Ok(Some(proto))
@@ -314,7 +339,11 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (f32, f32, f32) {
     if s == 0.0 {
         return (l, l, l);
     }
-    let p = if l <= 0.5 { l * (1.0 + s) } else { l + s - l * s };
+    let p = if l <= 0.5 {
+        l * (1.0 + s)
+    } else {
+        l + s - l * s
+    };
     let q = 2.0 * l - p;
     let r = hue2rgb(q, p, h + 1.0 / 3.0);
     let g = hue2rgb(q, p, h);
@@ -359,9 +388,9 @@ fn parse_color_string(s: &str, out: &mut Color) {
             }
         } else if stripped.len() == 3 {
             if let Ok(h) = u32::from_str_radix(stripped, 16) {
-                let r = ((h >> 8) & 0xf) as u32;
-                let g = ((h >> 4) & 0xf) as u32;
-                let b = (h & 0xf) as u32;
+                let r = (h >> 8) & 0xf;
+                let g = (h >> 4) & 0xf;
+                let b = h & 0xf;
                 out.r = ((r << 4) | r) as f32 / 255.0;
                 out.g = ((g << 4) | g) as f32 / 255.0;
                 out.b = ((b << 4) | b) as f32 / 255.0;

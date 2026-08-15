@@ -34,9 +34,15 @@ impl Quaternion {
     /// Build a Quaternion from a rotation matrix (column-major 4x4 elements
     /// array). Used by Matrix4.decompose. Algorithm direct from three.js.
     pub fn from_rotation_matrix_elements(te: &[f32; 16]) -> Self {
-        let m11 = te[0]; let m12 = te[4]; let m13 = te[8];
-        let m21 = te[1]; let m22 = te[5]; let m23 = te[9];
-        let m31 = te[2]; let m32 = te[6]; let m33 = te[10];
+        let m11 = te[0];
+        let m12 = te[4];
+        let m13 = te[8];
+        let m21 = te[1];
+        let m22 = te[5];
+        let m23 = te[9];
+        let m31 = te[2];
+        let m32 = te[6];
+        let m33 = te[10];
 
         let trace = m11 + m22 + m33;
         let (x, y, z, w);
@@ -69,7 +75,7 @@ impl Quaternion {
     }
 }
 
-unsafe impl<'js> JsLifetime<'js> for Quaternion {
+unsafe impl JsLifetime<'_> for Quaternion {
     type Changed<'to> = Quaternion;
 }
 
@@ -92,7 +98,9 @@ impl<'js> JsClass<'js> for Quaternion {
                     ctx,
                     &proto,
                     $name,
-                    Func::from(|this: This<Class<'js, Quaternion>>| -> f32 { this.borrow().$field }),
+                    Func::from(|this: This<Class<'js, Quaternion>>| -> f32 {
+                        this.borrow().$field
+                    }),
                     Func::from(|this: This<Class<'js, Quaternion>>, v: f32| {
                         this.borrow_mut().$field = v;
                     }),
@@ -107,10 +115,18 @@ impl<'js> JsClass<'js> for Quaternion {
         proto.set(
             "set",
             Func::from(
-                |this: This<Class<'js, Quaternion>>, x: f32, y: f32, z: f32, w: f32| -> Class<'js, Quaternion> {
+                |this: This<Class<'js, Quaternion>>,
+                 x: f32,
+                 y: f32,
+                 z: f32,
+                 w: f32|
+                 -> Class<'js, Quaternion> {
                     {
                         let mut q = this.borrow_mut();
-                        q.x = x; q.y = y; q.z = z; q.w = w;
+                        q.x = x;
+                        q.y = y;
+                        q.z = z;
+                        q.w = w;
                     }
                     this.0.clone()
                 },
@@ -120,7 +136,9 @@ impl<'js> JsClass<'js> for Quaternion {
         proto.set(
             "copy",
             Func::from(
-                |this: This<Class<'js, Quaternion>>, other: Class<'js, Quaternion>| -> Class<'js, Quaternion> {
+                |this: This<Class<'js, Quaternion>>,
+                 other: Class<'js, Quaternion>|
+                 -> Class<'js, Quaternion> {
                     {
                         let o = *other.borrow();
                         let mut q = this.borrow_mut();
@@ -134,7 +152,9 @@ impl<'js> JsClass<'js> for Quaternion {
         proto.set(
             "clone",
             Func::from(
-                |ctx: Ctx<'js>, this: This<Class<'js, Quaternion>>| -> Result<Class<'js, Quaternion>> {
+                |ctx: Ctx<'js>,
+                 this: This<Class<'js, Quaternion>>|
+                 -> Result<Class<'js, Quaternion>> {
                     let q = *this.borrow();
                     Class::instance(ctx, q)
                 },
@@ -143,13 +163,15 @@ impl<'js> JsClass<'js> for Quaternion {
 
         proto.set(
             "identity",
-            Func::from(|this: This<Class<'js, Quaternion>>| -> Class<'js, Quaternion> {
-                {
-                    let mut q = this.borrow_mut();
-                    *q = Quaternion::default();
-                }
-                this.0.clone()
-            }),
+            Func::from(
+                |this: This<Class<'js, Quaternion>>| -> Class<'js, Quaternion> {
+                    {
+                        let mut q = this.borrow_mut();
+                        *q = Quaternion::default();
+                    }
+                    this.0.clone()
+                },
+            ),
         )?;
 
         proto.set(
@@ -200,16 +222,14 @@ impl<'js> JsClass<'js> for Quaternion {
                         (x, y, z, order)
                     } else {
                         let x: f32 = a.as_number().map(|n| n as f32).unwrap_or(0.0);
-                        let y: f32 = b
-                            .0
-                            .and_then(|v| v.as_number())
-                            .map(|n| n as f32)
-                            .unwrap_or(0.0);
+                        let y: f32 =
+                            b.0.and_then(|v| v.as_number())
+                                .map(|n| n as f32)
+                                .unwrap_or(0.0);
                         let z: f32 = c.0.unwrap_or(0.0);
-                        let order: String = d
-                            .0
-                            .and_then(|s| s.to_string().ok())
-                            .unwrap_or_else(|| "XYZ".to_string());
+                        let order: String =
+                            d.0.and_then(|s| s.to_string().ok())
+                                .unwrap_or_else(|| "XYZ".to_string());
                         (x, y, z, order)
                     };
 
@@ -270,7 +290,9 @@ impl<'js> JsClass<'js> for Quaternion {
         proto.set(
             "multiply",
             Func::from(
-                |this: This<Class<'js, Quaternion>>, other: Class<'js, Quaternion>| -> Class<'js, Quaternion> {
+                |this: This<Class<'js, Quaternion>>,
+                 other: Class<'js, Quaternion>|
+                 -> Class<'js, Quaternion> {
                     let q = *this.borrow();
                     let o = *other.borrow();
                     let r = quat_mul(q, o);
@@ -283,7 +305,9 @@ impl<'js> JsClass<'js> for Quaternion {
         proto.set(
             "premultiply",
             Func::from(
-                |this: This<Class<'js, Quaternion>>, other: Class<'js, Quaternion>| -> Class<'js, Quaternion> {
+                |this: This<Class<'js, Quaternion>>,
+                 other: Class<'js, Quaternion>|
+                 -> Class<'js, Quaternion> {
                     let q = *this.borrow();
                     let o = *other.borrow();
                     let r = quat_mul(o, q);
@@ -310,29 +334,33 @@ impl<'js> JsClass<'js> for Quaternion {
 
         proto.set(
             "conjugate",
-            Func::from(|this: This<Class<'js, Quaternion>>| -> Class<'js, Quaternion> {
-                {
-                    let mut q = this.borrow_mut();
-                    q.x = -q.x;
-                    q.y = -q.y;
-                    q.z = -q.z;
-                }
-                this.0.clone()
-            }),
+            Func::from(
+                |this: This<Class<'js, Quaternion>>| -> Class<'js, Quaternion> {
+                    {
+                        let mut q = this.borrow_mut();
+                        q.x = -q.x;
+                        q.y = -q.y;
+                        q.z = -q.z;
+                    }
+                    this.0.clone()
+                },
+            ),
         )?;
 
         proto.set(
             "invert",
-            Func::from(|this: This<Class<'js, Quaternion>>| -> Class<'js, Quaternion> {
-                // Three.js inverts unit quaternions via conjugate. Match.
-                {
-                    let mut q = this.borrow_mut();
-                    q.x = -q.x;
-                    q.y = -q.y;
-                    q.z = -q.z;
-                }
-                this.0.clone()
-            }),
+            Func::from(
+                |this: This<Class<'js, Quaternion>>| -> Class<'js, Quaternion> {
+                    // Three.js inverts unit quaternions via conjugate. Match.
+                    {
+                        let mut q = this.borrow_mut();
+                        q.x = -q.x;
+                        q.y = -q.y;
+                        q.z = -q.z;
+                    }
+                    this.0.clone()
+                },
+            ),
         )?;
 
         proto.set(
@@ -364,25 +392,27 @@ impl<'js> JsClass<'js> for Quaternion {
 
         proto.set(
             "normalize",
-            Func::from(|this: This<Class<'js, Quaternion>>| -> Class<'js, Quaternion> {
-                {
-                    let mut q = this.borrow_mut();
-                    let len = (q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w).sqrt();
-                    if len == 0.0 {
-                        q.x = 0.0;
-                        q.y = 0.0;
-                        q.z = 0.0;
-                        q.w = 1.0;
-                    } else {
-                        let inv = 1.0 / len;
-                        q.x *= inv;
-                        q.y *= inv;
-                        q.z *= inv;
-                        q.w *= inv;
+            Func::from(
+                |this: This<Class<'js, Quaternion>>| -> Class<'js, Quaternion> {
+                    {
+                        let mut q = this.borrow_mut();
+                        let len = (q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w).sqrt();
+                        if len == 0.0 {
+                            q.x = 0.0;
+                            q.y = 0.0;
+                            q.z = 0.0;
+                            q.w = 1.0;
+                        } else {
+                            let inv = 1.0 / len;
+                            q.x *= inv;
+                            q.y *= inv;
+                            q.z *= inv;
+                            q.w *= inv;
+                        }
                     }
-                }
-                this.0.clone()
-            }),
+                    this.0.clone()
+                },
+            ),
         )?;
 
         proto.set(

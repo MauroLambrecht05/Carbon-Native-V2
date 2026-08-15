@@ -15,17 +15,36 @@ name = "carbon-fast-math"
 version = "0.1.0"
 edition = "2021"
 rust-version.workspace = true
-license = "Apache-2.0"
 description = "Rust-native QuickJS classes mirroring three.js's math API (Vector3, Matrix4, Quaternion, Box3, Frustum, Color). Drop-in replacement that runs ~10-50x faster than three.js's JS implementations under QuickJS."
-# The workspace manifest lives in .config/rust. Cargo only walks UP from a
-# crate, so it would never find it — the link has to be explicit.
-workspace = "../../../.config/rust"
+# The workspace manifest lives in .tools/orchestration/bazel/cargo, beside the
+# Bazel rules that drive it. Cargo only walks UP from a crate, so it would
+# never find it — the link has to be explicit.
+workspace = "../../../.tools/orchestration/bazel/cargo"
 
 [lib]
 name = "carbon_fast_math"
 # Not src/lib.rs: this tree puts folders at the root of a solution rather than
 # hiding them under src/, so the crate root sits beside domain/.
 path = "lib.rs"
+
+# The phase-3 benchmark driver: runs our Rust-backed classes and a JS
+# implementation mirroring three.js's source in the SAME rquickjs context, so
+# the only variable is the implementation behind an identical JS surface.
+#
+# Declared explicitly rather than auto-discovered. Cargo only auto-discovers
+# binaries in `src/bin/`, and this crate has no `src/` — the same flattening
+# that moves the crate root to `lib.rs` means every target needs a path.
+#
+# `tools/` rather than `bin/`: it is a development instrument, not something the
+# crate ships. .tools/automation/benchmarks/phases/bench-phase3.ps1 drives it.
+[[bin]]
+name = "bench_runner"
+path = "tools/bench_runner.rs"
+
+# Clippy runs with -D warnings; the shared allow-list lives in the workspace
+# root so one rationale covers every crate. See //.tools/orchestration/bazel/cargo/Cargo.toml.
+[lints]
+workspace = true
 
 [dependencies]
 # rquickjs with the class macro feature so we can derive #[class]/#[methods].

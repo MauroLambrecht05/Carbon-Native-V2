@@ -55,7 +55,7 @@ impl Vector3 {
     }
 }
 
-unsafe impl<'js> JsLifetime<'js> for Vector3 {
+unsafe impl JsLifetime<'_> for Vector3 {
     type Changed<'to> = Vector3;
 }
 
@@ -129,43 +129,53 @@ impl<'js> JsClass<'js> for Vector3 {
 
         proto.set(
             "setScalar",
-            Func::from(|this: This<Class<'js, Vector3>>, s: f32| -> Class<'js, Vector3> {
-                {
-                    let mut b = this.borrow_mut();
-                    b.x = s;
-                    b.y = s;
-                    b.z = s;
-                }
-                this.0.clone()
-            }),
+            Func::from(
+                |this: This<Class<'js, Vector3>>, s: f32| -> Class<'js, Vector3> {
+                    {
+                        let mut b = this.borrow_mut();
+                        b.x = s;
+                        b.y = s;
+                        b.z = s;
+                    }
+                    this.0.clone()
+                },
+            ),
         )?;
 
         proto.set(
             "setX",
-            Func::from(|this: This<Class<'js, Vector3>>, v: f32| -> Class<'js, Vector3> {
-                this.borrow_mut().x = v;
-                this.0.clone()
-            }),
+            Func::from(
+                |this: This<Class<'js, Vector3>>, v: f32| -> Class<'js, Vector3> {
+                    this.borrow_mut().x = v;
+                    this.0.clone()
+                },
+            ),
         )?;
         proto.set(
             "setY",
-            Func::from(|this: This<Class<'js, Vector3>>, v: f32| -> Class<'js, Vector3> {
-                this.borrow_mut().y = v;
-                this.0.clone()
-            }),
+            Func::from(
+                |this: This<Class<'js, Vector3>>, v: f32| -> Class<'js, Vector3> {
+                    this.borrow_mut().y = v;
+                    this.0.clone()
+                },
+            ),
         )?;
         proto.set(
             "setZ",
-            Func::from(|this: This<Class<'js, Vector3>>, v: f32| -> Class<'js, Vector3> {
-                this.borrow_mut().z = v;
-                this.0.clone()
-            }),
+            Func::from(
+                |this: This<Class<'js, Vector3>>, v: f32| -> Class<'js, Vector3> {
+                    this.borrow_mut().z = v;
+                    this.0.clone()
+                },
+            ),
         )?;
 
         proto.set(
             "copy",
             Func::from(
-                |this: This<Class<'js, Vector3>>, other: Class<'js, Vector3>| -> Class<'js, Vector3> {
+                |this: This<Class<'js, Vector3>>,
+                 other: Class<'js, Vector3>|
+                 -> Class<'js, Vector3> {
                     {
                         let o = *other.borrow();
                         let mut b = this.borrow_mut();
@@ -181,7 +191,9 @@ impl<'js> JsClass<'js> for Vector3 {
         proto.set(
             "add",
             Func::from(
-                |this: This<Class<'js, Vector3>>, other: Class<'js, Vector3>| -> Class<'js, Vector3> {
+                |this: This<Class<'js, Vector3>>,
+                 other: Class<'js, Vector3>|
+                 -> Class<'js, Vector3> {
                     {
                         let o = *other.borrow();
                         let mut b = this.borrow_mut();
@@ -196,15 +208,17 @@ impl<'js> JsClass<'js> for Vector3 {
 
         proto.set(
             "addScalar",
-            Func::from(|this: This<Class<'js, Vector3>>, s: f32| -> Class<'js, Vector3> {
-                {
-                    let mut b = this.borrow_mut();
-                    b.x += s;
-                    b.y += s;
-                    b.z += s;
-                }
-                this.0.clone()
-            }),
+            Func::from(
+                |this: This<Class<'js, Vector3>>, s: f32| -> Class<'js, Vector3> {
+                    {
+                        let mut b = this.borrow_mut();
+                        b.x += s;
+                        b.y += s;
+                        b.z += s;
+                    }
+                    this.0.clone()
+                },
+            ),
         )?;
 
         proto.set(
@@ -249,7 +263,9 @@ impl<'js> JsClass<'js> for Vector3 {
         proto.set(
             "sub",
             Func::from(
-                |this: This<Class<'js, Vector3>>, other: Class<'js, Vector3>| -> Class<'js, Vector3> {
+                |this: This<Class<'js, Vector3>>,
+                 other: Class<'js, Vector3>|
+                 -> Class<'js, Vector3> {
                     {
                         let o = *other.borrow();
                         let mut b = this.borrow_mut();
@@ -264,15 +280,17 @@ impl<'js> JsClass<'js> for Vector3 {
 
         proto.set(
             "subScalar",
-            Func::from(|this: This<Class<'js, Vector3>>, s: f32| -> Class<'js, Vector3> {
-                {
-                    let mut b = this.borrow_mut();
-                    b.x -= s;
-                    b.y -= s;
-                    b.z -= s;
-                }
-                this.0.clone()
-            }),
+            Func::from(
+                |this: This<Class<'js, Vector3>>, s: f32| -> Class<'js, Vector3> {
+                    {
+                        let mut b = this.borrow_mut();
+                        b.x -= s;
+                        b.y -= s;
+                        b.z -= s;
+                    }
+                    this.0.clone()
+                },
+            ),
         )?;
 
         proto.set(
@@ -298,7 +316,9 @@ impl<'js> JsClass<'js> for Vector3 {
         proto.set(
             "multiply",
             Func::from(
-                |this: This<Class<'js, Vector3>>, other: Class<'js, Vector3>| -> Class<'js, Vector3> {
+                |this: This<Class<'js, Vector3>>,
+                 other: Class<'js, Vector3>|
+                 -> Class<'js, Vector3> {
                     {
                         let o = *other.borrow();
                         let mut b = this.borrow_mut();
@@ -313,15 +333,17 @@ impl<'js> JsClass<'js> for Vector3 {
 
         proto.set(
             "multiplyScalar",
-            Func::from(|this: This<Class<'js, Vector3>>, s: f32| -> Class<'js, Vector3> {
-                {
-                    let mut b = this.borrow_mut();
-                    b.x *= s;
-                    b.y *= s;
-                    b.z *= s;
-                }
-                this.0.clone()
-            }),
+            Func::from(
+                |this: This<Class<'js, Vector3>>, s: f32| -> Class<'js, Vector3> {
+                    {
+                        let mut b = this.borrow_mut();
+                        b.x *= s;
+                        b.y *= s;
+                        b.z *= s;
+                    }
+                    this.0.clone()
+                },
+            ),
         )?;
 
         proto.set(
@@ -347,7 +369,9 @@ impl<'js> JsClass<'js> for Vector3 {
         proto.set(
             "divide",
             Func::from(
-                |this: This<Class<'js, Vector3>>, other: Class<'js, Vector3>| -> Class<'js, Vector3> {
+                |this: This<Class<'js, Vector3>>,
+                 other: Class<'js, Vector3>|
+                 -> Class<'js, Vector3> {
                     {
                         let o = *other.borrow();
                         let mut b = this.borrow_mut();
@@ -362,18 +386,20 @@ impl<'js> JsClass<'js> for Vector3 {
 
         proto.set(
             "divideScalar",
-            Func::from(|this: This<Class<'js, Vector3>>, s: f32| -> Class<'js, Vector3> {
-                {
-                    // three.js: `this.multiplyScalar( 1 / scalar )`. Same float
-                    // semantics including division-by-zero -> Infinity.
-                    let inv = 1.0 / s;
-                    let mut b = this.borrow_mut();
-                    b.x *= inv;
-                    b.y *= inv;
-                    b.z *= inv;
-                }
-                this.0.clone()
-            }),
+            Func::from(
+                |this: This<Class<'js, Vector3>>, s: f32| -> Class<'js, Vector3> {
+                    {
+                        // three.js: `this.multiplyScalar( 1 / scalar )`. Same float
+                        // semantics including division-by-zero -> Infinity.
+                        let inv = 1.0 / s;
+                        let mut b = this.borrow_mut();
+                        b.x *= inv;
+                        b.y *= inv;
+                        b.z *= inv;
+                    }
+                    this.0.clone()
+                },
+            ),
         )?;
 
         proto.set(
@@ -443,24 +469,28 @@ impl<'js> JsClass<'js> for Vector3 {
 
         proto.set(
             "setLength",
-            Func::from(|this: This<Class<'js, Vector3>>, length: f32| -> Class<'js, Vector3> {
-                {
-                    let mut b = this.borrow_mut();
-                    let cur = (b.x * b.x + b.y * b.y + b.z * b.z).sqrt();
-                    let inv = if cur == 0.0 { 1.0 } else { 1.0 / cur };
-                    let factor = inv * length;
-                    b.x *= factor;
-                    b.y *= factor;
-                    b.z *= factor;
-                }
-                this.0.clone()
-            }),
+            Func::from(
+                |this: This<Class<'js, Vector3>>, length: f32| -> Class<'js, Vector3> {
+                    {
+                        let mut b = this.borrow_mut();
+                        let cur = (b.x * b.x + b.y * b.y + b.z * b.z).sqrt();
+                        let inv = if cur == 0.0 { 1.0 } else { 1.0 / cur };
+                        let factor = inv * length;
+                        b.x *= factor;
+                        b.y *= factor;
+                        b.z *= factor;
+                    }
+                    this.0.clone()
+                },
+            ),
         )?;
 
         proto.set(
             "cross",
             Func::from(
-                |this: This<Class<'js, Vector3>>, other: Class<'js, Vector3>| -> Class<'js, Vector3> {
+                |this: This<Class<'js, Vector3>>,
+                 other: Class<'js, Vector3>|
+                 -> Class<'js, Vector3> {
                     {
                         let o = *other.borrow();
                         let mut b = this.borrow_mut();
@@ -566,7 +596,9 @@ impl<'js> JsClass<'js> for Vector3 {
         proto.set(
             "applyQuaternion",
             Func::from(
-                |this: This<Class<'js, Vector3>>, q: Class<'js, Quaternion>| -> Class<'js, Vector3> {
+                |this: This<Class<'js, Vector3>>,
+                 q: Class<'js, Quaternion>|
+                 -> Class<'js, Vector3> {
                     let (x, y, z) = {
                         let v = this.borrow();
                         (v.x, v.y, v.z)
@@ -638,7 +670,9 @@ impl<'js> JsClass<'js> for Vector3 {
         proto.set(
             "min",
             Func::from(
-                |this: This<Class<'js, Vector3>>, other: Class<'js, Vector3>| -> Class<'js, Vector3> {
+                |this: This<Class<'js, Vector3>>,
+                 other: Class<'js, Vector3>|
+                 -> Class<'js, Vector3> {
                     {
                         let o = *other.borrow();
                         let mut b = this.borrow_mut();
@@ -654,7 +688,9 @@ impl<'js> JsClass<'js> for Vector3 {
         proto.set(
             "max",
             Func::from(
-                |this: This<Class<'js, Vector3>>, other: Class<'js, Vector3>| -> Class<'js, Vector3> {
+                |this: This<Class<'js, Vector3>>,
+                 other: Class<'js, Vector3>|
+                 -> Class<'js, Vector3> {
                     {
                         let o = *other.borrow();
                         let mut b = this.borrow_mut();
@@ -757,10 +793,12 @@ impl<'js> JsClass<'js> for Vector3 {
 
         proto.set(
             "clone",
-            Func::from(|ctx: Ctx<'js>, this: This<Class<'js, Vector3>>| -> Result<Class<'js, Vector3>> {
-                let v = *this.borrow();
-                Class::instance(ctx, v)
-            }),
+            Func::from(
+                |ctx: Ctx<'js>, this: This<Class<'js, Vector3>>| -> Result<Class<'js, Vector3>> {
+                    let v = *this.borrow();
+                    Class::instance(ctx, v)
+                },
+            ),
         )?;
 
         proto.set(

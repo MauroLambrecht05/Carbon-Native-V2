@@ -29,7 +29,7 @@ impl Box3 {
     }
 }
 
-unsafe impl<'js> JsLifetime<'js> for Box3 {
+unsafe impl JsLifetime<'_> for Box3 {
     type Changed<'to> = Box3;
 }
 
@@ -55,10 +55,12 @@ impl<'js> JsClass<'js> for Box3 {
             ctx,
             &proto,
             "min",
-            Func::from(|ctx: Ctx<'js>, this: This<Class<'js, Box3>>| -> Result<Class<'js, Vector3>> {
-                let m = this.borrow().min;
-                Class::instance(ctx, m)
-            }),
+            Func::from(
+                |ctx: Ctx<'js>, this: This<Class<'js, Box3>>| -> Result<Class<'js, Vector3>> {
+                    let m = this.borrow().min;
+                    Class::instance(ctx, m)
+                },
+            ),
             Func::from(|this: This<Class<'js, Box3>>, v: Class<'js, Vector3>| {
                 let nv = *v.borrow();
                 this.borrow_mut().min = nv;
@@ -68,10 +70,12 @@ impl<'js> JsClass<'js> for Box3 {
             ctx,
             &proto,
             "max",
-            Func::from(|ctx: Ctx<'js>, this: This<Class<'js, Box3>>| -> Result<Class<'js, Vector3>> {
-                let m = this.borrow().max;
-                Class::instance(ctx, m)
-            }),
+            Func::from(
+                |ctx: Ctx<'js>, this: This<Class<'js, Box3>>| -> Result<Class<'js, Vector3>> {
+                    let m = this.borrow().max;
+                    Class::instance(ctx, m)
+                },
+            ),
             Func::from(|this: This<Class<'js, Box3>>, v: Class<'js, Vector3>| {
                 let nv = *v.borrow();
                 this.borrow_mut().max = nv;
@@ -128,10 +132,12 @@ impl<'js> JsClass<'js> for Box3 {
 
         proto.set(
             "clone",
-            Func::from(|ctx: Ctx<'js>, this: This<Class<'js, Box3>>| -> Result<Class<'js, Box3>> {
-                let b = *this.borrow();
-                Class::instance(ctx, b)
-            }),
+            Func::from(
+                |ctx: Ctx<'js>, this: This<Class<'js, Box3>>| -> Result<Class<'js, Box3>> {
+                    let b = *this.borrow();
+                    Class::instance(ctx, b)
+                },
+            ),
         )?;
 
         proto.set(
@@ -191,7 +197,9 @@ impl<'js> JsClass<'js> for Box3 {
         proto.set(
             "setFromPoints",
             Func::from(
-                |this: This<Class<'js, Box3>>, points: rquickjs::Array<'js>| -> Result<Class<'js, Box3>> {
+                |this: This<Class<'js, Box3>>,
+                 points: rquickjs::Array<'js>|
+                 -> Result<Class<'js, Box3>> {
                     {
                         let mut b = this.borrow_mut();
                         *b = Box3::empty();
@@ -218,51 +226,63 @@ impl<'js> JsClass<'js> for Box3 {
                 |this: This<Class<'js, Box3>>, pt: Class<'js, Vector3>| -> bool {
                     let p = *pt.borrow();
                     let b = this.borrow();
-                    p.x >= b.min.x && p.x <= b.max.x &&
-                    p.y >= b.min.y && p.y <= b.max.y &&
-                    p.z >= b.min.z && p.z <= b.max.z
+                    p.x >= b.min.x
+                        && p.x <= b.max.x
+                        && p.y >= b.min.y
+                        && p.y <= b.max.y
+                        && p.z >= b.min.z
+                        && p.z <= b.max.z
                 },
             ),
         )?;
 
         proto.set(
             "containsBox",
-            Func::from(|this: This<Class<'js, Box3>>, other: Class<'js, Box3>| -> bool {
-                let o = *other.borrow();
-                let b = this.borrow();
-                b.min.x <= o.min.x && o.max.x <= b.max.x &&
-                b.min.y <= o.min.y && o.max.y <= b.max.y &&
-                b.min.z <= o.min.z && o.max.z <= b.max.z
-            }),
+            Func::from(
+                |this: This<Class<'js, Box3>>, other: Class<'js, Box3>| -> bool {
+                    let o = *other.borrow();
+                    let b = this.borrow();
+                    b.min.x <= o.min.x
+                        && o.max.x <= b.max.x
+                        && b.min.y <= o.min.y
+                        && o.max.y <= b.max.y
+                        && b.min.z <= o.min.z
+                        && o.max.z <= b.max.z
+                },
+            ),
         )?;
 
         proto.set(
             "intersectsBox",
-            Func::from(|this: This<Class<'js, Box3>>, other: Class<'js, Box3>| -> bool {
-                let o = *other.borrow();
-                let b = this.borrow();
-                !(o.max.x < b.min.x || o.min.x > b.max.x ||
-                  o.max.y < b.min.y || o.min.y > b.max.y ||
-                  o.max.z < b.min.z || o.min.z > b.max.z)
-            }),
+            Func::from(
+                |this: This<Class<'js, Box3>>, other: Class<'js, Box3>| -> bool {
+                    let o = *other.borrow();
+                    let b = this.borrow();
+                    !(o.max.x < b.min.x
+                        || o.min.x > b.max.x
+                        || o.max.y < b.min.y
+                        || o.min.y > b.max.y
+                        || o.max.z < b.min.z
+                        || o.min.z > b.max.z)
+                },
+            ),
         )?;
 
         proto.set(
             "intersectsSphere",
-            Func::from(|this: This<Class<'js, Box3>>,
-                        center: Class<'js, Vector3>,
-                        radius: f32|
-                        -> bool {
-                let c = *center.borrow();
-                let b = this.borrow();
-                let cx = c.x.max(b.min.x).min(b.max.x);
-                let cy = c.y.max(b.min.y).min(b.max.y);
-                let cz = c.z.max(b.min.z).min(b.max.z);
-                let dx = cx - c.x;
-                let dy = cy - c.y;
-                let dz = cz - c.z;
-                dx * dx + dy * dy + dz * dz <= radius * radius
-            }),
+            Func::from(
+                |this: This<Class<'js, Box3>>, center: Class<'js, Vector3>, radius: f32| -> bool {
+                    let c = *center.borrow();
+                    let b = this.borrow();
+                    let cx = c.x.max(b.min.x).min(b.max.x);
+                    let cy = c.y.max(b.min.y).min(b.max.y);
+                    let cz = c.z.max(b.min.z).min(b.max.z);
+                    let dx = cx - c.x;
+                    let dy = cy - c.y;
+                    let dz = cz - c.z;
+                    dx * dx + dy * dy + dz * dz <= radius * radius
+                },
+            ),
         )?;
 
         proto.set(
@@ -319,12 +339,18 @@ impl<'js> JsClass<'js> for Box3 {
 
         proto.set(
             "equals",
-            Func::from(|this: This<Class<'js, Box3>>, other: Class<'js, Box3>| -> bool {
-                let a = *this.borrow();
-                let b = *other.borrow();
-                a.min.x == b.min.x && a.min.y == b.min.y && a.min.z == b.min.z &&
-                a.max.x == b.max.x && a.max.y == b.max.y && a.max.z == b.max.z
-            }),
+            Func::from(
+                |this: This<Class<'js, Box3>>, other: Class<'js, Box3>| -> bool {
+                    let a = *this.borrow();
+                    let b = *other.borrow();
+                    a.min.x == b.min.x
+                        && a.min.y == b.min.y
+                        && a.min.z == b.min.z
+                        && a.max.x == b.max.x
+                        && a.max.y == b.max.y
+                        && a.max.z == b.max.z
+                },
+            ),
         )?;
 
         Ok(Some(proto))
@@ -336,9 +362,10 @@ impl<'js> JsClass<'js> for Box3 {
         let c = Constructor::new_class::<Box3, _, _>(
             ctx.clone(),
             |min: Opt<Class<'js, Vector3>>, max: Opt<Class<'js, Vector3>>| -> Box3 {
-                let mn = min.0.map(|c| *c.borrow()).unwrap_or_else(|| {
-                    Vector3::new(f32::INFINITY, f32::INFINITY, f32::INFINITY)
-                });
+                let mn = min
+                    .0
+                    .map(|c| *c.borrow())
+                    .unwrap_or_else(|| Vector3::new(f32::INFINITY, f32::INFINITY, f32::INFINITY));
                 let mx = max.0.map(|c| *c.borrow()).unwrap_or_else(|| {
                     Vector3::new(-f32::INFINITY, -f32::INFINITY, -f32::INFINITY)
                 });

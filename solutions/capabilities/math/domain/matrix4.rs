@@ -48,7 +48,7 @@ impl Matrix4 {
     }
 }
 
-unsafe impl<'js> JsLifetime<'js> for Matrix4 {
+unsafe impl JsLifetime<'_> for Matrix4 {
     type Changed<'to> = Matrix4;
 }
 
@@ -72,22 +72,26 @@ impl<'js> JsClass<'js> for Matrix4 {
             ctx,
             &proto,
             "elements",
-            Func::from(|ctx: Ctx<'js>, this: This<Class<'js, Matrix4>>| -> Result<rquickjs::Array<'js>> {
-                let m = this.borrow();
-                let arr = rquickjs::Array::new(ctx)?;
-                for i in 0..16 {
-                    arr.set(i, m.elements[i])?;
-                }
-                Ok(arr)
-            }),
+            Func::from(
+                |ctx: Ctx<'js>, this: This<Class<'js, Matrix4>>| -> Result<rquickjs::Array<'js>> {
+                    let m = this.borrow();
+                    let arr = rquickjs::Array::new(ctx)?;
+                    for i in 0..16 {
+                        arr.set(i, m.elements[i])?;
+                    }
+                    Ok(arr)
+                },
+            ),
             // setter: copy 16 entries from the supplied array into our buffer.
-            Func::from(|this: This<Class<'js, Matrix4>>, value: rquickjs::Array<'js>| -> Result<()> {
-                let mut m = this.borrow_mut();
-                for i in 0..16 {
-                    m.elements[i] = value.get::<f32>(i).unwrap_or(0.0);
-                }
-                Ok(())
-            }),
+            Func::from(
+                |this: This<Class<'js, Matrix4>>, value: rquickjs::Array<'js>| -> Result<()> {
+                    let mut m = this.borrow_mut();
+                    for i in 0..16 {
+                        m.elements[i] = value.get::<f32>(i).unwrap_or(0.0);
+                    }
+                    Ok(())
+                },
+            ),
         )?;
 
         // set(n11, n12, ..., n44) — three.js's row-major signature that
@@ -100,15 +104,29 @@ impl<'js> JsClass<'js> for Matrix4 {
         proto.set(
             "set",
             Func::from(
-                |this: This<Class<'js, Matrix4>>, args: rquickjs::function::Rest<f32>| -> Class<'js, Matrix4> {
+                |this: This<Class<'js, Matrix4>>,
+                 args: rquickjs::function::Rest<f32>|
+                 -> Class<'js, Matrix4> {
                     let n = args.0;
                     if n.len() == 16 {
                         let mut m = this.borrow_mut();
                         let e = &mut m.elements;
-                        e[0]  = n[0];  e[4]  = n[1];  e[8]  = n[2];  e[12] = n[3];
-                        e[1]  = n[4];  e[5]  = n[5];  e[9]  = n[6];  e[13] = n[7];
-                        e[2]  = n[8];  e[6]  = n[9];  e[10] = n[10]; e[14] = n[11];
-                        e[3]  = n[12]; e[7]  = n[13]; e[11] = n[14]; e[15] = n[15];
+                        e[0] = n[0];
+                        e[4] = n[1];
+                        e[8] = n[2];
+                        e[12] = n[3];
+                        e[1] = n[4];
+                        e[5] = n[5];
+                        e[9] = n[6];
+                        e[13] = n[7];
+                        e[2] = n[8];
+                        e[6] = n[9];
+                        e[10] = n[10];
+                        e[14] = n[11];
+                        e[3] = n[12];
+                        e[7] = n[13];
+                        e[11] = n[14];
+                        e[15] = n[15];
                     }
                     this.0.clone()
                 },
@@ -128,16 +146,20 @@ impl<'js> JsClass<'js> for Matrix4 {
 
         proto.set(
             "clone",
-            Func::from(|ctx: Ctx<'js>, this: This<Class<'js, Matrix4>>| -> Result<Class<'js, Matrix4>> {
-                let m = *this.borrow();
-                Class::instance(ctx, m)
-            }),
+            Func::from(
+                |ctx: Ctx<'js>, this: This<Class<'js, Matrix4>>| -> Result<Class<'js, Matrix4>> {
+                    let m = *this.borrow();
+                    Class::instance(ctx, m)
+                },
+            ),
         )?;
 
         proto.set(
             "copy",
             Func::from(
-                |this: This<Class<'js, Matrix4>>, other: Class<'js, Matrix4>| -> Class<'js, Matrix4> {
+                |this: This<Class<'js, Matrix4>>,
+                 other: Class<'js, Matrix4>|
+                 -> Class<'js, Matrix4> {
                     {
                         let o = *other.borrow();
                         let mut m = this.borrow_mut();
@@ -151,7 +173,9 @@ impl<'js> JsClass<'js> for Matrix4 {
         proto.set(
             "multiply",
             Func::from(
-                |this: This<Class<'js, Matrix4>>, other: Class<'js, Matrix4>| -> Class<'js, Matrix4> {
+                |this: This<Class<'js, Matrix4>>,
+                 other: Class<'js, Matrix4>|
+                 -> Class<'js, Matrix4> {
                     {
                         let o = *other.borrow();
                         let a = *this.borrow();
@@ -166,7 +190,9 @@ impl<'js> JsClass<'js> for Matrix4 {
         proto.set(
             "premultiply",
             Func::from(
-                |this: This<Class<'js, Matrix4>>, other: Class<'js, Matrix4>| -> Class<'js, Matrix4> {
+                |this: This<Class<'js, Matrix4>>,
+                 other: Class<'js, Matrix4>|
+                 -> Class<'js, Matrix4> {
                     {
                         let o = *other.borrow();
                         let a = *this.borrow();
@@ -196,15 +222,17 @@ impl<'js> JsClass<'js> for Matrix4 {
 
         proto.set(
             "multiplyScalar",
-            Func::from(|this: This<Class<'js, Matrix4>>, s: f32| -> Class<'js, Matrix4> {
-                {
-                    let mut m = this.borrow_mut();
-                    for v in m.elements.iter_mut() {
-                        *v *= s;
+            Func::from(
+                |this: This<Class<'js, Matrix4>>, s: f32| -> Class<'js, Matrix4> {
+                    {
+                        let mut m = this.borrow_mut();
+                        for v in m.elements.iter_mut() {
+                            *v *= s;
+                        }
                     }
-                }
-                this.0.clone()
-            }),
+                    this.0.clone()
+                },
+            ),
         )?;
 
         proto.set(
@@ -246,97 +274,98 @@ impl<'js> JsClass<'js> for Matrix4 {
 
         proto.set(
             "makeTranslation",
-            Func::from(|this: This<Class<'js, Matrix4>>, x: f32, y: f32, z: f32| -> Class<'js, Matrix4> {
-                {
-                    let mut m = this.borrow_mut();
-                    m.elements = [
-                        1.0, 0.0, 0.0, 0.0,
-                        0.0, 1.0, 0.0, 0.0,
-                        0.0, 0.0, 1.0, 0.0,
-                          x,   y,   z, 1.0,
-                    ];
-                }
-                this.0.clone()
-            }),
+            Func::from(
+                |this: This<Class<'js, Matrix4>>, x: f32, y: f32, z: f32| -> Class<'js, Matrix4> {
+                    {
+                        let mut m = this.borrow_mut();
+                        m.elements = [
+                            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, x, y, z,
+                            1.0,
+                        ];
+                    }
+                    this.0.clone()
+                },
+            ),
         )?;
 
         proto.set(
             "makeScale",
-            Func::from(|this: This<Class<'js, Matrix4>>, x: f32, y: f32, z: f32| -> Class<'js, Matrix4> {
-                {
-                    let mut m = this.borrow_mut();
-                    m.elements = [
-                          x, 0.0, 0.0, 0.0,
-                        0.0,   y, 0.0, 0.0,
-                        0.0, 0.0,   z, 0.0,
-                        0.0, 0.0, 0.0, 1.0,
-                    ];
-                }
-                this.0.clone()
-            }),
+            Func::from(
+                |this: This<Class<'js, Matrix4>>, x: f32, y: f32, z: f32| -> Class<'js, Matrix4> {
+                    {
+                        let mut m = this.borrow_mut();
+                        m.elements = [
+                            x, 0.0, 0.0, 0.0, 0.0, y, 0.0, 0.0, 0.0, 0.0, z, 0.0, 0.0, 0.0, 0.0,
+                            1.0,
+                        ];
+                    }
+                    this.0.clone()
+                },
+            ),
         )?;
 
         proto.set(
             "makeRotationX",
-            Func::from(|this: This<Class<'js, Matrix4>>, theta: f32| -> Class<'js, Matrix4> {
-                let (s, c) = theta.sin_cos();
-                {
-                    let mut m = this.borrow_mut();
-                    m.elements = [
-                        1.0, 0.0, 0.0, 0.0,
-                        0.0,   c,   s, 0.0,
-                        0.0,  -s,   c, 0.0,
-                        0.0, 0.0, 0.0, 1.0,
-                    ];
-                }
-                this.0.clone()
-            }),
+            Func::from(
+                |this: This<Class<'js, Matrix4>>, theta: f32| -> Class<'js, Matrix4> {
+                    let (s, c) = theta.sin_cos();
+                    {
+                        let mut m = this.borrow_mut();
+                        m.elements = [
+                            1.0, 0.0, 0.0, 0.0, 0.0, c, s, 0.0, 0.0, -s, c, 0.0, 0.0, 0.0, 0.0, 1.0,
+                        ];
+                    }
+                    this.0.clone()
+                },
+            ),
         )?;
 
         proto.set(
             "makeRotationY",
-            Func::from(|this: This<Class<'js, Matrix4>>, theta: f32| -> Class<'js, Matrix4> {
-                let (s, c) = theta.sin_cos();
-                {
-                    let mut m = this.borrow_mut();
-                    m.elements = [
-                          c, 0.0,  -s, 0.0,
-                        0.0, 1.0, 0.0, 0.0,
-                          s, 0.0,   c, 0.0,
-                        0.0, 0.0, 0.0, 1.0,
-                    ];
-                }
-                this.0.clone()
-            }),
+            Func::from(
+                |this: This<Class<'js, Matrix4>>, theta: f32| -> Class<'js, Matrix4> {
+                    let (s, c) = theta.sin_cos();
+                    {
+                        let mut m = this.borrow_mut();
+                        m.elements = [
+                            c, 0.0, -s, 0.0, 0.0, 1.0, 0.0, 0.0, s, 0.0, c, 0.0, 0.0, 0.0, 0.0, 1.0,
+                        ];
+                    }
+                    this.0.clone()
+                },
+            ),
         )?;
 
         proto.set(
             "makeRotationZ",
-            Func::from(|this: This<Class<'js, Matrix4>>, theta: f32| -> Class<'js, Matrix4> {
-                let (s, c) = theta.sin_cos();
-                {
-                    let mut m = this.borrow_mut();
-                    m.elements = [
-                          c,   s, 0.0, 0.0,
-                         -s,   c, 0.0, 0.0,
-                        0.0, 0.0, 1.0, 0.0,
-                        0.0, 0.0, 0.0, 1.0,
-                    ];
-                }
-                this.0.clone()
-            }),
+            Func::from(
+                |this: This<Class<'js, Matrix4>>, theta: f32| -> Class<'js, Matrix4> {
+                    let (s, c) = theta.sin_cos();
+                    {
+                        let mut m = this.borrow_mut();
+                        m.elements = [
+                            c, s, 0.0, 0.0, -s, c, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+                        ];
+                    }
+                    this.0.clone()
+                },
+            ),
         )?;
 
         proto.set(
             "makeRotationFromQuaternion",
-            Func::from(|this: This<Class<'js, Matrix4>>, q: Class<'js, Quaternion>| -> Class<'js, Matrix4> {
-                let qb = *q.borrow();
-                {
-                    let mut m = this.borrow_mut();
-                    m.elements = compose_matrix(0.0, 0.0, 0.0, qb, 1.0, 1.0, 1.0);
-                }
-                this.0.clone()
-            }),
+            Func::from(
+                |this: This<Class<'js, Matrix4>>,
+                 q: Class<'js, Quaternion>|
+                 -> Class<'js, Matrix4> {
+                    let qb = *q.borrow();
+                    {
+                        let mut m = this.borrow_mut();
+                        m.elements = compose_matrix(0.0, 0.0, 0.0, qb, 1.0, 1.0, 1.0);
+                    }
+                    this.0.clone()
+                },
+            ),
         )?;
 
         proto.set(
@@ -394,8 +423,12 @@ impl<'js> JsClass<'js> for Matrix4 {
             "makePerspective",
             Func::from(
                 |this: This<Class<'js, Matrix4>>,
-                 left: f32, right: f32, top: f32, bottom: f32,
-                 near: f32, far: f32|
+                 left: f32,
+                 right: f32,
+                 top: f32,
+                 bottom: f32,
+                 near: f32,
+                 far: f32|
                  -> Class<'js, Matrix4> {
                     // three.js (post WebGPU update) uses NDC depth [0,1] when
                     // coordinateSystem is WebGPUCoordinateSystem; default
@@ -410,10 +443,7 @@ impl<'js> JsClass<'js> for Matrix4 {
                     {
                         let mut m = this.borrow_mut();
                         m.elements = [
-                              x, 0.0, 0.0,  0.0,
-                            0.0,   y, 0.0,  0.0,
-                              a,   b,   c, -1.0,
-                            0.0, 0.0,   d,  0.0,
+                            x, 0.0, 0.0, 0.0, 0.0, y, 0.0, 0.0, a, b, c, -1.0, 0.0, 0.0, d, 0.0,
                         ];
                     }
                     this.0.clone()
@@ -425,8 +455,12 @@ impl<'js> JsClass<'js> for Matrix4 {
             "makeOrthographic",
             Func::from(
                 |this: This<Class<'js, Matrix4>>,
-                 left: f32, right: f32, top: f32, bottom: f32,
-                 near: f32, far: f32|
+                 left: f32,
+                 right: f32,
+                 top: f32,
+                 bottom: f32,
+                 near: f32,
+                 far: f32|
                  -> Class<'js, Matrix4> {
                     let w = 1.0 / (right - left);
                     let h = 1.0 / (top - bottom);
@@ -437,10 +471,22 @@ impl<'js> JsClass<'js> for Matrix4 {
                     {
                         let mut m = this.borrow_mut();
                         m.elements = [
-                            2.0 * w,   0.0,        0.0, 0.0,
-                                0.0, 2.0 * h,    0.0, 0.0,
-                                0.0,   0.0, -2.0 * p, 0.0,
-                                 -x,    -y,       -z, 1.0,
+                            2.0 * w,
+                            0.0,
+                            0.0,
+                            0.0,
+                            0.0,
+                            2.0 * h,
+                            0.0,
+                            0.0,
+                            0.0,
+                            0.0,
+                            -2.0 * p,
+                            0.0,
+                            -x,
+                            -y,
+                            -z,
+                            1.0,
                         ];
                     }
                     this.0.clone()
@@ -484,7 +530,7 @@ impl<'js> JsClass<'js> for Matrix4 {
 
     fn constructor(ctx: &Ctx<'js>) -> Result<Option<Constructor<'js>>> {
         // Three.js's `new Matrix4()` returns the identity. No required args.
-        let c = Constructor::new_class::<Matrix4, _, _>(ctx.clone(), || Matrix4::identity())?;
+        let c = Constructor::new_class::<Matrix4, _, _>(ctx.clone(), Matrix4::identity)?;
         Ok(Some(c))
     }
 }
@@ -506,33 +552,57 @@ impl<'js> IntoJs<'js> for Matrix4 {
 pub fn mat4_mul(a: &[f32; 16], b: &[f32; 16]) -> [f32; 16] {
     let mut r = [0.0_f32; 16];
     // three.js source, modified to read from arrays (columns 0..3 of a, b).
-    let a11 = a[0]; let a12 = a[4]; let a13 = a[8];  let a14 = a[12];
-    let a21 = a[1]; let a22 = a[5]; let a23 = a[9];  let a24 = a[13];
-    let a31 = a[2]; let a32 = a[6]; let a33 = a[10]; let a34 = a[14];
-    let a41 = a[3]; let a42 = a[7]; let a43 = a[11]; let a44 = a[15];
+    let a11 = a[0];
+    let a12 = a[4];
+    let a13 = a[8];
+    let a14 = a[12];
+    let a21 = a[1];
+    let a22 = a[5];
+    let a23 = a[9];
+    let a24 = a[13];
+    let a31 = a[2];
+    let a32 = a[6];
+    let a33 = a[10];
+    let a34 = a[14];
+    let a41 = a[3];
+    let a42 = a[7];
+    let a43 = a[11];
+    let a44 = a[15];
 
-    let b11 = b[0]; let b12 = b[4]; let b13 = b[8];  let b14 = b[12];
-    let b21 = b[1]; let b22 = b[5]; let b23 = b[9];  let b24 = b[13];
-    let b31 = b[2]; let b32 = b[6]; let b33 = b[10]; let b34 = b[14];
-    let b41 = b[3]; let b42 = b[7]; let b43 = b[11]; let b44 = b[15];
+    let b11 = b[0];
+    let b12 = b[4];
+    let b13 = b[8];
+    let b14 = b[12];
+    let b21 = b[1];
+    let b22 = b[5];
+    let b23 = b[9];
+    let b24 = b[13];
+    let b31 = b[2];
+    let b32 = b[6];
+    let b33 = b[10];
+    let b34 = b[14];
+    let b41 = b[3];
+    let b42 = b[7];
+    let b43 = b[11];
+    let b44 = b[15];
 
-    r[0]  = a11 * b11 + a12 * b21 + a13 * b31 + a14 * b41;
-    r[4]  = a11 * b12 + a12 * b22 + a13 * b32 + a14 * b42;
-    r[8]  = a11 * b13 + a12 * b23 + a13 * b33 + a14 * b43;
+    r[0] = a11 * b11 + a12 * b21 + a13 * b31 + a14 * b41;
+    r[4] = a11 * b12 + a12 * b22 + a13 * b32 + a14 * b42;
+    r[8] = a11 * b13 + a12 * b23 + a13 * b33 + a14 * b43;
     r[12] = a11 * b14 + a12 * b24 + a13 * b34 + a14 * b44;
 
-    r[1]  = a21 * b11 + a22 * b21 + a23 * b31 + a24 * b41;
-    r[5]  = a21 * b12 + a22 * b22 + a23 * b32 + a24 * b42;
-    r[9]  = a21 * b13 + a22 * b23 + a23 * b33 + a24 * b43;
+    r[1] = a21 * b11 + a22 * b21 + a23 * b31 + a24 * b41;
+    r[5] = a21 * b12 + a22 * b22 + a23 * b32 + a24 * b42;
+    r[9] = a21 * b13 + a22 * b23 + a23 * b33 + a24 * b43;
     r[13] = a21 * b14 + a22 * b24 + a23 * b34 + a24 * b44;
 
-    r[2]  = a31 * b11 + a32 * b21 + a33 * b31 + a34 * b41;
-    r[6]  = a31 * b12 + a32 * b22 + a33 * b32 + a34 * b42;
+    r[2] = a31 * b11 + a32 * b21 + a33 * b31 + a34 * b41;
+    r[6] = a31 * b12 + a32 * b22 + a33 * b32 + a34 * b42;
     r[10] = a31 * b13 + a32 * b23 + a33 * b33 + a34 * b43;
     r[14] = a31 * b14 + a32 * b24 + a33 * b34 + a34 * b44;
 
-    r[3]  = a41 * b11 + a42 * b21 + a43 * b31 + a44 * b41;
-    r[7]  = a41 * b12 + a42 * b22 + a43 * b32 + a44 * b42;
+    r[3] = a41 * b11 + a42 * b21 + a43 * b31 + a44 * b41;
+    r[7] = a41 * b12 + a42 * b22 + a43 * b32 + a44 * b42;
     r[11] = a41 * b13 + a42 * b23 + a43 * b33 + a44 * b43;
     r[15] = a41 * b14 + a42 * b24 + a43 * b34 + a44 * b44;
     r
@@ -542,43 +612,73 @@ pub fn mat4_mul(a: &[f32; 16], b: &[f32; 16]) -> [f32; 16] {
 pub fn determinant(e: &[f32; 16]) -> f32 {
     // three.js's Matrix4.determinant — cofactor expansion along the first
     // row of the 4x4. Matches three.js exactly so test parity holds.
-    let n11 = e[0]; let n12 = e[4]; let n13 = e[8];  let n14 = e[12];
-    let n21 = e[1]; let n22 = e[5]; let n23 = e[9];  let n24 = e[13];
-    let n31 = e[2]; let n32 = e[6]; let n33 = e[10]; let n34 = e[14];
-    let n41 = e[3]; let n42 = e[7]; let n43 = e[11]; let n44 = e[15];
+    let n11 = e[0];
+    let n12 = e[4];
+    let n13 = e[8];
+    let n14 = e[12];
+    let n21 = e[1];
+    let n22 = e[5];
+    let n23 = e[9];
+    let n24 = e[13];
+    let n31 = e[2];
+    let n32 = e[6];
+    let n33 = e[10];
+    let n34 = e[14];
+    let n41 = e[3];
+    let n42 = e[7];
+    let n43 = e[11];
+    let n44 = e[15];
 
-    n41 * (
-        n14 * n23 * n32 - n13 * n24 * n32 - n14 * n22 * n33
-            + n12 * n24 * n33 + n13 * n22 * n34 - n12 * n23 * n34
-    ) + n42 * (
-        n11 * n23 * n34 - n11 * n24 * n33 + n14 * n21 * n33
-            - n13 * n21 * n34 + n13 * n24 * n31 - n14 * n23 * n31
-    ) + n43 * (
-        n11 * n24 * n32 - n11 * n22 * n34 - n14 * n21 * n32
-            + n12 * n21 * n34 + n14 * n22 * n31 - n12 * n24 * n31
-    ) + n44 * (
-        -n13 * n22 * n31 - n11 * n23 * n32 + n11 * n22 * n33
-            + n13 * n21 * n32 - n12 * n21 * n33 + n12 * n23 * n31
-    )
+    n41 * (n14 * n23 * n32 - n13 * n24 * n32 - n14 * n22 * n33 + n12 * n24 * n33 + n13 * n22 * n34
+        - n12 * n23 * n34)
+        + n42
+            * (n11 * n23 * n34 - n11 * n24 * n33 + n14 * n21 * n33 - n13 * n21 * n34
+                + n13 * n24 * n31
+                - n14 * n23 * n31)
+        + n43
+            * (n11 * n24 * n32 - n11 * n22 * n34 - n14 * n21 * n32
+                + n12 * n21 * n34
+                + n14 * n22 * n31
+                - n12 * n24 * n31)
+        + n44
+            * (-n13 * n22 * n31 - n11 * n23 * n32 + n11 * n22 * n33 + n13 * n21 * n32
+                - n12 * n21 * n33
+                + n12 * n23 * n31)
 }
 
 /// Invert a 4x4 matrix, using three.js's source verbatim. If the matrix
 /// is singular returns the zero matrix (matches three.js's behavior).
 #[inline]
 pub fn mat4_invert(me: &[f32; 16]) -> [f32; 16] {
-    let n11 = me[0]; let n21 = me[1]; let n31 = me[2];  let n41 = me[3];
-    let n12 = me[4]; let n22 = me[5]; let n32 = me[6];  let n42 = me[7];
-    let n13 = me[8]; let n23 = me[9]; let n33 = me[10]; let n43 = me[11];
-    let n14 = me[12]; let n24 = me[13]; let n34 = me[14]; let n44 = me[15];
+    let n11 = me[0];
+    let n21 = me[1];
+    let n31 = me[2];
+    let n41 = me[3];
+    let n12 = me[4];
+    let n22 = me[5];
+    let n32 = me[6];
+    let n42 = me[7];
+    let n13 = me[8];
+    let n23 = me[9];
+    let n33 = me[10];
+    let n43 = me[11];
+    let n14 = me[12];
+    let n24 = me[13];
+    let n34 = me[14];
+    let n44 = me[15];
 
-    let t11 = n23 * n34 * n42 - n24 * n33 * n42 + n24 * n32 * n43
-        - n22 * n34 * n43 - n23 * n32 * n44 + n22 * n33 * n44;
-    let t12 = n14 * n33 * n42 - n13 * n34 * n42 - n14 * n32 * n43
-        + n12 * n34 * n43 + n13 * n32 * n44 - n12 * n33 * n44;
-    let t13 = n13 * n24 * n42 - n14 * n23 * n42 + n14 * n22 * n43
-        - n12 * n24 * n43 - n13 * n22 * n44 + n12 * n23 * n44;
-    let t14 = n14 * n23 * n32 - n13 * n24 * n32 - n14 * n22 * n33
-        + n12 * n24 * n33 + n13 * n22 * n34 - n12 * n23 * n34;
+    let t11 =
+        n23 * n34 * n42 - n24 * n33 * n42 + n24 * n32 * n43 - n22 * n34 * n43 - n23 * n32 * n44
+            + n22 * n33 * n44;
+    let t12 =
+        n14 * n33 * n42 - n13 * n34 * n42 - n14 * n32 * n43 + n12 * n34 * n43 + n13 * n32 * n44
+            - n12 * n33 * n44;
+    let t13 =
+        n13 * n24 * n42 - n14 * n23 * n42 + n14 * n22 * n43 - n12 * n24 * n43 - n13 * n22 * n44
+            + n12 * n23 * n44;
+    let t14 =
+        n14 * n23 * n32 - n13 * n24 * n32 - n14 * n22 * n33 + n12 * n24 * n33 + n13 * n22 * n34
+            - n12 * n23 * n34;
 
     let det = n11 * t11 + n21 * t12 + n31 * t13 + n41 * t14;
     if det == 0.0 {
@@ -586,55 +686,110 @@ pub fn mat4_invert(me: &[f32; 16]) -> [f32; 16] {
     }
     let inv_det = 1.0 / det;
     let mut r = [0.0_f32; 16];
-    r[0]  = t11 * inv_det;
-    r[1]  = (n24 * n33 * n41 - n23 * n34 * n41 - n24 * n31 * n43
-        + n21 * n34 * n43 + n23 * n31 * n44 - n21 * n33 * n44) * inv_det;
-    r[2]  = (n22 * n34 * n41 - n24 * n32 * n41 + n24 * n31 * n42
-        - n21 * n34 * n42 - n22 * n31 * n44 + n21 * n32 * n44) * inv_det;
-    r[3]  = (n23 * n32 * n41 - n22 * n33 * n41 - n23 * n31 * n42
-        + n21 * n33 * n42 + n22 * n31 * n43 - n21 * n32 * n43) * inv_det;
+    r[0] = t11 * inv_det;
+    r[1] =
+        (n24 * n33 * n41 - n23 * n34 * n41 - n24 * n31 * n43 + n21 * n34 * n43 + n23 * n31 * n44
+            - n21 * n33 * n44)
+            * inv_det;
+    r[2] =
+        (n22 * n34 * n41 - n24 * n32 * n41 + n24 * n31 * n42 - n21 * n34 * n42 - n22 * n31 * n44
+            + n21 * n32 * n44)
+            * inv_det;
+    r[3] =
+        (n23 * n32 * n41 - n22 * n33 * n41 - n23 * n31 * n42 + n21 * n33 * n42 + n22 * n31 * n43
+            - n21 * n32 * n43)
+            * inv_det;
 
-    r[4]  = t12 * inv_det;
-    r[5]  = (n13 * n34 * n41 - n14 * n33 * n41 + n14 * n31 * n43
-        - n11 * n34 * n43 - n13 * n31 * n44 + n11 * n33 * n44) * inv_det;
-    r[6]  = (n14 * n32 * n41 - n12 * n34 * n41 - n14 * n31 * n42
-        + n11 * n34 * n42 + n12 * n31 * n44 - n11 * n32 * n44) * inv_det;
-    r[7]  = (n12 * n33 * n41 - n13 * n32 * n41 + n13 * n31 * n42
-        - n11 * n33 * n42 - n12 * n31 * n43 + n11 * n32 * n43) * inv_det;
+    r[4] = t12 * inv_det;
+    r[5] =
+        (n13 * n34 * n41 - n14 * n33 * n41 + n14 * n31 * n43 - n11 * n34 * n43 - n13 * n31 * n44
+            + n11 * n33 * n44)
+            * inv_det;
+    r[6] =
+        (n14 * n32 * n41 - n12 * n34 * n41 - n14 * n31 * n42 + n11 * n34 * n42 + n12 * n31 * n44
+            - n11 * n32 * n44)
+            * inv_det;
+    r[7] =
+        (n12 * n33 * n41 - n13 * n32 * n41 + n13 * n31 * n42 - n11 * n33 * n42 - n12 * n31 * n43
+            + n11 * n32 * n43)
+            * inv_det;
 
-    r[8]  = t13 * inv_det;
-    r[9]  = (n14 * n23 * n41 - n13 * n24 * n41 - n14 * n21 * n43
-        + n11 * n24 * n43 + n13 * n21 * n44 - n11 * n23 * n44) * inv_det;
-    r[10] = (n12 * n24 * n41 - n14 * n22 * n41 + n14 * n21 * n42
-        - n11 * n24 * n42 - n12 * n21 * n44 + n11 * n22 * n44) * inv_det;
-    r[11] = (n13 * n22 * n41 - n12 * n23 * n41 - n13 * n21 * n42
-        + n11 * n23 * n42 + n12 * n21 * n43 - n11 * n22 * n43) * inv_det;
+    r[8] = t13 * inv_det;
+    r[9] =
+        (n14 * n23 * n41 - n13 * n24 * n41 - n14 * n21 * n43 + n11 * n24 * n43 + n13 * n21 * n44
+            - n11 * n23 * n44)
+            * inv_det;
+    r[10] =
+        (n12 * n24 * n41 - n14 * n22 * n41 + n14 * n21 * n42 - n11 * n24 * n42 - n12 * n21 * n44
+            + n11 * n22 * n44)
+            * inv_det;
+    r[11] =
+        (n13 * n22 * n41 - n12 * n23 * n41 - n13 * n21 * n42 + n11 * n23 * n42 + n12 * n21 * n43
+            - n11 * n22 * n43)
+            * inv_det;
 
     r[12] = t14 * inv_det;
-    r[13] = (n13 * n24 * n31 - n14 * n23 * n31 + n14 * n21 * n33
-        - n11 * n24 * n33 - n13 * n21 * n34 + n11 * n23 * n34) * inv_det;
-    r[14] = (n14 * n22 * n31 - n12 * n24 * n31 - n14 * n21 * n32
-        + n11 * n24 * n32 + n12 * n21 * n34 - n11 * n22 * n34) * inv_det;
-    r[15] = (n12 * n23 * n31 - n13 * n22 * n31 + n13 * n21 * n32
-        - n11 * n23 * n32 - n12 * n21 * n33 + n11 * n22 * n33) * inv_det;
+    r[13] =
+        (n13 * n24 * n31 - n14 * n23 * n31 + n14 * n21 * n33 - n11 * n24 * n33 - n13 * n21 * n34
+            + n11 * n23 * n34)
+            * inv_det;
+    r[14] =
+        (n14 * n22 * n31 - n12 * n24 * n31 - n14 * n21 * n32 + n11 * n24 * n32 + n12 * n21 * n34
+            - n11 * n22 * n34)
+            * inv_det;
+    r[15] =
+        (n12 * n23 * n31 - n13 * n22 * n31 + n13 * n21 * n32 - n11 * n23 * n32 - n12 * n21 * n33
+            + n11 * n22 * n33)
+            * inv_det;
     r
 }
 
 /// Compose a TRS matrix from position, rotation (quat), scale.
 /// Direct port of three.js Matrix4.compose.
 #[inline]
-pub fn compose_matrix(px: f32, py: f32, pz: f32, q: Quaternion, sx: f32, sy: f32, sz: f32) -> [f32; 16] {
-    let x = q.x; let y = q.y; let z = q.z; let w = q.w;
-    let x2 = x + x;  let y2 = y + y;  let z2 = z + z;
-    let xx = x * x2; let xy = x * y2; let xz = x * z2;
-    let yy = y * y2; let yz = y * z2; let zz = z * z2;
-    let wx = w * x2; let wy = w * y2; let wz = w * z2;
+pub fn compose_matrix(
+    px: f32,
+    py: f32,
+    pz: f32,
+    q: Quaternion,
+    sx: f32,
+    sy: f32,
+    sz: f32,
+) -> [f32; 16] {
+    let x = q.x;
+    let y = q.y;
+    let z = q.z;
+    let w = q.w;
+    let x2 = x + x;
+    let y2 = y + y;
+    let z2 = z + z;
+    let xx = x * x2;
+    let xy = x * y2;
+    let xz = x * z2;
+    let yy = y * y2;
+    let yz = y * z2;
+    let zz = z * z2;
+    let wx = w * x2;
+    let wy = w * y2;
+    let wz = w * z2;
 
     [
-        (1.0 - (yy + zz)) * sx, (xy + wz) * sx,        (xz - wy) * sx,        0.0,
-        (xy - wz) * sy,         (1.0 - (xx + zz)) * sy, (yz + wx) * sy,        0.0,
-        (xz + wy) * sz,         (yz - wx) * sz,         (1.0 - (xx + yy)) * sz, 0.0,
-        px, py, pz, 1.0,
+        (1.0 - (yy + zz)) * sx,
+        (xy + wz) * sx,
+        (xz - wy) * sx,
+        0.0,
+        (xy - wz) * sy,
+        (1.0 - (xx + zz)) * sy,
+        (yz + wx) * sy,
+        0.0,
+        (xz + wy) * sz,
+        (yz - wx) * sz,
+        (1.0 - (xx + yy)) * sz,
+        0.0,
+        px,
+        py,
+        pz,
+        1.0,
     ]
 }
 
@@ -668,8 +823,8 @@ pub fn decompose_matrix(te: &[f32; 16]) -> (f32, f32, f32, Quaternion, f32, f32,
     rot[6] = te[6] * inv_sy;
     rot[7] = 0.0;
 
-    rot[8]  = te[8]  * inv_sz;
-    rot[9]  = te[9]  * inv_sz;
+    rot[8] = te[8] * inv_sz;
+    rot[9] = te[9] * inv_sz;
     rot[10] = te[10] * inv_sz;
     rot[11] = 0.0;
 
@@ -726,8 +881,14 @@ pub fn look_at(eye: &Vector3, target: &Vector3, up: &Vector3, current: &[f32; 16
     let yz = zx * xy - zy * xx;
 
     let mut e = *current;
-    e[0] = xx; e[1] = xy; e[2] = xz;
-    e[4] = yx; e[5] = yy; e[6] = yz;
-    e[8] = zx; e[9] = zy; e[10] = zz;
+    e[0] = xx;
+    e[1] = xy;
+    e[2] = xz;
+    e[4] = yx;
+    e[5] = yy;
+    e[6] = yz;
+    e[8] = zx;
+    e[9] = zy;
+    e[10] = zz;
     e
 }
