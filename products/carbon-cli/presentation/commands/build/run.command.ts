@@ -9,6 +9,8 @@ import { log, c } from "@carbon/logging";
 import { isBackend, VALID_BACKENDS } from "@carbon/contracts/app/backend";
 import { start } from "@carbon/process";
 import { buildProject, ensureNodeModules, ensureRuntime } from "@carbon/bundling";
+import { NoHostAppError, pluginUseCases } from "@carbon/plugins";
+import { PRODUCTS_DIR } from "@carbon/workspace";
 
 interface Args {
   projectDir: string;
@@ -72,6 +74,14 @@ export async function runCommand(rest: string[]): Promise<number> {
       noBabelCache,
     });
 
+    // Plugins, before the window rather than after. Everything reported here
+    // the runtime would also report — as `[carbon-plugin] FAILED to load ...`
+    // on a stderr stream nobody is watching, once the app is already up and
+    // quietly missing a feature. An error is not fatal: the runtime skips a
+    // plugin it cannot load and the app still runs, so this warns loudly and
+    // carries on rather than refusing to launch something that works.
+    preflightPlugins(projectDir);
+
     log.info(`launching runtime…`);
     log.step(c.dim(exe));
     log.raw("");
@@ -105,6 +115,41 @@ export async function runCommand(rest: string[]): Promise<number> {
   }
 }
 
+
+/**
+ * Report anything that will stop a declared plugin loading.
+ *
+ * Never throws: an app with no plugins, no carbon.toml above it, or a
+ * malformed [plugins] table is not a reason to refuse to run. The runtime is
+ * the enforcement point; this is the earlier, better-placed message.
+ */
+function preflightPlugins(projectDir: string): void {
+  let result;
+  try {
+    // The preflight reads no templates, but the factory builds all the use
+    // cases together, so it still wants the SDK root — see plugin.command.ts.
+    result = pluginUseCases(join(PRODUCTS_DIR, "carbon-ext")).preflight.execute(projectDir);
+  } catch (e) {
+    // NoHostAppError means there is no carbon.toml, which `loadCarbonConfig`
+    // above would already have failed on. Anything else here is a bug in the
+    // preflight, and a bug in a warning must not take the app down.
+    if (!(e instanceof NoHostAppError)) {
+      log.warn(`plugin preflight skipped: ${(e as Error).message}`);
+    }
+    return;
+  }
+
+  if (result.checked === 0 || result.problems.length === 0) return;
+
+  log.warn(`${result.problems.length} plugin problem(s) — the runtime will skip what it cannot load:`);
+  for (const problem of result.problems) {
+    log.raw(`  ${problem.severity === "error" ? c.red("×") : c.yellow("!")} ${c.bold(problem.plugin)}: ${problem.message}`);
+    if (problem.fix) {
+      for (const line of problem.fix.split("\n")) log.raw(`    ${c.dim(line)}`);
+    }
+  }
+  log.raw("");
+}
 
 // ── Command ─────────────────────────────────────────────────────────────────
 // The implementation above is the ported V1 body, unchanged. This class is

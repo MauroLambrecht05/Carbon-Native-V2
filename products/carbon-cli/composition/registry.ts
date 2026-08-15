@@ -68,8 +68,18 @@ export function buildRegistry(): CommandRegistry {
 
     defineCommand(
       {
+        name: "ext",
+        summary: "The extension surface plugins plug into (generate / check / list / show)",
+        usage: "ext <subcommand> [options]",
+      },
+      async () =>
+        new (await import("../presentation/commands/extensions/ext.command.ts")).ExtCommand(),
+    ),
+
+    defineCommand(
+      {
         name: "plugin",
-        summary: "Manage native plugins (new / build / install / list / info)",
+        summary: "Manage native plugins (new / build / check / install / list / info)",
         usage: "plugin <subcommand> [options]",
       },
       async () => new (await import("../presentation/commands/plugins/plugin.command.ts")).PluginCommand(),
