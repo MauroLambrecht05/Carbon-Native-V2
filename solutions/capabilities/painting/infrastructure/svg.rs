@@ -136,11 +136,7 @@ fn paint_svg_node(
     } else {
         parent_stroke_width
     };
-    let linecap_str = node
-        .props
-        .svg_stroke_linecap
-        .as_deref()
-        .or(parent_linecap);
+    let linecap_str = node.props.svg_stroke_linecap.as_deref().or(parent_linecap);
     let linejoin_str = node
         .props
         .svg_stroke_linejoin
@@ -361,13 +357,7 @@ fn peek_pair(toks: &[Tok], i: usize) -> Option<(f32, f32)> {
 /// Parse SVG path-data into a tiny-skia path, with the (scale, offset)
 /// transform applied so the result is in pixmap coordinates. Returns None
 /// if the path produces no operations (empty `d`, only invalid commands).
-pub fn parse_path(
-    d: &str,
-    scale_x: f32,
-    scale_y: f32,
-    off_x: f32,
-    off_y: f32,
-) -> Option<Path> {
+pub fn parse_path(d: &str, scale_x: f32, scale_y: f32, off_x: f32, off_y: f32) -> Option<Path> {
     let toks = tokenize(d);
     if toks.is_empty() {
         return None;

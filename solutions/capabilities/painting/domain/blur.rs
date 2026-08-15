@@ -18,15 +18,21 @@ use tiny_skia::Pixmap;
 /// In-place Gaussian blur. `radius` is the CSS-style blur radius.
 /// The actual filter σ ≈ radius / 2. Radius 0 = no-op.
 pub fn box_blur(pixmap: &mut Pixmap, radius: u32) {
-    if radius == 0 { return; }
+    if radius == 0 {
+        return;
+    }
     gaussian_blur(pixmap, radius as f32 * 0.5);
 }
 
 pub fn gaussian_blur(pixmap: &mut Pixmap, sigma: f32) {
-    if sigma < 0.4 { return; }
+    if sigma < 0.4 {
+        return;
+    }
     let w = pixmap.width() as usize;
     let h = pixmap.height() as usize;
-    if w == 0 || h == 0 { return; }
+    if w == 0 || h == 0 {
+        return;
+    }
 
     // ±3σ covers 99.7% of the curve — anything beyond contributes <0.3%.
     let r = (sigma * 3.0).ceil().max(1.0) as usize;
@@ -50,7 +56,9 @@ fn build_kernel(sigma: f32, r: usize) -> Vec<f32> {
         sum += w;
     }
     // Normalize so the kernel preserves overall pixmap energy.
-    for v in &mut k { *v /= sum; }
+    for v in &mut k {
+        *v /= sum;
+    }
     k
 }
 
@@ -73,7 +81,7 @@ fn blur_h(src: &[u8], dst: &mut [u8], w: usize, h: usize, r: usize, kernel: &[f3
                 ac += src[p + 3] as f32 * weight;
             }
             let dp = row + x * 4;
-            dst[dp]     = rc.round().clamp(0.0, 255.0) as u8;
+            dst[dp] = rc.round().clamp(0.0, 255.0) as u8;
             dst[dp + 1] = gc.round().clamp(0.0, 255.0) as u8;
             dst[dp + 2] = bc.round().clamp(0.0, 255.0) as u8;
             dst[dp + 3] = ac.round().clamp(0.0, 255.0) as u8;
@@ -101,14 +109,13 @@ fn blur_v(src: &[u8], dst: &mut [u8], w: usize, h: usize, r: usize, kernel: &[f3
                 ac += src[p + 3] as f32 * weight;
             }
             let dp = y * stride + col;
-            dst[dp]     = rc.round().clamp(0.0, 255.0) as u8;
+            dst[dp] = rc.round().clamp(0.0, 255.0) as u8;
             dst[dp + 1] = gc.round().clamp(0.0, 255.0) as u8;
             dst[dp + 2] = bc.round().clamp(0.0, 255.0) as u8;
             dst[dp + 3] = ac.round().clamp(0.0, 255.0) as u8;
         }
     }
 }
-
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 //
@@ -238,7 +245,11 @@ mod tests {
         // from washing out its own body.
         let mut pm = filled_block(41, 20);
         box_blur(&mut pm, 4);
-        assert_eq!(alpha_at(&pm, 20, 20), 255, "the block's interior should stay opaque");
+        assert_eq!(
+            alpha_at(&pm, 20, 20),
+            255,
+            "the block's interior should stay opaque"
+        );
     }
 
     #[test]

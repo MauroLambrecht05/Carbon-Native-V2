@@ -29,9 +29,9 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 use tiny_skia::{
-    BlendMode, Color, FillRule, GradientStop, LinearGradient, Mask, Paint, PathBuilder,
-    Pixmap, Point, PremultipliedColorU8, RadialGradient, Rect, Shader, SpreadMode, Stroke,
-    StrokeDash, Transform,
+    BlendMode, Color, FillRule, GradientStop, LinearGradient, Mask, Paint, PathBuilder, Pixmap,
+    Point, PremultipliedColorU8, RadialGradient, Rect, Shader, SpreadMode, Stroke, StrokeDash,
+    Transform,
 };
 
 use carbon_text_renderer::TextEngine;
@@ -244,8 +244,16 @@ pub fn get_pixels(id: u32, x: i32, y: i32, w: u32, h: u32) -> Vec<u8> {
 /// each glyph overwrite its neighbours → garbled, wrong glyphs.
 #[allow(clippy::too_many_arguments)]
 pub fn put_pixels(
-    id: u32, src: &[u8], src_w: u32, src_h: u32, dx: i32, dy: i32,
-    dirty_x: i32, dirty_y: i32, dirty_w: i32, dirty_h: i32,
+    id: u32,
+    src: &[u8],
+    src_w: u32,
+    src_h: u32,
+    dx: i32,
+    dy: i32,
+    dirty_x: i32,
+    dirty_y: i32,
+    dirty_w: i32,
+    dirty_h: i32,
 ) {
     SURFACES.with(|s| {
         let mut m = s.borrow_mut();
@@ -378,8 +386,7 @@ fn blit_pixmap_over(dst: &mut Pixmap, src: &Pixmap, dx: i32, dy: i32) {
             let ng = s.green() as u32 + (d.green() as u32 * inv) / 255;
             let nb = s.blue() as u32 + (d.blue() as u32 * inv) / 255;
             let na = sa + (d.alpha() as u32 * inv) / 255;
-            if let Some(p) =
-                PremultipliedColorU8::from_rgba(nr as u8, ng as u8, nb as u8, na as u8)
+            if let Some(p) = PremultipliedColorU8::from_rgba(nr as u8, ng as u8, nb as u8, na as u8)
             {
                 dst_px[di] = p;
             }
@@ -408,7 +415,8 @@ pub fn flush(id: u32, json: &str, te: &mut TextEngine) {
     };
 
     let t1 = std::time::Instant::now();
-    let mut op_times: std::collections::HashMap<&str, (u32, f64)> = std::collections::HashMap::new();
+    let mut op_times: std::collections::HashMap<&str, (u32, f64)> =
+        std::collections::HashMap::new();
     for cmd in arr {
         let Some(op) = cmd.as_array() else { continue };
         if op.is_empty() {
@@ -433,7 +441,11 @@ pub fn flush(id: u32, json: &str, te: &mut TextEngine) {
 
     if perf && (parse_ms + replay_ms) > 2.0 {
         let mut tops: Vec<(&str, (u32, f64))> = op_times.into_iter().collect();
-        tops.sort_by(|a, b| b.1 .1.partial_cmp(&a.1 .1).unwrap_or(std::cmp::Ordering::Equal));
+        tops.sort_by(|a, b| {
+            b.1 .1
+                .partial_cmp(&a.1 .1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         let summary: String = tops
             .iter()
             .take(4)
@@ -605,23 +617,42 @@ fn replay_one(c: &mut Canvas2d, name: &str, op: &[Value], te: &mut TextEngine) {
         // transforms
         "t" => {
             c.state.transform = Transform::from_row(
-                num(op, 1), num(op, 2), num(op, 3), num(op, 4), num(op, 5), num(op, 6),
+                num(op, 1),
+                num(op, 2),
+                num(op, 3),
+                num(op, 4),
+                num(op, 5),
+                num(op, 6),
             );
         }
         "tf" => {
             let m = Transform::from_row(
-                num(op, 1), num(op, 2), num(op, 3), num(op, 4), num(op, 5), num(op, 6),
+                num(op, 1),
+                num(op, 2),
+                num(op, 3),
+                num(op, 4),
+                num(op, 5),
+                num(op, 6),
             );
             c.state.transform = c.state.transform.pre_concat(m);
         }
         "tr" => {
-            c.state.transform = c.state.transform.pre_concat(Transform::from_translate(num(op, 1), num(op, 2)));
+            c.state.transform = c
+                .state
+                .transform
+                .pre_concat(Transform::from_translate(num(op, 1), num(op, 2)));
         }
         "sc" => {
-            c.state.transform = c.state.transform.pre_concat(Transform::from_scale(num(op, 1), num(op, 2)));
+            c.state.transform = c
+                .state
+                .transform
+                .pre_concat(Transform::from_scale(num(op, 1), num(op, 2)));
         }
         "ro" => {
-            c.state.transform = c.state.transform.pre_concat(Transform::from_rotate(num(op, 1).to_degrees()));
+            c.state.transform = c
+                .state
+                .transform
+                .pre_concat(Transform::from_rotate(num(op, 1).to_degrees()));
         }
         "rt" => c.state.transform = Transform::identity(),
         // styles
@@ -648,7 +679,7 @@ fn replay_one(c: &mut Canvas2d, name: &str, op: &[Value], te: &mut TextEngine) {
             if let Some(ss) = op.get(3).and_then(|v| v.as_array()) {
                 for s in ss {
                     if let Some(pair) = s.as_array() {
-                        let off = pair.get(0).and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+                        let off = pair.first().and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
                         let col = pair
                             .get(1)
                             .and_then(|v| v.as_str())
@@ -658,7 +689,11 @@ fn replay_one(c: &mut Canvas2d, name: &str, op: &[Value], te: &mut TextEngine) {
                     }
                 }
             }
-            let g = Style::Gradient(Gradient { linear, coords, stops });
+            let g = Style::Gradient(Gradient {
+                linear,
+                coords,
+                stops,
+            });
             if name == "fsg" {
                 c.state.fill = g;
             } else {
@@ -754,9 +789,16 @@ fn replay_one(c: &mut Canvas2d, name: &str, op: &[Value], te: &mut TextEngine) {
         "ar" => {
             let mut hc = c.has_cur;
             arc_ops(
-                &mut c.path, &c.state.transform, &mut hc,
-                num(op, 1), num(op, 2), num(op, 3), num(op, 3), 0.0,
-                num(op, 4), num(op, 5),
+                &mut c.path,
+                &c.state.transform,
+                &mut hc,
+                num(op, 1),
+                num(op, 2),
+                num(op, 3),
+                num(op, 3),
+                0.0,
+                num(op, 4),
+                num(op, 5),
                 op.get(6).and_then(|v| v.as_bool()).unwrap_or(false),
             );
             c.has_cur = hc;
@@ -764,9 +806,16 @@ fn replay_one(c: &mut Canvas2d, name: &str, op: &[Value], te: &mut TextEngine) {
         "ae" => {
             let mut hc = c.has_cur;
             arc_ops(
-                &mut c.path, &c.state.transform, &mut hc,
-                num(op, 1), num(op, 2), num(op, 3), num(op, 4), num(op, 5),
-                num(op, 6), num(op, 7),
+                &mut c.path,
+                &c.state.transform,
+                &mut hc,
+                num(op, 1),
+                num(op, 2),
+                num(op, 3),
+                num(op, 4),
+                num(op, 5),
+                num(op, 6),
+                num(op, 7),
                 op.get(8).and_then(|v| v.as_bool()).unwrap_or(false),
             );
             c.has_cur = hc;
@@ -817,16 +866,45 @@ fn draw_image(c: &mut Canvas2d, op: &[Value]) {
             .get(&(src_id as u32))
             .map(|sc| (sc.pixmap.width() as f32, sc.pixmap.height() as f32))
     });
-    let Some((sw_full, sh_full)) = dims else { return };
+    let Some((sw_full, sh_full)) = dims else {
+        return;
+    };
 
     // Decode the argument variant by count.
     let n = op.len();
     let (sx, sy, sw, sh, dx, dy, dw, dh) = if n >= 10 {
-        (num(op, 2), num(op, 3), num(op, 4), num(op, 5), num(op, 6), num(op, 7), num(op, 8), num(op, 9))
+        (
+            num(op, 2),
+            num(op, 3),
+            num(op, 4),
+            num(op, 5),
+            num(op, 6),
+            num(op, 7),
+            num(op, 8),
+            num(op, 9),
+        )
     } else if n >= 6 {
-        (0.0, 0.0, sw_full, sh_full, num(op, 2), num(op, 3), num(op, 4), num(op, 5))
+        (
+            0.0,
+            0.0,
+            sw_full,
+            sh_full,
+            num(op, 2),
+            num(op, 3),
+            num(op, 4),
+            num(op, 5),
+        )
     } else {
-        (0.0, 0.0, sw_full, sh_full, num(op, 2), num(op, 3), sw_full, sh_full)
+        (
+            0.0,
+            0.0,
+            sw_full,
+            sh_full,
+            num(op, 2),
+            num(op, 3),
+            sw_full,
+            sh_full,
+        )
     };
     if sw <= 0.0 || sh <= 0.0 || dw <= 0.0 || dh <= 0.0 {
         return;
@@ -840,12 +918,13 @@ fn draw_image(c: &mut Canvas2d, op: &[Value]) {
     let dst = map_pt(ctm, dx, dy);
     // 1:1 (no scaling) — what xterm does for every atlas glyph. Crisp integer
     // sub-rect copy; otherwise a bounded nearest-neighbour resample.
-    let one_to_one =
-        axis_aligned(ctm) && (eff_dw - sw).abs() < 0.5 && (eff_dh - sh).abs() < 0.5;
+    let one_to_one = axis_aligned(ctm) && (eff_dw - sw).abs() < 0.5 && (eff_dh - sh).abs() < 0.5;
 
     SURFACES.with(|s| {
         let store = s.borrow();
-        let Some(src) = store.get(&(src_id as u32)) else { return };
+        let Some(src) = store.get(&(src_id as u32)) else {
+            return;
+        };
         let src_pm = &src.pixmap;
         if one_to_one {
             blit_subrect(
@@ -872,8 +951,14 @@ fn draw_image(c: &mut Canvas2d, op: &[Value]) {
 fn blit_scaled(
     c: &mut Canvas2d,
     src: &Pixmap,
-    sx: f32, sy: f32, sw: f32, sh: f32,
-    dx: f32, dy: f32, dw: f32, dh: f32,
+    sx: f32,
+    sy: f32,
+    sw: f32,
+    sh: f32,
+    dx: f32,
+    dy: f32,
+    dw: f32,
+    dh: f32,
 ) {
     if dw <= 0.0 || dh <= 0.0 || sw <= 0.0 || sh <= 0.0 {
         return;
@@ -950,8 +1035,7 @@ fn blit_scaled(
             let ng = sg + d.green() as u32 * inv / 255;
             let nb = sb + d.blue() as u32 * inv / 255;
             let na = sa + d.alpha() as u32 * inv / 255;
-            if let Some(p) =
-                PremultipliedColorU8::from_rgba(nr as u8, ng as u8, nb as u8, na as u8)
+            if let Some(p) = PremultipliedColorU8::from_rgba(nr as u8, ng as u8, nb as u8, na as u8)
             {
                 dst_px[di] = p;
             }
@@ -965,8 +1049,12 @@ fn blit_scaled(
 fn blit_subrect(
     c: &mut Canvas2d,
     src: &Pixmap,
-    sx: i32, sy: i32, w: i32, h: i32,
-    dx: i32, dy: i32,
+    sx: i32,
+    sy: i32,
+    w: i32,
+    h: i32,
+    dx: i32,
+    dy: i32,
 ) {
     let sw = src.width() as i32;
     let sh = src.height() as i32;
@@ -976,7 +1064,12 @@ fn blit_subrect(
     // Active clip (rectangular bounds and/or non-rect mask). Read before the
     // mutable pixmap borrow; both are disjoint fields of `c`.
     let (cl_x0, cl_y0, cl_x1, cl_y1) = match c.state.clip_rect {
-        Some((x0, y0, x1, y1)) => (x0.round() as i32, y0.round() as i32, x1.round() as i32, y1.round() as i32),
+        Some((x0, y0, x1, y1)) => (
+            x0.round() as i32,
+            y0.round() as i32,
+            x1.round() as i32,
+            y1.round() as i32,
+        ),
         None => (i32::MIN, i32::MIN, i32::MAX, i32::MAX),
     };
     let clip_data = c.state.clip.as_ref().map(|m| m.data());
@@ -985,28 +1078,48 @@ fn blit_subrect(
     for row in 0..h {
         let syy = sy + row;
         let dyy = dy + row;
-        if syy < 0 || syy >= sh || dyy < 0 || dyy >= dh { continue; }
-        if dyy < cl_y0 || dyy >= cl_y1 { continue; }
+        if syy < 0 || syy >= sh || dyy < 0 || dyy >= dh {
+            continue;
+        }
+        if dyy < cl_y0 || dyy >= cl_y1 {
+            continue;
+        }
         for col in 0..w {
             let sxx = sx + col;
             let dxx = dx + col;
-            if sxx < 0 || sxx >= sw || dxx < 0 || dxx >= dw { continue; }
-            if dxx < cl_x0 || dxx >= cl_x1 { continue; }
+            if sxx < 0 || sxx >= sw || dxx < 0 || dxx >= dw {
+                continue;
+            }
+            if dxx < cl_x0 || dxx >= cl_x1 {
+                continue;
+            }
             let s = src_px[(syy * sw + sxx) as usize];
             let mut sa = s.alpha() as u32;
-            if sa == 0 { continue; }
+            if sa == 0 {
+                continue;
+            }
             let mut sr = s.red() as u32;
             let mut sg = s.green() as u32;
             let mut sb = s.blue() as u32;
             if alpha < 1.0 {
                 let a = (alpha * 255.0) as u32;
-                sr = sr * a / 255; sg = sg * a / 255; sb = sb * a / 255; sa = sa * a / 255;
+                sr = sr * a / 255;
+                sg = sg * a / 255;
+                sb = sb * a / 255;
+                sa = sa * a / 255;
             }
             let di = (dyy * dw + dxx) as usize;
             if let Some(md) = clip_data {
                 let cov = md[di] as u32;
-                if cov == 0 { continue; }
-                if cov < 255 { sr = sr * cov / 255; sg = sg * cov / 255; sb = sb * cov / 255; sa = sa * cov / 255; }
+                if cov == 0 {
+                    continue;
+                }
+                if cov < 255 {
+                    sr = sr * cov / 255;
+                    sg = sg * cov / 255;
+                    sb = sb * cov / 255;
+                    sa = sa * cov / 255;
+                }
             }
             let d = dst_px[di];
             let inv = 255 - sa;
@@ -1014,7 +1127,8 @@ fn blit_subrect(
             let ng = sg + (d.green() as u32 * inv) / 255;
             let nb = sb + (d.blue() as u32 * inv) / 255;
             let na = sa + (d.alpha() as u32 * inv) / 255;
-            if let Some(p) = PremultipliedColorU8::from_rgba(nr as u8, ng as u8, nb as u8, na as u8) {
+            if let Some(p) = PremultipliedColorU8::from_rgba(nr as u8, ng as u8, nb as u8, na as u8)
+            {
                 dst_px[di] = p;
             }
         }
@@ -1044,7 +1158,9 @@ fn fill_rect(c: &mut Canvas2d, x: f32, y: f32, w: f32, h: f32) {
     if w == 0.0 || h == 0.0 {
         return;
     }
-    let Some(shader) = style_to_shader(&c.state.fill, c.state.global_alpha) else { return };
+    let Some(shader) = style_to_shader(&c.state.fill, c.state.global_alpha) else {
+        return;
+    };
     let mut paint = Paint::default();
     paint.shader = shader;
     paint.blend_mode = c.state.blend;
@@ -1065,14 +1181,23 @@ fn fill_rect(c: &mut Canvas2d, x: f32, y: f32, w: f32, h: f32) {
             ry1 = ry1.min(cy1);
         }
         if rx1 > rx0 && ry1 > ry0 {
-            if let Some(rect) = Rect::from_xywh(rx0, ry0, (rx1 - rx0).max(0.0001), (ry1 - ry0).max(0.0001)) {
-                c.pixmap.fill_rect(rect, &paint, Transform::identity(), c.state.clip.as_ref());
+            if let Some(rect) =
+                Rect::from_xywh(rx0, ry0, (rx1 - rx0).max(0.0001), (ry1 - ry0).max(0.0001))
+            {
+                c.pixmap
+                    .fill_rect(rect, &paint, Transform::identity(), c.state.clip.as_ref());
             }
         }
     } else if let Some(path) = rect_path_device(c, x, y, w, h) {
         paint.anti_alias = true;
         let mask = clip_mask(c);
-        c.pixmap.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), mask.as_ref());
+        c.pixmap.fill_path(
+            &path,
+            &paint,
+            FillRule::Winding,
+            Transform::identity(),
+            mask.as_ref(),
+        );
     }
 }
 
@@ -1121,34 +1246,55 @@ fn clear_rect(c: &mut Canvas2d, x: f32, y: f32, w: f32, h: f32) {
     paint.blend_mode = BlendMode::Clear;
     if let Some(path) = rect_path_device(c, x, y, w, h) {
         let mask = clip_mask(c);
-        c.pixmap.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), mask.as_ref());
+        c.pixmap.fill_path(
+            &path,
+            &paint,
+            FillRule::Winding,
+            Transform::identity(),
+            mask.as_ref(),
+        );
     }
 }
 
 fn stroke_rect(c: &mut Canvas2d, x: f32, y: f32, w: f32, h: f32) {
-    let Some(path) = rect_path_device(c, x, y, w, h) else { return };
+    let Some(path) = rect_path_device(c, x, y, w, h) else {
+        return;
+    };
     stroke_path(c, &path);
 }
 
 fn do_fill(c: &mut Canvas2d, even_odd: bool) {
-    let Some(path) = build_path(&c.path) else { return };
-    let Some(shader) = style_to_shader(&c.state.fill, c.state.global_alpha) else { return };
+    let Some(path) = build_path(&c.path) else {
+        return;
+    };
+    let Some(shader) = style_to_shader(&c.state.fill, c.state.global_alpha) else {
+        return;
+    };
     let mut paint = Paint::default();
     paint.shader = shader;
     paint.blend_mode = c.state.blend;
     paint.anti_alias = true;
-    let rule = if even_odd { FillRule::EvenOdd } else { FillRule::Winding };
+    let rule = if even_odd {
+        FillRule::EvenOdd
+    } else {
+        FillRule::Winding
+    };
     let mask = clip_mask(c);
-    c.pixmap.fill_path(&path, &paint, rule, Transform::identity(), mask.as_ref());
+    c.pixmap
+        .fill_path(&path, &paint, rule, Transform::identity(), mask.as_ref());
 }
 
 fn do_stroke(c: &mut Canvas2d) {
-    let Some(path) = build_path(&c.path) else { return };
+    let Some(path) = build_path(&c.path) else {
+        return;
+    };
     stroke_path(c, &path);
 }
 
 fn stroke_path(c: &mut Canvas2d, path: &tiny_skia::Path) {
-    let Some(shader) = style_to_shader(&c.state.stroke, c.state.global_alpha) else { return };
+    let Some(shader) = style_to_shader(&c.state.stroke, c.state.global_alpha) else {
+        return;
+    };
     let mut paint = Paint::default();
     paint.shader = shader;
     paint.blend_mode = c.state.blend;
@@ -1172,7 +1318,12 @@ fn stroke_path(c: &mut Canvas2d, path: &tiny_skia::Path) {
         ..Stroke::default()
     };
     if !c.state.line_dash.is_empty() {
-        let dashes: Vec<f32> = c.state.line_dash.iter().map(|d| (d * scale).max(0.01)).collect();
+        let dashes: Vec<f32> = c
+            .state
+            .line_dash
+            .iter()
+            .map(|d| (d * scale).max(0.01))
+            .collect();
         stroke.dash = StrokeDash::new(dashes, c.state.line_dash_offset * scale);
     }
     let mask = clip_mask(c);
@@ -1248,8 +1399,14 @@ fn do_clip(c: &mut Canvas2d, even_odd: bool) {
     }
     // Non-rectangular (or refining an existing mask): build/intersect a Mask,
     // seeded from any active rect clip so the bound isn't lost.
-    let Some(path) = build_path(&c.path) else { return };
-    let rule = if even_odd { FillRule::EvenOdd } else { FillRule::Winding };
+    let Some(path) = build_path(&c.path) else {
+        return;
+    };
+    let rule = if even_odd {
+        FillRule::EvenOdd
+    } else {
+        FillRule::Winding
+    };
     let mut mask = match &c.state.clip {
         Some(m) => m.clone(),
         None => match Mask::new(c.pixmap.width(), c.pixmap.height()) {
@@ -1324,7 +1481,15 @@ fn fill_text(c: &mut Canvas2d, te: &mut TextEngine, op: &[Value], _stroke: bool)
         None => (f32::NEG_INFINITY, f32::INFINITY),
     };
     te.draw_text_styled_mono(
-        &mut c.pixmap, text, p.x, p.y, px, color,
-        clip_top, clip_bottom, 0.0, mono,
+        &mut c.pixmap,
+        text,
+        p.x,
+        p.y,
+        px,
+        color,
+        clip_top,
+        clip_bottom,
+        0.0,
+        mono,
     );
 }
