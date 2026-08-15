@@ -2,20 +2,31 @@
 
 package(default_visibility = ["//visibility:public"])
 
-load("//.tools/orchestration/bazel/cargo:defs.bzl", "cargo_library")
+load("//.tools/orchestration/bazel/cargo:defs.bzl", "cargo_library", "cargo_test")
 
 filegroup(
     name = "srcs",
     srcs = glob(["**/*.rs", "**/*.js", "Cargo.toml"], allow_empty = True),
 )
 
-# No test target. Every module here drives a real OS facility — opening a file
-# dialog, spawning a PTY, writing to the keychain — so tests need either a fake
-# at the port boundary (which does not exist yet) or a machine willing to pop
-# dialogs. The surface IS checked, by //.tools/validation:host_boundary against
-# contracts/runtime: every function this registers is verified present.
 cargo_library(
     name = "lib",
+    package = "carbon-plugin-host",
+    srcs = [":srcs"],
+)
+
+# The manifest parser, the capability check and the cross-DLL allocator — the
+# parts of this crate that are pure logic over the frozen ABI, and the only
+# Rust test V1 had. It did not come across with the migration; this is the port.
+#
+# What is deliberately NOT here: loading a real .dll end to end. That was
+# fragile across CI-vs-local and MSVC-vs-GNU in V1, and the assembled runtime is
+# covered by //products/carbon:launch_test instead.
+#
+# The rest of this crate drives real OS facilities and stays untested here; its
+# surface is checked by the host-boundary validator against contracts/runtime.
+cargo_test(
+    name = "plugin_loader_test",
     package = "carbon-plugin-host",
     srcs = [":srcs"],
 )

@@ -27,7 +27,20 @@
 // a build — it breaks plugins already installed on users' machines. That is the
 // worst blast radius in the repository.
 
-#[path = "host_exports.rs"]
+// ── Layout ──────────────────────────────────────────────────────────────────
+//   abi/        the C-ABI surface a plugin receives. Frozen — plugins ship
+//               prebuilt, so a layout change here breaks ones already
+//               installed.
+//   adapters/   finding, opening and registering a plugin: a driven adapter
+//               over libloading, like every other adapter in this tier.
+//               Replaceable; the ABI is not.
+//
+// Two directories rather than two loose files because the difference in blast
+// radius between them is the most important thing about this crate. `abi/`
+// keeps its own name rather than becoming a port: a port is an interface this
+// crate calls outward through, and this is an interface OTHER people's
+// prebuilt binaries were compiled against.
+#[path = "abi/host_exports.rs"]
 pub mod host_exports;
-#[path = "plugin_loader.rs"]
+#[path = "adapters/plugin_loader.rs"]
 pub mod plugin_loader;

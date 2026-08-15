@@ -18,21 +18,31 @@ name = "carbon-plugin-host"
 version = "0.1.0"
 edition = "2021"
 rust-version.workspace = true
-license = "Apache-2.0"
 description = "Native plugin loading for the carbon runtime: the C-ABI host exports a plugin receives, and the manifest-driven loader that hands them over."
-# The workspace manifest lives in .config/rust. Cargo only walks UP from a
-# crate, so it would never find it — the link has to be explicit.
-workspace = "../../../.config/rust"
+# The workspace manifest lives in .tools/orchestration/bazel/cargo, beside the
+# Bazel rules that drive it. Cargo only walks UP from a crate, so it would
+# never find it — the link has to be explicit.
+workspace = "../../../.tools/orchestration/bazel/cargo"
 
 [lib]
 name = "carbon_plugin_host"
 path = "lib.rs"
+
+# Clippy runs with -D warnings; the shared allow-list lives in the workspace
+# root so one rationale covers every crate. See //.tools/orchestration/bazel/cargo/Cargo.toml.
+[lints]
+workspace = true
 
 [dependencies]
 carbon-runtime-contract = { path = "../../contracts/runtime/rust" }
 # carbon-core supplies the [plugins] section of carbon.toml that the loader
 # reads. It is the Rust side of contracts/app.
 carbon-core = { path = "../../contracts/app/rust" }
+# The extension-point registry, generated from
+# contracts/plugin/registry/extension-points.zig. The loader walks its table
+# rather than carrying a hand-written copy of every hook's symbol and
+# signature.
+carbon-plugin-contract = { path = "../../contracts/plugin/rust" }
 anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -41,3 +51,14 @@ toml = { version = "0.8", default-features = false, features = ["parse"] }
 libloading = "0.8"
 rquickjs = { version = "0.9", default-features = false, features = ["loader", "classes", "macro"] }
 tao = { version = "0.30", default-features = false, features = ["rwh_06"] }
+
+# An integration test under tests/ links the crate from outside, so it sees only
+# the public API plus what is declared here — the [dependencies] above are not
+# in scope for it. These are the same crates and versions, restated for that
+# side of the boundary.
+[dev-dependencies]
+carbon-core = { path = "../../contracts/app/rust" }
+carbon-plugin-contract = { path = "../../contracts/plugin/rust" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { version = "0.8", default-features = false, features = ["parse"] }

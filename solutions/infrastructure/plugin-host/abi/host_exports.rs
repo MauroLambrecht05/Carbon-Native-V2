@@ -311,9 +311,7 @@ fn on_js_thread() -> bool {
 // because build.rs adds -rdynamic).
 
 #[no_mangle]
-pub unsafe extern "C" fn carbon_js_get_context(
-    app: *mut HostCarbonApp,
-) -> *mut CarbonJSContext {
+pub unsafe extern "C" fn carbon_js_get_context(app: *mut HostCarbonApp) -> *mut CarbonJSContext {
     if app.is_null() {
         return core::ptr::null_mut();
     }
@@ -338,18 +336,18 @@ pub unsafe extern "C" fn carbon_js_set_global_string(
     let raw_ctx = ctx as *mut qjs::JSContext;
     let value_cstr = CStr::from_ptr(value);
     let value_bytes = value_cstr.to_bytes();
-    let js_value = qjs::JS_NewStringLen(
-        raw_ctx,
-        value_cstr.as_ptr(),
-        value_bytes.len() as _,
-    );
+    let js_value = qjs::JS_NewStringLen(raw_ctx, value_cstr.as_ptr(), value_bytes.len() as _);
     if qjs::JS_IsException(js_value) {
         return CARBON_ERR_GENERIC;
     }
     let global = qjs::JS_GetGlobalObject(raw_ctx);
     let r = qjs::JS_SetPropertyStr(raw_ctx, global, name, js_value);
     qjs::JS_FreeValue(raw_ctx, global);
-    if r < 0 { CARBON_ERR_GENERIC } else { CARBON_OK }
+    if r < 0 {
+        CARBON_ERR_GENERIC
+    } else {
+        CARBON_OK
+    }
 }
 
 #[no_mangle]
@@ -369,7 +367,11 @@ pub unsafe extern "C" fn carbon_js_set_global_number(
     let global = qjs::JS_GetGlobalObject(raw_ctx);
     let r = qjs::JS_SetPropertyStr(raw_ctx, global, name, js_value);
     qjs::JS_FreeValue(raw_ctx, global);
-    if r < 0 { CARBON_ERR_GENERIC } else { CARBON_OK }
+    if r < 0 {
+        CARBON_ERR_GENERIC
+    } else {
+        CARBON_OK
+    }
 }
 
 // Type alias matching the SDK's `CarbonJSCallback` so plugins can pass
@@ -461,7 +463,12 @@ unsafe extern "C" fn carbon_callback_trampoline(
     if bytes.is_empty() {
         return qjs::JS_UNDEFINED;
     }
-    qjs::JS_ParseJSON(ctx, result_cstr.as_ptr(), bytes.len() as _, b"<carbon-cb>\0".as_ptr() as _)
+    qjs::JS_ParseJSON(
+        ctx,
+        result_cstr.as_ptr(),
+        bytes.len() as _,
+        b"<carbon-cb>\0".as_ptr() as _,
+    )
 }
 
 thread_local! {
@@ -490,7 +497,7 @@ pub unsafe extern "C" fn carbon_js_set_global_function(
     });
     REGISTRY.with(|r| r.borrow_mut().insert(cookie, cb));
 
-    let mut data: [qjs::JSValue; 1] = [qjs::JS_MKVAL(qjs::JS_TAG_INT as i32, cookie)];
+    let mut data: [qjs::JSValue; 1] = [qjs::JS_MKVAL(qjs::JS_TAG_INT, cookie)];
     let func = qjs::JS_NewCFunctionData(
         raw_ctx,
         Some(carbon_callback_trampoline),
@@ -506,14 +513,15 @@ pub unsafe extern "C" fn carbon_js_set_global_function(
     let global = qjs::JS_GetGlobalObject(raw_ctx);
     let r = qjs::JS_SetPropertyStr(raw_ctx, global, name, func);
     qjs::JS_FreeValue(raw_ctx, global);
-    if r < 0 { CARBON_ERR_GENERIC } else { CARBON_OK }
+    if r < 0 {
+        CARBON_ERR_GENERIC
+    } else {
+        CARBON_OK
+    }
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn carbon_js_eval(
-    ctx: *mut CarbonJSContext,
-    source: *const c_char,
-) -> i32 {
+pub unsafe extern "C" fn carbon_js_eval(ctx: *mut CarbonJSContext, source: *const c_char) -> i32 {
     if ctx.is_null() || source.is_null() {
         return CARBON_ERR_INVALID;
     }
