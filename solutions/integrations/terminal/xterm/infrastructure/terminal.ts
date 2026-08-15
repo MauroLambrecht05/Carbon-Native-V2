@@ -14,9 +14,9 @@
 // `term.onData(cb)`, `term.loadAddon(addon)`, `term.cols`, `term.rows`,
 // `term.buffer`, etc.
 
-import { AnsiParser } from "./ansi";
-import { Emitter } from "./events";
-import { BufferNamespace, Grid } from "./grid";
+import { AnsiParser } from "../domain/ansi.ts";
+import { Emitter } from "../domain/events.ts";
+import { BufferNamespace, Grid } from "../domain/grid.ts";
 import type {
   IBufferNamespace,
   IDisposable,
@@ -25,7 +25,7 @@ import type {
   ITerminalAddon,
   ITerminalOptions,
   ITheme,
-} from "./types";
+} from "../domain/types.ts";
 
 const DEFAULT_THEME: Required<ITheme> = {
   background: "#1e1e1e",

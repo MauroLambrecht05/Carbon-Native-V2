@@ -2,7 +2,7 @@
 // ANSI sequences a fresh Terminal can replay. Used by terax-ai's
 // `dormantRing` to snapshot a paused terminal's content for restore.
 
-import type { ITerminal, ITerminalAddon } from "../types";
+import type { ITerminal, ITerminalAddon } from "../../domain/types.ts";
 
 export class SerializeAddon implements ITerminalAddon {
   private term: ITerminal | null = null;

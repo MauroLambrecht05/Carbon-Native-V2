@@ -7,10 +7,10 @@
   "sideEffects": false,
   "exports": {
     "./xterm": "./index.ts",
-    "./addon-fit": "./addons/fit.ts",
-    "./addon-search": "./addons/search.ts",
-    "./addon-serialize": "./addons/serialize.ts",
-    "./addon-web-links": "./addons/web-links.ts",
-    "./addon-webgl": "./addons/webgl.ts"
+    "./addon-fit": "./infrastructure/addons/fit.ts",
+    "./addon-search": "./infrastructure/addons/search.ts",
+    "./addon-serialize": "./infrastructure/addons/serialize.ts",
+    "./addon-web-links": "./infrastructure/addons/web-links.ts",
+    "./addon-webgl": "./infrastructure/addons/webgl.ts"
   }
 }

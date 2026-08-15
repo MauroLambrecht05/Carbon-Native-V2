@@ -3,7 +3,7 @@
 // swap in. The addon exposes the same `activate`/`dispose` contract so
 // `term.loadAddon(new WebglAddon())` doesn't throw.
 
-import type { ITerminal, ITerminalAddon } from "../types";
+import type { ITerminal, ITerminalAddon } from "../../domain/types.ts";
 
 export class WebglAddon implements ITerminalAddon {
   /** xterm-webgl emits this when GL fails (e.g. on iOS); our shim

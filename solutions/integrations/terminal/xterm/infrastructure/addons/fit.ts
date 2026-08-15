@@ -10,7 +10,7 @@
 // runaway height and propose thousands of rows. The container (the element
 // the app mounted the terminal into) always carries the intended box.
 
-import type { ITerminal, ITerminalAddon } from "../types";
+import type { ITerminal, ITerminalAddon } from "../../domain/types.ts";
 
 // Defensive caps: a terminal larger than this is always a measurement bug,
 // and resize() allocates cols×rows scene nodes — an unbounded value hangs

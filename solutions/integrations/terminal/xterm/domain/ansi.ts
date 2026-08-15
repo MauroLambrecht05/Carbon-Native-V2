@@ -27,7 +27,7 @@
 //
 // Anything we don't recognise is logged (in dev) and otherwise ignored.
 
-import type { Grid, CellAttrs } from "./grid";
+import type { Grid, CellAttrs } from "./grid.ts";
 
 export interface AnsiSinks {
   /** Called when OSC 0/2 lands — `setWindowTitle(text)`. */

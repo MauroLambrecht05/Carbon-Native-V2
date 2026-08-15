@@ -6,7 +6,7 @@
 //   emitter.fire({ data: "hi" });
 //   sub.dispose();
 
-import type { IDisposable } from "./types";
+import type { IDisposable } from "./types.ts";
 
 export class Emitter<T> {
   private listeners = new Set<(arg: T) => void>();

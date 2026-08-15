@@ -3,8 +3,8 @@
 // SearchAddon / SerializeAddon round-trip correctly — `translateToString`
 // just joins cell `.ch` values per line.
 
-import type { IBuffer, IBufferCell, IBufferLine, IBufferNamespace, IDisposable } from "./types";
-import { Emitter } from "./events";
+import type { IBuffer, IBufferCell, IBufferLine, IBufferNamespace, IDisposable } from "./types.ts";
+import { Emitter } from "./events.ts";
 
 /** Logical cell attributes — packed enough to fit hot use without
  *  burning memory on every cell. Foreground/background are 24-bit ARGB

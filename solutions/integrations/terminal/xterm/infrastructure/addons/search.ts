@@ -4,7 +4,7 @@
 // the addon just tells the Terminal where the match is via the
 // onDidChangeResults callback.
 
-import type { ITerminal, ITerminalAddon } from "../types";
+import type { ITerminal, ITerminalAddon } from "../../domain/types.ts";
 
 export interface ISearchOptions {
   regex?: boolean;

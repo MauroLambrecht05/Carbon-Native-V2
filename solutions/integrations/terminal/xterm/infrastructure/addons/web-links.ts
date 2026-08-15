@@ -4,7 +4,7 @@
 // text content and wrapping matched substrings in a <span> with an
 // onclick that calls back into the user's handler.
 
-import type { ITerminal, ITerminalAddon } from "../types";
+import type { ITerminal, ITerminalAddon } from "../../domain/types.ts";
 
 const URL_RE = /(https?:\/\/|file:\/\/)[^\s]+[^\s.,:;!?'")\]}]/g;
 
