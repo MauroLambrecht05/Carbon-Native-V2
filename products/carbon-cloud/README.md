@@ -10,8 +10,10 @@ composition/     the control plane's entrypoint (main.ts), each worker's
 infrastructure/
   http/           the API: create/claim/complete a build, serve the dashboard
   persistence/    Postgres connection + migrations
-presentation/
-  dashboard/      the v1 dashboard (React) — signup, usage, deploy, status
+presentation/     the v1 dashboard (React) — signup, usage, deploy, status.
+                  No subfolder: it's the only presentation surface this
+                  product has, so it sits at presentation/ directly rather
+                  than presentation/dashboard/.
 ```
 
 ## Run it locally
@@ -62,7 +64,7 @@ Not real yet: `@carbon/billing`'s `PaymentProvider` — `UpgradePlanUseCase`
 changes the stored plan on a successful charge, but the only implementation
 is `FakePaymentProvider`, which always succeeds without moving any money.
 
-The dashboard (`presentation/dashboard`, React) covers signup, pasting an
+The dashboard (`presentation/`, React) covers signup, pasting an
 existing token, usage against the plan, queuing a build, and checking one's
 status — a token typed in lives in the browser's localStorage for the tab's
 session; there's no cookie session yet.

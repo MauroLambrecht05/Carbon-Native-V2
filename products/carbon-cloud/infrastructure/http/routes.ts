@@ -58,7 +58,7 @@ async function authenticate(req: Request, verifyToken: VerifyTokenUseCase): Prom
   return orgId;
 }
 
-const DASHBOARD_DIR = new URL("../../presentation/dashboard/", import.meta.url);
+const DASHBOARD_DIR = new URL("../../presentation/", import.meta.url);
 const DASHBOARD_HTML = await Bun.file(new URL("index.html", DASHBOARD_DIR)).text();
 
 // Bundled once at startup, not per request — the dashboard is React, and a
