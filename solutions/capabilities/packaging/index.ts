@@ -1,7 +1,9 @@
 // @carbon/packaging — an artifact into an OS installer definition.
 //
-//   application/     GeneratePackageUseCase: target -> definition on disk
-//   infrastructure/  one generator per target, plus the filesystem writer
+//   application/ports/      PackageWriter — where a definition gets written
+//   application/usecases/   GeneratePackageUseCase: target -> definition on disk
+//   infrastructure/         NodePackageWriter, and generators/ — one per
+//                           installer target
 //
 // ── WHAT IT PRODUCES ────────────────────────────────────────────────────────
 // The INPUT a packaging tool consumes — an NSIS .nsi, a WiX .wxs, a Debian
@@ -15,17 +17,17 @@ export {
   GeneratePackageUseCase,
   UnknownTargetError,
   WrongPlatformError,
-  type PackageWriter,
   type GeneratePackageRequest,
   type GeneratePackageResult,
 } from "./application/usecases/GeneratePackageUseCase.ts";
+export type { PackageWriter } from "./application/ports/PackageWriter.ts";
 export { NodePackageWriter } from "./infrastructure/NodePackageWriter.ts";
 
-export * from "./infrastructure/appimage.ts";
-export * from "./infrastructure/deb.ts";
-export * from "./infrastructure/dmg.ts";
-export * from "./infrastructure/nsis.ts";
-export * from "./infrastructure/wix.ts";
+export * from "./infrastructure/generators/appimage.ts";
+export * from "./infrastructure/generators/deb.ts";
+export * from "./infrastructure/generators/dmg.ts";
+export * from "./infrastructure/generators/nsis.ts";
+export * from "./infrastructure/generators/wix.ts";
 
 import { GeneratePackageUseCase } from "./application/usecases/GeneratePackageUseCase.ts";
 import { NodePackageWriter } from "./infrastructure/NodePackageWriter.ts";

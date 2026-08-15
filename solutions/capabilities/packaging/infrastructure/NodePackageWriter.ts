@@ -2,7 +2,7 @@
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import type { PackageWriter } from "../application/usecases/GeneratePackageUseCase.ts";
+import type { PackageWriter } from "../application/ports/PackageWriter.ts";
 
 export class NodePackageWriter implements PackageWriter {
   createDirectory(path: string): void {

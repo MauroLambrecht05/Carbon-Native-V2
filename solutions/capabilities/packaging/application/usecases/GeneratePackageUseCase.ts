@@ -21,17 +21,12 @@ import {
   type InstallerTarget,
   type InstallerTargetId,
 } from "@carbon/contracts/distribution";
-import { generateAppImage } from "../../infrastructure/appimage.ts";
-import { generateDEB } from "../../infrastructure/deb.ts";
-import { generateDMG } from "../../infrastructure/dmg.ts";
-import { generateNSIS } from "../../infrastructure/nsis.ts";
-import { generateWiX } from "../../infrastructure/wix.ts";
-
-/** Writing the generated definition. Behind a port so the use case is testable. */
-export interface PackageWriter {
-  writeFile(path: string, contents: string): void;
-  createDirectory(path: string): void;
-}
+import type { PackageWriter } from "../ports/PackageWriter.ts";
+import { generateAppImage } from "../../infrastructure/generators/appimage.ts";
+import { generateDEB } from "../../infrastructure/generators/deb.ts";
+import { generateDMG } from "../../infrastructure/generators/dmg.ts";
+import { generateNSIS } from "../../infrastructure/generators/nsis.ts";
+import { generateWiX } from "../../infrastructure/generators/wix.ts";
 
 type Generator = (
   config: CarbonConfig,
