@@ -24,5 +24,5 @@ every app built with carbon. Their licenses ship with them.
 harfbuzz's `hb-subset`; regenerate it with `scripts/fonts/subset-roboto.mjs`. A
 subset is a derivative work and carries the same license as its source.
 
-`just check-boundaries` fails if a font lands in this directory without a
+`//.tools/automation/ci:boundaries_test` fails if a font lands here without a
 license file beside it.

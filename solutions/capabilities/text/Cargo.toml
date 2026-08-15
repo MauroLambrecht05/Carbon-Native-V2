@@ -24,11 +24,11 @@ name = "carbon-text-renderer"
 version = "0.1.0"
 edition = "2021"
 rust-version.workspace = true
-license = "Apache-2.0"
 description = "Lazy-loaded text engine: fontdue glyph rasterization + a font-stack with per-glyph fallback, plus word-wrap and measurement. No dependency on any other engine crate, so any paint backend can use it."
-# The workspace manifest lives in .config/rust. Cargo only walks UP from a
-# crate, so it would never find it — the link has to be explicit.
-workspace = "../../../.config/rust"
+# The workspace manifest lives in .tools/orchestration/bazel/cargo, beside the
+# Bazel rules that drive it. Cargo only walks UP from a crate, so it would
+# never find it — the link has to be explicit.
+workspace = "../../../.tools/orchestration/bazel/cargo"
 
 [lib]
 name = "carbon_text_renderer"
@@ -38,6 +38,11 @@ name = "carbon_text_renderer"
 # this wrong is a compile error rather than a silent one — but only for the
 # fonts that are actually referenced.
 path = "lib.rs"
+
+# Clippy runs with -D warnings; the shared allow-list lives in the workspace
+# root so one rationale covers every crate. See //.tools/orchestration/bazel/cargo/Cargo.toml.
+[lints]
+workspace = true
 
 [dependencies]
 tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd", "png-format"] }

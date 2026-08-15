@@ -82,6 +82,12 @@ struct CachedGlyph {
     bitmap: Vec<u8>,
 }
 
+impl Default for TextEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TextEngine {
     pub fn new() -> Self {
         Self {
@@ -293,7 +299,10 @@ impl TextEngine {
         let _primary = match self.primary() {
             Some(f) => f,
             None => {
-                return (text.chars().count() as f32 * font_size * 0.55, font_size * 1.3);
+                return (
+                    text.chars().count() as f32 * font_size * 0.55,
+                    font_size * 1.3,
+                );
             }
         };
         let mono_advance = if is_mono {
@@ -323,7 +332,8 @@ impl TextEngine {
             w += adv;
             first = false;
         }
-        let metric = self.primary()
+        let metric = self
+            .primary()
             .and_then(|f| f.horizontal_line_metrics(px))
             .map(|m| m.new_line_size)
             .unwrap_or(font_size * 1.25);
@@ -340,7 +350,8 @@ impl TextEngine {
         }
         let px = font_size;
         match self.primary() {
-            Some(f) => f.horizontal_line_metrics(px)
+            Some(f) => f
+                .horizontal_line_metrics(px)
                 .map(|m| m.new_line_size)
                 .unwrap_or(font_size * 1.3),
             None => font_size * 1.3,
@@ -377,7 +388,13 @@ impl TextEngine {
         self.wrap_lines_pm(text, font_size, max_width, false)
     }
 
-    pub fn wrap_lines_pm(&mut self, text: &str, font_size: f32, max_width: f32, prefer_mono: bool) -> Vec<String> {
+    pub fn wrap_lines_pm(
+        &mut self,
+        text: &str,
+        font_size: f32,
+        max_width: f32,
+        prefer_mono: bool,
+    ) -> Vec<String> {
         if text.is_empty() {
             return vec![String::new()];
         }
@@ -433,7 +450,13 @@ impl TextEngine {
         self.measure_wrapped_pm(text, font_size, max_width, false)
     }
 
-    pub fn measure_wrapped_pm(&mut self, text: &str, font_size: f32, max_width: f32, prefer_mono: bool) -> (f32, f32) {
+    pub fn measure_wrapped_pm(
+        &mut self,
+        text: &str,
+        font_size: f32,
+        max_width: f32,
+        prefer_mono: bool,
+    ) -> (f32, f32) {
         let (single_w, line_h) = self.measure_styled_mono(text, font_size, 0.0, prefer_mono);
         if single_w <= max_width || max_width <= 0.0 {
             return (single_w, line_h);
@@ -461,13 +484,31 @@ impl TextEngine {
     ) {
         let (single_w, line_h) = self.measure(text, font_size);
         if single_w <= max_width || max_width <= 0.0 {
-            self.draw_text(pixmap, text, x, y, font_size, color_argb, f32::NEG_INFINITY, f32::INFINITY);
+            self.draw_text(
+                pixmap,
+                text,
+                x,
+                y,
+                font_size,
+                color_argb,
+                f32::NEG_INFINITY,
+                f32::INFINITY,
+            );
             return;
         }
         let lines = self.wrap_lines(text, font_size, max_width);
         for (i, line) in lines.iter().enumerate() {
             let ly = y + (i as f32) * line_h;
-            self.draw_text(pixmap, line, x, ly, font_size, color_argb, f32::NEG_INFINITY, f32::INFINITY);
+            self.draw_text(
+                pixmap,
+                line,
+                x,
+                ly,
+                font_size,
+                color_argb,
+                f32::NEG_INFINITY,
+                f32::INFINITY,
+            );
         }
     }
 
@@ -484,8 +525,17 @@ impl TextEngine {
         clip_bottom: f32,
     ) {
         self.draw_text_wrapped_clipped_styled(
-            pixmap, text, x, y, font_size, color_argb, max_width, clip_top, clip_bottom,
-            None, 0.0,
+            pixmap,
+            text,
+            x,
+            y,
+            font_size,
+            color_argb,
+            max_width,
+            clip_top,
+            clip_bottom,
+            None,
+            0.0,
         );
     }
 
@@ -504,8 +554,18 @@ impl TextEngine {
         letter_spacing: f32,
     ) {
         self.draw_text_wrapped_clipped_styled_mono(
-            pixmap, text, x, y, font_size, color_argb, max_width,
-            clip_top, clip_bottom, line_height_prop, letter_spacing, false,
+            pixmap,
+            text,
+            x,
+            y,
+            font_size,
+            color_argb,
+            max_width,
+            clip_top,
+            clip_bottom,
+            line_height_prop,
+            letter_spacing,
+            false,
         );
     }
 
@@ -524,9 +584,8 @@ impl TextEngine {
         letter_spacing: f32,
         is_mono: bool,
     ) {
-        let (single_w, intrinsic_h) = self.measure_styled_mono(
-            text, font_size, letter_spacing, is_mono,
-        );
+        let (single_w, intrinsic_h) =
+            self.measure_styled_mono(text, font_size, letter_spacing, is_mono);
         let line_h = if line_height_prop.is_some() {
             self.resolve_line_height(font_size, line_height_prop)
         } else {
@@ -543,8 +602,16 @@ impl TextEngine {
                 continue;
             }
             self.draw_text_styled_mono(
-                pixmap, line, x, ly, font_size, color_argb,
-                clip_top, clip_bottom, letter_spacing, is_mono,
+                pixmap,
+                line,
+                x,
+                ly,
+                font_size,
+                color_argb,
+                clip_top,
+                clip_bottom,
+                letter_spacing,
+                is_mono,
             );
         }
     }
@@ -560,7 +627,17 @@ impl TextEngine {
         clip_top: f32,
         clip_bottom: f32,
     ) {
-        self.draw_text_styled(pixmap, text, x, y, font_size, color_argb, clip_top, clip_bottom, 0.0);
+        self.draw_text_styled(
+            pixmap,
+            text,
+            x,
+            y,
+            font_size,
+            color_argb,
+            clip_top,
+            clip_bottom,
+            0.0,
+        );
     }
 
     pub fn draw_text_styled(
@@ -576,8 +653,16 @@ impl TextEngine {
         letter_spacing: f32,
     ) {
         self.draw_text_styled_mono(
-            pixmap, text, x, y, font_size, color_argb,
-            clip_top, clip_bottom, letter_spacing, false,
+            pixmap,
+            text,
+            x,
+            y,
+            font_size,
+            color_argb,
+            clip_top,
+            clip_bottom,
+            letter_spacing,
+            false,
         );
     }
 
@@ -661,20 +746,17 @@ impl TextEngine {
             };
             let cp = ch as u32;
             let key = (cp, px_int, font_idx);
-            if !self.cache.contains_key(&key) {
+            if let std::collections::hash_map::Entry::Vacant(e) = self.cache.entry(key) {
                 let f = &self.fonts[font_idx as usize];
                 let (metrics, bitmap) = f.rasterize(ch, font_size);
-                self.cache.insert(
-                    key,
-                    CachedGlyph {
-                        width: metrics.width,
-                        height: metrics.height,
-                        xmin: metrics.xmin,
-                        ymin: metrics.ymin,
-                        advance: metrics.advance_width,
-                        bitmap,
-                    },
-                );
+                e.insert(CachedGlyph {
+                    width: metrics.width,
+                    height: metrics.height,
+                    xmin: metrics.xmin,
+                    ymin: metrics.ymin,
+                    advance: metrics.advance_width,
+                    bitmap,
+                });
             }
             let glyph = match self.cache.get(&key) {
                 Some(g) => g,
@@ -690,7 +772,18 @@ impl TextEngine {
             let gy = (pen_y - glyph.ymin as f32 - glyph.height as f32).round() as i32;
 
             blit_glyph(
-                pixmap, gx, gy, glyph.width, glyph.height, &glyph.bitmap, r, g, b, a, pw, ph,
+                pixmap,
+                gx,
+                gy,
+                glyph.width,
+                glyph.height,
+                &glyph.bitmap,
+                r,
+                g,
+                b,
+                a,
+                pw,
+                ph,
                 clip_top as i32,
                 clip_bottom as i32,
                 x_clip.0,
@@ -716,7 +809,10 @@ impl TextEngine {
             };
             let m = self.fonts.get(idx as usize).map(|f| f.metrics(ch, px));
             let (xmin, w) = m.map(|mm| (mm.xmin, mm.width)).unwrap_or((0, 0));
-            out.push_str(&format!("  {:?} idx={} adv={:.2} xmin={} w={} pen->{:.2}\n", ch, idx, adv, xmin, w, pen));
+            out.push_str(&format!(
+                "  {:?} idx={} adv={:.2} xmin={} w={} pen->{:.2}\n",
+                ch, idx, adv, xmin, w, pen
+            ));
             pen += adv;
         }
         out.push_str(&format!("  total_w={:.2}\n", pen));
