@@ -45,9 +45,14 @@ Real: the build queue (Postgres, `FOR UPDATE SKIP LOCKED` claims), the Linux
 and Windows workers (checks out, builds, packages for real via
 `dpkg-deb`/`appimagetool`/`makensis`/`wix`, signs with Authenticode on
 Windows, uploads to S3-compatible storage), orgs + API tokens gating every
-`/v1/builds/*` request, the dashboard.
+`/v1/builds/*` request, usage metering (a build over the free plan's 60
+included minutes/month gets a 402, not silently allowed through).
 
-Not yet: a Mac worker, billing, per-build authorization (any valid token can
+Not real yet: `@carbon/billing`'s `PaymentProvider` — `UpgradePlanUseCase`
+changes the stored plan on a successful charge, but the only implementation
+is `FakePaymentProvider`, which always succeeds without moving any money.
+
+Not yet: a Mac worker, per-build authorization (any valid token can
 claim/complete any org's queued work — fine for one self-hosted deployment
 you control every worker for, a real gap for multiple untrusted tenants), a
 real dashboard beyond build-status lookup.

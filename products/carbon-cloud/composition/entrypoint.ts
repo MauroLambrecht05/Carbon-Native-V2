@@ -15,6 +15,11 @@ import {
   PostgresIdentityRepository,
   VerifyTokenUseCase,
 } from "@carbon/identity";
+import {
+  CheckUsageLimitUseCase,
+  PostgresBillingRepository,
+  RecordBuildUsageUseCase,
+} from "@carbon/billing";
 import { migrate, openDatabase } from "../infrastructure/persistence/Database.ts";
 import { buildRoutes } from "../infrastructure/http/routes.ts";
 
@@ -55,6 +60,7 @@ export async function startServer(config: CarbonCloudConfig) {
 
   const builds = new PostgresBuildRepository(sql);
   const identity = new PostgresIdentityRepository(sql);
+  const billing = new PostgresBillingRepository(sql);
   const routes = buildRoutes({
     createBuild: new CreateBuildUseCase(builds),
     getBuild: new GetBuildUseCase(builds),
@@ -62,6 +68,8 @@ export async function startServer(config: CarbonCloudConfig) {
     completeBuild: new CompleteBuildUseCase(builds),
     createOrganization: new CreateOrganizationUseCase(identity),
     verifyToken: new VerifyTokenUseCase(identity),
+    checkUsageLimit: new CheckUsageLimitUseCase(billing, billing),
+    recordBuildUsage: new RecordBuildUsageUseCase(billing),
   });
 
   return Bun.serve({

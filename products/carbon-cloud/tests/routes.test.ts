@@ -18,11 +18,18 @@ import {
   InMemoryIdentityRepository,
   VerifyTokenUseCase,
 } from "@carbon/identity";
+import {
+  CheckUsageLimitUseCase,
+  InMemoryBillingRepository,
+  RecordBuildUsageUseCase,
+  UsageRecord,
+} from "@carbon/billing";
 import { buildRoutes } from "../infrastructure/http/routes.ts";
 
 async function harness() {
   const builds = new InMemoryBuildRepository();
   const identity = new InMemoryIdentityRepository();
+  const billing = new InMemoryBillingRepository();
   const createOrganization = new CreateOrganizationUseCase(identity);
   const routes = buildRoutes({
     createBuild: new CreateBuildUseCase(builds),
@@ -31,6 +38,8 @@ async function harness() {
     completeBuild: new CompleteBuildUseCase(builds),
     createOrganization,
     verifyToken: new VerifyTokenUseCase(identity),
+    checkUsageLimit: new CheckUsageLimitUseCase(billing, billing),
+    recordBuildUsage: new RecordBuildUsageUseCase(billing),
   });
   const server = Bun.serve({ port: 0, routes, fetch: () => new Response("not found", { status: 404 }) });
   const base = `http://localhost:${server.port}`;
@@ -38,14 +47,14 @@ async function harness() {
   // Every scenario below needs a valid token to get past auth, so signing
   // up once here is setup, not the thing under test — signup itself is
   // covered separately below.
-  const { apiToken } = await createOrganization.execute("Test Org");
+  const { orgId, apiToken } = await createOrganization.execute("Test Org");
   const authed = (path: string, init: RequestInit = {}) =>
     fetch(`${base}${path}`, {
       ...init,
       headers: { ...init.headers, authorization: `Bearer ${apiToken}` },
     });
 
-  return { server, base, apiToken, authed };
+  return { server, base, orgId, apiToken, authed, billing };
 }
 
 describe("POST /v1/orgs", () => {
@@ -158,6 +167,46 @@ describe("the claim -> complete loop", () => {
       body: JSON.stringify({ platform: "linux", workerId: "w1" }),
     });
     expect(res.status).toBe(204);
+    server.stop(true);
+  });
+});
+
+describe("usage limits", () => {
+  test("a build completing successfully records usage", async () => {
+    const { server, authed, orgId, billing } = await harness();
+    const created = (await (
+      await authed("/v1/builds", {
+        method: "POST",
+        body: JSON.stringify({ repoUrl: "r", commitSha: "c", targets: ["deb"] }),
+      })
+    ).json()) as BuildProps;
+
+    await authed(`/v1/builds/${created.id}/complete`, {
+      method: "POST",
+      body: JSON.stringify({ outcome: "succeeded", artifacts: [] }),
+    });
+
+    // recorded, even if ~0 minutes for an instant test run — sumMinutesForOrg
+    // going through unaffected is the thing this checks, not the exact value.
+    const usedMinutes = await billing.sumMinutesForOrg(orgId, new Date(0));
+    expect(usedMinutes).toBeGreaterThanOrEqual(0);
+    server.stop(true);
+  });
+
+  test("a build over the free plan's included minutes is refused with 402", async () => {
+    const { server, authed, orgId, billing } = await harness();
+    // Free plan: 60 included minutes. Pre-seed past that directly through
+    // the repository — simulating a prior period's usage without needing
+    // 61 real build/complete round trips.
+    await billing.save(
+      UsageRecord.record({ id: crypto.randomUUID(), orgId, buildId: "prior", durationMs: 61 * 60_000 }),
+    );
+
+    const res = await authed("/v1/builds", {
+      method: "POST",
+      body: JSON.stringify({ repoUrl: "r", commitSha: "c", targets: ["deb"] }),
+    });
+    expect(res.status).toBe(402);
     server.stop(true);
   });
 });

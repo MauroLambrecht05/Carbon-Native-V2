@@ -87,6 +87,9 @@
       "@carbon/bundling/bundler": [
         "../solutions/capabilities/bundling/infrastructure/BunBundler.ts"
       ],
+      "@carbon/billing": [
+        "../solutions/capabilities/billing/index.ts"
+      ],
       "@carbon/bundling/cache": [
         "../solutions/capabilities/bundling/infrastructure/BuildCache.ts"
       ],

@@ -1,0 +1,23 @@
+# Carbon Native V2 - @carbon/billing
+#
+# Capability: usage metering and plans for Carbon Cloud.
+
+package(default_visibility = ["//visibility:public"])
+
+load("//.tools/orchestration/bazel/bun:defs.bzl", "bun_test")
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["**/*.ts"], exclude = ["**/*.test.ts"], allow_empty = True),
+)
+
+filegroup(
+    name = "tests",
+    srcs = glob(["**/*.test.ts"], allow_empty = True),
+)
+
+bun_test(
+    name = "billing_test",
+    entry = "tests/billing.test.ts",
+    srcs = [":srcs", ":tests"],
+)

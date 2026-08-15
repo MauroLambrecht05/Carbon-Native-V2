@@ -1,0 +1,13 @@
+{
+  "name": "@carbon/billing",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Usage metering and plans for Carbon Cloud.",
+  "type": "module",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "carbon": {
+    "kind": "service"
+  }
+}

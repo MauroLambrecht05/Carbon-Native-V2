@@ -14,6 +14,7 @@ import {
   type GetBuildUseCase,
 } from "@carbon/cloud-orchestration";
 import type { CreateOrganizationUseCase, VerifyTokenUseCase } from "@carbon/identity";
+import type { CheckUsageLimitUseCase, RecordBuildUsageUseCase } from "@carbon/billing";
 
 export interface RouteDeps {
   readonly createBuild: CreateBuildUseCase;
@@ -22,6 +23,8 @@ export interface RouteDeps {
   readonly completeBuild: CompleteBuildUseCase;
   readonly createOrganization: CreateOrganizationUseCase;
   readonly verifyToken: VerifyTokenUseCase;
+  readonly checkUsageLimit: CheckUsageLimitUseCase;
+  readonly recordBuildUsage: RecordBuildUsageUseCase;
 }
 
 function json(body: unknown, status = 200): Response {
@@ -104,6 +107,13 @@ export function buildRoutes(deps: RouteDeps) {
         const orgId = await authenticate(req, deps.verifyToken);
         if (orgId instanceof Response) return orgId;
         try {
+          const usage = await deps.checkUsageLimit.execute(orgId);
+          if (!usage.withinLimit) {
+            return json(
+              { error: `plan's ${usage.includedMinutes} included build-minutes used for this period` },
+              402,
+            );
+          }
           const body = (await req.json()) as {
             repoUrl: string;
             commitSha: string;
@@ -150,9 +160,25 @@ export function buildRoutes(deps: RouteDeps) {
         if (authed instanceof Response) return authed;
         try {
           const body = (await req.json()) as Record<string, unknown>;
-          await deps.completeBuild.execute({ ...body, buildId: req.params.id } as Parameters<
+          const buildId = req.params.id;
+          await deps.completeBuild.execute({ ...body, buildId } as Parameters<
             CompleteBuildUseCase["execute"]
           >[0]);
+
+          // Metered on wall time from creation to this outcome, not just
+          // time spent "running" — queue wait is real cost too, and Build
+          // doesn't track a separate started-running timestamp to bill off
+          // instead. Only succeeded/failed are terminal; "running" isn't
+          // billable yet.
+          if (body.outcome === "succeeded" || body.outcome === "failed") {
+            const build = (await deps.getBuild.execute(buildId)).toProps();
+            await deps.recordBuildUsage.execute({
+              orgId: build.orgId,
+              buildId,
+              durationMs: build.updatedAt.getTime() - build.createdAt.getTime(),
+            });
+          }
+
           return json({ ok: true });
         } catch (error) {
           return errorResponse(error);
