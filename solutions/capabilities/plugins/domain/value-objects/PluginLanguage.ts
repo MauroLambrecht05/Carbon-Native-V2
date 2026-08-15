@@ -1,16 +1,35 @@
-// The languages a native plugin can be written in.
+// The language a native plugin is written in.
 //
-// Each language answers the same four questions — what file marks a project,
-// what command builds it, how a release build is requested, and where the
-// artifact lands. Keeping those together is what lets the use cases treat Rust
-// and Zig identically instead of branching on language five separate times,
-// which is what the CLI command did.
+// ── THERE IS ONE ────────────────────────────────────────────────────────────
+// Zig. This was a two-element list — Rust and Zig — with an SDK, a template,
+// an artifact-layout rule and a `--lang` flag for each, and the toolchain
+// branched on the answer in five places.
+//
+// Zig is the one, for reasons that are properties of the job rather than
+// taste:
+//
+//   * A plugin is a C-ABI shared library. Zig's `export fn ... callconv(.C)`
+//     IS that, with no attribute soup and no `#[no_mangle]` unsafe block.
+//   * `@cImport` reads `carbon_plugin.h` directly, so the SDK does not
+//     hand-mirror the ABI — the Rust SDK had a whole `ffi.rs` doing exactly
+//     that, and a hand-mirrored ABI is a second source of truth.
+//   * The extension-point registry IS Zig. A plugin `@import`s
+//     `extension-points.zig` and gets the ids and signatures comptime-checked
+//     against the same file the runtime's table was generated from. No other
+//     language gets that without a generated binding.
+//   * `zig build` cross-compiles to every target carbon ships without a
+//     toolchain per host.
+//
+// The type stays a record rather than collapsing into constants, because the
+// four questions below are the ones the use cases ask, and answering them
+// through one value is what let `BuildPluginUseCase` and `InstallPluginUseCase`
+// stop branching on language at all.
 
-export type LanguageId = "rust" | "zig";
+export type LanguageId = "zig";
 
 export interface PluginLanguage {
   readonly id: LanguageId;
-  /** Presence of this file in a directory identifies the language. */
+  /** Presence of this file in a directory identifies a plugin project. */
   readonly marker: string;
   readonly buildCommand: string;
   /** Extra arguments that turn a debug build into an optimised one. */
@@ -19,20 +38,6 @@ export interface PluginLanguage {
   /** Directories to search for the built library, most-preferred first. */
   readonly artifactDirs: readonly string[][];
 }
-
-export const RUST: PluginLanguage = {
-  id: "rust",
-  marker: "Cargo.toml",
-  buildCommand: "cargo",
-  releaseArgs: ["build", "--release"],
-  debugArgs: ["build"],
-  // Release first: after `cargo build --release` both may exist, and the
-  // release artifact is the one worth installing.
-  artifactDirs: [
-    ["target", "release"],
-    ["target", "debug"],
-  ],
-};
 
 export const ZIG: PluginLanguage = {
   id: "zig",
@@ -46,10 +51,19 @@ export const ZIG: PluginLanguage = {
   ],
 };
 
-export const LANGUAGES: readonly PluginLanguage[] = [RUST, ZIG];
+export const LANGUAGES: readonly PluginLanguage[] = [ZIG];
 
-/** Accepts the `rs` alias the CLI has always taken for `rust`. */
+/** The language every plugin is written in. */
+export const DEFAULT_LANGUAGE = ZIG;
+
+/**
+ * Resolve a language name.
+ *
+ * Still a lookup rather than a constant so the error path stays: a
+ * `carbon-plugin.toml` in the wild says `language = "rust"`, and the caller
+ * turning `undefined` into "this workspace builds Zig plugins" is a better
+ * message than a silent default that then fails at `cargo: not found`.
+ */
 export function languageNamed(id: string): PluginLanguage | undefined {
-  if (id === "rs") return RUST;
   return LANGUAGES.find((l) => l.id === id);
 }

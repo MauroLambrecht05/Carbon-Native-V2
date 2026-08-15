@@ -10,7 +10,11 @@ import {
   DEFAULT_PLUGIN_LANGUAGE,
   DEFAULT_PLUGIN_NAME,
 } from "@carbon/contracts/plugin";
-import { RUST, languageNamed, type PluginLanguage } from "../value-objects/PluginLanguage.ts";
+import {
+  DEFAULT_LANGUAGE,
+  languageNamed,
+  type PluginLanguage,
+} from "../value-objects/PluginLanguage.ts";
 import { PluginName } from "../value-objects/PluginName.ts";
 
 export class PluginManifest {
@@ -43,6 +47,6 @@ export class PluginManifest {
       else if (key === "language") language = value;
     }
 
-    return new PluginManifest(PluginName.from(name), languageNamed(language) ?? RUST);
+    return new PluginManifest(PluginName.from(name), languageNamed(language) ?? DEFAULT_LANGUAGE);
   }
 }

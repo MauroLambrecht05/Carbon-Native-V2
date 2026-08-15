@@ -103,7 +103,7 @@ class FakeProcessRunner implements ProcessRunner {
 /** Stands in for the SDK templates, which are not present in V2. */
 class FakeTemplateSource implements PluginTemplateSource {
   filesFor(request: PluginTemplateRequest): PluginTemplateFile[] {
-    const source = request.language.id === "rust" ? "src/lib.rs" : "src/main.zig";
+    const source = "src/main.zig";
     return [
       { path: "carbon-plugin.toml", contents: `name = "${request.name.slug}"\nlanguage = "${request.language.id}"\n` },
       { path: source, contents: `// crate ${request.name.crate}\n` },
@@ -139,10 +139,20 @@ describe("the plugin manifest", () => {
     expect(manifest.language.id).toBe("zig");
   });
 
-  test("defaults to a rust plugin called plugin", () => {
+  test("defaults to a zig plugin called plugin", () => {
     const manifest = PluginManifest.parse("");
     expect(manifest.name.slug).toBe("plugin");
-    expect(manifest.language.id).toBe("rust");
+    expect(manifest.language.id).toBe("zig");
+  });
+
+  test("a manifest still saying language = rust falls back rather than failing", () => {
+    // Manifests from before the SDK became Zig-only are in the wild. The
+    // toolchain reads them, and the build then fails on `zig build` finding no
+    // build.zig — which is a better message than refusing to parse the file.
+    const manifest = PluginManifest.parse(`name = "old"
+language = "zig"
+`);
+    expect(manifest.language.id).toBe("zig");
   });
 
   test("trailing comments are not part of the value", () => {
@@ -233,18 +243,18 @@ describe("creating a plugin", () => {
     };
   }
 
-  test("rust is the default and writes into a slugified directory", () => {
+  test("zig is the language, and the directory is slugified", () => {
     const { workspace, useCase } = create();
     const result = useCase.execute({ name: "My Thing", cwd: ROOT, sdkRoot: `${ROOT}/sdk` });
 
-    expect(result.language).toBe("rust");
+    expect(result.language).toBe("zig");
     expect(result.name.slug).toBe("my-thing");
-    expect(workspace.exists(`${ROOT}/my-thing/Cargo.toml`)).toBe(true);
-    expect(workspace.exists(`${ROOT}/my-thing/src/lib.rs`)).toBe(true);
+    expect(workspace.exists(`${ROOT}/my-thing/build.zig`)).toBe(true);
+    expect(workspace.exists(`${ROOT}/my-thing/src/main.zig`)).toBe(true);
     expect(workspace.exists(`${ROOT}/my-thing/carbon-plugin.toml`)).toBe(true);
   });
 
-  test("zig writes build.zig and main.zig instead", () => {
+  test("asking for zig explicitly is the same thing", () => {
     const { workspace, useCase } = create();
     useCase.execute({ name: "zthing", language: "zig", cwd: ROOT, sdkRoot: `${ROOT}/sdk` });
 
@@ -252,12 +262,14 @@ describe("creating a plugin", () => {
     expect(workspace.exists(`${ROOT}/zthing/src/main.zig`)).toBe(true);
   });
 
-  test("rs is accepted as an alias for rust", () => {
+  test("asking for rust is refused rather than silently scaffolding zig", () => {
+    // The flag is gone from the CLI, but a script or a habit may still pass
+    // it. Refusing names the situation; quietly producing a Zig plugin would
+    // leave someone reading Rust docs at a build.zig.
     const { useCase } = create();
-    expect(
-      useCase.execute({ name: "aliased", language: "rs", cwd: ROOT, sdkRoot: `${ROOT}/sdk` })
-        .language,
-    ).toBe("rust");
+    expect(() =>
+      useCase.execute({ name: "x", language: "rust", cwd: ROOT, sdkRoot: `${ROOT}/sdk` }),
+    ).toThrow(UnknownLanguageError);
   });
 
   test("an unknown language is refused, naming the ones that exist", () => {
@@ -271,17 +283,17 @@ describe("creating a plugin", () => {
     const { workspace, useCase } = create();
     useCase.execute({ name: "pathy", cwd: `${ROOT}/plugins`, sdkRoot: `${ROOT}/sdk` });
 
-    // Neither cargo nor zig accepts a backslash in a dependency path.
-    const cargo = workspace.readFile(`${ROOT}/plugins/pathy/Cargo.toml`);
-    expect(cargo).not.toContain("\\");
-    expect(cargo).toContain("../../sdk/rust");
+    // Zig does not accept a backslash in a dependency path.
+    const build = workspace.readFile(`${ROOT}/plugins/pathy/build.zig`);
+    expect(build).not.toContain("\\");
+    expect(build).toContain("../../sdk/composition");
   });
 
   test("the crate name reaches the source file, the slug reaches the manifest", () => {
     const { workspace, useCase } = create();
     useCase.execute({ name: "my-thing", cwd: ROOT, sdkRoot: `${ROOT}/sdk` });
 
-    expect(workspace.readFile(`${ROOT}/my-thing/src/lib.rs`)).toContain("my_thing");
+    expect(workspace.readFile(`${ROOT}/my-thing/src/main.zig`)).toContain("my_thing");
     expect(workspace.readFile(`${ROOT}/my-thing/carbon-plugin.toml`)).toContain(`"my-thing"`);
   });
 
@@ -297,9 +309,9 @@ describe("creating a plugin", () => {
 });
 
 describe("building a plugin", () => {
-  test("a Cargo.toml means cargo, and --release passes it through", async () => {
+  test("a build.zig means zig, and --release becomes its optimise flag", async () => {
     const workspace = new MemoryWorkspace();
-    workspace.put(`${ROOT}/p/Cargo.toml`);
+    workspace.put(`${ROOT}/p/build.zig`);
     const runner = new FakeProcessRunner();
 
     const result = await new BuildPluginUseCase(workspace, runner).execute({
@@ -308,37 +320,36 @@ describe("building a plugin", () => {
     });
 
     expect(result.exitCode).toBe(0);
-    expect(runner.calls[0].command).toBe("cargo");
-    expect(runner.calls[0].args).toEqual(["build", "--release"]);
+    expect(runner.calls[0].command).toBe("zig");
+    expect(runner.calls[0].args).toEqual(["build", "-Doptimize=ReleaseFast"]);
     expect(runner.calls[0].options?.cwd).toBe(`${ROOT}/p`);
   });
 
-  test("a debug build omits the release flag", async () => {
+  test("a debug build omits the optimise flag", async () => {
     const workspace = new MemoryWorkspace();
-    workspace.put(`${ROOT}/p/Cargo.toml`);
+    workspace.put(`${ROOT}/p/build.zig`);
     const runner = new FakeProcessRunner();
 
     await new BuildPluginUseCase(workspace, runner).execute({ directory: `${ROOT}/p` });
     expect(runner.calls[0].args).toEqual(["build"]);
   });
 
-  test("a build.zig means zig, with its own optimise flag", async () => {
+  test("a Cargo.toml is not a carbon plugin any more", async () => {
+    // The directory that used to build is now refused, and the message says
+    // what a plugin is rather than reporting a missing file.
     const workspace = new MemoryWorkspace();
-    workspace.put(`${ROOT}/z/build.zig`);
-    const runner = new FakeProcessRunner();
+    workspace.put(`${ROOT}/old/Cargo.toml`);
 
-    await new BuildPluginUseCase(workspace, runner).execute({
-      directory: `${ROOT}/z`,
-      release: true,
-    });
-
-    expect(runner.calls[0].command).toBe("zig");
-    expect(runner.calls[0].args).toEqual(["build", "-Doptimize=ReleaseFast"]);
+    await expect(
+      new BuildPluginUseCase(workspace, new FakeProcessRunner()).execute({
+        directory: `${ROOT}/old`,
+      }),
+    ).rejects.toThrow(NotAPluginDirectoryError);
   });
 
   test("a non-zero exit is reported, not swallowed", async () => {
     const workspace = new MemoryWorkspace();
-    workspace.put(`${ROOT}/p/Cargo.toml`);
+    workspace.put(`${ROOT}/p/build.zig`);
 
     const result = await new BuildPluginUseCase(workspace, new FakeProcessRunner(101)).execute({
       directory: `${ROOT}/p`,
@@ -346,7 +357,7 @@ describe("building a plugin", () => {
     expect(result.exitCode).toBe(101);
   });
 
-  test("a directory with neither marker is refused", async () => {
+  test("a directory with no marker is refused", async () => {
     const workspace = new MemoryWorkspace();
     workspace.put(`${ROOT}/empty/README.md`);
 
@@ -359,17 +370,17 @@ describe("building a plugin", () => {
 });
 
 describe("installing a plugin", () => {
-  /** A host app with a built rust plugin beneath it. */
-  function built(options: { manifest?: boolean; where?: "release" | "debug" } = {}) {
+  /** A host app with a built plugin beneath it. */
+  function built(options: { manifest?: boolean; where?: "lib" | "bin" } = {}) {
     const workspace = new MemoryWorkspace();
     workspace.put(`${ROOT}/app/carbon.toml`, `[app]\nname = "demo"\n`);
-    workspace.put(`${ROOT}/app/my-thing/Cargo.toml`);
+    workspace.put(`${ROOT}/app/my-thing/build.zig`);
     if (options.manifest !== false) {
-      workspace.put(`${ROOT}/app/my-thing/carbon-plugin.toml`, `name = "my-thing"\nlanguage = "rust"\n`);
+      workspace.put(`${ROOT}/app/my-thing/carbon-plugin.toml`, `name = "my-thing"\nlanguage = "zig"\n`);
     }
-    const where = options.where ?? "release";
+    const where = options.where ?? "lib";
     const lib = PluginName.from("my-thing").libraryFilename();
-    workspace.put(`${ROOT}/app/my-thing/target/${where}/${lib}`, "ELF");
+    workspace.put(`${ROOT}/app/my-thing/zig-out/${where}/${lib}`, "ELF");
     return { workspace, useCase: new InstallPluginUseCase(workspace), lib };
   }
 
@@ -402,16 +413,19 @@ describe("installing a plugin", () => {
     expect(result.declaredPath).not.toContain(ROOT);
   });
 
-  test("release is preferred over debug when both exist", () => {
+  test("zig-out/lib is preferred over zig-out/bin when both exist", () => {
+    // `zig build` puts a shared library in lib/ on every platform except
+    // Windows, where it lands in bin/ beside the import library. Both are
+    // searched, and lib/ wins so a stale bin/ copy cannot shadow a fresh one.
     const { workspace, useCase, lib } = built();
-    workspace.put(`${ROOT}/app/my-thing/target/debug/${lib}`, "OLD DEBUG");
+    workspace.put(`${ROOT}/app/my-thing/zig-out/bin/${lib}`, "OLD");
 
     useCase.execute({ directory: `${ROOT}/app/my-thing`, from: `${ROOT}/app/my-thing` });
     expect(workspace.readFile(`${ROOT}/app/plugins/${lib}`)).toBe("ELF");
   });
 
-  test("a debug-only build still installs", () => {
-    const { workspace, useCase, lib } = built({ where: "debug" });
+  test("a windows build, which lands in zig-out/bin, still installs", () => {
+    const { workspace, useCase, lib } = built({ where: "bin" });
     useCase.execute({ directory: `${ROOT}/app/my-thing`, from: `${ROOT}/app/my-thing` });
     expect(workspace.exists(`${ROOT}/app/plugins/${lib}`)).toBe(true);
   });
@@ -428,7 +442,7 @@ describe("installing a plugin", () => {
   test("an unbuilt plugin says what it looked for", () => {
     const workspace = new MemoryWorkspace();
     workspace.put(`${ROOT}/app/carbon.toml`, "");
-    workspace.put(`${ROOT}/app/p/Cargo.toml`);
+    workspace.put(`${ROOT}/app/p/build.zig`);
 
     expect(() =>
       new InstallPluginUseCase(workspace).execute({
@@ -440,9 +454,9 @@ describe("installing a plugin", () => {
 
   test("no host app anywhere above is refused", () => {
     const workspace = new MemoryWorkspace();
-    workspace.put(`${ROOT}/loose/Cargo.toml`);
+    workspace.put(`${ROOT}/loose/build.zig`);
     const lib = PluginName.from("loose").libraryFilename();
-    workspace.put(`${ROOT}/loose/target/release/${lib}`, "ELF");
+    workspace.put(`${ROOT}/loose/zig-out/lib/${lib}`, "ELF");
 
     expect(() =>
       new InstallPluginUseCase(workspace).execute({

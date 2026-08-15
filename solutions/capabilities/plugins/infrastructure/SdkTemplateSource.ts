@@ -7,13 +7,19 @@
 // embeds its own copy they drift, silently, into producing different plugins
 // for the same command.
 //
-// The SDK lives in solutions/capabilities/plugin-sdk, which holds the Rust and
-// Zig libraries a plugin compiles against plus the templates a new plugin is
-// generated from.
+// ── WHERE THE SDK IS, AND WHY THIS DOES NOT SAY ─────────────────────────────
+// The templates live in `products/carbon-ext/presentation/templates`, because
+// what a scaffolded plugin looks like is the SDK's surface — and this is a
+// SOLUTION. Solutions may not name a path inside a product; products depend on
+// solutions and never the other way round.
 //
-// It pointed at <workspace>/packages/carbon-sdk until the SDK was migrated — a
-// V1 directory that had not existed since, so `carbon plugin new` failed on a
-// missing template file.
+// So the root is INJECTED. `carbon-cli` knows where carbon-ext is and passes
+// it in, and this adapter only knows how to read templates out of whatever
+// root it was handed. That is also what makes it testable against a fake.
+//
+// It used to derive the path itself via `sdkRootFor(workspaceRoot)`, which was
+// fine while the SDK was a capability and wrong the moment it became a
+// product.
 
 import { join } from "node:path";
 import type {
@@ -23,28 +29,20 @@ import type {
 } from "../application/ports/PluginWorkspace.ts";
 import type { PluginWorkspace } from "../application/ports/PluginWorkspace.ts";
 
-/** Where the SDK lives, relative to the workspace root. */
-export function sdkRootFor(workspaceRoot: string): string {
-  return join(workspaceRoot, "solutions", "capabilities", "plugin-sdk");
-}
-
 /**
  * Which template produces which file, per language.
  *
- * A table rather than two code paths: adding a language is a row, and the two
- * languages cannot drift in how they render.
+ * Still a table with the language as its key, though there is one language
+ * now. The shape is what let Rust be removed as a data edit rather than an
+ * unpicking of two code paths, and it is what a second language would go back
+ * into — the cost of keeping it is one line.
  */
 const LAYOUT: Record<string, Array<{ template: string; output: string }>> = {
-  rust: [
-    { template: "rust/templates/plugin/Cargo.toml.tmpl", output: "Cargo.toml" },
-    { template: "rust/templates/plugin/src/lib.rs.tmpl", output: "src/lib.rs" },
-    { template: "rust/templates/plugin/carbon-plugin.toml.tmpl", output: "carbon-plugin.toml" },
-  ],
   zig: [
-    { template: "zig/templates/plugin/build.zig.tmpl", output: "build.zig" },
-    { template: "zig/templates/plugin/build.zig.zon.tmpl", output: "build.zig.zon" },
-    { template: "zig/templates/plugin/src/main.zig.tmpl", output: "src/main.zig" },
-    { template: "zig/templates/plugin/carbon-plugin.toml.tmpl", output: "carbon-plugin.toml" },
+    { template: "presentation/templates/plugin/build.zig.tmpl", output: "build.zig" },
+    { template: "presentation/templates/plugin/build.zig.zon.tmpl", output: "build.zig.zon" },
+    { template: "presentation/templates/plugin/src/main.zig.tmpl", output: "src/main.zig" },
+    { template: "presentation/templates/plugin/carbon-plugin.toml.tmpl", output: "carbon-plugin.toml" },
   ],
 };
 
@@ -69,8 +67,8 @@ export class SdkTemplateSource implements PluginTemplateSource {
  *
  * @@NAME@@ means different things depending on the file, and this is not a
  * quirk worth normalising away: manifests name the plugin `my-thing`, but
- * `my-thing` is not a legal Rust or Zig identifier, so the generated sources
- * need `my_thing`. V1 drew the line at source files and the SDK templates are
+ * `my-thing` is not a legal Zig identifier, so the generated sources need
+ * `my_thing`. V1 drew the line at source files and the SDK templates are
  * written against that, so the line stays where it is.
  */
 function render(template: string, output: string, request: PluginTemplateRequest): string {
@@ -81,7 +79,7 @@ function render(template: string, output: string, request: PluginTemplateRequest
     .replaceAll("@@SDK_PATH@@", request.sdkPath);
 }
 
-/** Source files take the crate name in @@NAME@@; everything else takes the slug. */
+/** Source files take the identifier form in @@NAME@@; everything else the slug. */
 export function isSourceFile(output: string): boolean {
   return output.startsWith("src/");
 }

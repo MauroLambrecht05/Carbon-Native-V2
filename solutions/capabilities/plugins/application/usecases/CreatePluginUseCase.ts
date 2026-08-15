@@ -2,7 +2,11 @@
 
 import { join, relative } from "node:path";
 import { TargetNotEmptyError, UnknownLanguageError } from "../../domain/errors/PluginError.ts";
-import { languageNamed, LANGUAGES, RUST } from "../../domain/value-objects/PluginLanguage.ts";
+import {
+  DEFAULT_LANGUAGE,
+  languageNamed,
+  LANGUAGES,
+} from "../../domain/value-objects/PluginLanguage.ts";
 import { PluginName } from "../../domain/value-objects/PluginName.ts";
 import type {
   PluginTemplateFile,
@@ -39,7 +43,7 @@ export class CreatePluginUseCase {
   ) {}
 
   execute(request: CreatePluginRequest): CreatePluginResult {
-    const language = request.language ? languageNamed(request.language) : RUST;
+    const language = request.language ? languageNamed(request.language) : DEFAULT_LANGUAGE;
     if (!language) {
       throw new UnknownLanguageError(
         request.language!,
@@ -53,10 +57,21 @@ export class CreatePluginUseCase {
       throw new TargetNotEmptyError(target);
     }
 
-    // Neither Cargo nor Zig accepts a backslash in a dependency path, so the
-    // SDK path is forward-slashed regardless of platform.
+    // The SDK package root: where the scaffolded build.zig.zon points its
+    // `carbon-plugin-sdk` dependency.
+    //
+    // `composition/`, because that is where build.zig lives — a Zig package IS
+    // its build.zig, and the SDK's is its composition root. This used to join
+    // `language.id`, i.e. `<sdkRoot>/zig`, which was right while the SDK was
+    // solutions/capabilities/plugin-sdk/zig/ and pointed at nothing once it
+    // became products/carbon-ext. Naming the directory rather than deriving it
+    // from the language is also honest: there is one language, and where its
+    // package definition sits is not a property of the language.
+    //
+    // Zig does not accept a backslash in a dependency path, so it is
+    // forward-slashed regardless of platform.
     const sdkPath = forwardSlashes(
-      relative(target, join(request.sdkRoot, language.id)) || ".",
+      relative(target, join(request.sdkRoot, "composition")) || ".",
     );
 
     const files = this.templates.filesFor({ name, language, sdkPath });
@@ -66,10 +81,7 @@ export class CreatePluginUseCase {
       this.workspace.writeFile(join(target, file.path), file.contents);
     }
 
-    const nextStep =
-      language.id === "rust"
-        ? `cd ${name.slug} && carbon plugin build --release && carbon plugin install`
-        : `cd ${name.slug} && zig build && carbon plugin install`;
+    const nextStep = `cd ${name.slug} && carbon plugin build --release && carbon plugin install`;
 
     return { name, target, language: language.id, files, nextStep };
   }

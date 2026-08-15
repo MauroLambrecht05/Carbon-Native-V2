@@ -22,11 +22,14 @@ export class TargetNotEmptyError extends PluginError {
   }
 }
 
-/** Neither a Cargo.toml nor a build.zig, so there is nothing to build. */
+/** No build.zig, so there is nothing to build. */
 export class NotAPluginDirectoryError extends PluginError {
   readonly kind = "not-a-plugin";
   constructor(readonly directory: string) {
-    super(`no Cargo.toml or build.zig found in ${directory}`);
+    super(
+      `no build.zig found in ${directory} — a carbon plugin is a Zig project. ` +
+        "Scaffold one with: carbon plugin new <name>",
+    );
   }
 }
 
