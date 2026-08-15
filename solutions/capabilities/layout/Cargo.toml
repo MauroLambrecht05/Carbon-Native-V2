@@ -20,15 +20,20 @@ name = "carbon-layout"
 version = "0.1.0"
 edition = "2021"
 rust-version.workspace = true
-license = "Apache-2.0"
 description = "Scene graph + Taffy integration for the carbon runtime, plus the CSS-string value parsers (gradients, transforms, box-shadow, clip-path) that populate node properties."
-# The workspace manifest lives in .config/rust. Cargo only walks UP from a
-# crate, so it would never find it — the link has to be explicit.
-workspace = "../../../.config/rust"
+# The workspace manifest lives in .tools/orchestration/bazel/cargo, beside the
+# Bazel rules that drive it. Cargo only walks UP from a crate, so it would
+# never find it — the link has to be explicit.
+workspace = "../../../.tools/orchestration/bazel/cargo"
 
 [lib]
 name = "carbon_layout"
 path = "lib.rs"
+
+# Clippy runs with -D warnings; the shared allow-list lives in the workspace
+# root so one rationale covers every crate. See //.tools/orchestration/bazel/cargo/Cargo.toml.
+[lints]
+workspace = true
 
 [dependencies]
 serde = { workspace = true }

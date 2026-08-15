@@ -20,7 +20,7 @@ pub use carbon_text_renderer as text;
 //
 // `#[path]` keeps the module names, so `carbon_layout::scene::Scene` still
 // resolves for every downstream crate.
-#[path = "domain/scene.rs"]
-pub mod scene;
 #[path = "domain/css_parse.rs"]
 pub mod css_parse;
+#[path = "domain/scene.rs"]
+pub mod scene;

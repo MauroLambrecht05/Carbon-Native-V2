@@ -47,7 +47,10 @@ fn surrounding_whitespace_is_ignored() {
 #[test]
 fn rgb_and_rgba_functions() {
     assert_eq!(parse_color_str("rgb(255, 0, 0)"), Some(OPAQUE | 0xFF0000));
-    assert_eq!(parse_color_str("rgba(255, 0, 0, 1)"), Some(OPAQUE | 0xFF0000));
+    assert_eq!(
+        parse_color_str("rgba(255, 0, 0, 1)"),
+        Some(OPAQUE | 0xFF0000)
+    );
 }
 
 #[test]
@@ -64,7 +67,10 @@ fn rgba_alpha_is_a_fraction_scaled_to_a_byte() {
 
 #[test]
 fn zero_alpha_is_fully_transparent() {
-    assert_eq!(parse_color_str("rgba(255, 0, 0, 0)").map(|c| c >> 24), Some(0));
+    assert_eq!(
+        parse_color_str("rgba(255, 0, 0, 0)").map(|c| c >> 24),
+        Some(0)
+    );
 }
 
 #[test]
@@ -87,7 +93,7 @@ fn currentcolor_is_none_not_black() {
 fn named_colors_resolve_and_are_case_insensitive() {
     assert_eq!(parse_color_str("red"), Some(OPAQUE | 0xFF0000));
     assert_eq!(parse_color_str("white"), Some(OPAQUE | 0xFFFFFF));
-    assert_eq!(parse_color_str("BLACK"), Some(OPAQUE | 0x000000));
+    assert_eq!(parse_color_str("BLACK"), Some(OPAQUE));
 }
 
 #[test]
@@ -103,7 +109,11 @@ fn unknown_names_and_malformed_input_are_none() {
         "",
         "   ",
     ] {
-        assert_eq!(parse_color_str(input), None, "input {input:?} should not parse");
+        assert_eq!(
+            parse_color_str(input),
+            None,
+            "input {input:?} should not parse"
+        );
     }
 }
 
@@ -111,23 +121,35 @@ fn unknown_names_and_malformed_input_are_none() {
 fn hsl_maps_the_primaries() {
     // Red, green, blue at the three 120-degree marks. Full saturation, half
     // lightness is exactly the primary in each case.
-    assert_eq!(parse_color_str("hsl(0, 100%, 50%)"), Some(OPAQUE | 0xFF0000));
-    assert_eq!(parse_color_str("hsl(120, 100%, 50%)"), Some(OPAQUE | 0x00FF00));
-    assert_eq!(parse_color_str("hsl(240, 100%, 50%)"), Some(OPAQUE | 0x0000FF));
+    assert_eq!(
+        parse_color_str("hsl(0, 100%, 50%)"),
+        Some(OPAQUE | 0xFF0000)
+    );
+    assert_eq!(
+        parse_color_str("hsl(120, 100%, 50%)"),
+        Some(OPAQUE | 0x00FF00)
+    );
+    assert_eq!(
+        parse_color_str("hsl(240, 100%, 50%)"),
+        Some(OPAQUE | 0x0000FF)
+    );
 }
 
 #[test]
 fn hsl_lightness_extremes_are_black_and_white() {
-    assert_eq!(parse_color_str("hsl(0, 100%, 0%)"), Some(OPAQUE | 0x000000));
-    assert_eq!(parse_color_str("hsl(0, 100%, 100%)"), Some(OPAQUE | 0xFFFFFF));
+    assert_eq!(parse_color_str("hsl(0, 100%, 0%)"), Some(OPAQUE));
+    assert_eq!(
+        parse_color_str("hsl(0, 100%, 100%)"),
+        Some(OPAQUE | 0xFFFFFF)
+    );
 }
 
 // ── Gradients ───────────────────────────────────────────────────────────────
 
 #[test]
 fn linear_gradient_keeps_its_stops_in_order() {
-    let g = parse_linear_gradient("linear-gradient(to right, #ff0000, #0000ff)")
-        .expect("should parse");
+    let g =
+        parse_linear_gradient("linear-gradient(to right, #ff0000, #0000ff)").expect("should parse");
     assert_eq!(g.stops.len(), 2);
     // Order is load-bearing: reversing it reverses the gradient on screen.
     assert_eq!(g.stops[0].color, OPAQUE | 0xFF0000);
@@ -136,15 +158,15 @@ fn linear_gradient_keeps_its_stops_in_order() {
 
 #[test]
 fn linear_gradient_accepts_more_than_two_stops() {
-    let g = parse_linear_gradient("linear-gradient(to right, red, white, blue)")
-        .expect("should parse");
+    let g =
+        parse_linear_gradient("linear-gradient(to right, red, white, blue)").expect("should parse");
     assert_eq!(g.stops.len(), 3);
 }
 
 #[test]
 fn radial_gradient_parses() {
-    let g = parse_radial_gradient("radial-gradient(circle, #ffffff, #000000)")
-        .expect("should parse");
+    let g =
+        parse_radial_gradient("radial-gradient(circle, #ffffff, #000000)").expect("should parse");
     assert_eq!(g.stops.len(), 2);
 }
 

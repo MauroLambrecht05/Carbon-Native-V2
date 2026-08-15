@@ -321,10 +321,22 @@ pub enum TransformOp {
     /// they're a percentage (0..100) resolved at paint time against the
     /// element's own width (x) / height (y) — CSS `translate(-50%, -50%)`
     /// semantics, which is how Radix centers every dialog/dropdown/tooltip.
-    Translate { x: f32, y: f32, #[serde(default)] x_pct: bool, #[serde(default)] y_pct: bool },
+    Translate {
+        x: f32,
+        y: f32,
+        #[serde(default)]
+        x_pct: bool,
+        #[serde(default)]
+        y_pct: bool,
+    },
     /// Radians.
-    Rotate { rad: f32 },
-    Scale { x: f32, y: f32 },
+    Rotate {
+        rad: f32,
+    },
+    Scale {
+        x: f32,
+        y: f32,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -518,6 +530,12 @@ pub struct Scene {
     pub dirty_rect: Option<(f32, f32, f32, f32)>,
 }
 
+impl Default for Scene {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Scene {
     pub fn new() -> Self {
         Self {
@@ -542,13 +560,7 @@ impl Scene {
     /// None if any ancestor lacks a computed layout. Cheap because trees
     /// are shallow (chat-app depths peak around 12).
     pub fn absolute_box(&self, target: u32) -> Option<(f32, f32, f32, f32)> {
-        fn walk(
-            s: &Scene,
-            id: u32,
-            target: u32,
-            ox: f32,
-            oy: f32,
-        ) -> Option<(f32, f32, f32, f32)> {
+        fn walk(s: &Scene, id: u32, target: u32, ox: f32, oy: f32) -> Option<(f32, f32, f32, f32)> {
             let n = s.nodes.get(&id)?;
             let layout = n.computed_layout?;
             let x = ox + layout.location.x;
@@ -614,7 +626,8 @@ impl Scene {
         self.nodes.clear();
         self.root = 0;
         self.taffy = TaffyTree::new();
-        self.dirty = true; self.layout_valid = false;
+        self.dirty = true;
+        self.layout_valid = false;
         self.scroll_offsets.clear();
         self.hovered = None;
         self.focused = None;
@@ -631,7 +644,7 @@ impl Scene {
     // event-loop knows to repaint.
 
     pub fn input_state_mut(&mut self, id: u32) -> &mut InputState {
-        self.inputs.entry(id).or_insert_with(InputState::default)
+        self.inputs.entry(id).or_default()
     }
 
     pub fn input_state(&self, id: u32) -> Option<&InputState> {
@@ -647,12 +660,9 @@ impl Scene {
             Some(t) => t,
             None => return,
         };
-        let st = self.inputs.entry(id).or_insert_with(InputState::default);
+        let st = self.inputs.entry(id).or_default();
         if let Some(top) = st.undo.last() {
-            if top.text == text
-                && top.caret == st.caret
-                && top.sel_anchor == st.sel_anchor
-            {
+            if top.text == text && top.caret == st.caret && top.sel_anchor == st.sel_anchor {
                 return;
             }
         }
@@ -698,7 +708,8 @@ impl Scene {
         if let Some(n) = self.nodes.get_mut(&id) {
             n.props.text = Some(prev.text.clone());
         }
-        self.dirty = true; self.layout_valid = false;
+        self.dirty = true;
+        self.layout_valid = false;
         Some(prev.text)
     }
 
@@ -730,7 +741,8 @@ impl Scene {
         if let Some(n) = self.nodes.get_mut(&id) {
             n.props.text = Some(next.text.clone());
         }
-        self.dirty = true; self.layout_valid = false;
+        self.dirty = true;
+        self.layout_valid = false;
         Some(next.text)
     }
 
@@ -740,7 +752,7 @@ impl Scene {
         self.push_undo_snapshot(id);
         let n = self.nodes.get_mut(&id)?;
         let text = n.props.text.clone().unwrap_or_default();
-        let st = self.inputs.entry(id).or_insert_with(InputState::default);
+        let st = self.inputs.entry(id).or_default();
         let (start, end) = sel_range(text.len(), st);
         let mut out = String::with_capacity(text.len() + s.len());
         out.push_str(&text[..start]);
@@ -750,7 +762,8 @@ impl Scene {
         n.props.text = Some(out.clone());
         st.caret = new_caret;
         st.sel_anchor = new_caret;
-        self.dirty = true; self.layout_valid = false;
+        self.dirty = true;
+        self.layout_valid = false;
         Some(out)
     }
 
@@ -760,7 +773,7 @@ impl Scene {
         self.push_undo_snapshot(id);
         let n = self.nodes.get_mut(&id)?;
         let text = n.props.text.clone().unwrap_or_default();
-        let st = self.inputs.entry(id).or_insert_with(InputState::default);
+        let st = self.inputs.entry(id).or_default();
         let (start, end) = sel_range(text.len(), st);
         let (new_text, new_caret) = if start == end {
             if start == 0 {
@@ -780,7 +793,8 @@ impl Scene {
         n.props.text = Some(new_text.clone());
         st.caret = new_caret;
         st.sel_anchor = new_caret;
-        self.dirty = true; self.layout_valid = false;
+        self.dirty = true;
+        self.layout_valid = false;
         Some(new_text)
     }
 
@@ -789,7 +803,7 @@ impl Scene {
         self.push_undo_snapshot(id);
         let n = self.nodes.get_mut(&id)?;
         let text = n.props.text.clone().unwrap_or_default();
-        let st = self.inputs.entry(id).or_insert_with(InputState::default);
+        let st = self.inputs.entry(id).or_default();
         let (start, end) = sel_range(text.len(), st);
         let (new_text, new_caret) = if start == end {
             if start >= text.len() {
@@ -809,7 +823,8 @@ impl Scene {
         n.props.text = Some(new_text.clone());
         st.caret = new_caret;
         st.sel_anchor = new_caret;
-        self.dirty = true; self.layout_valid = false;
+        self.dirty = true;
+        self.layout_valid = false;
         Some(new_text)
     }
 
@@ -822,7 +837,7 @@ impl Scene {
         };
         let text_len = n.props.text.as_deref().map(|s| s.len()).unwrap_or(0);
         let text = n.props.text.clone().unwrap_or_default();
-        let st = self.inputs.entry(id).or_insert_with(InputState::default);
+        let st = self.inputs.entry(id).or_default();
         let new_caret = match dir {
             CaretMove::Left => prev_char_boundary(&text, st.caret),
             CaretMove::Right => next_char_boundary(&text, st.caret),
@@ -833,7 +848,8 @@ impl Scene {
         if !extend {
             st.sel_anchor = new_caret;
         }
-        self.dirty = true; self.layout_valid = false;
+        self.dirty = true;
+        self.layout_valid = false;
     }
 
     /// Select the entire text content.
@@ -843,10 +859,11 @@ impl Scene {
             None => return,
         };
         let text_len = n.props.text.as_deref().map(|s| s.len()).unwrap_or(0);
-        let st = self.inputs.entry(id).or_insert_with(InputState::default);
+        let st = self.inputs.entry(id).or_default();
         st.sel_anchor = 0;
         st.caret = text_len;
-        self.dirty = true; self.layout_valid = false;
+        self.dirty = true;
+        self.layout_valid = false;
     }
 
     /// Select the word that contains the byte offset `at`. A "word" here is
@@ -869,10 +886,11 @@ impl Scene {
         // word immediately to the LEFT of the caret (matches OS behavior
         // when double-clicking just after the last char of a word).
         let mut probe = at;
-        if probe == len || (probe < len && !is_word(bytes[probe])) {
-            if probe > 0 && is_word(bytes[probe - 1]) {
-                probe -= 1;
-            }
+        if (probe == len || (probe < len && !is_word(bytes[probe])))
+            && probe > 0
+            && is_word(bytes[probe - 1])
+        {
+            probe -= 1;
         }
         if probe >= len || !is_word(bytes[probe]) {
             return;
@@ -885,10 +903,11 @@ impl Scene {
         while end < len && is_word(bytes[end]) {
             end += 1;
         }
-        let st = self.inputs.entry(id).or_insert_with(InputState::default);
+        let st = self.inputs.entry(id).or_default();
         st.sel_anchor = start;
         st.caret = end;
-        self.dirty = true; self.layout_valid = false;
+        self.dirty = true;
+        self.layout_valid = false;
     }
 
     /// Set caret + anchor to a specific byte offset (used by mouse-click
@@ -900,12 +919,13 @@ impl Scene {
         };
         let text_len = n.props.text.as_deref().map(|s| s.len()).unwrap_or(0);
         let off = byte_offset.min(text_len);
-        let st = self.inputs.entry(id).or_insert_with(InputState::default);
+        let st = self.inputs.entry(id).or_default();
         st.caret = off;
         if !extend {
             st.sel_anchor = off;
         }
-        self.dirty = true; self.layout_valid = false;
+        self.dirty = true;
+        self.layout_valid = false;
     }
 
     /// Copy the currently-selected substring out of `id`'s text. Returns
@@ -973,8 +993,7 @@ impl Scene {
         let local_x = (x - pad_left).max(0.0);
         let local_y = (y - pad_top).max(0.0);
         let line_idx = if is_textarea {
-            ((local_y / line_h.max(1.0)).floor() as usize)
-                .min(visual_lines.len().saturating_sub(1))
+            ((local_y / line_h.max(1.0)).floor() as usize).min(visual_lines.len().saturating_sub(1))
         } else {
             0
         };
@@ -1106,9 +1125,7 @@ impl Scene {
                             }
                             _ => 0.0,
                         };
-                        if current_w + leading_w + word_w > max_width
-                            && word_start > sub_start
-                        {
+                        if current_w + leading_w + word_w > max_width && word_start > sub_start {
                             out.push((
                                 logical_byte_start + sub_start,
                                 logical_byte_start + word_start,
@@ -1120,10 +1137,7 @@ impl Scene {
                         }
                         prev_word_end = Some(i);
                     }
-                    out.push((
-                        logical_byte_start + sub_start,
-                        logical_byte_end,
-                    ));
+                    out.push((logical_byte_start + sub_start, logical_byte_end));
                 }
             }
             logical_byte_start = logical_byte_end + 1;
@@ -1231,12 +1245,13 @@ impl Scene {
             (vidx + 1).min(visual_lines.len().saturating_sub(1))
         };
         let new_caret = Self::visual_line_col_to_caret(&visual_lines, new_vidx, col);
-        let st = self.inputs.entry(id).or_insert_with(InputState::default);
+        let st = self.inputs.entry(id).or_default();
         st.caret = new_caret;
         if !extend {
             st.sel_anchor = new_caret;
         }
-        self.dirty = true; self.layout_valid = false;
+        self.dirty = true;
+        self.layout_valid = false;
     }
 
     pub fn create_node(&mut self, id: u32, tag: &str, mut props: PaintProps) {
@@ -1285,13 +1300,15 @@ impl Scene {
             taffy_id: None,
         };
         self.nodes.insert(id, node);
-        self.dirty = true; self.layout_valid = false;
+        self.dirty = true;
+        self.layout_valid = false;
     }
 
     pub fn set_text(&mut self, id: u32, text: String) {
         if let Some(n) = self.nodes.get_mut(&id) {
             n.props.text = Some(text);
-            self.dirty = true; self.layout_valid = false;
+            self.dirty = true;
+            self.layout_valid = false;
         }
     }
 
@@ -1328,7 +1345,8 @@ impl Scene {
             if matches!(kind, NodeKind::Button) {
                 n.props.clickable = true;
             }
-            self.dirty = true; self.layout_valid = false;
+            self.dirty = true;
+            self.layout_valid = false;
         }
     }
 
@@ -1383,12 +1401,21 @@ impl Scene {
                 "position" => {
                     n.props.position = v.as_str().map(|s| s.to_string());
                 }
-                "top" => { n.props.top = parse_len(&v); }
-                "right" => { n.props.right = parse_len(&v); }
-                "bottom" => { n.props.bottom = parse_len(&v); }
-                "left" => { n.props.left = parse_len(&v); }
+                "top" => {
+                    n.props.top = parse_len(&v);
+                }
+                "right" => {
+                    n.props.right = parse_len(&v);
+                }
+                "bottom" => {
+                    n.props.bottom = parse_len(&v);
+                }
+                "left" => {
+                    n.props.left = parse_len(&v);
+                }
                 "z-index" | "z_index" | "zIndex" => {
-                    n.props.z_index = parse_f32(&v).map(|f| f.round() as i32)
+                    n.props.z_index = parse_f32(&v)
+                        .map(|f| f.round() as i32)
                         .or_else(|| v.as_i64().map(|i| i as i32));
                 }
                 "color" => n.props.color = parse_color(&v),
@@ -1454,7 +1481,10 @@ impl Scene {
                     if let Some(s) = v.as_str() {
                         let mut parts = s.split_whitespace();
                         let a = parts.next().unwrap_or("center").to_string();
-                        let j = parts.next().map(|x| x.to_string()).unwrap_or_else(|| a.clone());
+                        let j = parts
+                            .next()
+                            .map(|x| x.to_string())
+                            .unwrap_or_else(|| a.clone());
                         n.props.align_items_grid = Some(a);
                         n.props.justify_items = Some(j);
                     }
@@ -1464,7 +1494,10 @@ impl Scene {
                     if let Some(s) = v.as_str() {
                         let mut parts = s.split_whitespace();
                         let a = parts.next().unwrap_or("center").to_string();
-                        let j = parts.next().map(|x| x.to_string()).unwrap_or_else(|| a.clone());
+                        let j = parts
+                            .next()
+                            .map(|x| x.to_string())
+                            .unwrap_or_else(|| a.clone());
                         n.props.align_content = Some(a);
                         n.props.justify_content = Some(j);
                     }
@@ -1486,7 +1519,10 @@ impl Scene {
                     if let Some(s) = v.as_str() {
                         let mut parts = s.split_whitespace();
                         let a = parts.next().unwrap_or("auto").to_string();
-                        let j = parts.next().map(|x| x.to_string()).unwrap_or_else(|| a.clone());
+                        let j = parts
+                            .next()
+                            .map(|x| x.to_string())
+                            .unwrap_or_else(|| a.clone());
                         n.props.align_self = Some(a);
                         n.props.justify_self = Some(j);
                     }
@@ -1494,14 +1530,16 @@ impl Scene {
                 "padding" => n.props.padding = parse_f32(&v),
                 "paddingX" | "padding_x" | "padding-x" => n.props.padding_x = parse_f32(&v),
                 "paddingY" | "padding_y" | "padding-y" => n.props.padding_y = parse_f32(&v),
-                "paddingLeft" | "padding_left" | "padding-left"
-                    => n.props.padding_left = parse_f32(&v),
-                "paddingRight" | "padding_right" | "padding-right"
-                    => n.props.padding_right = parse_f32(&v),
-                "paddingTop" | "padding_top" | "padding-top"
-                    => n.props.padding_top = parse_f32(&v),
-                "paddingBottom" | "padding_bottom" | "padding-bottom"
-                    => n.props.padding_bottom = parse_f32(&v),
+                "paddingLeft" | "padding_left" | "padding-left" => {
+                    n.props.padding_left = parse_f32(&v)
+                }
+                "paddingRight" | "padding_right" | "padding-right" => {
+                    n.props.padding_right = parse_f32(&v)
+                }
+                "paddingTop" | "padding_top" | "padding-top" => n.props.padding_top = parse_f32(&v),
+                "paddingBottom" | "padding_bottom" | "padding-bottom" => {
+                    n.props.padding_bottom = parse_f32(&v)
+                }
                 "margin" => {
                     let m = parse_len(&v);
                     n.props.margin_left = m;
@@ -1519,14 +1557,14 @@ impl Scene {
                     n.props.margin_top = m;
                     n.props.margin_bottom = m;
                 }
-                "marginLeft" | "margin_left" | "margin-left"
-                    => n.props.margin_left = parse_len(&v),
-                "marginRight" | "margin_right" | "margin-right"
-                    => n.props.margin_right = parse_len(&v),
-                "marginTop" | "margin_top" | "margin-top"
-                    => n.props.margin_top = parse_len(&v),
-                "marginBottom" | "margin_bottom" | "margin-bottom"
-                    => n.props.margin_bottom = parse_len(&v),
+                "marginLeft" | "margin_left" | "margin-left" => n.props.margin_left = parse_len(&v),
+                "marginRight" | "margin_right" | "margin-right" => {
+                    n.props.margin_right = parse_len(&v)
+                }
+                "marginTop" | "margin_top" | "margin-top" => n.props.margin_top = parse_len(&v),
+                "marginBottom" | "margin_bottom" | "margin-bottom" => {
+                    n.props.margin_bottom = parse_len(&v)
+                }
                 "fontWeight" | "font_weight" | "font-weight" => {
                     // Accept "bold" | "normal" | "lighter" | numeric 100-900.
                     if let Some(s) = v.as_str() {
@@ -1543,8 +1581,11 @@ impl Scene {
                 "textAlign" | "text_align" | "text-align" => {
                     n.props.text_align = v.as_str().map(|s| s.to_string());
                 }
-                "textDecoration" | "text_decoration" | "text-decoration" |
-                "textDecorationLine" | "text-decoration-line" => {
+                "textDecoration"
+                | "text_decoration"
+                | "text-decoration"
+                | "textDecorationLine"
+                | "text-decoration-line" => {
                     n.props.text_decoration = v.as_str().map(|s| s.to_string());
                 }
                 "lineHeight" | "line_height" | "line-height" => {
@@ -1575,11 +1616,26 @@ impl Scene {
                     } else if let Some(arr) = v.as_array() {
                         let mut out = Vec::with_capacity(arr.len());
                         for item in arr {
-                            let text = item.get("text").and_then(|t| t.as_str()).unwrap_or("").to_string();
-                            let color = parse_color(item.get("color").unwrap_or(&serde_json::Value::Null));
-                            let weight = item.get("weight").and_then(|w| w.as_u64()).map(|w| w as u32);
-                            let background = parse_color(item.get("background").unwrap_or(&serde_json::Value::Null));
-                            out.push(TextSpan { text, color, weight, background });
+                            let text = item
+                                .get("text")
+                                .and_then(|t| t.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            let color =
+                                parse_color(item.get("color").unwrap_or(&serde_json::Value::Null));
+                            let weight = item
+                                .get("weight")
+                                .and_then(|w| w.as_u64())
+                                .map(|w| w as u32);
+                            let background = parse_color(
+                                item.get("background").unwrap_or(&serde_json::Value::Null),
+                            );
+                            out.push(TextSpan {
+                                text,
+                                color,
+                                weight,
+                                background,
+                            });
                         }
                         n.props.spans = Some(out);
                     }
@@ -1619,8 +1675,11 @@ impl Scene {
                 // Drag region: any of these prop names (data-* attribute
                 // bridged through applyProps, or the bare "drag-region"
                 // key) opt this node in as an OS drag handle.
-                "drag-region" | "drag_region" | "dragRegion"
-                | "data-tauri-drag-region" | "data-carbon-drag-region" => {
+                "drag-region"
+                | "drag_region"
+                | "dragRegion"
+                | "data-tauri-drag-region"
+                | "data-carbon-drag-region" => {
                     // Accept any truthy value: "true", "", null-equivalent.
                     n.props.drag_region = match &v {
                         serde_json::Value::Bool(b) => *b,
@@ -1636,9 +1695,7 @@ impl Scene {
                         if s.starts_with("url(") && s.ends_with(')') {
                             s = s[4..s.len() - 1].trim().to_string();
                         }
-                        s = s
-                            .trim_matches(|c: char| c == '"' || c == '\'')
-                            .to_string();
+                        s = s.trim_matches(|c: char| c == '"' || c == '\'').to_string();
                         if !s.is_empty() {
                             n.props.background_image = Some(s);
                         }
@@ -1691,8 +1748,7 @@ impl Scene {
                             .filter_map(|p| p.parse::<f32>().ok())
                             .collect();
                         if parts.len() == 4 {
-                            n.props.svg_view_box =
-                                Some([parts[0], parts[1], parts[2], parts[3]]);
+                            n.props.svg_view_box = Some([parts[0], parts[1], parts[2], parts[3]]);
                         }
                     }
                 }
@@ -1772,7 +1828,8 @@ impl Scene {
                 }
                 _ => {}
             }
-            self.dirty = true; self.layout_valid = false;
+            self.dirty = true;
+            self.layout_valid = false;
         }
     }
 
@@ -1798,7 +1855,8 @@ impl Scene {
                 }
                 None => parent.children.push(child_id),
             }
-            self.dirty = true; self.layout_valid = false;
+            self.dirty = true;
+            self.layout_valid = false;
         }
     }
 
@@ -1814,12 +1872,14 @@ impl Scene {
         if self.hovered == Some(id) {
             self.hovered = None;
         }
-        self.dirty = true; self.layout_valid = false;
+        self.dirty = true;
+        self.layout_valid = false;
     }
 
     pub fn set_root(&mut self, id: u32) {
         self.root = id;
-        self.dirty = true; self.layout_valid = false;
+        self.dirty = true;
+        self.layout_valid = false;
     }
 
     /// Total height of a scrollport's content: max(child.location.y +
@@ -1859,10 +1919,7 @@ impl Scene {
         if !n.props.overflow_y {
             return 0.0;
         }
-        let viewport_h = n
-            .computed_layout
-            .map(|l| l.size.height)
-            .unwrap_or(0.0);
+        let viewport_h = n.computed_layout.map(|l| l.size.height).unwrap_or(0.0);
         let content_h = self.content_height(id);
         let max_offset = (content_h - viewport_h).max(0.0);
         let clamped = raw.clamp(0.0, max_offset);
@@ -1875,7 +1932,8 @@ impl Scene {
         // reach pixels their paint touches. Forcing dirty=true picks
         // the "full clear + paint" branch which is artifact-free.
         // Optimization can come back when the cull/clip math is tight.
-        self.dirty = true; self.layout_valid = false;
+        self.dirty = true;
+        self.layout_valid = false;
         self.repaint_dirty = true;
         self.dirty_rect = None;
         clamped
@@ -2106,7 +2164,8 @@ impl Scene {
             // algorithm shrinks text in row containers down to longest-word
             // width, producing the broken metadata row where each `<text>`
             // wrapped at every space even with abundant horizontal space.
-            let mut style = props_to_style_with_inherited(&n.props, is_text, te, effective_fs, effective_mono);
+            let mut style =
+                props_to_style_with_inherited(&n.props, is_text, te, effective_fs, effective_mono);
             // Document-root children behave like a browser <body>'s block
             // children: they keep their own heights and do NOT flex-shrink to
             // make room for an overflowing sibling. The scene root is a
@@ -2166,7 +2225,15 @@ impl Scene {
             // every "single-line text wrapped to two lines" bug we kept
             // chasing.
             let user_width = n.props.width.is_some();
-            (n.children.clone(), style, ctx, effective_fs, user_width, is_svg, effective_mono)
+            (
+                n.children.clone(),
+                style,
+                ctx,
+                effective_fs,
+                user_width,
+                is_svg,
+                effective_mono,
+            )
         };
 
         // For <svg>: skip recursing into children entirely. svg.rs walks
@@ -2183,7 +2250,13 @@ impl Scene {
         let mut child_taffy_ids = Vec::with_capacity(children_ids.len());
         let children_are_root_children = id == self.root;
         for cid in &children_ids {
-            if let Some(t) = self.build_taffy_inherited(*cid, child_font_size, child_mono, te, children_are_root_children) {
+            if let Some(t) = self.build_taffy_inherited(
+                *cid,
+                child_font_size,
+                child_mono,
+                te,
+                children_are_root_children,
+            ) {
                 child_taffy_ids.push(t);
             }
         }
@@ -2257,14 +2330,24 @@ impl Scene {
         let mut tdy = 0.0f32;
         if let Some(tlist) = &n.props.transform {
             for op in &tlist.0 {
-                if let TransformOp::Translate { x: tx, y: ty, x_pct, y_pct } = op {
+                if let TransformOp::Translate {
+                    x: tx,
+                    y: ty,
+                    x_pct,
+                    y_pct,
+                } = op
+                {
                     tdx += if *x_pct { *tx * 0.01 * nw } else { *tx };
                     tdy += if *y_pct { *ty * 0.01 * nh } else { *ty };
                 }
             }
         }
-        if let Some((vx, px)) = n.props.translate_x { tdx += if px { vx * 0.01 * nw } else { vx }; }
-        if let Some((vy, py)) = n.props.translate_y { tdy += if py { vy * 0.01 * nh } else { vy }; }
+        if let Some((vx, px)) = n.props.translate_x {
+            tdx += if px { vx * 0.01 * nw } else { vx };
+        }
+        if let Some((vy, py)) = n.props.translate_y {
+            tdy += if py { vy * 0.01 * nh } else { vy };
+        }
         nx += tdx;
         ny += tdy;
         if x < nx || y < ny || x > nx + nw || y > ny + nh {
@@ -2273,7 +2356,11 @@ impl Scene {
         // Descend into children — if this node is a scrollport, shift the
         // child origin up by the current scroll offset so a click hits the
         // visually-correct child.
-        let scroll_y = if n.props.overflow_y { self.scroll_y(id) } else { 0.0 };
+        let scroll_y = if n.props.overflow_y {
+            self.scroll_y(id)
+        } else {
+            0.0
+        };
         for &c in n.children.iter().rev() {
             if let Some(hit) = self.hit_test_recurse(c, x, y, nx, ny - scroll_y) {
                 return Some(hit);
@@ -2318,8 +2405,16 @@ impl Scene {
         if x < nx || y < ny || x > nx + nw || y > ny + nh {
             return None;
         }
-        let region = if n.props.drag_region { Some(id) } else { current_region };
-        let scroll_y = if n.props.overflow_y { self.scroll_y(id) } else { 0.0 };
+        let region = if n.props.drag_region {
+            Some(id)
+        } else {
+            current_region
+        };
+        let scroll_y = if n.props.overflow_y {
+            self.scroll_y(id)
+        } else {
+            0.0
+        };
         for &c in n.children.iter().rev() {
             if let Some(hit) = self.drag_region_recurse(c, x, y, nx, ny - scroll_y, region) {
                 return Some(hit);
@@ -2354,7 +2449,11 @@ impl Scene {
         if x < nx || y < ny || x > nx + nw || y > ny + nh {
             return None;
         }
-        let scroll_y = if n.props.overflow_y { self.scroll_y(id) } else { 0.0 };
+        let scroll_y = if n.props.overflow_y {
+            self.scroll_y(id)
+        } else {
+            0.0
+        };
         for &c in n.children.iter().rev() {
             if let Some(hit) = self.hit_test_scrollable_recurse(c, x, y, nx, ny - scroll_y) {
                 return Some(hit);
@@ -2426,10 +2525,8 @@ fn parse_color(v: &serde_json::Value) -> Option<u32> {
             return Some(0xFF000000 | (r << 16) | (g << 8) | b);
         }
         None
-    } else if let Some(n) = v.as_u64() {
-        Some(n as u32)
     } else {
-        None
+        v.as_u64().map(|n| n as u32)
     }
 }
 
@@ -2510,9 +2607,11 @@ fn parse_calc(expr: &str) -> Option<Len> {
     let bytes = expr.as_bytes();
     for i in 0..bytes.len() {
         let c = bytes[i] as char;
-        if c == '(' { depth += 1; }
-        else if c == ')' { depth -= 1; }
-        else if depth == 0 && (c == '+' || c == '-') && i > 0 {
+        if c == '(' {
+            depth += 1;
+        } else if c == ')' {
+            depth -= 1;
+        } else if depth == 0 && (c == '+' || c == '-') && i > 0 {
             // Tailwind escapes the `-` to a hyphen surrounded by spaces
             // (`100% - 1px`) but bare `100%-1px` (no spaces) also shows
             // up in the underscore-encoded form. Either way we split at
@@ -2538,8 +2637,12 @@ fn parse_calc(expr: &str) -> Option<Len> {
                 // taffy can't subtract a length from a percent, but in
                 // practice these "−1px" deltas are decorative and the
                 // parent-relative percent is the visually correct anchor.
-                if let Some(CalcOp::Percent(p)) = left_v { return Some(Len::Percent(p)); }
-                if let Some(CalcOp::Percent(p)) = right_v { return Some(Len::Percent(p)); }
+                if let Some(CalcOp::Percent(p)) = left_v {
+                    return Some(Len::Percent(p));
+                }
+                if let Some(CalcOp::Percent(p)) = right_v {
+                    return Some(Len::Percent(p));
+                }
                 return None;
             }
         }
@@ -2559,13 +2662,22 @@ enum CalcOp {
 
 fn parse_calc_operand(s: &str) -> Option<CalcOp> {
     let s = s.trim();
-    if let Some(p) = s.strip_suffix('%').and_then(|n| n.trim().parse::<f32>().ok()) {
+    if let Some(p) = s
+        .strip_suffix('%')
+        .and_then(|n| n.trim().parse::<f32>().ok())
+    {
         return Some(CalcOp::Percent(p / 100.0));
     }
-    if let Some(px) = s.strip_suffix("px").and_then(|n| n.trim().parse::<f32>().ok()) {
+    if let Some(px) = s
+        .strip_suffix("px")
+        .and_then(|n| n.trim().parse::<f32>().ok())
+    {
         return Some(CalcOp::Length(px));
     }
-    if let Some(rem) = s.strip_suffix("rem").and_then(|n| n.trim().parse::<f32>().ok()) {
+    if let Some(rem) = s
+        .strip_suffix("rem")
+        .and_then(|n| n.trim().parse::<f32>().ok())
+    {
         return Some(CalcOp::Length(rem * 16.0)); // 1rem = 16px
     }
     if let Ok(n) = s.parse::<f32>() {
@@ -2662,7 +2774,10 @@ fn parse_min_track(tok: &str) -> MinTrackSizingFunction {
                 let _ = num_str.trim().parse::<f32>();
                 return MinTrackSizingFunction::Auto;
             }
-            if let Some(pct) = s.strip_suffix('%').and_then(|n| n.trim().parse::<f32>().ok()) {
+            if let Some(pct) = s
+                .strip_suffix('%')
+                .and_then(|n| n.trim().parse::<f32>().ok())
+            {
                 return MinTrackSizingFunction::Fixed(LengthPercentage::Percent(pct / 100.0));
             }
             let stripped = s.strip_suffix("px").unwrap_or(s);
@@ -2687,7 +2802,10 @@ fn parse_max_track(tok: &str) -> MaxTrackSizingFunction {
                 }
                 return MaxTrackSizingFunction::Fraction(1.0);
             }
-            if let Some(pct) = s.strip_suffix('%').and_then(|n| n.trim().parse::<f32>().ok()) {
+            if let Some(pct) = s
+                .strip_suffix('%')
+                .and_then(|n| n.trim().parse::<f32>().ok())
+            {
                 return MaxTrackSizingFunction::Fixed(LengthPercentage::Percent(pct / 100.0));
             }
             let stripped = s.strip_suffix("px").unwrap_or(s);
@@ -2706,8 +2824,13 @@ fn parse_track_list(s: &str) -> Vec<TrackSizingFunction> {
     let mut out = Vec::new();
     for tok in split_top_level(s, ' ') {
         let tok = tok.trim();
-        if tok.is_empty() { continue; }
-        if let Some(inner) = tok.strip_prefix("repeat(").and_then(|r| r.strip_suffix(')')) {
+        if tok.is_empty() {
+            continue;
+        }
+        if let Some(inner) = tok
+            .strip_prefix("repeat(")
+            .and_then(|r| r.strip_suffix(')'))
+        {
             let parts = split_top_level(inner, ',');
             if parts.len() >= 2 {
                 let count_str = parts[0].trim();
@@ -2721,7 +2844,10 @@ fn parse_track_list(s: &str) -> Vec<TrackSizingFunction> {
                         .map(|t| parse_track_sizing(t.trim()))
                         .collect();
                 if let Some(n) = count {
-                    out.push(TrackSizingFunction::Repeat(GridTrackRepetition::Count(n), inner_tracks));
+                    out.push(TrackSizingFunction::Repeat(
+                        GridTrackRepetition::Count(n),
+                        inner_tracks,
+                    ));
                     continue;
                 }
             }
@@ -2740,13 +2866,17 @@ fn parse_grid_line(s: &str) -> Line<GridPlacement> {
         None => (s, None),
     };
     let start = parse_grid_placement(start_str);
-    let end = end_str.map(parse_grid_placement).unwrap_or(GridPlacement::Auto);
+    let end = end_str
+        .map(parse_grid_placement)
+        .unwrap_or(GridPlacement::Auto);
     Line { start, end }
 }
 
 fn parse_grid_placement(s: &str) -> GridPlacement {
     let s = s.trim();
-    if s == "auto" || s.is_empty() { return GridPlacement::Auto; }
+    if s == "auto" || s.is_empty() {
+        return GridPlacement::Auto;
+    }
     if let Some(rest) = s.strip_prefix("span ") {
         if let Ok(n) = rest.trim().parse::<u16>() {
             return GridPlacement::from_span(n);
@@ -2767,18 +2897,30 @@ fn split_top_level(s: &str, sep: char) -> Vec<String> {
     let mut depth = 0i32;
     let mut cur = String::new();
     for c in s.chars() {
-        if c == '(' { depth += 1; cur.push(c); continue; }
-        if c == ')' { depth -= 1; cur.push(c); continue; }
+        if c == '(' {
+            depth += 1;
+            cur.push(c);
+            continue;
+        }
+        if c == ')' {
+            depth -= 1;
+            cur.push(c);
+            continue;
+        }
         if c == sep && depth == 0 {
             let t = cur.trim();
-            if !t.is_empty() { out.push(t.to_string()); }
+            if !t.is_empty() {
+                out.push(t.to_string());
+            }
             cur.clear();
             continue;
         }
         cur.push(c);
     }
     let t = cur.trim();
-    if !t.is_empty() { out.push(t.to_string()); }
+    if !t.is_empty() {
+        out.push(t.to_string());
+    }
     out
 }
 
@@ -2792,11 +2934,24 @@ fn len_to_lpa(l: Len) -> LengthPercentageAuto {
     }
 }
 
+/// Defaults wrapper over [`props_to_style_with_inherited`] — 14 px root font
+/// size, no inherited context.
+///
+/// Every call site now threads real inherited values through, so nothing uses
+/// this. Kept because it documents what the defaults are, and the comments at
+/// lines 2220, 2265 and 3179 refer to "props_to_style" as the operation.
+#[allow(dead_code)]
 fn props_to_style(props: &PaintProps, is_text: bool, te: &mut crate::text::TextEngine) -> Style {
     props_to_style_with_inherited(props, is_text, te, 14.0, false)
 }
 
-fn props_to_style_with_inherited(props: &PaintProps, is_text: bool, te: &mut crate::text::TextEngine, inherited_font_size: f32, prefer_mono: bool) -> Style {
+fn props_to_style_with_inherited(
+    props: &PaintProps,
+    is_text: bool,
+    te: &mut crate::text::TextEngine,
+    inherited_font_size: f32,
+    prefer_mono: bool,
+) -> Style {
     let mut style = Style::default();
     // display: pick flex (default), grid, or none. "block"/"inline-block"
     // / "contents" don't have first-class scene support yet; treat them
@@ -2828,10 +2983,7 @@ fn props_to_style_with_inherited(props: &PaintProps, is_text: bool, te: &mut cra
         // * No display specified at all: pretend the div is block flow
         //   by stacking children vertically (column). Most app code
         //   without `flex` was relying on this implicit behavior.
-        let explicit_flex = matches!(
-            props.display.as_deref(),
-            Some("flex") | Some("inline-flex"),
-        );
+        let explicit_flex = matches!(props.display.as_deref(), Some("flex") | Some("inline-flex"),);
         style.flex_direction = if explicit_flex {
             FlexDirection::Row
         } else {
@@ -2897,10 +3049,14 @@ fn props_to_style_with_inherited(props: &PaintProps, is_text: bool, te: &mut cra
         style.grid_row = parse_grid_line(s);
     }
     if let Some(a) = &props.align_self {
-        if let Some(v) = parse_align_opt(a) { style.align_self = Some(v); }
+        if let Some(v) = parse_align_opt(a) {
+            style.align_self = Some(v);
+        }
     }
     if let Some(a) = &props.justify_self {
-        if let Some(v) = parse_align_opt(a) { style.justify_self = Some(v); }
+        if let Some(v) = parse_align_opt(a) {
+            style.justify_self = Some(v);
+        }
     }
     // CSS-shorthand fallback chain: per-side override beats x/y override
     // beats blanket padding. `padding: 0` on a parent doesn't accidentally
@@ -2927,10 +3083,22 @@ fn props_to_style_with_inherited(props: &PaintProps, is_text: bool, te: &mut cra
         || props.margin_bottom.is_some()
     {
         style.margin = taffy::Rect {
-            left: props.margin_left.map(len_to_lpa).unwrap_or(LengthPercentageAuto::Length(0.0)),
-            right: props.margin_right.map(len_to_lpa).unwrap_or(LengthPercentageAuto::Length(0.0)),
-            top: props.margin_top.map(len_to_lpa).unwrap_or(LengthPercentageAuto::Length(0.0)),
-            bottom: props.margin_bottom.map(len_to_lpa).unwrap_or(LengthPercentageAuto::Length(0.0)),
+            left: props
+                .margin_left
+                .map(len_to_lpa)
+                .unwrap_or(LengthPercentageAuto::Length(0.0)),
+            right: props
+                .margin_right
+                .map(len_to_lpa)
+                .unwrap_or(LengthPercentageAuto::Length(0.0)),
+            top: props
+                .margin_top
+                .map(len_to_lpa)
+                .unwrap_or(LengthPercentageAuto::Length(0.0)),
+            bottom: props
+                .margin_bottom
+                .map(len_to_lpa)
+                .unwrap_or(LengthPercentageAuto::Length(0.0)),
         };
     }
     if let Some(g) = props.gap {
@@ -2989,10 +3157,22 @@ fn props_to_style_with_inherited(props: &PaintProps, is_text: bool, te: &mut cra
         }
     }
     style.inset = taffy::Rect {
-        left:   props.left.map(len_to_lpa).unwrap_or(LengthPercentageAuto::Auto),
-        right:  props.right.map(len_to_lpa).unwrap_or(LengthPercentageAuto::Auto),
-        top:    props.top.map(len_to_lpa).unwrap_or(LengthPercentageAuto::Auto),
-        bottom: props.bottom.map(len_to_lpa).unwrap_or(LengthPercentageAuto::Auto),
+        left: props
+            .left
+            .map(len_to_lpa)
+            .unwrap_or(LengthPercentageAuto::Auto),
+        right: props
+            .right
+            .map(len_to_lpa)
+            .unwrap_or(LengthPercentageAuto::Auto),
+        top: props
+            .top
+            .map(len_to_lpa)
+            .unwrap_or(LengthPercentageAuto::Auto),
+        bottom: props
+            .bottom
+            .map(len_to_lpa)
+            .unwrap_or(LengthPercentageAuto::Auto),
     };
     if is_text {
         if let Some(text) = &props.text {

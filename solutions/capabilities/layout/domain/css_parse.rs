@@ -9,7 +9,8 @@
 // GradientStopDef, BoxShadow, TransformList, TransformOp}`.
 
 use crate::scene::{
-    BoxShadow, ClipPath, GradientDef, GradientShape, GradientStopDef, Len, TransformList, TransformOp,
+    BoxShadow, ClipPath, GradientDef, GradientShape, GradientStopDef, Len, TransformList,
+    TransformOp,
 };
 
 /// Splits a CSS argument list on top-level commas — commas inside `()`
@@ -21,9 +22,18 @@ fn split_top_level(s: &str) -> Vec<String> {
     let mut cur = String::new();
     for c in s.chars() {
         match c {
-            '(' => { depth += 1; cur.push(c); }
-            ')' => { depth -= 1; cur.push(c); }
-            ',' if depth == 0 => { out.push(cur.trim().to_string()); cur.clear(); }
+            '(' => {
+                depth += 1;
+                cur.push(c);
+            }
+            ')' => {
+                depth -= 1;
+                cur.push(c);
+            }
+            ',' if depth == 0 => {
+                out.push(cur.trim().to_string());
+                cur.clear();
+            }
             _ => cur.push(c),
         }
     }
@@ -49,10 +59,10 @@ pub fn parse_color_str(input: &str) -> Option<u32> {
         return parse_hex(hex);
     }
     if let Some(args) = strip_fn(s, "rgb").or_else(|| strip_fn(s, "rgba")) {
-        return parse_rgb_args(&args);
+        return parse_rgb_args(args);
     }
     if let Some(args) = strip_fn(s, "hsl").or_else(|| strip_fn(s, "hsla")) {
-        return parse_hsl_args(&args);
+        return parse_hsl_args(args);
     }
     // CSS named colors — fall back to the common HTML4/CSS3 set. Real
     // browsers ship the full ~140-name table; the subset here covers
@@ -64,57 +74,60 @@ pub fn parse_color_str(input: &str) -> Option<u32> {
 
 fn parse_named_color(s: &str) -> Option<u32> {
     let n = s.to_ascii_lowercase();
-    Some(0xFF000000 | match n.as_str() {
-        "black" => 0x000000,
-        "white" => 0xFFFFFF,
-        "red" => 0xFF0000,
-        "green" => 0x008000,
-        "lime" => 0x00FF00,
-        "blue" => 0x0000FF,
-        "yellow" => 0xFFFF00,
-        "cyan" | "aqua" => 0x00FFFF,
-        "magenta" | "fuchsia" => 0xFF00FF,
-        "gray" | "grey" => 0x808080,
-        "silver" => 0xC0C0C0,
-        "maroon" => 0x800000,
-        "olive" => 0x808000,
-        "navy" => 0x000080,
-        "purple" => 0x800080,
-        "teal" => 0x008080,
-        "orange" => 0xFFA500,
-        "pink" => 0xFFC0CB,
-        "brown" => 0xA52A2A,
-        "gold" => 0xFFD700,
-        "violet" => 0xEE82EE,
-        "indigo" => 0x4B0082,
-        "lightgray" | "lightgrey" => 0xD3D3D3,
-        "darkgray" | "darkgrey" => 0xA9A9A9,
-        "lightblue" => 0xADD8E6,
-        "darkblue" => 0x00008B,
-        "lightgreen" => 0x90EE90,
-        "darkgreen" => 0x006400,
-        "lightred" => 0xFFCCCB,
-        "darkred" => 0x8B0000,
-        "skyblue" => 0x87CEEB,
-        "tomato" => 0xFF6347,
-        "salmon" => 0xFA8072,
-        "coral" => 0xFF7F50,
-        "khaki" => 0xF0E68C,
-        "crimson" => 0xDC143C,
-        "lavender" => 0xE6E6FA,
-        "plum" => 0xDDA0DD,
-        "beige" => 0xF5F5DC,
-        "azure" => 0xF0FFFF,
-        "ivory" => 0xFFFFF0,
-        "mintcream" => 0xF5FFFA,
-        "snow" => 0xFFFAFA,
-        "wheat" => 0xF5DEB3,
-        "tan" => 0xD2B48C,
-        "chocolate" => 0xD2691E,
-        "sienna" => 0xA0522D,
-        "peru" => 0xCD853F,
-        _ => return None,
-    })
+    Some(
+        0xFF000000
+            | match n.as_str() {
+                "black" => 0x000000,
+                "white" => 0xFFFFFF,
+                "red" => 0xFF0000,
+                "green" => 0x008000,
+                "lime" => 0x00FF00,
+                "blue" => 0x0000FF,
+                "yellow" => 0xFFFF00,
+                "cyan" | "aqua" => 0x00FFFF,
+                "magenta" | "fuchsia" => 0xFF00FF,
+                "gray" | "grey" => 0x808080,
+                "silver" => 0xC0C0C0,
+                "maroon" => 0x800000,
+                "olive" => 0x808000,
+                "navy" => 0x000080,
+                "purple" => 0x800080,
+                "teal" => 0x008080,
+                "orange" => 0xFFA500,
+                "pink" => 0xFFC0CB,
+                "brown" => 0xA52A2A,
+                "gold" => 0xFFD700,
+                "violet" => 0xEE82EE,
+                "indigo" => 0x4B0082,
+                "lightgray" | "lightgrey" => 0xD3D3D3,
+                "darkgray" | "darkgrey" => 0xA9A9A9,
+                "lightblue" => 0xADD8E6,
+                "darkblue" => 0x00008B,
+                "lightgreen" => 0x90EE90,
+                "darkgreen" => 0x006400,
+                "lightred" => 0xFFCCCB,
+                "darkred" => 0x8B0000,
+                "skyblue" => 0x87CEEB,
+                "tomato" => 0xFF6347,
+                "salmon" => 0xFA8072,
+                "coral" => 0xFF7F50,
+                "khaki" => 0xF0E68C,
+                "crimson" => 0xDC143C,
+                "lavender" => 0xE6E6FA,
+                "plum" => 0xDDA0DD,
+                "beige" => 0xF5F5DC,
+                "azure" => 0xF0FFFF,
+                "ivory" => 0xFFFFF0,
+                "mintcream" => 0xF5FFFA,
+                "snow" => 0xFFFAFA,
+                "wheat" => 0xF5DEB3,
+                "tan" => 0xD2B48C,
+                "chocolate" => 0xD2691E,
+                "sienna" => 0xA0522D,
+                "peru" => 0xCD853F,
+                _ => return None,
+            },
+    )
 }
 
 fn strip_fn<'a>(s: &'a str, name: &str) -> Option<&'a str> {
@@ -184,7 +197,11 @@ fn parse_rgb_args(args: &str) -> Option<u32> {
     let r = parse_channel(parts[0])? as u32;
     let g = parse_channel(parts[1])? as u32;
     let b = parse_channel(parts[2])? as u32;
-    let a = if parts.len() == 4 { parse_alpha(parts[3])? as u32 } else { 255 };
+    let a = if parts.len() == 4 {
+        parse_alpha(parts[3])? as u32
+    } else {
+        255
+    };
     Some((a << 24) | (r << 16) | (g << 8) | b)
 }
 
@@ -197,10 +214,18 @@ fn parse_hsl_args(args: &str) -> Option<u32> {
     if parts.len() != 3 && parts.len() != 4 {
         return None;
     }
-    let h = parts[0].trim().trim_end_matches("deg").parse::<f32>().ok()?;
+    let h = parts[0]
+        .trim()
+        .trim_end_matches("deg")
+        .parse::<f32>()
+        .ok()?;
     let s = parts[1].trim().trim_end_matches('%').parse::<f32>().ok()? / 100.0;
     let l = parts[2].trim().trim_end_matches('%').parse::<f32>().ok()? / 100.0;
-    let a = if parts.len() == 4 { parse_alpha(parts[3])? as u32 } else { 255 };
+    let a = if parts.len() == 4 {
+        parse_alpha(parts[3])? as u32
+    } else {
+        255
+    };
     let (r, g, b) = hsl_to_rgb(h, s, l);
     Some((a << 24) | ((r as u32) << 16) | ((g as u32) << 8) | b as u32)
 }
@@ -208,7 +233,11 @@ fn parse_hsl_args(args: &str) -> Option<u32> {
 fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (u8, u8, u8) {
     // Standard HSL → RGB conversion (CSS Color 3 §4.2.4).
     let h = (((h % 360.0) + 360.0) % 360.0) / 360.0;
-    let q = if l < 0.5 { l * (1.0 + s) } else { l + s - l * s };
+    let q = if l < 0.5 {
+        l * (1.0 + s)
+    } else {
+        l + s - l * s
+    };
     let p = 2.0 * l - q;
     let r = hue_to_rgb(p, q, h + 1.0 / 3.0);
     let g = hue_to_rgb(p, q, h);
@@ -221,11 +250,21 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (u8, u8, u8) {
 }
 
 fn hue_to_rgb(p: f32, q: f32, mut t: f32) -> f32 {
-    if t < 0.0 { t += 1.0; }
-    if t > 1.0 { t -= 1.0; }
-    if t < 1.0 / 6.0 { return p + (q - p) * 6.0 * t; }
-    if t < 1.0 / 2.0 { return q; }
-    if t < 2.0 / 3.0 { return p + (q - p) * (2.0 / 3.0 - t) * 6.0; }
+    if t < 0.0 {
+        t += 1.0;
+    }
+    if t > 1.0 {
+        t -= 1.0;
+    }
+    if t < 1.0 / 6.0 {
+        return p + (q - p) * 6.0 * t;
+    }
+    if t < 1.0 / 2.0 {
+        return q;
+    }
+    if t < 2.0 / 3.0 {
+        return p + (q - p) * (2.0 / 3.0 - t) * 6.0;
+    }
     p
 }
 
@@ -236,7 +275,9 @@ fn hue_to_rgb(p: f32, q: f32, mut t: f32) -> f32 {
 pub fn parse_linear_gradient(s: &str) -> Option<GradientDef> {
     let args = strip_fn(s.trim(), "linear-gradient")?;
     let parts = split_top_level(args);
-    if parts.is_empty() { return None; }
+    if parts.is_empty() {
+        return None;
+    }
 
     let mut stops_start = 0usize;
     let mut angle = 180.0f32;
@@ -249,8 +290,13 @@ pub fn parse_linear_gradient(s: &str) -> Option<GradientDef> {
         stops_start = 1;
     }
     let stops = parse_stops(&parts[stops_start..])?;
-    if stops.len() < 2 { return None; }
-    Some(GradientDef { shape: GradientShape::Linear { angle_deg: angle }, stops })
+    if stops.len() < 2 {
+        return None;
+    }
+    Some(GradientDef {
+        shape: GradientShape::Linear { angle_deg: angle },
+        stops,
+    })
 }
 
 /// `radial-gradient(circle at center, #f00, #00f)` — we accept any
@@ -259,27 +305,40 @@ pub fn parse_linear_gradient(s: &str) -> Option<GradientDef> {
 pub fn parse_radial_gradient(s: &str) -> Option<GradientDef> {
     let args = strip_fn(s.trim(), "radial-gradient")?;
     let parts = split_top_level(args);
-    if parts.is_empty() { return None; }
+    if parts.is_empty() {
+        return None;
+    }
 
     let mut stops_start = 0usize;
     let mut cx = 0.5f32;
     let mut cy = 0.5f32;
     let first = parts[0].trim().to_ascii_lowercase();
-    let looks_like_position = first.contains("at ") || first.starts_with("circle")
-        || first.starts_with("ellipse") || first.starts_with("closest")
+    let looks_like_position = first.contains("at ")
+        || first.starts_with("circle")
+        || first.starts_with("ellipse")
+        || first.starts_with("closest")
         || first.starts_with("farthest");
     if looks_like_position {
         if let Some(rest) = first.find("at ") {
             let pos = &first[rest + 3..];
             let mut it = pos.split_whitespace();
-            if let Some(p) = it.next() { cx = parse_position_axis(p).unwrap_or(0.5); }
-            if let Some(p) = it.next() { cy = parse_position_axis(p).unwrap_or(0.5); }
+            if let Some(p) = it.next() {
+                cx = parse_position_axis(p).unwrap_or(0.5);
+            }
+            if let Some(p) = it.next() {
+                cy = parse_position_axis(p).unwrap_or(0.5);
+            }
         }
         stops_start = 1;
     }
     let stops = parse_stops(&parts[stops_start..])?;
-    if stops.len() < 2 { return None; }
-    Some(GradientDef { shape: GradientShape::Radial { cx, cy }, stops })
+    if stops.len() < 2 {
+        return None;
+    }
+    Some(GradientDef {
+        shape: GradientShape::Radial { cx, cy },
+        stops,
+    })
 }
 
 fn parse_position_axis(s: &str) -> Option<f32> {
@@ -355,9 +414,16 @@ fn parse_stops(parts: &[String]) -> Option<Vec<GradientStopDef>> {
             // Auto-distribute when no explicit offset: 0%, 100% for the
             // endpoints, evenly spaced in between.
             let n = parts.len() as f32;
-            if n <= 1.0 { 0.0 } else { i as f32 / (n - 1.0) }
+            if n <= 1.0 {
+                0.0
+            } else {
+                i as f32 / (n - 1.0)
+            }
         });
-        stops.push(GradientStopDef { offset: offset.clamp(0.0, 1.0), color });
+        stops.push(GradientStopDef {
+            offset: offset.clamp(0.0, 1.0),
+            color,
+        });
     }
     Some(stops)
 }
@@ -370,14 +436,17 @@ fn parse_stops(parts: &[String]) -> Option<Vec<GradientStopDef>> {
 /// top), and outset shadows sit underneath the box bg while inset
 /// shadows sit on top of it.
 pub fn parse_box_shadow(s: &str) -> Vec<BoxShadow> {
-    split_top_level(s).into_iter()
+    split_top_level(s)
+        .into_iter()
         .filter_map(|entry| parse_box_shadow_one(&entry))
         .collect()
 }
 
 fn parse_box_shadow_one(s: &str) -> Option<BoxShadow> {
     let tokens = tokenize_shadow(s);
-    if tokens.is_empty() { return None; }
+    if tokens.is_empty() {
+        return None;
+    }
     // Detect leading or trailing `inset` keyword.
     let mut inset = false;
     let mut toks: Vec<&str> = tokens.iter().map(|t| t.as_str()).collect();
@@ -385,17 +454,30 @@ fn parse_box_shadow_one(s: &str) -> Option<BoxShadow> {
         inset = true;
         toks.remove(i);
     }
-    if toks.len() < 3 { return None; }
-    let (color_idx, color) = toks.iter().enumerate().rev()
+    if toks.len() < 3 {
+        return None;
+    }
+    let (color_idx, color) = toks
+        .iter()
+        .enumerate()
+        .rev()
         .find_map(|(i, t)| parse_color_str(t).map(|c| (i, c)))?;
-    let nums: Vec<f32> = toks[..color_idx].iter()
+    let nums: Vec<f32> = toks[..color_idx]
+        .iter()
         .map(|t| parse_length(t).unwrap_or(0.0))
         .collect();
     let offset_x = nums.first().copied().unwrap_or(0.0);
     let offset_y = nums.get(1).copied().unwrap_or(0.0);
     let blur = nums.get(2).copied().unwrap_or(0.0).max(0.0);
     let spread = nums.get(3).copied().unwrap_or(0.0);
-    Some(BoxShadow { offset_x, offset_y, blur, spread, color, inset })
+    Some(BoxShadow {
+        offset_x,
+        offset_y,
+        blur,
+        spread,
+        color,
+        inset,
+    })
 }
 
 fn tokenize_shadow(s: &str) -> Vec<String> {
@@ -405,8 +487,14 @@ fn tokenize_shadow(s: &str) -> Vec<String> {
     let mut depth = 0i32;
     for c in s.chars() {
         match c {
-            '(' => { depth += 1; cur.push(c); }
-            ')' => { depth -= 1; cur.push(c); }
+            '(' => {
+                depth += 1;
+                cur.push(c);
+            }
+            ')' => {
+                depth -= 1;
+                cur.push(c);
+            }
             _ if c.is_whitespace() && depth == 0 => {
                 if !cur.is_empty() {
                     out.push(std::mem::take(&mut cur));
@@ -415,13 +503,17 @@ fn tokenize_shadow(s: &str) -> Vec<String> {
             _ => cur.push(c),
         }
     }
-    if !cur.is_empty() { out.push(cur); }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
     out
 }
 
 fn parse_length(s: &str) -> Option<f32> {
     let t = s.trim();
-    if t == "0" { return Some(0.0); }
+    if t == "0" {
+        return Some(0.0);
+    }
     let num = t.strip_suffix("px").unwrap_or(t);
     num.parse::<f32>().ok()
 }
@@ -464,11 +556,21 @@ pub fn parse_transform(s: &str) -> Option<TransformList> {
             }
             "translatex" => {
                 let (x, x_pct) = parse_translate_component(parts.first().copied().unwrap_or("0"));
-                TransformOp::Translate { x, y: 0.0, x_pct, y_pct: false }
+                TransformOp::Translate {
+                    x,
+                    y: 0.0,
+                    x_pct,
+                    y_pct: false,
+                }
             }
             "translatey" => {
                 let (y, y_pct) = parse_translate_component(parts.first().copied().unwrap_or("0"));
-                TransformOp::Translate { x: 0.0, y, x_pct: false, y_pct }
+                TransformOp::Translate {
+                    x: 0.0,
+                    y,
+                    x_pct: false,
+                    y_pct,
+                }
             }
             // framer-motion emits `translate3d(x, y, z)` (+ `translateZ(0)`)
             // for GPU-hinted transforms; take x/y, ignore z.
@@ -481,7 +583,9 @@ pub fn parse_transform(s: &str) -> Option<TransformList> {
             "rotate" => {
                 let a = parts.first().copied().unwrap_or("0");
                 let deg = parse_angle(a).unwrap_or_else(|| a.parse::<f32>().unwrap_or(0.0));
-                TransformOp::Rotate { rad: deg.to_radians() }
+                TransformOp::Rotate {
+                    rad: deg.to_radians(),
+                }
             }
             "scale" => {
                 let x: f32 = parts.first().and_then(|p| p.parse().ok()).unwrap_or(1.0);
@@ -500,7 +604,11 @@ pub fn parse_transform(s: &str) -> Option<TransformList> {
         };
         ops.push(op);
     }
-    if ops.is_empty() { None } else { Some(TransformList(ops)) }
+    if ops.is_empty() {
+        None
+    } else {
+        Some(TransformList(ops))
+    }
 }
 
 // ─── clip-path ────────────────────────────────────────────────────────────
@@ -508,7 +616,9 @@ pub fn parse_transform(s: &str) -> Option<TransformList> {
 /// Parse a `Len` accepting px or % suffix. Empty / unrecognised → None.
 fn parse_clip_len(s: &str) -> Option<Len> {
     let t = s.trim();
-    if t.is_empty() { return None; }
+    if t.is_empty() {
+        return None;
+    }
     if let Some(num) = t.strip_suffix('%') {
         return num.trim().parse::<f32>().ok().map(Len::Percent);
     }
@@ -524,11 +634,15 @@ fn parse_clip_len(s: &str) -> Option<Len> {
 /// Returns None for `none` / unrecognised; returns Some(ClipPath) otherwise.
 pub fn parse_clip_path(s: &str) -> Option<ClipPath> {
     let t = s.trim();
-    if t.is_empty() || t.eq_ignore_ascii_case("none") { return None; }
+    if t.is_empty() || t.eq_ignore_ascii_case("none") {
+        return None;
+    }
     let paren = t.find('(')?;
     let name = t[..paren].trim().to_ascii_lowercase();
     let close = t.rfind(')')?;
-    if close < paren { return None; }
+    if close < paren {
+        return None;
+    }
     let args = t[paren + 1..close].trim();
     match name.as_str() {
         "inset" => parse_clip_inset(args),
@@ -574,7 +688,13 @@ fn parse_clip_inset(args: &str) -> Option<ClipPath> {
     let radius = radius_str
         .and_then(|s| parse_clip_len(s.split_ascii_whitespace().next().unwrap_or("")))
         .unwrap_or(Len::Length(0.0));
-    Some(ClipPath::Inset { top: t, right: r, bottom: b, left: l, radius })
+    Some(ClipPath::Inset {
+        top: t,
+        right: r,
+        bottom: b,
+        left: l,
+        radius,
+    })
 }
 
 fn parse_clip_circle(args: &str) -> Option<ClipPath> {
@@ -628,12 +748,16 @@ fn parse_clip_polygon(args: &str) -> Option<ClipPath> {
     let mut points = Vec::new();
     for v in split_top_level(rest) {
         let coords: Vec<&str> = v.split_ascii_whitespace().collect();
-        if coords.len() < 2 { return None; }
+        if coords.len() < 2 {
+            return None;
+        }
         let x = parse_clip_len(coords[0])?;
         let y = parse_clip_len(coords[1])?;
         points.push((x, y));
     }
-    if points.len() < 3 { return None; }
+    if points.len() < 3 {
+        return None;
+    }
     Some(ClipPath::Polygon(points))
 }
 
@@ -675,7 +799,9 @@ fn find_word(s: &str, word: &str) -> Option<usize> {
         let before_ok = abs == 0 || s.as_bytes()[abs - 1].is_ascii_whitespace();
         let after = abs + word.len();
         let after_ok = after >= s.len() || s.as_bytes()[after].is_ascii_whitespace();
-        if before_ok && after_ok { return Some(abs); }
+        if before_ok && after_ok {
+            return Some(abs);
+        }
         pos = abs + 1;
     }
     None
