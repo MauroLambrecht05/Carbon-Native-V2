@@ -9,7 +9,7 @@
 // a real toolchain installed, which is true on a build worker and not
 // generally true on a dev laptop.
 //
-// macOS (dmg) still needs its own worker before it has a builder here.
+// Every generator now has a real builder.
 
 import type { CarbonConfig } from "@carbon/contracts/app";
 import type { ProcessRunner } from "@carbon/process";
@@ -24,6 +24,7 @@ import { buildAppImage } from "../../infrastructure/builders/appimage.ts";
 import { buildDeb } from "../../infrastructure/builders/deb.ts";
 import { buildNsis } from "../../infrastructure/builders/nsis.ts";
 import { buildWix } from "../../infrastructure/builders/wix.ts";
+import { buildDmg } from "../../infrastructure/builders/dmg.ts";
 import { UnknownTargetError, WrongPlatformError } from "./GeneratePackageUseCase.ts";
 
 type Builder = (
@@ -39,11 +40,12 @@ const BUILDERS: Partial<Record<InstallerTargetId, Builder>> = {
   appimage: buildAppImage,
   nsis: buildNsis,
   wix: buildWix,
+  dmg: buildDmg,
 };
 
 export class TargetNotBuildableError extends Error {
   constructor(readonly target: InstallerTargetId) {
-    super(`${target} has a generator but no builder yet — dmg needs a macOS worker first`);
+    super(`${target} has a generator but no builder yet`);
   }
 }
 

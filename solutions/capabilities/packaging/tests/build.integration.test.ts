@@ -1,8 +1,6 @@
-// Building a real installer from a generated definition.
-//
-// Linux (deb, appimage) and Windows (nsis, wix) — the toolchains a build
-// worker has today. macOS (dmg) needs its own worker; requesting it here is
-// a clear refusal (TargetNotBuildableError), not a silent no-op.
+// Building a real installer from a generated definition. Every installer
+// target has a real builder now: deb/appimage (Linux), nsis/wix (Windows),
+// dmg (macOS).
 
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
@@ -10,7 +8,6 @@ import type { CarbonConfig } from "@carbon/contracts/app";
 import type { ProcessOptions, ProcessResult, ProcessRunner } from "@carbon/process";
 import {
   BuildPackageUseCase,
-  TargetNotBuildableError,
   UnknownTargetError,
   WrongPlatformError,
   type PackageWriter,
@@ -158,6 +155,24 @@ describe("wix", () => {
   });
 });
 
+describe("dmg", () => {
+  test("writes the appdmg spec and invokes appdmg", async () => {
+    const { useCase: uc, writer, runner } = useCase();
+    const result = await uc.execute({
+      target: "dmg",
+      config,
+      binaryPath: "/build/carbon-mini",
+      dir: "/out/dmg",
+      platform: "darwin",
+    });
+
+    expect(writer.files.has("/out/dmg/spec.json")).toBe(true);
+    expect(runner.calls[0]!.command).toBe("appdmg");
+    expect(runner.calls[0]!.args).toEqual(["/out/dmg/spec.json", "/out/dmg/Demo App-1.2.3.dmg"]);
+    expect(result.outputPath).toBe("/out/dmg/Demo App-1.2.3.dmg");
+  });
+});
+
 describe("refusals", () => {
   test("an unknown target is refused", async () => {
     const { useCase: uc } = useCase();
@@ -171,12 +186,5 @@ describe("refusals", () => {
     await expect(
       uc.execute({ target: "deb", config, binaryPath: "/b", dir: "/o", platform: "win32" }),
     ).rejects.toThrow(WrongPlatformError);
-  });
-
-  test("dmg has a generator but no builder yet — no macOS worker exists", async () => {
-    const { useCase: uc } = useCase();
-    await expect(
-      uc.execute({ target: "dmg", config, binaryPath: "/b", dir: "/o", platform: "darwin" }),
-    ).rejects.toThrow(TargetNotBuildableError);
   });
 });

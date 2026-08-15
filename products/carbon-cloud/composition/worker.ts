@@ -5,7 +5,7 @@
 
 import { log } from "@carbon/logging";
 import { nodeProcessRunner } from "@carbon/process";
-import type { AuthenticodeCredentials } from "@carbon/signing";
+import type { AuthenticodeCredentials, MacOsCredentials } from "@carbon/signing";
 import type { TargetPlatform } from "@carbon/contracts/distribution";
 import {
   GitRepoFetcher,
@@ -27,6 +27,7 @@ export interface WorkerOptions {
   readonly defaultWorkDir: string;
   readonly signingKey?: SigningKey;
   readonly authenticode?: AuthenticodeCredentials;
+  readonly macos?: MacOsCredentials;
 }
 
 export async function runWorker(options: WorkerOptions): Promise<never> {
@@ -35,7 +36,7 @@ export async function runWorker(options: WorkerOptions): Promise<never> {
     requireEnv("WORKER_API_TOKEN"),
   );
   const repos = new GitRepoFetcher(nodeProcessRunner);
-  const pipeline = new RealLocalPipeline(log, options.signingKey, options.authenticode);
+  const pipeline = new RealLocalPipeline(log, options.signingKey, options.authenticode, options.macos);
   const uploader = new S3ArtifactUploader(
     {
       type: "s3",

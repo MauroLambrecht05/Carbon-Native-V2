@@ -12,7 +12,9 @@ import {
   signFile,
   readSecretKey,
   signAuthenticode,
+  signAndNotarizeMacOs,
   type AuthenticodeCredentials,
+  type MacOsCredentials,
 } from "@carbon/signing";
 import { nodeProcessRunner } from "@carbon/process";
 import type { Logger } from "@carbon/logging";
@@ -34,6 +36,7 @@ export class RealLocalPipeline implements LocalPipeline {
     private readonly logger: Logger,
     private readonly signingKey?: SigningKey,
     private readonly authenticode?: AuthenticodeCredentials,
+    private readonly macos?: MacOsCredentials,
   ) {
     // Fails fast on a bad key/password rather than on the first artifact of
     // the first job — a worker that can't sign shouldn't claim work at all.
@@ -53,6 +56,14 @@ export class RealLocalPipeline implements LocalPipeline {
     target: InstallerTargetId,
     outDir: string,
   ): Promise<PackagedTarget> {
+    // dmg is the odd one out: Gatekeeper checks the signature on the binary
+    // a user actually runs, and appdmg copies binaryPath INTO the dmg at
+    // build time — so this has to sign binaryPath before packaging, not the
+    // .dmg after, the way Authenticode signs the finished nsis/wix output.
+    if (target === "dmg" && this.macos) {
+      await signAndNotarizeMacOs(binaryPath, this.macos, nodeProcessRunner);
+    }
+
     await generatePackageUseCase().execute({ target, config, binaryPath, outputDir: outDir });
     const built = await buildPackageUseCase().execute({ target, config, binaryPath, dir: join(outDir, target) });
 

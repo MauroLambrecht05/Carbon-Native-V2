@@ -4,13 +4,14 @@ Carbon Cloud: push a repo, get a signed installer and a working auto-update
 — the same job Vercel does for a Next.js deploy. Self-hosted, v1.
 
 ```
-composition/     the control-plane entrypoint (main.ts), the Linux worker's
-                  entrypoint (worker-linux.ts), and the two Dockerfiles
+composition/     the control plane's entrypoint (main.ts), each worker's
+                  (worker-{linux,windows,macos}.ts, sharing worker.ts), and
+                  the Dockerfiles — macOS has none, see worker-macos.ts
 infrastructure/
   http/           the API: create/claim/complete a build, serve the dashboard
   persistence/    Postgres connection + migrations
 presentation/
-  dashboard/      the v1 status page (React) — paste a build id, see its status
+  dashboard/      the v1 dashboard (React) — signup, usage, deploy, status
 ```
 
 ## Run it locally
@@ -41,12 +42,21 @@ Already have a token (a second machine, CI)? `cloud login --url <url> --token
 
 ## What's real vs. what's next
 
-Real: the build queue (Postgres, `FOR UPDATE SKIP LOCKED` claims), the Linux
-and Windows workers (checks out, builds, packages for real via
-`dpkg-deb`/`appimagetool`/`makensis`/`wix`, signs with Authenticode on
-Windows, uploads to S3-compatible storage), orgs + API tokens gating every
-`/v1/builds/*` request, usage metering (a build over the free plan's 60
-included minutes/month gets a 402, not silently allowed through).
+Real: the build queue (Postgres, `FOR UPDATE SKIP LOCKED` claims), all three
+workers (checks out, builds, packages for real via
+`dpkg-deb`/`appimagetool`/`makensis`/`wix`/`appdmg`, signs with Authenticode
+on Windows and codesign+notarization on macOS, uploads to S3-compatible
+storage), orgs + API tokens gating every `/v1/builds/*` request, usage
+metering (a build over the free plan's 60 included minutes/month gets a 402,
+not silently allowed through).
+
+The Linux and Windows workers are Dockerized; the macOS worker is not — see
+`composition/worker-macos.ts`'s own note. Docker cannot run macOS at all, so
+that worker runs directly on real Mac hardware. None of the three workers
+have been run against real infrastructure in this repo's own dev sandbox
+(no reachable Docker daemon, no Mac); each is built and unit-tested against
+fakes for every subprocess call, to the same standard the rest of this
+product is.
 
 Not real yet: `@carbon/billing`'s `PaymentProvider` — `UpgradePlanUseCase`
 changes the stored plan on a successful charge, but the only implementation
@@ -57,7 +67,9 @@ existing token, usage against the plan, queuing a build, and checking one's
 status — a token typed in lives in the browser's localStorage for the tab's
 session; there's no cookie session yet.
 
-Not yet: a Mac worker, per-build authorization (any valid token can
-claim/complete any org's queued work — fine for one self-hosted deployment
-you control every worker for, a real gap for multiple untrusted tenants), a
-build list/history view (only look-up-by-id exists).
+Not yet: per-build authorization (any valid token can claim/complete any
+org's queued work — fine for one self-hosted deployment you control every
+worker for, a real gap for multiple untrusted tenants), a build
+list/history view (only look-up-by-id exists), a proper `.app` bundle for
+macOS (`dmg`'s builder packages the raw runtime binary today — see the
+KNOWN GAP note in `packaging/infrastructure/builders/dmg.ts`).

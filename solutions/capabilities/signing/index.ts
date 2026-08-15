@@ -20,3 +20,10 @@ export {
   AuthenticodeSignError,
   type AuthenticodeCredentials,
 } from "./infrastructure/AuthenticodeSigner.ts";
+export {
+  signAndNotarizeMacOs,
+  CodesignError,
+  NotarizeError,
+  StapleError,
+  type MacOsCredentials,
+} from "./infrastructure/MacOsSigner.ts";
