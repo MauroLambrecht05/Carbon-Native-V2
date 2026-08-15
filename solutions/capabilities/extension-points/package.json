@@ -1,0 +1,9 @@
+{
+  "name": "@carbon/extension-points",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The extension-point registry: parses the Zig source of truth and renders the C header, the Rust dispatch table and the TypeScript the toolchain validates manifests with.",
+  "type": "module",
+  "carbon": { "kind": "service" },
+  "exports": { ".": "./index.ts" }
+}

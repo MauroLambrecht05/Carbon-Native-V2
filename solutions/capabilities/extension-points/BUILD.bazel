@@ -1,0 +1,15 @@
+# Carbon Native V2 - @carbon/extension-points
+#
+# Capability (service): the extension-point registry and its renderings.
+
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["**/*.ts", "package.json"], exclude = ["**/*.test.ts"], allow_empty = True),
+)
+
+filegroup(
+    name = "tests",
+    srcs = glob(["**/*.test.ts"], allow_empty = True),
+)
