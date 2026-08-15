@@ -145,6 +145,7 @@ products/
 ├── carbon/                            # The runtime: carbon-mini and carbon-blitz
 ├── carbon-cli/                        # The app developer's surface
 ├── carbon-ext/                        # The plugin SDK: header, templates, package definition
+├── carbon-vscode/                     # .ctsx syntax highlighting, in the editor
 └── README.md                          # The product template every one of them follows
 ```
 

@@ -370,6 +370,20 @@ def validate_workspace(root: Path) -> bool:
         product = manifest.parent
         name = product.name
 
+        # carbon-vscode is a VS Code extension: package.json IS the manifest
+        # VS Code loads, so it can't be dropped the way carbon-ext dropped its
+        # to skip this loop. It activates through `contributes`, not a script
+        # this repo runs — there is no main.ts, and nothing to compose or
+        # test beyond what `vsce package` already checks. The signal is
+        # `engines.vscode` itself, not the product's name, so any future
+        # extension gets the same exemption without editing this file again.
+        try:
+            declares_vscode = "vscode" in json.loads(manifest.read_text(encoding="utf-8")).get("engines", {})
+        except (json.JSONDecodeError, OSError):
+            declares_vscode = False
+        if declares_vscode:
+            continue
+
         for required in ("main.ts", "composition", "presentation", "tests"):
             if not (product / required).exists():
                 print(f"[FAIL] product {name} is missing {required}/ (products/README.md)")

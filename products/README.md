@@ -8,6 +8,7 @@ shape.
 | `carbon` | the runtime an app runs on |
 | `carbon-cli` | an app developer: init, run, build, publish, plugin |
 | `carbon-ext` | an extension author — the plugin SDK itself |
+| `carbon-vscode` | an app developer, in the editor — `.ctsx` syntax highlighting |
 
 ```
 products/<name>/
@@ -78,6 +79,13 @@ to apply to everything, and carbon-ext was briefly given a `main.ts` to satisfy
 it — a second CLI, with its own dispatcher and command registry, for commands
 that belonged in `carbon-cli`. **Everything CLI is `carbon-cli`.** Being about
 plugins is not a reason for a command to leave.
+
+`carbon-vscode` carries a `package.json` — VS Code requires it, it's the
+manifest the extension host reads — but is exempt from the rest of the
+template for the same reason carbon-ext once was: it declares `engines.vscode`
+rather than a `main.ts`, and activates through `contributes`, not a script
+this repo runs. No `composition/`, `presentation/` or `tests/` either; there is
+nothing to wire and nothing beyond what `vsce package` already checks.
 
 ## Why `presentation/framework/` and not a shared package
 
