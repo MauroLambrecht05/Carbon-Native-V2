@@ -16,7 +16,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import * as THREE from "three";
 import { CarbonRenderer, MockCommandExecutor } from "@carbon/three";
-import { buildSnapshotScene, normalizeFrame } from "./fixtures/snapshot-scene.js";
+import { buildSnapshotScene, normalizeFrame } from "./fixtures/snapshot-scene.ts";
 
 describe("command stream snapshot", () => {
   it("matches the committed fixture for the canonical scene", () => {

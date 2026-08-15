@@ -1,17 +1,25 @@
 // @carbon/three
 //
-// Public entry point. Re-exports the renderer + mock executor + DrawCommand
-// schema. Phase 1 will add a real `CanvasSurfaceExecutor` next to this file
-// that wraps `__carbon_canvas_execute_commands(...)`; until then, only
-// `MockCommandExecutor` is available.
+// Public entry point. Re-exports the renderer + executors + DrawCommand
+// schema.
+//
+// ── LAYOUT ──────────────────────────────────────────────────────────────────
+//   domain/          the DrawCommand schema — the wire format between the
+//                    JS scene-walk and the Rust executor. Imports no three.js
+//                    and no host function: both sides of that boundary have
+//                    to agree on it, so it must not drag either one in.
+//   infrastructure/  the vendor-facing half: the renderer that walks a
+//                    three.js scene, and the executors the commands go to.
+//
+// Same split as integrations/bundler/vite.
 
-export { CarbonRenderer } from "./renderer.js";
-export type { CarbonRendererOptions } from "./renderer.js";
+export { CarbonRenderer } from "./infrastructure/renderer.js";
+export type { CarbonRendererOptions } from "./infrastructure/renderer.js";
 
-export { MockCommandExecutor } from "./mock-executor.js";
-export type { MockMode, MockStats } from "./mock-executor.js";
+export { MockCommandExecutor } from "./infrastructure/executors/mock-executor.js";
+export type { MockMode, MockStats } from "./infrastructure/executors/mock-executor.js";
 
-export { CanvasSurfaceExecutor } from "./canvas-executor.js";
+export { CanvasSurfaceExecutor } from "./infrastructure/executors/canvas-executor.js";
 
 export type {
   CommandExecutor,
@@ -33,4 +41,4 @@ export type {
   CameraDesc,
   TextureDescriptor,
   SideValue,
-} from "./types.js";
+} from "./domain/draw-commands.js";

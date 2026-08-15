@@ -14,8 +14,8 @@ import * as THREE from "three";
 import {
   createThreeFiberRenderer,
   wrapAsNode,
-} from "../renderer.ts";
-import { applyProp, getIntrinsicSpec } from "../intrinsics.ts";
+} from "../infrastructure/renderer.ts";
+import { applyProp, getIntrinsicSpec } from "../infrastructure/intrinsics.ts";
 
 // Mini-helper: build a node + apply props + insert, matching what the
 // JSX compiler would emit for `<tag args={...} prop={...} />`.

@@ -30,7 +30,7 @@ import type {
   SetLightsCommand,
   SideValue,
   TextureDescriptor,
-} from "./types.js";
+} from "../domain/draw-commands.js";
 
 export interface CarbonRendererOptions {
   // The <canvas> intrinsic created by the carbon-mini scene graph. The

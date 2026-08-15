@@ -7,8 +7,8 @@
   "types": "./index.ts",
   "exports": {
     ".": "./index.ts",
-    "./mock-executor": "./mock-executor.ts",
-    "./types": "./types.ts"
+    "./mock-executor": "./infrastructure/executors/mock-executor.ts",
+    "./types": "./domain/draw-commands.ts"
   },
   "scripts": {
     "test": "bun test",

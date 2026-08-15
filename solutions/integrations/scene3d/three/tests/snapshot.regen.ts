@@ -8,7 +8,7 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CarbonRenderer, MockCommandExecutor } from "@carbon/three";
-import { buildSnapshotScene, normalizeFrame } from "./fixtures/snapshot-scene.js";
+import { buildSnapshotScene, normalizeFrame } from "./fixtures/snapshot-scene.ts";
 
 const exec = new MockCommandExecutor();
 const renderer = new CarbonRenderer({

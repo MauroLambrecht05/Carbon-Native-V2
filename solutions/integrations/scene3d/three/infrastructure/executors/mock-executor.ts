@@ -11,7 +11,7 @@
 // The recorder also tracks lightweight stats so benchmarks can confirm
 // what was emitted without iterating the command list.
 
-import type { CommandExecutor, DrawCommand } from "./types.js";
+import type { CommandExecutor, DrawCommand } from "../../domain/draw-commands.js";
 
 export type MockMode = "keepLatest" | "keepAll";
 

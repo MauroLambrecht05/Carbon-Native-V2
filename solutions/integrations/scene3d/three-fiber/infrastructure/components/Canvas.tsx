@@ -21,8 +21,8 @@
 import { createSignal, onCleanup, onMount, createMemo, createContext, useContext, untrack, createEffect } from "solid-js";
 import * as THREE from "three";
 import { CarbonRenderer, CanvasSurfaceExecutor, MockCommandExecutor, type CommandExecutor } from "@carbon/three";
-import { createThreeFiberRenderer, type ThreeNode } from "./renderer.js";
-import { runR3FBuild, type R3FBuilder } from "./r3f-build.js";
+import { createThreeFiberRenderer, type ThreeNode } from "../renderer.js";
+import { runR3FBuild, type R3FBuilder } from "../r3f-build.js";
 
 // Augment Solid's JSX so the carbon-mini `<canvas>` intrinsic is
 // typed correctly here (apps importing @carbon/three-fiber may or may

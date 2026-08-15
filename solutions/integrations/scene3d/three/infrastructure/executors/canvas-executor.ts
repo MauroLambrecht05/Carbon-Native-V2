@@ -23,7 +23,7 @@ import type {
   MeshCommand,
   LineCommand,
   PointsCommand,
-} from "./types.js";
+} from "../../domain/draw-commands.js";
 
 declare const __carbon_canvas_execute_commands:
   | ((id: number, json: string) => void)

@@ -17,8 +17,8 @@ import { describe, expect, it } from "bun:test";
 import * as THREE from "three";
 // Neither renderer.js nor r3f-build.js are part of three-fiber's public
 // exports, so these stay relative reach-backs to the source.
-import { createThreeFiberRenderer } from "../renderer.ts";
-import { runR3FBuild, type R3FBuilder } from "../r3f-build.ts";
+import { createThreeFiberRenderer } from "../infrastructure/renderer.ts";
+import { runR3FBuild, type R3FBuilder } from "../infrastructure/r3f-build.ts";
 
 describe("runR3FBuild — bridge runtime", () => {
   it("constructs a mesh with geometry + material from a builder", () => {

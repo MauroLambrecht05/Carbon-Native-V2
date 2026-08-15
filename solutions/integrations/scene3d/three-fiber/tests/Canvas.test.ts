@@ -17,7 +17,7 @@ import type { MeshCommand } from "@carbon/three";
 // three-fiber's renderer.js isn't part of its public package exports (only
 // "." and "./types" are), so this stays a relative reach-back to the source
 // rather than a package-name import.
-import { createThreeFiberRenderer, wrapAsNode } from "../renderer.ts";
+import { createThreeFiberRenderer, wrapAsNode } from "../infrastructure/renderer.ts";
 
 function buildScene() {
   const scene = new THREE.Scene();
