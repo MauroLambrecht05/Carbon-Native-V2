@@ -1,8 +1,8 @@
 // The HTTP surface, over in-memory repositories. What talks to a real
 // Postgres is PostgresBuildRepository/PostgresIdentityRepository's own
 // concern; this only checks that a request maps to the right use case,
-// auth gates what it should, and status codes are right — none of which
-// needs a database to prove.
+// auth (and scope) gates what it should, and status codes are right — none
+// of which needs a database to prove.
 
 import { describe, expect, test } from "bun:test";
 import {
@@ -15,6 +15,7 @@ import {
 } from "@carbon/cloud-orchestration";
 import {
   CreateOrganizationUseCase,
+  IssueWorkerTokenUseCase,
   InMemoryIdentityRepository,
   VerifyTokenUseCase,
 } from "@carbon/identity";
@@ -31,12 +32,14 @@ async function harness() {
   const identity = new InMemoryIdentityRepository();
   const billing = new InMemoryBillingRepository();
   const createOrganization = new CreateOrganizationUseCase(identity);
+  const issueWorkerToken = new IssueWorkerTokenUseCase(identity);
   const routes = buildRoutes({
     createBuild: new CreateBuildUseCase(builds),
     getBuild: new GetBuildUseCase(builds),
     claimNext: new ClaimNextBuildUseCase(builds),
     completeBuild: new CompleteBuildUseCase(builds),
     createOrganization,
+    issueWorkerToken,
     verifyToken: new VerifyTokenUseCase(identity),
     checkUsageLimit: new CheckUsageLimitUseCase(billing, billing),
     recordBuildUsage: new RecordBuildUsageUseCase(billing),
@@ -45,20 +48,20 @@ async function harness() {
   const base = `http://localhost:${server.port}`;
 
   // Every scenario below needs a valid token to get past auth, so signing
-  // up once here is setup, not the thing under test — signup itself is
-  // covered separately below.
+  // up (and minting a worker token) once here is setup, not the thing
+  // under test — both are covered separately below.
   const { orgId, apiToken } = await createOrganization.execute("Test Org");
-  const authed = (path: string, init: RequestInit = {}) =>
-    fetch(`${base}${path}`, {
-      ...init,
-      headers: { ...init.headers, authorization: `Bearer ${apiToken}` },
-    });
+  const { workerToken } = await issueWorkerToken.execute(orgId);
+  const withToken = (token: string) => (path: string, init: RequestInit = {}) =>
+    fetch(`${base}${path}`, { ...init, headers: { ...init.headers, authorization: `Bearer ${token}` } });
+  const authed = withToken(apiToken);
+  const asWorker = withToken(workerToken);
 
-  return { server, base, orgId, apiToken, authed, billing };
+  return { server, base, orgId, apiToken, workerToken, authed, asWorker, billing };
 }
 
 describe("POST /v1/orgs", () => {
-  test("signup returns an org id and a usable token", async () => {
+  test("signup returns an org id and a usable org-scoped token", async () => {
     const { server, base } = await harness();
     const res = await fetch(`${base}/v1/orgs`, {
       method: "POST",
@@ -75,6 +78,24 @@ describe("POST /v1/orgs", () => {
     const { server, base } = await harness();
     const res = await fetch(`${base}/v1/orgs`, { method: "POST", body: JSON.stringify({}) });
     expect(res.status).toBe(400);
+    server.stop(true);
+  });
+});
+
+describe("POST /v1/worker-tokens", () => {
+  test("an org token can mint a worker token for itself", async () => {
+    const { server, authed } = await harness();
+    const res = await authed("/v1/worker-tokens", { method: "POST" });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { workerToken: string };
+    expect(body.workerToken).toStartWith("wk_");
+    server.stop(true);
+  });
+
+  test("a worker token cannot mint another worker token", async () => {
+    const { server, asWorker } = await harness();
+    const res = await asWorker("/v1/worker-tokens", { method: "POST" });
+    expect(res.status).toBe(403);
     server.stop(true);
   });
 });
@@ -100,6 +121,26 @@ describe("auth", () => {
     expect(res.status).toBe(401);
     server.stop(true);
   });
+
+  test("a worker token cannot create a build (needs org scope) — 403, not 401", async () => {
+    const { server, asWorker } = await harness();
+    const res = await asWorker("/v1/builds", {
+      method: "POST",
+      body: JSON.stringify({ repoUrl: "r", commitSha: "c", targets: ["deb"] }),
+    });
+    expect(res.status).toBe(403);
+    server.stop(true);
+  });
+
+  test("an org token cannot claim a build (needs worker scope)", async () => {
+    const { server, authed } = await harness();
+    const res = await authed("/v1/builds/claim", {
+      method: "POST",
+      body: JSON.stringify({ platform: "linux", workerId: "w1" }),
+    });
+    expect(res.status).toBe(403);
+    server.stop(true);
+  });
 });
 
 describe("POST /v1/builds", () => {
@@ -123,11 +164,24 @@ describe("GET /v1/builds/:id", () => {
     expect(res.status).toBe(404);
     server.stop(true);
   });
+
+  test("a worker token can read a build too", async () => {
+    const { server, authed, asWorker } = await harness();
+    const created = (await (
+      await authed("/v1/builds", {
+        method: "POST",
+        body: JSON.stringify({ repoUrl: "r", commitSha: "c", targets: ["deb"] }),
+      })
+    ).json()) as BuildProps;
+    const res = await asWorker(`/v1/builds/${created.id}`);
+    expect(res.status).toBe(200);
+    server.stop(true);
+  });
 });
 
 describe("the claim -> complete loop", () => {
   test("a worker can claim, then report success", async () => {
-    const { server, authed } = await harness();
+    const { server, authed, asWorker } = await harness();
     const created = (await (
       await authed("/v1/builds", {
         method: "POST",
@@ -136,20 +190,20 @@ describe("the claim -> complete loop", () => {
     ).json()) as BuildProps;
 
     const claimed = (await (
-      await authed("/v1/builds/claim", {
+      await asWorker("/v1/builds/claim", {
         method: "POST",
         body: JSON.stringify({ platform: "linux", workerId: "w1" }),
       })
     ).json()) as BuildProps;
     expect(claimed.id).toBe(created.id);
 
-    const running = await authed(`/v1/builds/${created.id}/complete`, {
+    const running = await asWorker(`/v1/builds/${created.id}/complete`, {
       method: "POST",
       body: JSON.stringify({ outcome: "running" }),
     });
     expect(running.status).toBe(200);
 
-    const done = await authed(`/v1/builds/${created.id}/complete`, {
+    const done = await asWorker(`/v1/builds/${created.id}/complete`, {
       method: "POST",
       body: JSON.stringify({ outcome: "succeeded", artifacts: [] }),
     });
@@ -161,8 +215,8 @@ describe("the claim -> complete loop", () => {
   });
 
   test("an empty claim response is 204, not an empty 200", async () => {
-    const { server, authed } = await harness();
-    const res = await authed("/v1/builds/claim", {
+    const { server, asWorker } = await harness();
+    const res = await asWorker("/v1/builds/claim", {
       method: "POST",
       body: JSON.stringify({ platform: "linux", workerId: "w1" }),
     });
@@ -191,7 +245,7 @@ describe("GET /v1/usage", () => {
 
 describe("usage limits", () => {
   test("a build completing successfully records usage", async () => {
-    const { server, authed, orgId, billing } = await harness();
+    const { server, authed, asWorker, orgId, billing } = await harness();
     const created = (await (
       await authed("/v1/builds", {
         method: "POST",
@@ -199,7 +253,7 @@ describe("usage limits", () => {
       })
     ).json()) as BuildProps;
 
-    await authed(`/v1/builds/${created.id}/complete`, {
+    await asWorker(`/v1/builds/${created.id}/complete`, {
       method: "POST",
       body: JSON.stringify({ outcome: "succeeded", artifacts: [] }),
     });

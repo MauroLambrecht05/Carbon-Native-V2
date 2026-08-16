@@ -21,8 +21,12 @@ export class CreateOrganizationUseCase {
     const org = Organization.create({ id: crypto.randomUUID(), name });
     await this.identity.saveOrganization(org);
 
+    // "cc_" — an org token, what carbon-cli authenticates as. Distinct from
+    // "wk_" (IssueWorkerTokenUseCase) the same way Stripe's sk_/pk_ prefixes
+    // let you tell two credentials apart at a glance before either does
+    // anything.
     const plaintext = `cc_${crypto.randomUUID().replaceAll("-", "")}`;
-    const token = ApiToken.issue({ id: crypto.randomUUID(), orgId: org.id, plaintext });
+    const token = ApiToken.issue({ id: crypto.randomUUID(), orgId: org.id, scope: "org", plaintext });
     await this.identity.saveToken(token);
 
     return { orgId: org.id, apiToken: plaintext };

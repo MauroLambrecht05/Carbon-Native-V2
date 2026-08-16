@@ -14,7 +14,10 @@ FROM debian:bookworm-slim
 
 ARG BUN_VERSION=1.3.10
 ARG RUST_VERSION=1.88.0
-ARG APPIMAGETOOL_VERSION=13
+# appimagetool has no versioned releases — "continuous" is the only tag
+# upstream publishes (confirmed against the real GitHub API; a guessed "13"
+# 404'd building this image for real).
+ARG APPIMAGETOOL_VERSION=continuous
 
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \

@@ -13,7 +13,13 @@ import {
   type CreateBuildUseCase,
   type GetBuildUseCase,
 } from "@carbon/cloud-orchestration";
-import type { CreateOrganizationUseCase, VerifyTokenUseCase } from "@carbon/identity";
+import {
+  type CreateOrganizationUseCase,
+  type IssueWorkerTokenUseCase,
+  type VerifyTokenUseCase,
+  type VerifiedToken,
+  type TokenScope,
+} from "@carbon/identity";
 import type { CheckUsageLimitUseCase, RecordBuildUsageUseCase } from "@carbon/billing";
 
 export interface RouteDeps {
@@ -22,6 +28,7 @@ export interface RouteDeps {
   readonly claimNext: ClaimNextBuildUseCase;
   readonly completeBuild: CompleteBuildUseCase;
   readonly createOrganization: CreateOrganizationUseCase;
+  readonly issueWorkerToken: IssueWorkerTokenUseCase;
   readonly verifyToken: VerifyTokenUseCase;
   readonly checkUsageLimit: CheckUsageLimitUseCase;
   readonly recordBuildUsage: RecordBuildUsageUseCase;
@@ -39,23 +46,36 @@ function errorResponse(error: unknown): Response {
 }
 
 /**
- * The org a request authenticates as, or a 401 Response to send back.
+ * Who a request authenticates as, restricted to one of `allowedScopes`, or
+ * a 401/403 Response to send back.
  *
- * Gates access to /v1/builds/*: every caller (carbon-cli, a worker) needs a
- * valid token. What it does NOT do yet is scope a worker's claim/complete
- * calls to one org's builds specifically — any valid token can claim any
- * org's queued work today. Fine for a single self-hosted deployment where
- * you control every worker; a real gap once multiple untrusted tenants
- * share one control plane.
+ * This is what closes the gap the previous version of this file had: a
+ * single token type could both queue work as an org AND pull any org's
+ * queued work off the shared queue. Now claim/complete require a "worker"
+ * token and create/usage require an "org" token — see ApiToken.ts's
+ * TokenScope. What this still does NOT do is scope a worker's claim to
+ * builds from the SAME org that issued its token — any worker token can
+ * claim any org's queued work, which is correct for a worker fleet (shared
+ * infrastructure) but means a compromised worker token from one org can
+ * read what other orgs are building. Fine for a single self-hosted
+ * deployment where you run every worker yourself; a real gap for multiple
+ * mutually-untrusting tenants sharing one control plane.
  */
-async function authenticate(req: Request, verifyToken: VerifyTokenUseCase): Promise<string | Response> {
+async function authenticate(
+  req: Request,
+  verifyToken: VerifyTokenUseCase,
+  allowedScopes: readonly TokenScope[],
+): Promise<VerifiedToken | Response> {
   const header = req.headers.get("authorization") ?? "";
   const token = header.startsWith("Bearer ") ? header.slice("Bearer ".length) : null;
   if (!token) return json({ error: "missing bearer token" }, 401);
 
-  const orgId = await verifyToken.execute(token);
-  if (!orgId) return json({ error: "invalid token" }, 401);
-  return orgId;
+  const verified = await verifyToken.execute(token);
+  if (!verified) return json({ error: "invalid token" }, 401);
+  if (!allowedScopes.includes(verified.scope)) {
+    return json({ error: `a ${verified.scope} token cannot do this — needs: ${allowedScopes.join(" or ")}` }, 403);
+  }
+  return verified;
 }
 
 const DASHBOARD_DIR = new URL("../../presentation/", import.meta.url);
@@ -102,12 +122,24 @@ export function buildRoutes(deps: RouteDeps) {
       },
     },
 
+    "/v1/worker-tokens": {
+      POST: async (req: Bun.BunRequest) => {
+        const verified = await authenticate(req, deps.verifyToken, ["org"]);
+        if (verified instanceof Response) return verified;
+        try {
+          return json(await deps.issueWorkerToken.execute(verified.orgId), 201);
+        } catch (error) {
+          return errorResponse(error);
+        }
+      },
+    },
+
     "/v1/usage": {
       GET: async (req: Bun.BunRequest) => {
-        const orgId = await authenticate(req, deps.verifyToken);
-        if (orgId instanceof Response) return orgId;
+        const verified = await authenticate(req, deps.verifyToken, ["org"]);
+        if (verified instanceof Response) return verified;
         try {
-          return json(await deps.checkUsageLimit.execute(orgId));
+          return json(await deps.checkUsageLimit.execute(verified.orgId));
         } catch (error) {
           return errorResponse(error);
         }
@@ -116,10 +148,10 @@ export function buildRoutes(deps: RouteDeps) {
 
     "/v1/builds": {
       POST: async (req: Bun.BunRequest) => {
-        const orgId = await authenticate(req, deps.verifyToken);
-        if (orgId instanceof Response) return orgId;
+        const verified = await authenticate(req, deps.verifyToken, ["org"]);
+        if (verified instanceof Response) return verified;
         try {
-          const usage = await deps.checkUsageLimit.execute(orgId);
+          const usage = await deps.checkUsageLimit.execute(verified.orgId);
           if (!usage.withinLimit) {
             return json(
               { error: `plan's ${usage.includedMinutes} included build-minutes used for this period` },
@@ -131,7 +163,7 @@ export function buildRoutes(deps: RouteDeps) {
             commitSha: string;
             targets: InstallerTargetId[];
           };
-          const build = await deps.createBuild.execute({ orgId, ...body });
+          const build = await deps.createBuild.execute({ orgId: verified.orgId, ...body });
           return json(build.toProps(), 201);
         } catch (error) {
           return errorResponse(error);
@@ -141,8 +173,10 @@ export function buildRoutes(deps: RouteDeps) {
 
     "/v1/builds/:id": {
       GET: async (req: Bun.BunRequest<"/v1/builds/:id">) => {
-        const orgId = await authenticate(req, deps.verifyToken);
-        if (orgId instanceof Response) return orgId;
+        // Either scope: an org checks its own build, a worker checks one
+        // it might be about to claim or just finished.
+        const verified = await authenticate(req, deps.verifyToken, ["org", "worker"]);
+        if (verified instanceof Response) return verified;
         try {
           const build = await deps.getBuild.execute(req.params.id);
           return json(build.toProps());
@@ -154,8 +188,8 @@ export function buildRoutes(deps: RouteDeps) {
 
     "/v1/builds/claim": {
       POST: async (req: Bun.BunRequest) => {
-        const authed = await authenticate(req, deps.verifyToken);
-        if (authed instanceof Response) return authed;
+        const verified = await authenticate(req, deps.verifyToken, ["worker"]);
+        if (verified instanceof Response) return verified;
         try {
           const body = (await req.json()) as { platform: TargetPlatform; workerId: string };
           const build = await deps.claimNext.execute(body);
@@ -168,8 +202,8 @@ export function buildRoutes(deps: RouteDeps) {
 
     "/v1/builds/:id/complete": {
       POST: async (req: Bun.BunRequest<"/v1/builds/:id/complete">) => {
-        const authed = await authenticate(req, deps.verifyToken);
-        if (authed instanceof Response) return authed;
+        const verified = await authenticate(req, deps.verifyToken, ["worker"]);
+        if (verified instanceof Response) return verified;
         try {
           const body = (await req.json()) as Record<string, unknown>;
           const buildId = req.params.id;

@@ -12,6 +12,7 @@ import {
 } from "@carbon/cloud-orchestration";
 import {
   CreateOrganizationUseCase,
+  IssueWorkerTokenUseCase,
   PostgresIdentityRepository,
   VerifyTokenUseCase,
 } from "@carbon/identity";
@@ -67,6 +68,7 @@ export async function startServer(config: CarbonCloudConfig) {
     claimNext: new ClaimNextBuildUseCase(builds),
     completeBuild: new CompleteBuildUseCase(builds),
     createOrganization: new CreateOrganizationUseCase(identity),
+    issueWorkerToken: new IssueWorkerTokenUseCase(identity),
     verifyToken: new VerifyTokenUseCase(identity),
     checkUsageLimit: new CheckUsageLimitUseCase(billing, billing),
     recordBuildUsage: new RecordBuildUsageUseCase(billing),

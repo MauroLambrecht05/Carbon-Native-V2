@@ -107,7 +107,7 @@ export function buildRegistry(): CommandRegistry {
       {
         name: "cloud",
         summary: "Build, sign and publish through Carbon Cloud",
-        usage: "cloud <signup|login|deploy|status> [options]",
+        usage: "cloud <signup|login|worker-token|deploy|status> [options]",
       },
       async () => new (await import("../presentation/commands/cloud/cloud.command.ts")).CloudCommand(),
     ),

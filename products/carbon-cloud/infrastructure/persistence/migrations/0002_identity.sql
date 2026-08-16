@@ -1,5 +1,6 @@
 -- Organizations and API tokens. See @carbon/identity — self-hosted v1's
--- whole model: an org owns everything, a token authenticates as one.
+-- whole model: an org owns everything, a token authenticates as one, as
+-- either of two scopes (see ApiToken.ts's TokenScope for what each can do).
 
 CREATE TABLE IF NOT EXISTS organizations (
   id          uuid PRIMARY KEY,
@@ -10,6 +11,7 @@ CREATE TABLE IF NOT EXISTS organizations (
 CREATE TABLE IF NOT EXISTS api_tokens (
   id          uuid PRIMARY KEY,
   org_id      uuid NOT NULL REFERENCES organizations(id),
+  scope       text NOT NULL CHECK (scope IN ('org', 'worker')),
   -- SHA-256 of the token — see domain/value-objects/TokenHash.ts for why
   -- not bcrypt/argon2. Looked up on every authenticated request, so this
   -- needs an index, not just a primary key elsewhere.
