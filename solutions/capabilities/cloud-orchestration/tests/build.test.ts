@@ -4,6 +4,7 @@ import {
   CompleteBuildUseCase,
   CreateBuildUseCase,
   GetBuildUseCase,
+  ListOrgBuildsUseCase,
   InMemoryBuildRepository,
   BuildNotFoundError,
   InvalidTransitionError,
@@ -17,6 +18,7 @@ function harness() {
     claim: new ClaimNextBuildUseCase(builds),
     complete: new CompleteBuildUseCase(builds),
     get: new GetBuildUseCase(builds),
+    list: new ListOrgBuildsUseCase(builds),
   };
 }
 
@@ -116,5 +118,24 @@ describe("refusals", () => {
     await expect(
       h.complete.execute({ buildId: build.id, outcome: "succeeded", artifacts: [] }),
     ).rejects.toThrow(InvalidTransitionError);
+  });
+});
+
+describe("listing", () => {
+  test("most recent first, scoped to the org, capped by limit", async () => {
+    const h = harness();
+    await h.create.execute({ orgId: "o1", repoUrl: "r", commitSha: "1", targets: ["deb"] });
+    await new Promise((r) => setTimeout(r, 2));
+    const second = await h.create.execute({ orgId: "o1", repoUrl: "r", commitSha: "2", targets: ["deb"] });
+    await h.create.execute({ orgId: "o2", repoUrl: "r", commitSha: "x", targets: ["deb"] });
+
+    const list = await h.list.execute("o1", 1);
+    expect(list).toHaveLength(1);
+    expect(list[0]!.id).toBe(second.id);
+  });
+
+  test("an org with no builds gets an empty list, not an error", async () => {
+    const h = harness();
+    expect(await h.list.execute("nobody")).toEqual([]);
   });
 });

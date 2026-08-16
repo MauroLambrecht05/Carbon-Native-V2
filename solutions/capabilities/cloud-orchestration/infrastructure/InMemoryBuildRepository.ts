@@ -31,4 +31,11 @@ export class InMemoryBuildRepository implements BuildRepository {
     next.claim(workerId);
     return next;
   }
+
+  async listByOrg(orgId: string, limit: number): Promise<Build[]> {
+    return [...this.rows.values()]
+      .filter((b) => b.toProps().orgId === orgId)
+      .sort((a, b) => b.toProps().createdAt.getTime() - a.toProps().createdAt.getTime())
+      .slice(0, limit);
+  }
 }

@@ -18,5 +18,6 @@ export { CreateBuildUseCase, type CreateBuildRequest } from "./application/useca
 export { ClaimNextBuildUseCase, type ClaimNextBuildRequest } from "./application/usecases/ClaimNextBuildUseCase.ts";
 export { CompleteBuildUseCase, type CompleteBuildRequest } from "./application/usecases/CompleteBuildUseCase.ts";
 export { GetBuildUseCase } from "./application/usecases/GetBuildUseCase.ts";
+export { ListOrgBuildsUseCase } from "./application/usecases/ListOrgBuildsUseCase.ts";
 export { InMemoryBuildRepository } from "./infrastructure/InMemoryBuildRepository.ts";
 export { PostgresBuildRepository } from "./infrastructure/PostgresBuildRepository.ts";

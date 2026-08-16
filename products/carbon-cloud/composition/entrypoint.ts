@@ -8,6 +8,7 @@ import {
   CompleteBuildUseCase,
   CreateBuildUseCase,
   GetBuildUseCase,
+  ListOrgBuildsUseCase,
   PostgresBuildRepository,
 } from "@carbon/cloud-orchestration";
 import {
@@ -65,6 +66,7 @@ export async function startServer(config: CarbonCloudConfig) {
   const routes = buildRoutes({
     createBuild: new CreateBuildUseCase(builds),
     getBuild: new GetBuildUseCase(builds),
+    listOrgBuilds: new ListOrgBuildsUseCase(builds),
     claimNext: new ClaimNextBuildUseCase(builds),
     completeBuild: new CompleteBuildUseCase(builds),
     createOrganization: new CreateOrganizationUseCase(identity),

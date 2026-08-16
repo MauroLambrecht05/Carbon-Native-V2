@@ -9,6 +9,24 @@
 #
 # NOT the full dev environment in .tools/environments/docker/Dockerfile —
 # this worker never runs Bazel, Zig, Go or LLVM, so it doesn't carry them.
+#
+# The libxkbcommon/wayland/x11/mesa/alsa set below is copied from
+# .github/workflows/ci.yml, not guessed: carbon-mini's windowing (tao) and
+# audio (cpal) dependencies need real system dev packages to compile at all,
+# and building this image for real against a real app is what surfaced that
+# — cargo failed deep in a transitive dependency's build.rs
+# (wayland-sys) with "pkg-config could not be found", the kind of error
+# that's easy to under-scope a fix for without seeing it happen.
+#
+# libgtk-3-dev is NOT in ci.yml's list — added after that fix still left
+# gobject-sys/glib-sys failing the same way. CI's cargo build apparently
+# never enables whatever capability (native dialogs, clipboard, tray — all
+# GTK-backed on Linux) pulls those crates in; a real app with
+# `--features dialog` (or similar) does. libgtk-3-dev pulls in
+# glib/gobject/gdk/pango/cairo/atk as its own dependencies, which is more
+# than strictly needed but is the standard Tauri-class Linux prerequisite
+# for exactly this dependency shape, and this repo's os/ adapters are
+# Tauri-inspired in the same way.
 
 FROM debian:bookworm-slim
 
@@ -28,6 +46,8 @@ ENV RUSTUP_HOME=/usr/local/rustup \
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl unzip git dpkg-dev build-essential \
+        libxkbcommon-dev libwayland-dev libxrandr-dev libxi-dev \
+        libgl1-mesa-dev libasound2-dev pkg-config libgtk-3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL https://sh.rustup.rs | sh -s -- \

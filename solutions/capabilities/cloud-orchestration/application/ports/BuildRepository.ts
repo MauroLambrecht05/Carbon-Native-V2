@@ -15,4 +15,6 @@ export interface BuildRepository {
   findById(id: string): Promise<Build | null>;
   /** Atomically claims the oldest queued build whose targets need `platform`. */
   claimNext(platform: TargetPlatform, workerId: string): Promise<Build | null>;
+  /** Most recent first. */
+  listByOrg(orgId: string, limit: number): Promise<Build[]>;
 }

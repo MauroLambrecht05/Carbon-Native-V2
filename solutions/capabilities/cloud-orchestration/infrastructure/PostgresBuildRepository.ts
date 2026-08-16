@@ -110,4 +110,11 @@ export class PostgresBuildRepository implements BuildRepository {
     `;
     return rows[0] ? toBuild(rows[0]) : null;
   }
+
+  async listByOrg(orgId: string, limit: number): Promise<Build[]> {
+    const rows = await this.sql<Row[]>`
+      SELECT * FROM builds WHERE org_id = ${orgId} ORDER BY created_at DESC LIMIT ${limit}
+    `;
+    return rows.map(toBuild);
+  }
 }

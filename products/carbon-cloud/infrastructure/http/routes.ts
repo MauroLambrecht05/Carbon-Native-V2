@@ -12,6 +12,7 @@ import {
   type CompleteBuildUseCase,
   type CreateBuildUseCase,
   type GetBuildUseCase,
+  type ListOrgBuildsUseCase,
 } from "@carbon/cloud-orchestration";
 import {
   type CreateOrganizationUseCase,
@@ -25,6 +26,7 @@ import type { CheckUsageLimitUseCase, RecordBuildUsageUseCase } from "@carbon/bi
 export interface RouteDeps {
   readonly createBuild: CreateBuildUseCase;
   readonly getBuild: GetBuildUseCase;
+  readonly listOrgBuilds: ListOrgBuildsUseCase;
   readonly claimNext: ClaimNextBuildUseCase;
   readonly completeBuild: CompleteBuildUseCase;
   readonly createOrganization: CreateOrganizationUseCase;
@@ -147,6 +149,17 @@ export function buildRoutes(deps: RouteDeps) {
     },
 
     "/v1/builds": {
+      GET: async (req: Bun.BunRequest) => {
+        const verified = await authenticate(req, deps.verifyToken, ["org"]);
+        if (verified instanceof Response) return verified;
+        try {
+          const limitParam = new URL(req.url).searchParams.get("limit");
+          const builds = await deps.listOrgBuilds.execute(verified.orgId, limitParam ? Number(limitParam) : undefined);
+          return json(builds.map((b) => b.toProps()));
+        } catch (error) {
+          return errorResponse(error);
+        }
+      },
       POST: async (req: Bun.BunRequest) => {
         const verified = await authenticate(req, deps.verifyToken, ["org"]);
         if (verified instanceof Response) return verified;

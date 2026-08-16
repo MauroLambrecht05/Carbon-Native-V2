@@ -81,16 +81,17 @@ changes the stored plan on a successful charge, but the only implementation
 is `FakePaymentProvider`, which always succeeds without moving any money.
 
 The dashboard (`presentation/`, React) covers signup, pasting an
-existing token, usage against the plan, queuing a build, and checking one's
-status — a token typed in lives in the browser's localStorage for the tab's
-session; there's no cookie session yet.
+existing token, usage against the plan, queuing a build, a recent-builds
+list (polled every 4s — no live-update channel yet), clicking a row to see
+its full status, and looking a build up by id directly — a token typed in
+lives in the browser's localStorage for the tab's session; there's no
+cookie session yet. `carbon cloud list` is the CLI equivalent.
 
 Not yet: a worker token isn't scoped to the specific org that minted it —
 any worker token can claim/complete any org's queued work, which is correct
 for a shared worker fleet but means a compromised worker token from one org
 can see what other orgs are building (fine for one self-hosted deployment
 you run every worker for yourself; a real gap for multiple mutually
-untrusting tenants). Also: a build list/history view (only look-up-by-id
-exists), a proper `.app` bundle for macOS (`dmg`'s builder packages the raw
-runtime binary today — see the KNOWN GAP note in
+untrusting tenants). Also: a proper `.app` bundle for macOS (`dmg`'s
+builder packages the raw runtime binary today — see the KNOWN GAP note in
 `packaging/infrastructure/builders/dmg.ts`).

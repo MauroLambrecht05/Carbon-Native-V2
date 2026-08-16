@@ -10,6 +10,7 @@ import {
   CompleteBuildUseCase,
   CreateBuildUseCase,
   GetBuildUseCase,
+  ListOrgBuildsUseCase,
   InMemoryBuildRepository,
   type BuildProps,
 } from "@carbon/cloud-orchestration";
@@ -36,6 +37,7 @@ async function harness() {
   const routes = buildRoutes({
     createBuild: new CreateBuildUseCase(builds),
     getBuild: new GetBuildUseCase(builds),
+    listOrgBuilds: new ListOrgBuildsUseCase(builds),
     claimNext: new ClaimNextBuildUseCase(builds),
     completeBuild: new CompleteBuildUseCase(builds),
     createOrganization,
@@ -153,6 +155,50 @@ describe("POST /v1/builds", () => {
     expect(res.status).toBe(201);
     const body = (await res.json()) as BuildProps;
     expect(body.status).toBe("queued");
+    server.stop(true);
+  });
+});
+
+describe("GET /v1/builds", () => {
+  test("lists the org's builds, most recent first", async () => {
+    const { server, authed } = await harness();
+    const create = (commitSha: string) =>
+      authed("/v1/builds", {
+        method: "POST",
+        body: JSON.stringify({ repoUrl: "r", commitSha, targets: ["deb"] }),
+      });
+    const first = (await (await create("first")).json()) as BuildProps;
+    const second = (await (await create("second")).json()) as BuildProps;
+
+    const res = await authed("/v1/builds");
+    expect(res.status).toBe(200);
+    const list = (await res.json()) as BuildProps[];
+    expect(list.map((b) => b.id)).toEqual([second.id, first.id]);
+    server.stop(true);
+  });
+
+  test("only the token's own org's builds, not another org's", async () => {
+    const { server, authed, base } = await harness();
+    await authed("/v1/builds", {
+      method: "POST",
+      body: JSON.stringify({ repoUrl: "r", commitSha: "c", targets: ["deb"] }),
+    });
+
+    const otherSignup = (await (
+      await fetch(`${base}/v1/orgs`, { method: "POST", body: JSON.stringify({ name: "Other Org" }) })
+    ).json()) as { apiToken: string };
+    const res = await fetch(`${base}/v1/builds`, {
+      headers: { authorization: `Bearer ${otherSignup.apiToken}` },
+    });
+    const list = (await res.json()) as BuildProps[];
+    expect(list).toEqual([]);
+    server.stop(true);
+  });
+
+  test("a worker token cannot list builds (needs org scope)", async () => {
+    const { server, asWorker } = await harness();
+    const res = await asWorker("/v1/builds");
+    expect(res.status).toBe(403);
     server.stop(true);
   });
 });

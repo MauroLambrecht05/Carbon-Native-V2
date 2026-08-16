@@ -50,6 +50,8 @@ export async function cloudCommand(rest: string[]): Promise<number> {
         return await cloudWorkerToken();
       case "deploy":
         return await cloudDeploy(args);
+      case "list":
+        return await cloudList(args);
       case "status":
         return await cloudStatus(args);
       case "--help":
@@ -204,6 +206,42 @@ async function cloudDeploy(args: string[]): Promise<number> {
   return 0;
 }
 
+async function cloudList(args: string[]): Promise<number> {
+  const creds = readCredentials();
+  if (!creds) {
+    log.error("not logged in — run `carbon cloud login --url <url> --token <token>` first");
+    return 1;
+  }
+
+  let limit = 20;
+  let i = 0;
+  while (i < args.length) {
+    if (args[i] === "--limit" && i + 1 < args.length) {
+      limit = parseInt(args[i + 1], 10);
+      i += 2;
+    } else {
+      i++;
+    }
+  }
+
+  const res = await fetch(`${creds.controlPlaneUrl}/v1/builds?limit=${limit}`, {
+    headers: { authorization: `Bearer ${creds.apiToken}` },
+  });
+  if (!res.ok) {
+    log.error(`control plane returned ${res.status}: ${await res.text()}`);
+    return 1;
+  }
+  const builds = (await res.json()) as Array<{ id: string; status: string; commitSha: string; targets: string[] }>;
+  if (builds.length === 0) {
+    log.info("no builds yet");
+    return 0;
+  }
+  for (const b of builds) {
+    console.log(`${b.id}  ${b.status.padEnd(10)}  ${b.commitSha.slice(0, 8)}  ${b.targets.join(",")}`);
+  }
+  return 0;
+}
+
 async function cloudStatus(args: string[]): Promise<number> {
   const creds = readCredentials();
   if (!creds) {
@@ -252,6 +290,9 @@ ${c.bold("Subcommands:")}
                --commit <sha>              (required)
                --target <id>               (required, repeatable)
 
+  ${c.cyan("list")}     List recent builds for your org
+               --limit <n>                 (default: 20)
+
   ${c.cyan("status")}   Check a build's status
                <build-id>                  (required)
 
@@ -269,7 +310,7 @@ export class CloudCommand extends Command {
   readonly meta: CommandMeta = {
     name: "cloud",
     summary: "Build, sign and publish through Carbon Cloud",
-    usage: "cloud <signup|login|worker-token|deploy|status> [options]",
+    usage: "cloud <signup|login|worker-token|deploy|list|status> [options]",
     examples: [
       "carbon cloud signup --url https://cloud.example.com --name \"My Org\"",
       "carbon cloud deploy --repo https://github.com/me/app.git --commit HEAD --target deb",

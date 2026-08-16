@@ -19,7 +19,16 @@ interface BuildProps {
   commitSha: string;
   targets: string[];
   error: string | null;
+  createdAt: string;
 }
+
+const STATUS_COLOR: Record<string, string> = {
+  succeeded: "#16794e",
+  failed: "#b3261e",
+  queued: "#6b6b6b",
+  claimed: "#8a6d00",
+  running: "#8a6d00",
+};
 
 const TOKEN_KEY = "carbon-cloud-token";
 
@@ -90,7 +99,7 @@ function UsagePanel({ token }: { token: string }) {
   );
 }
 
-function DeployForm({ token }: { token: string }) {
+function DeployForm({ token, onQueued }: { token: string; onQueued: () => void }) {
   const [repoUrl, setRepoUrl] = useState("");
   const [commitSha, setCommitSha] = useState("");
   const [targets, setTargets] = useState("deb");
@@ -109,6 +118,7 @@ function DeployForm({ token }: { token: string }) {
         }),
       });
       setResult(`queued: ${build.id}`);
+      onQueued();
     } catch (err) {
       setResult(err instanceof ApiError ? `${err.status}: ${err.message}` : String(err));
     }
@@ -128,25 +138,86 @@ function DeployForm({ token }: { token: string }) {
   );
 }
 
-function StatusLookup({ token }: { token: string }) {
+function BuildList({ token, refreshKey, onSelect }: { token: string; refreshKey: number; onSelect: (id: string) => void }) {
+  const [builds, setBuilds] = useState<BuildProps[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    apiFetch<BuildProps[]>("/v1/builds?limit=20", token)
+      .then(setBuilds)
+      .catch((err) => setError(err instanceof ApiError ? err.message : String(err)));
+    // Polled, not pushed: there's no live-update channel yet (see
+    // products/carbon-cloud/README.md) — refetching every few seconds is a
+    // deliberately simple stand-in until one exists.
+    const interval = setInterval(() => {
+      apiFetch<BuildProps[]>("/v1/builds?limit=20", token).then(setBuilds).catch(() => {});
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [token, refreshKey]);
+
+  return (
+    <section>
+      <h2>Recent builds</h2>
+      {error && <p style={{ color: "#b3261e" }}>{error}</p>}
+      {builds === null && !error && <p>loading…</p>}
+      {builds !== null && builds.length === 0 && <p>No builds yet — deploy one above.</p>}
+      {builds !== null && builds.length > 0 && (
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9em" }}>
+          <thead>
+            <tr style={{ textAlign: "left", borderBottom: "1px solid #ddd" }}>
+              <th>commit</th>
+              <th>targets</th>
+              <th>status</th>
+              <th>created</th>
+            </tr>
+          </thead>
+          <tbody>
+            {builds.map((b) => (
+              <tr
+                key={b.id}
+                onClick={() => onSelect(b.id)}
+                style={{ cursor: "pointer", borderBottom: "1px solid #f0f0f0" }}
+              >
+                <td>{b.commitSha.slice(0, 8)}</td>
+                <td>{b.targets.join(", ")}</td>
+                <td style={{ color: STATUS_COLOR[b.status] ?? "inherit", fontWeight: 600 }}>{b.status}</td>
+                <td>{new Date(b.createdAt).toLocaleString()}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
+  );
+}
+
+function StatusLookup({ token, selectedId }: { token: string; selectedId: string | null }) {
   const [buildId, setBuildId] = useState("");
   const [result, setResult] = useState<string | null>(null);
 
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
+  async function lookup(id: string) {
     setResult("loading...");
     try {
-      const build = await apiFetch<BuildProps>(`/v1/builds/${encodeURIComponent(buildId.trim())}`, token);
+      const build = await apiFetch<BuildProps>(`/v1/builds/${encodeURIComponent(id.trim())}`, token);
       setResult(JSON.stringify(build, null, 2));
     } catch (err) {
       setResult(err instanceof ApiError ? `${err.status}: ${err.message}` : String(err));
     }
   }
 
+  // Clicking a row in the build list above sets this; it looks up the same
+  // way typing an id in and submitting does, just triggered externally.
+  useEffect(() => {
+    if (selectedId) {
+      setBuildId(selectedId);
+      void lookup(selectedId);
+    }
+  }, [selectedId]);
+
   return (
     <section>
       <h2>Build status</h2>
-      <form onSubmit={onSubmit}>
+      <form onSubmit={(e) => { e.preventDefault(); void lookup(buildId); }}>
         <input value={buildId} onChange={(e) => setBuildId(e.target.value)} placeholder="build id" required />
         <button type="submit">Check</button>
       </form>
@@ -158,6 +229,8 @@ function StatusLookup({ token }: { token: string }) {
 export function App() {
   const [token, setToken] = useToken();
   const [tokenInput, setTokenInput] = useState("");
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   if (!token) {
     return (
@@ -190,8 +263,9 @@ export function App() {
         <button onClick={() => setToken(null)}>Log out</button>
       </p>
       <UsagePanel token={token} />
-      <DeployForm token={token} />
-      <StatusLookup token={token} />
+      <DeployForm token={token} onQueued={() => setRefreshKey((k) => k + 1)} />
+      <BuildList token={token} refreshKey={refreshKey} onSelect={setSelectedId} />
+      <StatusLookup token={token} selectedId={selectedId} />
     </main>
   );
 }
