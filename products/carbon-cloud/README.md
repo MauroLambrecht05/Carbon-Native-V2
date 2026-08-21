@@ -83,6 +83,24 @@ build. The resulting `.deb` was inspected directly (`dpkg-deb -c`/`-I`): a
 real 6.4MB package containing a real 24MB compiled `carbon-mini` binary at
 `/usr/lib/carbon/my-app` with correct control metadata.
 
+**The full loop has now been run for real, end to end**, not staged in
+pieces: `docker compose down -v` to a genuinely clean state, `docker
+compose up`, sign up for a real org, mint a real worker token, queue a real
+build against a real git repo — and watch a real worker claim it, `git
+clone`+`git checkout` for real, `cargo build --release` for real, package a
+real `.deb`, and upload it. That last step failed the first time through
+with `NoSuchBucket`: nothing in this stack ever created the MinIO bucket
+(`Bun.S3Client` only does object operations, not bucket management). Fixed
+with a `minio-init` compose service (the standard `mc`-based provisioning
+pattern). Fixing that surfaced a second real gap one layer down: the
+bucket MinIO created was private, so the artifact's public URL — the same
+kind of URL the dashboard links to and an update client's `manifest_url`
+would point at — 403'd on a plain unauthenticated `curl`. Fixed with `mc
+anonymous set download`. Re-ran the entire loop from another clean
+`docker compose down -v` with zero manual steps: build succeeded, artifact
+uploaded, downloaded over plain HTTP, sha256 matched the build record
+exactly.
+
 Real: the build queue (Postgres, `FOR UPDATE SKIP LOCKED` claims), all three
 workers' packaging code (`dpkg-deb`/`appimagetool`/`makensis`/`wix`/`appdmg`,
 Authenticode on Windows, codesign+notarization on macOS, upload to
