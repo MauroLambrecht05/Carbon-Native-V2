@@ -486,6 +486,7 @@ pub fn write_snapshot(path: &std::path::Path) -> Result<usize, String> {
 
 /// Result of a successful restore: the runtime + context pointers, ready to be
 /// re-wired (host-import registration, `JS_UpdateStackTop`).
+#[cfg(windows)]
 pub struct Restored {
     pub rt: *mut c_void,
     pub ctx: *mut c_void,

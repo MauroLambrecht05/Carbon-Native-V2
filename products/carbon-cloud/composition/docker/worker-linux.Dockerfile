@@ -27,6 +27,16 @@
 # than strictly needed but is the standard Tauri-class Linux prerequisite
 # for exactly this dependency shape, and this repo's os/ adapters are
 # Tauri-inspired in the same way.
+#
+# libdbus-1-dev: notify-rust's "dbus" feature (solutions/infrastructure/os/
+# Cargo.toml — switched from "zbus" after a real version-drift build break)
+# links against libdbus-1 at build time.
+#
+# libx11-xcb-dev: softbuffer's "x11" feature (products/carbon/Cargo.toml —
+# enabled after "default-features = false" with nothing re-added left its
+# dispatch macro with zero backends and 25 compile errors) pulls in
+# tiny-xlib, whose build.rs pkg-config-checks for x11-xcb specifically —
+# libxrandr-dev/libxi-dev above don't provide that .pc file.
 
 FROM debian:bookworm-slim
 
@@ -47,7 +57,8 @@ ENV RUSTUP_HOME=/usr/local/rustup \
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl unzip git dpkg-dev build-essential \
         libxkbcommon-dev libwayland-dev libxrandr-dev libxi-dev \
-        libgl1-mesa-dev libasound2-dev pkg-config libgtk-3-dev \
+        libgl1-mesa-dev libasound2-dev pkg-config libgtk-3-dev libdbus-1-dev \
+        libx11-xcb-dev \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL https://sh.rustup.rs | sh -s -- \

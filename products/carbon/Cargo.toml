@@ -123,7 +123,19 @@ resvg = { version = "0.45", default-features = false, optional = true }
 usvg = { version = "0.45", default-features = false, optional = true }
 fontdue = { version = "0.9", default-features = false, features = ["std"], optional = true }
 taffy = { version = "0.7", default-features = false, features = ["std", "flexbox", "grid", "taffy_tree"], optional = true }
-softbuffer = { version = "0.4", default-features = false, optional = true }
+# default-features = false with no features re-added left softbuffer's
+# make_dispatch! macro with zero platform backends compiled in — every
+# variant of its internal dispatch enums is `#[cfg]`-gated behind "x11"/
+# "wayland"/"kms", so with none enabled the enums have no variants at all.
+# That's not a normal empty-match: rustc can't even see the type parameters
+# `D`/`W` as used (E0392) and treats every match on the dispatch enum as
+# non-exhaustive against a type it can't prove is uninhabited (E0004),
+# which cascades into inference failures wherever Surface/Buffer methods
+# are called (E0282/E0283) — found building this crate for real against a
+# real app. x11 + wayland covers both real Linux display servers; kms
+# (DRM, no display server) and the *-dlopen runtime-loading variants
+# aren't needed here.
+softbuffer = { version = "0.4", default-features = false, features = ["x11", "wayland"], optional = true }
 # Phase 3 — Rust-native three.js math classes (Vector3, Matrix4, Quaternion,
 # Box3, Frustum, Color). The bundle opts in via `globalThis.__cm_register_math()`
 # so UI-only apps that never construct a Vector3 don't pay the prototype-
