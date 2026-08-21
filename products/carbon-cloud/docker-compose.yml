@@ -42,6 +42,34 @@ services:
       timeout: 5s
       retries: 10
 
+  # Nothing else creates the bucket — MinIO starts with none, and
+  # Bun.S3Client only does object operations (write/read/list/delete), no
+  # bucket management. Without this, every upload fails for real with
+  # "NoSuchBucket" (found running a real build through a real worker end to
+  # end: dpkg-deb succeeded, the S3 upload was the first thing to fail).
+  # `mc` is the standard way to provision a MinIO bucket in compose; it exits
+  # once its commands succeed, so `service_completed_successfully` is the
+  # right depends_on condition rather than a long-running service.
+  #
+  # `mc anonymous set download`: MinIO buckets are private by default, but
+  # S3ArtifactStore.publicUrl() builds a plain unauthenticated URL for
+  # OBJECT_STORE_PUBLIC_BASE_URL — that's what the dashboard links to and
+  # what an update client's manifest_url points artifacts at. Without this,
+  # every upload "succeeds" but the resulting URL 403s (found the same way
+  # as the bucket-missing bug: tried to actually download what got
+  # uploaded, over plain curl, no credentials — the way a real client would).
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${OBJECT_STORE_ACCESS_KEY_ID:-carbon_cloud} ${OBJECT_STORE_SECRET_ACCESS_KEY:-carbon_cloud_dev_secret} &&
+      mc mb --ignore-existing local/carbon-cloud &&
+      mc anonymous set download local/carbon-cloud
+      "
+
   control-plane:
     build:
       context: ../..
@@ -51,6 +79,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     environment:
       DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-carbon_cloud_dev}@postgres:5432/carbon_cloud
       PORT: "8080"
@@ -67,7 +97,10 @@ services:
       context: ../..
       dockerfile: products/carbon-cloud/composition/docker/worker-linux.Dockerfile
     depends_on:
-      - control-plane
+      control-plane:
+        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
     environment:
       CONTROL_PLANE_URL: http://control-plane:8080
       WORKER_API_TOKEN: ${WORKER_API_TOKEN:-dev-token}
