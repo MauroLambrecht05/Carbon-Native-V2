@@ -59,9 +59,29 @@ at all, `PostgresBuildRepository.save()` double-JSON-encoded `targets`/
 `artifacts` (Bun.SQL already encodes a bound value for a `::jsonb` cast —
 pre-`JSON.stringify`ing it was the bug), and the target-platform filter in
 `claimNext` needed `sql.array(x, "text")` specifically, not a `::text[]`
-cast on plain interpolation. The Linux worker image was also built for real
-(a wrong `appimagetool` release tag, fixed) but a build has not yet been run
-through it end to end — that's the next real-infrastructure test worth doing.
+cast on plain interpolation.
+
+**The Linux worker's compile step was proven for real too**, not just
+built: `cargo build --release` for `carbon-mini` was run inside the worker
+image against a real app (`labs/examples/my-app`), all the way through to
+`packageTarget()` producing a real `.deb`. Getting there surfaced four more
+real bugs, none of them found by review or unit tests: `softbuffer` and
+`notify-rust` both had `default-features = false` in `products/carbon/
+Cargo.toml`/`solutions/infrastructure/os/Cargo.toml` with no platform
+backend re-added, so a full build hit 25 compile errors in softbuffer's
+dispatch macro (empty enum — no `x11`/`wayland` variant compiled in) and a
+zbus 5.13.2 vs. notify-rust 4.17.0 version-incompatibility break; the fix
+was `features = ["x11", "wayland"]` on softbuffer and switching notify-rust
+from its `zbus` backend to `dbus` (older, no equivalent break). Enabling
+`x11` then needed `libx11-xcb-dev` on the image (the existing
+`libxrandr-dev`/`libxi-dev` don't provide `x11-xcb.pc`), and `dbus` needed
+`libdbus-1-dev`. Separately — a real bug independent of any dependency
+version — `solutions/capabilities/snapshot/lib.rs`'s Windows-only
+`Restored` struct was missing its `#[cfg(windows)]` gate, colliding with
+the `#[cfg(not(windows))]` stub of the same name on every non-Windows
+build. The resulting `.deb` was inspected directly (`dpkg-deb -c`/`-I`): a
+real 6.4MB package containing a real 24MB compiled `carbon-mini` binary at
+`/usr/lib/carbon/my-app` with correct control metadata.
 
 Real: the build queue (Postgres, `FOR UPDATE SKIP LOCKED` claims), all three
 workers' packaging code (`dpkg-deb`/`appimagetool`/`makensis`/`wix`/`appdmg`,
