@@ -123,8 +123,21 @@ its full status, and looking a build up by id directly — a token typed in
 lives in the browser's localStorage for the tab's session; there's no
 cookie session yet. `carbon cloud list` is the CLI equivalent.
 
-Not yet: a proper `.app` bundle for macOS (`dmg`'s builder packages the raw
-runtime binary today — see the KNOWN GAP note in
-`packaging/infrastructure/builders/dmg.ts`) and a real `PaymentProvider`
-implementation (Stripe/Paddle) to replace `FakePaymentProvider` — needs a
-real (even test-mode) API key this environment doesn't have.
+`dmg`'s builder now assembles a real `.app` bundle
+(`Contents/{MacOS,Resources}` + a generated `Info.plist`) around the binary
+before packaging it, rather than putting the loose binary straight in the
+dmg — verified as far as this sandbox can: unit-tested tree/plist contents,
+but `appdmg` itself is a macOS-only tool (shells out to `hdiutil`), so
+nothing here has run the actual dmg build or launched the resulting `.app`
+on real macOS.
+
+Not yet: a real `PaymentProvider` implementation (Stripe/Paddle) to replace
+`FakePaymentProvider` — and this needs more than an adapter. The current
+`PaymentProvider.chargeForPlan(orgId, plan)` port has no payment-method
+parameter at all; real card collection is PCI-restricted to client-side
+tokenization (Stripe Elements or a hosted Checkout page), which doesn't
+exist in the dashboard yet. Building a "real" adapter against today's port
+would produce something that looks wired up but can't actually charge
+anything — worse than the current honest fake. Needs a product decision on
+the checkout flow plus a real (even test-mode) API key this environment
+doesn't have.
