@@ -84,7 +84,7 @@ export class PostgresBuildRepository implements BuildRepository {
     return rows[0] ? toBuild(rows[0]) : null;
   }
 
-  async claimNext(platform: TargetPlatform, workerId: string): Promise<Build | null> {
+  async claimNext(platform: TargetPlatform, workerId: string, orgId: string): Promise<Build | null> {
     // Precomputed here, not in SQL: the target -> platform mapping is a TS
     // contract (solutions/contracts/distribution), not something the
     // database should know how to reproduce.
@@ -101,7 +101,7 @@ export class PostgresBuildRepository implements BuildRepository {
       SET status = 'claimed', worker_id = ${workerId}, updated_at = now()
       WHERE id = (
         SELECT id FROM builds
-        WHERE status = 'queued' AND targets ?| ${this.sql.array(platformTargets, "text")}
+        WHERE status = 'queued' AND org_id = ${orgId} AND targets ?| ${this.sql.array(platformTargets, "text")}
         ORDER BY created_at ASC
         FOR UPDATE SKIP LOCKED
         LIMIT 1

@@ -19,9 +19,10 @@ export class InMemoryBuildRepository implements BuildRepository {
     return this.rows.get(id) ?? null;
   }
 
-  async claimNext(platform: TargetPlatform, workerId: string): Promise<Build | null> {
+  async claimNext(platform: TargetPlatform, workerId: string, orgId: string): Promise<Build | null> {
     const queued = [...this.rows.values()]
       .filter((b) => b.status === "queued")
+      .filter((b) => b.toProps().orgId === orgId)
       .filter((b) => b.toProps().targets.some((t) => installerTarget(t)?.platform === platform))
       .sort((a, b) => a.toProps().createdAt.getTime() - b.toProps().createdAt.getTime());
 

@@ -13,8 +13,15 @@ import type { TargetPlatform } from "@carbon/contracts/distribution";
 export interface BuildRepository {
   save(build: Build): Promise<void>;
   findById(id: string): Promise<Build | null>;
-  /** Atomically claims the oldest queued build whose targets need `platform`. */
-  claimNext(platform: TargetPlatform, workerId: string): Promise<Build | null>;
+  /**
+   * Atomically claims the oldest queued build whose targets need `platform`,
+   * scoped to `orgId` — the org that issued the claiming worker's token.
+   * Without this, any worker token can see and claim any org's queue, which
+   * is a compromised-token blast-radius problem for real multi-tenancy
+   * (the plan's stated destination) even though it's a no-op restriction
+   * for a self-hosted single-org deployment.
+   */
+  claimNext(platform: TargetPlatform, workerId: string, orgId: string): Promise<Build | null>;
   /** Most recent first. */
   listByOrg(orgId: string, limit: number): Promise<Build[]>;
 }

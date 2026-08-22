@@ -33,7 +33,7 @@ describe("the lifecycle", () => {
     });
     expect(build.status).toBe("queued");
 
-    const claimed = await h.claim.execute({ platform: "linux", workerId: "worker-1" });
+    const claimed = await h.claim.execute({ platform: "linux", workerId: "worker-1", orgId: "org_1" });
     expect(claimed?.id).toBe(build.id);
     expect(claimed?.status).toBe("claimed");
 
@@ -55,7 +55,7 @@ describe("the lifecycle", () => {
     const build = await h.create.execute({
       orgId: "org_1", repoUrl: "https://example.com/demo.git", commitSha: "abc", targets: ["deb"],
     });
-    await h.claim.execute({ platform: "linux", workerId: "w1" });
+    await h.claim.execute({ platform: "linux", workerId: "w1", orgId: "org_1" });
     await h.complete.execute({ buildId: build.id, outcome: "failed", error: "clone failed" });
     const failed = await h.get.execute(build.id);
     expect(failed.status).toBe("failed");
@@ -72,20 +72,27 @@ describe("claiming", () => {
     await new Promise((r) => setTimeout(r, 2));
     await h.create.execute({ orgId: "o", repoUrl: "r", commitSha: "2", targets: ["deb"] });
 
-    const claimed = await h.claim.execute({ platform: "linux", workerId: "w1" });
+    const claimed = await h.claim.execute({ platform: "linux", workerId: "w1", orgId: "o" });
     expect(claimed?.id).toBe(first.id);
   });
 
   test("a build queued for a Windows target is invisible to a Linux worker", async () => {
     const h = harness();
     await h.create.execute({ orgId: "o", repoUrl: "r", commitSha: "1", targets: ["nsis"] });
-    const claimed = await h.claim.execute({ platform: "linux", workerId: "w1" });
+    const claimed = await h.claim.execute({ platform: "linux", workerId: "w1", orgId: "o" });
     expect(claimed).toBeNull();
   });
 
   test("nothing queued means null, not an error", async () => {
     const h = harness();
-    expect(await h.claim.execute({ platform: "linux", workerId: "w1" })).toBeNull();
+    expect(await h.claim.execute({ platform: "linux", workerId: "w1", orgId: "o" })).toBeNull();
+  });
+
+  test("a worker token cannot claim another org's queued build", async () => {
+    const h = harness();
+    await h.create.execute({ orgId: "org-a", repoUrl: "r", commitSha: "1", targets: ["deb"] });
+    const claimed = await h.claim.execute({ platform: "linux", workerId: "w1", orgId: "org-b" });
+    expect(claimed).toBeNull();
   });
 });
 
@@ -112,7 +119,7 @@ describe("refusals", () => {
     const build = await h.create.execute({
       orgId: "o", repoUrl: "r", commitSha: "1", targets: ["deb"],
     });
-    await h.claim.execute({ platform: "linux", workerId: "w1" });
+    await h.claim.execute({ platform: "linux", workerId: "w1", orgId: "o" });
     await h.complete.execute({ buildId: build.id, outcome: "running" });
     await h.complete.execute({ buildId: build.id, outcome: "succeeded", artifacts: [] });
     await expect(

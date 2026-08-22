@@ -59,7 +59,19 @@ async function harness() {
   const authed = withToken(apiToken);
   const asWorker = withToken(workerToken);
 
-  return { server, base, orgId, apiToken, workerToken, authed, asWorker, billing };
+  return {
+    server,
+    base,
+    orgId,
+    apiToken,
+    workerToken,
+    authed,
+    asWorker,
+    billing,
+    createOrganization,
+    issueWorkerToken,
+    withToken,
+  };
 }
 
 describe("POST /v1/orgs", () => {
@@ -263,6 +275,25 @@ describe("the claim -> complete loop", () => {
   test("an empty claim response is 204, not an empty 200", async () => {
     const { server, asWorker } = await harness();
     const res = await asWorker("/v1/builds/claim", {
+      method: "POST",
+      body: JSON.stringify({ platform: "linux", workerId: "w1" }),
+    });
+    expect(res.status).toBe(204);
+    server.stop(true);
+  });
+
+  test("a worker token cannot claim another org's queued build", async () => {
+    const { server, authed, createOrganization, issueWorkerToken, withToken } = await harness();
+    await authed("/v1/builds", {
+      method: "POST",
+      body: JSON.stringify({ repoUrl: "r", commitSha: "c", targets: ["appimage"] }),
+    });
+
+    const other = await createOrganization.execute("Other Org");
+    const { workerToken: otherWorkerToken } = await issueWorkerToken.execute(other.orgId);
+    const asOtherWorker = withToken(otherWorkerToken);
+
+    const res = await asOtherWorker("/v1/builds/claim", {
       method: "POST",
       body: JSON.stringify({ platform: "linux", workerId: "w1" }),
     });

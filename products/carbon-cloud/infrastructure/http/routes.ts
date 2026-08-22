@@ -55,13 +55,12 @@ function errorResponse(error: unknown): Response {
  * single token type could both queue work as an org AND pull any org's
  * queued work off the shared queue. Now claim/complete require a "worker"
  * token and create/usage require an "org" token — see ApiToken.ts's
- * TokenScope. What this still does NOT do is scope a worker's claim to
- * builds from the SAME org that issued its token — any worker token can
- * claim any org's queued work, which is correct for a worker fleet (shared
- * infrastructure) but means a compromised worker token from one org can
- * read what other orgs are building. Fine for a single self-hosted
- * deployment where you run every worker yourself; a real gap for multiple
- * mutually-untrusting tenants sharing one control plane.
+ * TokenScope. `/v1/builds/claim`'s handler also threads `verified.orgId`
+ * into ClaimNextBuildUseCase, so a worker token can only ever claim the
+ * queue of the org that minted it — a self-hosted single-org deployment
+ * sees no difference (it only ever had one org's builds to claim), but a
+ * compromised worker token can no longer read what a different org is
+ * building.
  */
 async function authenticate(
   req: Request,
@@ -205,7 +204,7 @@ export function buildRoutes(deps: RouteDeps) {
         if (verified instanceof Response) return verified;
         try {
           const body = (await req.json()) as { platform: TargetPlatform; workerId: string };
-          const build = await deps.claimNext.execute(body);
+          const build = await deps.claimNext.execute({ ...body, orgId: verified.orgId });
           return build ? json(build.toProps()) : json(null, 204);
         } catch (error) {
           return errorResponse(error);
