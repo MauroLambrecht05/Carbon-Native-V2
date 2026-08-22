@@ -21,6 +21,11 @@ import {
   CheckUsageLimitUseCase,
   PostgresBillingRepository,
   RecordBuildUsageUseCase,
+  StartPlanUpgradeUseCase,
+  ConfirmPlanUpgradeUseCase,
+  FakeCheckoutSessionProvider,
+  StripeCheckoutProvider,
+  type CheckoutSessionProvider,
 } from "@carbon/billing";
 import { migrate, openDatabase } from "../infrastructure/persistence/Database.ts";
 import { buildRoutes } from "../infrastructure/http/routes.ts";
@@ -35,6 +40,17 @@ export interface CarbonCloudConfig {
     readonly bucket: string;
     readonly publicBaseUrl: string;
   };
+  /**
+   * Undefined unless STRIPE_SECRET_KEY is set — startServer falls back to
+   * FakeCheckoutSessionProvider (no real charge, no webhook verification
+   * possible) the same way RealLocalPipeline treats signingKey/macos as
+   * optional. STRIPE_PRICE_ID_PRO etc. name one env var per paid PlanId.
+   */
+  readonly stripe?: {
+    readonly secretKey: string;
+    readonly webhookSecret: string;
+    readonly priceIds: Partial<Record<import("@carbon/billing").PlanId, string>>;
+  };
 }
 
 export function configFromEnv(env: NodeJS.ProcessEnv = process.env): CarbonCloudConfig {
@@ -43,6 +59,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): CarbonCloud
     if (!value) throw new Error(`missing required env var ${name}`);
     return value;
   };
+  const stripeSecretKey = env.STRIPE_SECRET_KEY;
   return {
     databaseUrl: required("DATABASE_URL"),
     port: Number(env.PORT ?? 8080),
@@ -53,6 +70,13 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): CarbonCloud
       bucket: required("OBJECT_STORE_BUCKET"),
       publicBaseUrl: required("OBJECT_STORE_PUBLIC_BASE_URL"),
     },
+    stripe: stripeSecretKey
+      ? {
+          secretKey: stripeSecretKey,
+          webhookSecret: required("STRIPE_WEBHOOK_SECRET"),
+          priceIds: { pro: env.STRIPE_PRICE_ID_PRO },
+        }
+      : undefined,
   };
 }
 
@@ -63,6 +87,11 @@ export async function startServer(config: CarbonCloudConfig) {
   const builds = new PostgresBuildRepository(sql);
   const identity = new PostgresIdentityRepository(sql);
   const billing = new PostgresBillingRepository(sql);
+
+  const checkoutProvider: CheckoutSessionProvider = config.stripe
+    ? new StripeCheckoutProvider({ secretKey: config.stripe.secretKey, priceIds: config.stripe.priceIds })
+    : new FakeCheckoutSessionProvider();
+
   const routes = buildRoutes({
     createBuild: new CreateBuildUseCase(builds),
     getBuild: new GetBuildUseCase(builds),
@@ -74,6 +103,9 @@ export async function startServer(config: CarbonCloudConfig) {
     verifyToken: new VerifyTokenUseCase(identity),
     checkUsageLimit: new CheckUsageLimitUseCase(billing, billing),
     recordBuildUsage: new RecordBuildUsageUseCase(billing),
+    startPlanUpgrade: new StartPlanUpgradeUseCase(checkoutProvider),
+    confirmPlanUpgrade: new ConfirmPlanUpgradeUseCase(billing),
+    stripeWebhookSecret: config.stripe?.webhookSecret,
   });
 
   return Bun.serve({

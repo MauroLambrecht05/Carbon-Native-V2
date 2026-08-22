@@ -83,10 +83,31 @@ function SignupForm({ onSignedUp }: { onSignedUp: (token: string) => void }) {
 function UsagePanel({ token }: { token: string }) {
   const [usage, setUsage] = useState<UsageStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [upgrading, setUpgrading] = useState(false);
 
   useEffect(() => {
     apiFetch<UsageStatus>("/v1/usage", token).then(setUsage).catch((err) => setError(String(err)));
   }, [token]);
+
+  // Redirects the whole tab to Stripe's hosted Checkout page (or, if no
+  // real Stripe account is configured, FakeCheckoutSessionProvider's fake
+  // URL back to this same page) — never collects a card number here.
+  // The plan itself only changes once Stripe's webhook confirms payment,
+  // not on this redirect returning; see ConfirmPlanUpgradeUseCase's note.
+  async function onUpgrade() {
+    setUpgrading(true);
+    setError(null);
+    try {
+      const session = await apiFetch<{ url: string }>("/v1/billing/checkout", token, {
+        method: "POST",
+        body: JSON.stringify({ plan: "pro" }),
+      });
+      window.location.href = session.url;
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : String(err));
+      setUpgrading(false);
+    }
+  }
 
   if (error) return <p style={{ color: "#b3261e" }}>{error}</p>;
   if (!usage) return <p>loading usage…</p>;
@@ -95,6 +116,14 @@ function UsagePanel({ token }: { token: string }) {
     <p>
       {usage.usedMinutes.toFixed(1)} / {usage.includedMinutes} build-minutes used this period
       {!usage.withinLimit && <strong style={{ color: "#b3261e" }}> — over limit, new builds will be refused (402)</strong>}
+      {usage.includedMinutes < 6000 && (
+        <>
+          {" — "}
+          <button type="button" onClick={onUpgrade} disabled={upgrading}>
+            {upgrading ? "..." : "Upgrade to Pro"}
+          </button>
+        </>
+      )}
     </p>
   );
 }
@@ -256,12 +285,22 @@ export function App() {
     );
   }
 
+  // Where /?checkout=success|cancel lands back after a Checkout redirect —
+  // informational only. The plan itself changed (or didn't) from Stripe's
+  // webhook independently of this redirect landing at all; usage below
+  // reflects the real state once a refresh picks it up.
+  const checkoutResult = new URLSearchParams(window.location.search).get("checkout");
+
   return (
     <main style={{ font: "14px/1.5 -apple-system, system-ui, sans-serif", maxWidth: "40rem", margin: "3rem auto", padding: "0 1rem" }}>
       <h1>Carbon Cloud</h1>
       <p>
         <button onClick={() => setToken(null)}>Log out</button>
       </p>
+      {checkoutResult === "success" && (
+        <p style={{ color: "#16794e" }}>Checkout complete — the plan updates once payment is confirmed.</p>
+      )}
+      {checkoutResult === "cancel" && <p>Checkout cancelled — no charge made.</p>}
       <UsagePanel token={token} />
       <DeployForm token={token} onQueued={() => setRefreshKey((k) => k + 1)} />
       <BuildList token={token} refreshKey={refreshKey} onSelect={setSelectedId} />

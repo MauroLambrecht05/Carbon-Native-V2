@@ -21,7 +21,14 @@ import {
   type VerifiedToken,
   type TokenScope,
 } from "@carbon/identity";
-import type { CheckUsageLimitUseCase, RecordBuildUsageUseCase } from "@carbon/billing";
+import {
+  type CheckUsageLimitUseCase,
+  type RecordBuildUsageUseCase,
+  type StartPlanUpgradeUseCase,
+  type ConfirmPlanUpgradeUseCase,
+  type PlanId,
+  verifyStripeWebhookSignature,
+} from "@carbon/billing";
 
 export interface RouteDeps {
   readonly createBuild: CreateBuildUseCase;
@@ -34,6 +41,15 @@ export interface RouteDeps {
   readonly verifyToken: VerifyTokenUseCase;
   readonly checkUsageLimit: CheckUsageLimitUseCase;
   readonly recordBuildUsage: RecordBuildUsageUseCase;
+  readonly startPlanUpgrade: StartPlanUpgradeUseCase;
+  readonly confirmPlanUpgrade: ConfirmPlanUpgradeUseCase;
+  /**
+   * Undefined when running against FakeCheckoutSessionProvider (no real
+   * Stripe account configured) — the webhook route 501s rather than
+   * accepting unverifiable requests, since there's no secret to check a
+   * signature against.
+   */
+  readonly stripeWebhookSecret?: string;
 }
 
 function json(body: unknown, status = 200): Response {
@@ -241,6 +257,60 @@ export function buildRoutes(deps: RouteDeps) {
         } catch (error) {
           return errorResponse(error);
         }
+      },
+    },
+
+    "/v1/billing/checkout": {
+      POST: async (req: Bun.BunRequest) => {
+        const verified = await authenticate(req, deps.verifyToken, ["org"]);
+        if (verified instanceof Response) return verified;
+        try {
+          const body = (await req.json()) as { plan: PlanId };
+          // Same-origin redirect targets: the dashboard IS what's serving
+          // this request, at "/" — no separate PUBLIC_URL to configure.
+          const origin = new URL(req.url).origin;
+          const session = await deps.startPlanUpgrade.execute(
+            verified.orgId,
+            body.plan,
+            `${origin}/?checkout=success`,
+            `${origin}/?checkout=cancel`,
+          );
+          return json(session);
+        } catch (error) {
+          return errorResponse(error);
+        }
+      },
+    },
+
+    // Stripe calls this directly — no bearer token, `Stripe-Signature`
+    // instead. Reads the raw body text (not req.json()) because the
+    // signature is computed over the exact bytes Stripe sent; re-serializing
+    // a parsed-then-JSON.stringify'd copy would not reproduce them
+    // byte-for-byte and every signature check would fail.
+    "/v1/billing/webhook": {
+      POST: async (req: Bun.BunRequest) => {
+        if (!deps.stripeWebhookSecret) {
+          return json({ error: "no Stripe webhook secret configured" }, 501);
+        }
+        const rawBody = await req.text();
+        const signature = req.headers.get("stripe-signature");
+        if (!verifyStripeWebhookSignature(rawBody, signature, deps.stripeWebhookSecret)) {
+          return json({ error: "invalid signature" }, 400);
+        }
+
+        const event = JSON.parse(rawBody) as {
+          type: string;
+          data: { object: { metadata?: { orgId?: string; plan?: string } } };
+        };
+        if (event.type === "checkout.session.completed") {
+          const { orgId, plan } = event.data.object.metadata ?? {};
+          // Absent/malformed metadata on our own session is a config bug,
+          // not a payment to silently drop — but there's nothing sane to
+          // retry into, so this still 200s (Stripe retries a non-2xx
+          // response, and retrying resolves nothing here).
+          if (orgId && plan) await deps.confirmPlanUpgrade.execute(orgId, plan as PlanId);
+        }
+        return json({ received: true });
       },
     },
   };

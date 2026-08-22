@@ -5,6 +5,7 @@
 // of which needs a database to prove.
 
 import { describe, expect, test } from "bun:test";
+import { createHmac } from "node:crypto";
 import {
   ClaimNextBuildUseCase,
   CompleteBuildUseCase,
@@ -24,6 +25,9 @@ import {
   CheckUsageLimitUseCase,
   InMemoryBillingRepository,
   RecordBuildUsageUseCase,
+  StartPlanUpgradeUseCase,
+  ConfirmPlanUpgradeUseCase,
+  FakeCheckoutSessionProvider,
   UsageRecord,
 } from "@carbon/billing";
 import { buildRoutes } from "../infrastructure/http/routes.ts";
@@ -45,6 +49,9 @@ async function harness() {
     verifyToken: new VerifyTokenUseCase(identity),
     checkUsageLimit: new CheckUsageLimitUseCase(billing, billing),
     recordBuildUsage: new RecordBuildUsageUseCase(billing),
+    startPlanUpgrade: new StartPlanUpgradeUseCase(new FakeCheckoutSessionProvider()),
+    confirmPlanUpgrade: new ConfirmPlanUpgradeUseCase(billing),
+    stripeWebhookSecret: "whsec_test_secret",
   });
   const server = Bun.serve({ port: 0, routes, fetch: () => new Response("not found", { status: 404 }) });
   const base = `http://localhost:${server.port}`;
@@ -356,6 +363,81 @@ describe("usage limits", () => {
       body: JSON.stringify({ repoUrl: "r", commitSha: "c", targets: ["deb"] }),
     });
     expect(res.status).toBe(402);
+    server.stop(true);
+  });
+});
+
+describe("POST /v1/billing/checkout", () => {
+  test("an org token gets a checkout session url, and the plan hasn't changed yet", async () => {
+    const { server, authed } = await harness();
+    const res = await authed("/v1/billing/checkout", {
+      method: "POST",
+      body: JSON.stringify({ plan: "pro" }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { url: string };
+    expect(body.url).toContain("checkout=success");
+
+    const usage = (await (await authed("/v1/usage")).json()) as { includedMinutes: number };
+    expect(usage.includedMinutes).toBe(60); // still free — no webhook confirmation happened
+    server.stop(true);
+  });
+
+  test("a worker token cannot start a checkout session", async () => {
+    const { server, asWorker } = await harness();
+    const res = await asWorker("/v1/billing/checkout", {
+      method: "POST",
+      body: JSON.stringify({ plan: "pro" }),
+    });
+    expect(res.status).toBe(403);
+    server.stop(true);
+  });
+});
+
+describe("POST /v1/billing/webhook", () => {
+  const secret = "whsec_test_secret";
+
+  function sign(payload: string): string {
+    const t = Math.floor(Date.now() / 1000);
+    const hmac = createHmac("sha256", secret).update(`${t}.${payload}`).digest("hex");
+    return `t=${t},v1=${hmac}`;
+  }
+
+  test("a validly signed checkout.session.completed confirms the plan upgrade", async () => {
+    const { server, base, authed, orgId } = await harness();
+    const payload = JSON.stringify({
+      type: "checkout.session.completed",
+      data: { object: { metadata: { orgId, plan: "pro" } } },
+    });
+
+    const res = await fetch(`${base}/v1/billing/webhook`, {
+      method: "POST",
+      headers: { "stripe-signature": sign(payload) },
+      body: payload,
+    });
+    expect(res.status).toBe(200);
+
+    const usage = (await (await authed("/v1/usage")).json()) as { includedMinutes: number };
+    expect(usage.includedMinutes).toBe(6000);
+    server.stop(true);
+  });
+
+  test("an invalid signature is refused, and the plan does not change", async () => {
+    const { server, base, authed, orgId } = await harness();
+    const payload = JSON.stringify({
+      type: "checkout.session.completed",
+      data: { object: { metadata: { orgId, plan: "pro" } } },
+    });
+
+    const res = await fetch(`${base}/v1/billing/webhook`, {
+      method: "POST",
+      headers: { "stripe-signature": "t=123,v1=not_a_real_signature" },
+      body: payload,
+    });
+    expect(res.status).toBe(400);
+
+    const usage = (await (await authed("/v1/usage")).json()) as { includedMinutes: number };
+    expect(usage.includedMinutes).toBe(60);
     server.stop(true);
   });
 });
