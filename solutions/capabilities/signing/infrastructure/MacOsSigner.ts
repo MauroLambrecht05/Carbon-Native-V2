@@ -1,8 +1,12 @@
 // macOS code signing + notarization — the two-step Gatekeeper needs before
-// a downloaded binary runs without a warning. Single-executable scope only
-// (see the KNOWN GAP in packaging's dmg.ts builder: nothing produces a
-// proper .app bundle yet, so there's no bundle-signing dance to mirror from
-// sign-macos.sh here, just its "signing a single executable" branch).
+// a downloaded binary runs without a warning. Single-executable scope only:
+// packaging's dmg.ts builder now assembles a real .app bundle, but this
+// signs the loose binary before that happens (see RealLocalPipeline.ts's
+// packageTarget for why that ordering is still correct), mirroring
+// sign-macos.sh's "signing a single executable" branch rather than its
+// bundle-signing one. A second codesign pass over the assembled .app as a
+// whole — the way a real release pipeline seals Info.plist/Resources into
+// the signature too — isn't done here yet.
 //
 // notarytool's `--wait` blocks until Apple's done, rather than this
 // replicating sign-macos.sh + notarize-poll.sh's separate submit/poll

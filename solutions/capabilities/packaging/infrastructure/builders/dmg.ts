@@ -2,18 +2,22 @@
 //
 // generateDMG() already returns the exact JSON `appdmg` (the npm CLI tool)
 // takes as a spec file — title/icon/background/window/contents — unlike
-// deb/appimage's ad-hoc envelopes. So, like nsis/wix, the missing piece was
+// deb/appimage's ad-hoc envelopes. So, like nsis/wix, one missing piece was
 // only writing it to disk and invoking the tool, not materializing a tree.
 //
-// KNOWN GAP: `appPath` (what generateDMG's `contents` entry points at) is
-// the raw runtime binary today, not a proper .app bundle — no bundling step
-// exists yet to wrap carbon-mini/carbon-blitz the way macOS expects a
-// double-clickable app to look. The dmg builds; what's inside it isn't a
-// real macOS app yet.
+// The other missing piece — what used to be this file's KNOWN GAP note —
+// was that `appPath` (what generateDMG's `contents` entry points at) was
+// the raw runtime binary, not a proper `.app` bundle: macOS won't treat a
+// bare Mach-O executable as a double-clickable app, LaunchServices needs
+// the `Contents/{MacOS,Resources}` + `Info.plist` shape to know what it's
+// looking at. That's what buildAppBundle assembles below, the same way
+// deb.ts materializes a `pkgroot` tree before invoking dpkg-deb.
 
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { CarbonConfig } from "@carbon/contracts/app";
 import type { ProcessRunner } from "@carbon/process";
-import { generateDMG } from "../generators/dmg.ts";
+import { generateDMG, generateInfoPlist } from "../generators/dmg.ts";
 import type { PackageWriter } from "../../application/ports/PackageWriter.ts";
 
 export interface BuildResult {
@@ -26,6 +30,36 @@ export class DmgBuildError extends Error {
   }
 }
 
+/**
+ * Assembles `{dir}/{AppName}.app` around the compiled binary and returns
+ * its path. Mirrors deb.ts's pkgroot pattern: write the plist, copy the
+ * binary in under the app's own name (not the build artifact's original
+ * name — `carbon-mini` becomes `Contents/MacOS/<app.name>`, matching
+ * CFBundleExecutable and how deb.ts renames the same binary for the same
+ * reason), carry the bytecode bundle along if bundling produced one
+ * (nsis.ts does the identical existsSync check for the same file).
+ */
+function buildAppBundle(config: CarbonConfig, binaryPath: string, dir: string, writer: PackageWriter): string {
+  const appName = config.app.display_name || config.app.name;
+  const appBundlePath = `${dir}/${appName}.app`;
+  const contentsDir = `${appBundlePath}/Contents`;
+  const macosDir = `${contentsDir}/MacOS`;
+  const resourcesDir = `${contentsDir}/Resources`;
+
+  writer.createDirectory(macosDir);
+  writer.createDirectory(resourcesDir);
+  writer.writeFile(`${contentsDir}/Info.plist`, generateInfoPlist(config, config.app.name));
+
+  const installedBinary = `${macosDir}/${config.app.name}`;
+  writer.copyFile(binaryPath, installedBinary);
+  writer.makeExecutable(installedBinary);
+
+  const bundlePath = join(dirname(binaryPath), "..", "dist", "bundle.qbc.zst");
+  if (existsSync(bundlePath)) writer.copyFile(bundlePath, `${resourcesDir}/bundle.qbc.zst`);
+
+  return appBundlePath;
+}
+
 export async function buildDmg(
   config: CarbonConfig,
   binaryPath: string,
@@ -33,7 +67,9 @@ export async function buildDmg(
   writer: PackageWriter,
   runner: ProcessRunner,
 ): Promise<BuildResult> {
-  const spec = await generateDMG(config, binaryPath, dir);
+  const appBundlePath = buildAppBundle(config, binaryPath, dir, writer);
+
+  const spec = await generateDMG(config, appBundlePath, dir);
   const specPath = `${dir}/spec.json`;
   writer.writeFile(specPath, spec);
 

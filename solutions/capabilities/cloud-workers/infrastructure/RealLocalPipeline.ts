@@ -57,9 +57,18 @@ export class RealLocalPipeline implements LocalPipeline {
     outDir: string,
   ): Promise<PackagedTarget> {
     // dmg is the odd one out: Gatekeeper checks the signature on the binary
-    // a user actually runs, and appdmg copies binaryPath INTO the dmg at
-    // build time — so this has to sign binaryPath before packaging, not the
-    // .dmg after, the way Authenticode signs the finished nsis/wix output.
+    // a user actually runs, and buildDmg copies binaryPath INTO the .app
+    // bundle (then that into the dmg) at build time — so this has to sign
+    // binaryPath before packaging, not the .dmg after, the way Authenticode
+    // signs the finished nsis/wix output. A plain file copy doesn't disturb
+    // an existing codesign signature (it's embedded in the Mach-O itself),
+    // so signing the loose binary before buildDmg wraps it in
+    // Contents/MacOS/ still produces a validly-signed executable inside the
+    // bundle. What this does NOT do — a further real gap, not yet closed —
+    // is a second codesign pass over the assembled .app as a whole (which
+    // is what actually produces the bundle's CodeResources seal covering
+    // Info.plist/Resources, the way a real macOS release pipeline does);
+    // unverifiable without a Mac to notarize against for real.
     if (target === "dmg" && this.macos) {
       await signAndNotarizeMacOs(binaryPath, this.macos, nodeProcessRunner);
     }

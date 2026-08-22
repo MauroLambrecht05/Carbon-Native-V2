@@ -156,7 +156,7 @@ describe("wix", () => {
 });
 
 describe("dmg", () => {
-  test("writes the appdmg spec and invokes appdmg", async () => {
+  test("assembles a real .app bundle around the binary before writing the appdmg spec", async () => {
     const { useCase: uc, writer, runner } = useCase();
     const result = await uc.execute({
       target: "dmg",
@@ -166,7 +166,26 @@ describe("dmg", () => {
       platform: "darwin",
     });
 
-    expect(writer.files.has("/out/dmg/spec.json")).toBe(true);
+    expect(writer.dirs).toContain("/out/dmg/Demo App.app/Contents/MacOS");
+    expect(writer.dirs).toContain("/out/dmg/Demo App.app/Contents/Resources");
+    expect(writer.copies).toContainEqual([
+      "/build/carbon-mini",
+      "/out/dmg/Demo App.app/Contents/MacOS/demo",
+    ]);
+    expect(writer.executable).toContain("/out/dmg/Demo App.app/Contents/MacOS/demo");
+
+    const plist = writer.files.get("/out/dmg/Demo App.app/Contents/Info.plist");
+    expect(plist).toContain("<key>CFBundleExecutable</key>\n\t<string>demo</string>");
+    expect(plist).toContain("<key>CFBundleIdentifier</key>\n\t<string>com.carbon.demo</string>");
+    expect(plist).toContain("<key>CFBundleVersion</key>\n\t<string>1.2.3</string>");
+
+    // The dmg's spec.json must point at the .app bundle, not the loose
+    // binary — that's the whole point of assembling one first.
+    const spec = JSON.parse(writer.files.get("/out/dmg/spec.json")!) as {
+      contents: Array<{ path: string }>;
+    };
+    expect(spec.contents[0]!.path).toBe("/out/dmg/Demo App.app");
+
     expect(runner.calls[0]!.command).toBe("appdmg");
     expect(runner.calls[0]!.args).toEqual(["/out/dmg/spec.json", "/out/dmg/Demo App-1.2.3.dmg"]);
     expect(result.outputPath).toBe("/out/dmg/Demo App-1.2.3.dmg");
