@@ -29,6 +29,13 @@ specifically — `docker-compose.yml`'s `dev-token` default is a placeholder
 and will get a 401 (then a 403 even with a real org token: claiming needs
 worker scope, not org scope — see "auth" below) until you replace it.
 
+Billing runs against `FakeCheckoutSessionProvider` unless `STRIPE_SECRET_KEY`,
+`STRIPE_WEBHOOK_SECRET`, and `STRIPE_PRICE_ID_PRO` are all set on the
+control plane — with those, `POST /v1/billing/checkout` creates a real
+Stripe Checkout Session and the plan upgrades for real once
+`POST /v1/billing/webhook` (register this URL in the Stripe dashboard)
+receives a signed `checkout.session.completed` event.
+
 ## Trigger a build
 
 ```sh
@@ -131,13 +138,27 @@ but `appdmg` itself is a macOS-only tool (shells out to `hdiutil`), so
 nothing here has run the actual dmg build or launched the resulting `.app`
 on real macOS.
 
-Not yet: a real `PaymentProvider` implementation (Stripe/Paddle) to replace
-`FakePaymentProvider` — and this needs more than an adapter. The current
-`PaymentProvider.chargeForPlan(orgId, plan)` port has no payment-method
-parameter at all; real card collection is PCI-restricted to client-side
-tokenization (Stripe Elements or a hosted Checkout page), which doesn't
-exist in the dashboard yet. Building a "real" adapter against today's port
-would produce something that looks wired up but can't actually charge
-anything — worse than the current honest fake. Needs a product decision on
-the checkout flow plus a real (even test-mode) API key this environment
-doesn't have.
+**Billing is a real Stripe Checkout integration**, not `FakePaymentProvider`
+anymore. The old `PaymentProvider.chargeForPlan(orgId, plan)` port assumed
+a synchronous backend charge, which was never going to fit any real
+processor (PCI-restricted card collection needs client-side tokenization).
+Replaced with the shape Checkout actually has — `StartPlanUpgradeUseCase`
+creates a Stripe-hosted Checkout Session and returns its URL; the plan only
+changes in `ConfirmPlanUpgradeUseCase`, called from the new
+`POST /v1/billing/webhook` route once Stripe's `checkout.session.completed`
+event confirms real payment, never from the browser's redirect back to
+`successUrl` (reachable without having paid). `StripeCheckoutProvider`
+calls Stripe's REST API directly via `fetch` — no SDK dependency — and
+`verifyStripeWebhookSignature` reimplements Stripe's documented HMAC
+signature check by hand (replay-window + constant-time compare); without
+that, anyone who finds the webhook URL could POST themselves a free
+upgrade. `FakeCheckoutSessionProvider` is still the default when
+`STRIPE_SECRET_KEY` isn't set. The dashboard has a real "Upgrade to Pro"
+button. Verified: the full billing/routes test suites, the checkout+webhook
+routes against a real control plane and Postgres, and the whole flow
+clicked through in a real browser — which caught a real bug live,
+`FakeCheckoutSessionProvider` producing a malformed double-`?` URL, since
+fixed. What's *not* verified: actual Stripe API calls — no Stripe account
+or test API key in this environment, so `StripeCheckoutProvider` and the
+signature verifier are real, correct code against Stripe's documented
+contracts, checked as far as a sandbox with no Stripe access can check them.
