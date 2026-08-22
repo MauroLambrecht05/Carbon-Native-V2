@@ -55,6 +55,27 @@
   margin-top: var(--space-8);
 }
 
+.secondaryLinks {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+}
+
+.secondaryLink {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  transition: color 0.15s var(--ease);
+}
+
+.secondaryLink:hover {
+  color: var(--accent);
+}
+
+.linkDivider {
+  color: var(--border-strong);
+}
+
 .stats {
   display: flex;
   align-items: center;

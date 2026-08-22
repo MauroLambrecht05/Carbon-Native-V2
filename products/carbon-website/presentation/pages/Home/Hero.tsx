@@ -1,4 +1,4 @@
-import { Button } from "../../components/Button.tsx";
+import { InstallCommand } from "../../components/InstallCommand.tsx";
 import styles from "./Hero.module.css";
 
 export function Hero() {
@@ -18,12 +18,18 @@ export function Hero() {
           brick your users.
         </p>
         <div className={styles.actions}>
-          <Button href="#quickstart" variant="primary" size="lg">
-            Get started
-          </Button>
-          <Button href="/cloud" variant="secondary" size="lg">
-            Explore Carbon Cloud
-          </Button>
+          <InstallCommand command="carbon create my-app" />
+        </div>
+        <div className={styles.secondaryLinks}>
+          <a href="#quickstart" className={styles.secondaryLink}>
+            See the full quick start &rarr;
+          </a>
+          <span className={styles.linkDivider} aria-hidden="true">
+            &middot;
+          </span>
+          <a href="/cloud" className={styles.secondaryLink}>
+            Explore Carbon Cloud &rarr;
+          </a>
         </div>
         <div className={styles.stats}>
           <div className={styles.stat}>
