@@ -1,0 +1,68 @@
+# @carbon/math — three.js's math API, in Rust, exposed to QuickJS.
+#
+# Capability: vector and matrix math fast enough to run a scene graph under an
+# interpreter. Under QuickJS a JS Vector3.add is ~20x slower than on V8 (no JIT,
+# every property access through a hash table); doing it in Rust collapses each
+# operation into one FFI call.
+#
+# A leaf: it depends on rquickjs and glam, and on nothing else in this
+# workspace. That is why it migrated first — it proves the Cargo-under-Bazel
+# setup on real code, with real tests, without dragging the runtime along.
+
+[package]
+# carbon-kind = "library"
+name = "carbon-fast-math"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+description = "Rust-native QuickJS classes mirroring three.js's math API (Vector3, Matrix4, Quaternion, Box3, Frustum, Color). Drop-in replacement that runs ~10-50x faster than three.js's JS implementations under QuickJS."
+# The workspace manifest lives in .tools/orchestration/bazel/cargo, beside the
+# Bazel rules that drive it. Cargo only walks UP from a crate, so it would
+# never find it — the link has to be explicit.
+workspace = "../../../../.tools/orchestration/bazel/cargo"
+
+[lib]
+name = "carbon_fast_math"
+# Not src/lib.rs: this tree puts folders at the root of a solution rather than
+# hiding them under src/, so the crate root sits beside domain/.
+path = "lib.rs"
+
+# The phase-3 benchmark driver: runs our Rust-backed classes and a JS
+# implementation mirroring three.js's source in the SAME rquickjs context, so
+# the only variable is the implementation behind an identical JS surface.
+#
+# Declared explicitly rather than auto-discovered. Cargo only auto-discovers
+# binaries in `src/bin/`, and this crate has no `src/` — the same flattening
+# that moves the crate root to `lib.rs` means every target needs a path.
+#
+# `tools/` rather than `bin/`: it is a development instrument, not something the
+# crate ships. .tools/automation/benchmarks/phases/bench-phase3.ps1 drives it.
+[[bin]]
+name = "bench_runner"
+path = "tools/bench_runner.rs"
+
+# Clippy runs with -D warnings; the shared allow-list lives in the workspace
+# root so one rationale covers every crate. See //.tools/orchestration/bazel/cargo/Cargo.toml.
+[lints]
+workspace = true
+
+[dependencies]
+# rquickjs with the class macro feature so we can derive #[class]/#[methods].
+# `classes` is required to use the Class type at all; `macro` brings in the
+# proc-macros that emit the JsClass impls. `loader` is deliberately absent —
+# the host runtime owns its own module loader.
+rquickjs = { version = "0.9", default-features = false, features = ["classes", "macro"] }
+
+# glam — SIMD-aware math. Vec3 is a thin wrapper around [f32; 3] that lights up
+# SSE2 on x86_64 by default; Mat4 is a column-major 4x4 of f32.
+#
+# IMPORTANT: this uses Vec3, not Vec3A. Vec3A is 16-byte aligned [f32; 4], which
+# is faster in isolation and the WRONG shape here — three.js stores three
+# contiguous f32s per vector, and matching that layout is what lets one of our
+# Vector3s be passed into `mesh.position.copy(v)` with no copy.
+glam = { version = "0.30", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+# The tests spin up a real rquickjs context and run JS that exercises every
+# method, so they need the loader the library itself does without.
+rquickjs = { version = "0.9", features = ["classes", "macro", "loader"] }

@@ -4,8 +4,8 @@ What a release announces to an installed app: version, channel, rollout
 percentage, keyring and per-platform artifacts.
 
 **Agreement** `types/UpdateManifest.ts`
-**Honoured by** `capabilities/signing` (writes and signs it) and
-`capabilities/updating` (fetches and verifies it)
+**Honoured by** `capabilities/distribution/signing` (writes and signs it) and
+`capabilities/distribution/updating` (fetches and verifies it)
 
 This subject exists because those two capabilities had the same struct
 duplicated, each with its own copy — exactly the drift a contract prevents.

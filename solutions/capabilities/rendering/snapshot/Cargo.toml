@@ -1,0 +1,46 @@
+# @carbon/snapshot — QuickJS heap snapshot and restore.
+#
+# Capability: skipping the cold-start cost of building the JS heap, by dumping
+# the whole VM state to disk once and mapping it back on later launches.
+#
+# ── ON THE FLAT LAYOUT ──────────────────────────────────────────────────────
+# No domain/ or infrastructure/ here, for a reason specific to this crate: it is
+# ALL infrastructure. There is no model to separate out. The crate is a custom
+# QuickJS allocator that hands memory from one VirtualAlloc'd region at a fixed
+# address, plus the code to copy that region to a file and back — Win32 FFI and
+# pointer arithmetic from top to bottom.
+#
+# Splitting it into domain/ and infrastructure/ would leave domain/ empty and
+# infrastructure/ holding the file that already exists. The directory shape
+# should describe the code, not be imposed on it.
+#
+# It has no tests, which is worth stating plainly: this is the most dangerous
+# code in the tree — it depends on the executable loading at a constant base
+# (see the /DYNAMICBASE:NO note in the runtime's build.rs) and on every heap
+# pointer staying valid across processes. A wrong assumption here is a crash on
+# a user's machine, not a failing build.
+
+[package]
+# carbon-kind = "engine"
+name = "carbon-snapshot"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+description = "Native QuickJS heap snapshot/restore at a fixed memory address (Windows-only; non-Windows builds compile to no-op stubs). Depends only on rquickjs and its own hand-rolled Win32 FFI bindings."
+# The workspace manifest lives in .tools/orchestration/bazel/cargo, beside the
+# Bazel rules that drive it. Cargo only walks UP from a crate, so it would
+# never find it — the link has to be explicit.
+workspace = "../../../../.tools/orchestration/bazel/cargo"
+
+[lib]
+name = "carbon_snapshot"
+path = "lib.rs"
+
+# Clippy runs with -D warnings; the shared allow-list lives in the workspace
+# root so one rationale covers every crate. See //.tools/orchestration/bazel/cargo/Cargo.toml.
+[lints]
+workspace = true
+
+[dependencies]
+rquickjs = { version = "0.9", default-features = false, features = ["loader", "classes", "macro"] }
+lz4_flex = { version = "0.11", default-features = false, features = ["safe-decode", "safe-encode", "std"] }

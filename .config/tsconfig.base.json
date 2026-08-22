@@ -75,35 +75,35 @@
       "@carbon/babel/css": [
         "../solutions/integrations/transpiler/babel/infrastructure/css.ts"
       ],
-      "@carbon/extension-points": [
-        "../solutions/capabilities/extension-points/index.ts"
+      "@carbon/registry": [
+        "../solutions/capabilities/plugin/registry/index.ts"
       ],
       "@carbon/contracts/plugin/extension-points": [
         "../solutions/contracts/plugin/types/ExtensionPoints.ts"
       ],
       "@carbon/bundling": [
-        "../solutions/capabilities/bundling/index.ts"
+        "../solutions/capabilities/tooling/bundling/index.ts"
       ],
       "@carbon/bundling/bundler": [
-        "../solutions/capabilities/bundling/infrastructure/BunBundler.ts"
+        "../solutions/capabilities/tooling/bundling/infrastructure/BunBundler.ts"
       ],
       "@carbon/billing": [
-        "../solutions/capabilities/billing/index.ts"
+        "../solutions/capabilities/cloud/billing/index.ts"
       ],
       "@carbon/bundling/cache": [
-        "../solutions/capabilities/bundling/infrastructure/BuildCache.ts"
+        "../solutions/capabilities/tooling/bundling/infrastructure/BuildCache.ts"
       ],
       "@carbon/cli": [
         "../solutions/interface/cli/index.ts"
       ],
-      "@carbon/cloud-orchestration": [
-        "../solutions/capabilities/cloud-orchestration/index.ts"
+      "@carbon/orchestration": [
+        "../solutions/capabilities/cloud/orchestration/index.ts"
       ],
-      "@carbon/cloud-workers": [
-        "../solutions/capabilities/cloud-workers/index.ts"
+      "@carbon/worker": [
+        "../solutions/capabilities/cloud/worker/index.ts"
       ],
       "@carbon/identity": [
-        "../solutions/capabilities/identity/index.ts"
+        "../solutions/capabilities/cloud/identity/index.ts"
       ],
       "@carbon/contracts/app": [
         "../solutions/contracts/app/types/CarbonManifest.ts"
@@ -133,25 +133,25 @@
         "../solutions/infrastructure/logging/index.ts"
       ],
       "@carbon/packaging": [
-        "../solutions/capabilities/packaging/index.ts"
+        "../solutions/capabilities/distribution/packaging/index.ts"
       ],
-      "@carbon/plugins": [
-        "../solutions/capabilities/plugins/index.ts"
+      "@carbon/lifecycle": [
+        "../solutions/capabilities/plugin/lifecycle/index.ts"
       ],
       "@carbon/process": [
         "../solutions/infrastructure/process/index.ts"
       ],
       "@carbon/publishing": [
-        "../solutions/capabilities/publishing/index.ts"
+        "../solutions/capabilities/distribution/publishing/index.ts"
       ],
       "@carbon/scaffolding": [
-        "../solutions/capabilities/scaffolding/index.ts"
+        "../solutions/capabilities/tooling/scaffolding/index.ts"
       ],
       "@carbon/signing": [
-        "../solutions/capabilities/signing/index.ts"
+        "../solutions/capabilities/distribution/signing/index.ts"
       ],
       "@carbon/updating": [
-        "../solutions/capabilities/updating/index.ts"
+        "../solutions/capabilities/distribution/updating/index.ts"
       ],
       "@carbon/vite/assets": [
         "../solutions/integrations/bundler/vite/infrastructure/plugins/assets"

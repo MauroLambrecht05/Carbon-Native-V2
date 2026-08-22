@@ -9,7 +9,7 @@ import { log, c } from "@carbon/logging";
 import { isBackend, VALID_BACKENDS } from "@carbon/contracts/app/backend";
 import { start } from "@carbon/process";
 import { buildProject, ensureNodeModules, ensureRuntime } from "@carbon/bundling";
-import { NoHostAppError, pluginUseCases } from "@carbon/plugins";
+import { NoHostAppError, pluginUseCases } from "@carbon/lifecycle";
 import { PRODUCTS_DIR } from "@carbon/workspace";
 
 interface Args {

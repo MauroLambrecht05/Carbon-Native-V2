@@ -1,0 +1,91 @@
+# @carbon/imaging — decoding images and handing pixels to the runtime.
+#
+# Capability: a path or a byte string becomes RGBA the paint backend and the GPU
+# canvas can use, with a cache in front so the same image is decoded once.
+#
+#   domain/          the RGBA cache and its eviction policy
+#   application/     the load use case, including the capability check
+#   infrastructure/  decoder (over the `image` crate), js_class (over QuickJS)
+#
+# The split follows what would be replaced together: swap the decoding library
+# and only infrastructure/decoder.rs changes; swap the JS engine and only
+# infrastructure/js_class.rs does. domain/cache.rs survives both.
+
+[package]
+# carbon-kind = "engine"
+name = "carbon-image"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+description = "Native image loader for carbon-mini. Decodes PNG/JPEG/GIF/BMP/ICO/TIFF/WebP/AVIF via the `image` crate, exposes a CarbonImage class to QuickJS, and provides a path/bytes-keyed RGBA cache the host can hand to the GPU canvas as texture data."
+# The workspace manifest lives in .tools/orchestration/bazel/cargo, beside the
+# Bazel rules that drive it. Cargo only walks UP from a crate, so it would
+# never find it — the link has to be explicit.
+workspace = "../../../../.tools/orchestration/bazel/cargo"
+
+[lib]
+name = "carbon_image"
+path = "lib.rs"
+
+# Regenerates the PNG/JPEG fixtures in test-fixtures/. Not part of the library,
+# and not run by the tests — those build their fixtures in memory. It exists so
+# the checked-in binary fixtures can be reproduced rather than trusted.
+#
+#   bazel run //solutions/capabilities/imaging:gen_fixtures
+[[bin]]
+name = "gen_fixtures"
+path = "tools/gen_fixtures.rs"
+
+# Clippy runs with -D warnings; the shared allow-list lives in the workspace
+# root so one rationale covers every crate. See //.tools/orchestration/bazel/cargo/Cargo.toml.
+[lints]
+workspace = true
+
+[dependencies]
+# rquickjs — same shape carbon-fast-math uses. `classes` enables Class<T>;
+# `macro` brings in the proc-macros. JsClass is hand-rolled in js_class.rs
+# because width/height/format need read-only accessor properties.
+rquickjs = { version = "0.9", default-features = false, features = ["classes", "macro"] }
+
+# `image` — the heart of this crate. Defaults are disabled and formats opted
+# into one at a time, because enabling everything lands at ~3 MB of object code
+# and the runtime's whole premise is a small binary.
+#
+# Default here is PNG + JPEG: ~95% of real-world image traffic, ~700 KB, no
+# system DLL dependencies. Everything else is a feature flag below, and those
+# flags propagate up through the runtime's Cargo.toml so the app author picks.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+
+anyhow = { workspace = true }
+
+[features]
+# Default: PNG + JPEG only. Smallest binary, covers the common case.
+default = []
+
+# GIF — animation frames are flattened to the first frame. +~150 KB.
+gif = ["image/gif"]
+
+# WebP, lossy and lossless. +~200 KB. The `image` crate uses pure-Rust
+# `image-webp`, so there is no system libwebp dependency and Windows works out
+# of the box.
+webp = ["image/webp"]
+
+# AVIF. Off by default and worth understanding before enabling: the pure-Rust
+# decoder adds ~500 KB by itself and ~2 MB with its transitive dependencies.
+avif = ["image/avif"]
+
+# The remaining trivial formats, individually so they can be picked apart.
+# +~80 KB combined.
+bmp = ["image/bmp"]
+ico = ["image/ico"]
+tiff = ["image/tiff"]
+
+# Everything this crate supports. ~3 MB delta — measure before shipping it.
+all-formats = ["gif", "webp", "avif", "bmp", "ico", "tiff"]
+
+[dev-dependencies]
+# The tests spin up a real rquickjs context, the same way the math tests do.
+rquickjs = { version = "0.9", features = ["classes", "macro", "loader"] }
+# The fixtures are encoded in memory by the `image` crate's own encoders, so a
+# round trip can be checked without trusting a binary file in git.
+image = { version = "0.25", features = ["png", "jpeg"] }

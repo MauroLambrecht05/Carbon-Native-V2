@@ -1,0 +1,13 @@
+{
+  "name": "@carbon/lifecycle",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Authoring, building and installing native carbon plugins.",
+  "type": "module",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "carbon": {
+    "kind": "service"
+  }
+}

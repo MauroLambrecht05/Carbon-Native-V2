@@ -14,7 +14,7 @@ import {
   RunNextJobUseCase,
   S3ArtifactUploader,
   type SigningKey,
-} from "@carbon/cloud-workers";
+} from "@carbon/worker";
 
 export function requireEnv(name: string): string {
   const value = process.env[name];

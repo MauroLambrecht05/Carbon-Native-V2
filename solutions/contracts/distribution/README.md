@@ -4,7 +4,7 @@ Which installer formats exist, what each is called, and where each can be
 built.
 
 **Agreement** `types/InstallerTarget.ts`
-**Honoured by** `capabilities/packaging` (one generator per target) and
+**Honoured by** `capabilities/distribution/packaging` (one generator per target) and
 `products/carbon-cli` (validates `--target`, expands `--target all`, and
 renders its help from the registry)
 

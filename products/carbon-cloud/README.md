@@ -83,7 +83,7 @@ from its `zbus` backend to `dbus` (older, no equivalent break). Enabling
 `x11` then needed `libx11-xcb-dev` on the image (the existing
 `libxrandr-dev`/`libxi-dev` don't provide `x11-xcb.pc`), and `dbus` needed
 `libdbus-1-dev`. Separately — a real bug independent of any dependency
-version — `solutions/capabilities/snapshot/lib.rs`'s Windows-only
+version — `solutions/capabilities/rendering/snapshot/lib.rs`'s Windows-only
 `Restored` struct was missing its `#[cfg(windows)]` gate, colliding with
 the `#[cfg(not(windows))]` stub of the same name on every non-Windows
 build. The resulting `.deb` was inspected directly (`dpkg-deb -c`/`-I`): a

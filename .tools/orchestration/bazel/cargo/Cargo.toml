@@ -40,18 +40,18 @@ members = [
   # Populated per migration phase. See products/carbon/MIGRATION.md.
   #
   # Phase 2 — leaf capabilities (no runtime dependency, own tests):
-  "../../../../solutions/capabilities/math",
-  "../../../../solutions/capabilities/updating/rust",
-  "../../../../solutions/capabilities/publishing/rust",
-  "../../../../solutions/capabilities/text",
-  "../../../../solutions/capabilities/snapshot",
-  "../../../../solutions/capabilities/imaging",
-  "../../../../solutions/capabilities/audio",
+  "../../../../solutions/capabilities/rendering/math",
+  "../../../../solutions/capabilities/distribution/updating/rust",
+  "../../../../solutions/capabilities/distribution/publishing/rust",
+  "../../../../solutions/capabilities/rendering/text",
+  "../../../../solutions/capabilities/rendering/snapshot",
+  "../../../../solutions/capabilities/rendering/imaging",
+  "../../../../solutions/capabilities/rendering/audio",
   #
   # Phase 3 — engines:
-  "../../../../solutions/capabilities/layout",
-  "../../../../solutions/capabilities/painting",
-  "../../../../solutions/capabilities/gpu-canvas",
+  "../../../../solutions/capabilities/rendering/layout",
+  "../../../../solutions/capabilities/rendering/painting",
+  "../../../../solutions/capabilities/rendering/gpu",
   #
   # Phase 4 — host and platform:
   "../../../../solutions/contracts/runtime/rust",

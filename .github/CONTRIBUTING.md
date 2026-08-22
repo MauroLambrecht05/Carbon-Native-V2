@@ -76,7 +76,7 @@ Individually, for a faster loop:
 
 `carbon-gpu-canvas` is tagged `manual` and excluded from `//...`: its wgpu stack
 needs rustc 1.88, above the pinned 1.86. Run it deliberately with
-`RUSTUP_TOOLCHAIN=1.88 bazel test //solutions/capabilities/gpu-canvas:all`.
+`RUSTUP_TOOLCHAIN=1.88 bazel test //solutions/capabilities/rendering/gpu:all`.
 
 ## The rules CI enforces
 
@@ -103,10 +103,10 @@ does not cover:
 3. **No committed binaries.** Build them in CI. There is no exception. The one
    that existed — `.tools/vendor/`, holding a checksummed `bsdiff.exe` and
    `zig-zstd.exe` — is gone: both are now `carbon-delta`, built from
-   `solutions/capabilities/publishing/rust`, which also made `carbon publish`
+   `solutions/capabilities/distribution/publishing/rust`, which also made `carbon publish`
    work off Windows for the first time.
 4. **Embedded fonts carry their licenses.** Everything in
-   `solutions/capabilities/text/assets/` is compiled into every shipped binary,
+   `solutions/capabilities/rendering/text/assets/` is compiled into every shipped binary,
    so shipping it without the license text is a redistribution problem.
 
 ## The boundary that has no compiler
@@ -147,7 +147,7 @@ no per-binary dependency scoping — see that file's header), an entry in
 declaration to `interface/stdlib/api/` — all in the same change, or the boundary
 check fails.
 
-**A native plugin.** Start from `solutions/capabilities/plugin-sdk/`.
+**A native plugin.** Start from `solutions/capabilities/plugin/sdk/`.
 `labs/clipboard-plugin/` is the reference implementation of the C ABI.
 
 **A benchmark.** Extend
@@ -163,7 +163,7 @@ backward compatibility with v1. Each session writes a **new** dated folder under
 - Use `@carbon/testing` for temp directories, project fixtures and CLI
   invocation rather than hand-rolling them.
 - `bazel test //...` runs both. `bun test <filter>` runs one TypeScript suite;
-  `bazel test //solutions/capabilities/math:math_test` runs one Rust crate's.
+  `bazel test //solutions/capabilities/rendering/math:math_test` runs one Rust crate's.
 
 A test that is `#[ignore]`d or skipped must say why in the annotation itself.
 

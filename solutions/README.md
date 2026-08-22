@@ -19,15 +19,42 @@ solutions/
 │   ├── distribution/    which installer formats exist, and where each builds
 │   └── toolchain/       the versions this workspace is built against
 │
-├── capabilities/    what carbon can do — one folder per capability
-│   ├── signing/         proving an artifact came from us
-│   ├── updating/        keeping an install current without bricking it
-│   ├── scaffolding/     a name and a preset into a working project
-│   ├── plugins/         authoring, building and installing native plugins
-│   ├── extension-points/ the plugin registry, and its C/Rust/TS renderings
-│   ├── bundling/        source into a runnable bundle
-│   ├── packaging/       an artifact into an OS installer
-│   └── publishing/      announcing a release and shipping its artifacts
+├── capabilities/    what carbon can do — grouped by domain, one folder per
+│   │                capability inside its category. 21 capabilities outgrew a
+│   │                flat list; category is a browsing aid, not the `kind`
+│   │                system below — see "Capabilities are grouped twice".
+│   │                Every category and every capability is one word, no
+│   │                exceptions — including math, which has no capability
+│   │                of its own to sit beside otherwise (see below) but does
+│   │                not get to sit ungrouped at capabilities/ root either.
+│   ├── cloud/            Carbon Cloud's own domain — accounts, billing, the
+│   │   ├── billing/          build queue, the worker side of it
+│   │   ├── orchestration/
+│   │   ├── worker/
+│   │   └── identity/
+│   ├── distribution/     getting a built app to a user, signed and current
+│   │   ├── packaging/        an artifact into an OS installer
+│   │   ├── publishing/       announcing a release and shipping its artifacts
+│   │   ├── signing/          proving an artifact came from us
+│   │   └── updating/         keeping an install current without bricking it
+│   ├── plugin/            authoring, building and loading native plugins
+│   │   ├── registry/         the plugin registry, and its C/Rust/TS renderings
+│   │   ├── lifecycle/        authoring, building and installing native plugins
+│   │   └── sdk/               the Zig SDK's implementation
+│   ├── rendering/         the runtime's own paint/layout/media stack
+│   │   ├── audio/ · gpu/ · imaging/ · layout/ · painting/ · text/
+│   │   ├── math/              pure vector/matrix computation — a library
+│   │   │                      (see "kinds" below), filed here because this
+│   │   │                      is where its only real consumer lives, not
+│   │   │                      because it shares a dependency with its
+│   │   │                      neighbors — see "Capabilities are grouped
+│   │   │                      twice" for the previous, now-overridden,
+│   │   │                      reasoning against exactly this
+│   │   └── snapshot/         heap snapshot/restore (FFI, not rendering per
+│   │                         se, but consumed by nothing else — see below)
+│   └── tooling/           turning source into something runnable
+│       ├── bundling/         source into a runnable bundle
+│       └── scaffolding/      a name and a preset into a working project
 │
 ├── infrastructure/  vendor-neutral technical services — ports/ + adapters/
 │   ├── logging/         the Logger port, and a console adapter
@@ -78,9 +105,9 @@ The middle rows mostly describe what already happens.
 ## Two languages, one tree
 
 `solutions/` holds Rust and TypeScript side by side, and the tier a thing
-belongs to does not depend on its language. `capabilities/audio` is Rust,
-`capabilities/signing` is TypeScript, and both are capabilities for the same
-reason: they are what carbon does.
+belongs to does not depend on its language. `capabilities/rendering/audio` is
+Rust, `capabilities/distribution/signing` is TypeScript, and both are
+capabilities for the same reason: they are what carbon does.
 
 Rust crates are built through `//.tools/orchestration/bazel/cargo`, TypeScript
 through `//.tools/orchestration/bazel/bun`. Neither tier knows.
@@ -119,6 +146,38 @@ three were right — their model is a *contract*, shared with whoever else
 speaks it. The second required engines to have no `application/`; `imaging`
 failed that, and was also right — a runtime engine can still have one genuine
 use case. Directory presence was never the invariant.
+
+## Capabilities are grouped twice, on two different axes
+
+`kind` (above) and the `cloud/`/`distribution/`/`plugin/`/`rendering/`/
+`tooling/` category each capability now sits under (see the tree at the
+top) answer different questions, and neither replaces the other:
+
+- **`kind`** is about **dependency rules** — service, engine or library
+  decides what a capability is allowed to import, and is declared as
+  metadata (`carbon.kind`) precisely so it stays orthogonal to where a file
+  happens to live. "The rules are about dependencies, not directories" above
+  is still true.
+- **category** is about **what the capability is FOR**, purely for a human
+  finding it — `cloud/` is Carbon Cloud's own domain regardless of whether
+  `billing` (service) or a hypothetical engine in that space would sit
+  beside it. It exists because 21 capabilities in one flat list had stopped
+  being browsable, not because domain and kind turned out to correlate.
+
+They mostly don't correlate: `rendering/` holds six engines, one FFI
+capability (`snapshot`), and one library (`math`) together because they're
+all part of the runtime's paint path, not because kind grouped them there.
+`math` is the one deliberate exception to "category means the dependency
+graph agrees": it isn't consumed by any other capability at all, only
+directly by `products/carbon`'s `mini` feature, so filing it under
+`rendering/` next to the engines that happen to share its math primitives
+asserts a relationship that doesn't actually exist in the dependency
+graph. It sits there anyway, because the alternative — a single capability
+sitting alone at `capabilities/` root, in no category at all — was judged
+worse: one inconsistent placement is a smaller cost than a rule
+("category, then capability, always") with an exception baked into the
+tree itself. Read `math`'s presence under `rendering/` as "no better home
+exists", not "this is where it dependency-wise belongs".
 
 ## The service shape
 
@@ -266,9 +325,9 @@ Worth reading as one path, because no single directory holds it:
 | Tier | Holds |
 |---|---|
 | `contracts/plugin/` | `registry/extension-points.zig` — **the source of truth**, plus the C, Rust and TS renderings generated from it |
-| `capabilities/extension-points/` | parsing that Zig, and rendering the three |
-| `capabilities/plugin-sdk/` | the Zig SDK's implementation — the surface is `products/carbon-ext` |
-| `capabilities/plugins/` | scaffold, build, check, install, preflight |
+| `capabilities/plugin/registry/` | parsing that Zig, and rendering the three |
+| `capabilities/plugin/sdk/` | the Zig SDK's implementation — the surface is `products/carbon-ext` |
+| `capabilities/plugin/lifecycle/` | scaffold, build, check, install, preflight |
 | `infrastructure/plugin-host/` | the loader: dlopen, bind by symbol, enforce capabilities, dispatch |
 | `products/carbon-ext` | the SDK itself: the C ABI header, the templates, the package definition |
 | `products/carbon-cli` | every command: `carbon plugin *`, `carbon ext *`, and the preflight `carbon run` calls |
@@ -351,7 +410,7 @@ These are half-steps, marked so they are not mistaken for finished work:
   *are* now injected.
 - **`usecases/` in `bundling/` export functions, not classes.** They hold one
   use case each, but the bodies are the ported V1 functions. Newer capabilities
-  (`scaffolding`, `plugins`, `publishing`) use classes with `execute()`.
+  (`scaffolding`, `lifecycle`, `publishing`) use classes with `execute()`.
 
 ## Cold start
 

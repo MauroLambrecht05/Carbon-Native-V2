@@ -10,7 +10,7 @@ import {
   GetBuildUseCase,
   ListOrgBuildsUseCase,
   PostgresBuildRepository,
-} from "@carbon/cloud-orchestration";
+} from "@carbon/orchestration";
 import {
   CreateOrganizationUseCase,
   IssueWorkerTokenUseCase,

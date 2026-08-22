@@ -13,6 +13,12 @@
 // are blind to the gap.
 
 use super::*;
+// gpu/executor/material/geometry/uniforms extracted to carbon-gpu-canvas —
+// aliased so every existing `gpu::X` call site below is unchanged. Only
+// `gpu` is referenced outside that crate; executor/material/geometry/
+// uniforms were always internal to how gpu.rs implements the canvas.
+#[cfg(feature = "gpu")]
+use carbon_gpu_canvas::gpu;
 
 pub(crate) fn register_host_imports(
     js_ctx: &JsContext,

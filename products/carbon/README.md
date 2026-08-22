@@ -70,7 +70,7 @@ presents; the logic it composes lives in `solutions/`. That rule is enforced by
 |---|---|
 | `contracts/runtime` | `UserEvent` and `WindowOp`, shared with the host layer |
 | `contracts/app` | the carbon.toml schema, read at startup |
-| `capabilities/*` (engines) | layout, painting, text, gpu-canvas, imaging, audio, snapshot, math |
+| `capabilities/rendering/*` (engines) | layout, painting, text, gpu, imaging, audio, snapshot, math |
 | `infrastructure/os` | the 19 native host modules |
 | `infrastructure/plugin-host` | loading native plugins |
 | `infrastructure/platform` | per-OS shims |

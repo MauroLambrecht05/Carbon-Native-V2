@@ -100,13 +100,6 @@ pub(crate) fn js_string_literal(s: &str) -> String {
     out
 }
 
-// gpu/executor/material/geometry/uniforms extracted to carbon-gpu-canvas —
-// aliased so every existing `gpu::X` call site is unchanged. Only `gpu` is
-// referenced outside that crate; executor/material/geometry/uniforms were
-// always internal to how gpu.rs implements the canvas.
-#[cfg(feature = "gpu")]
-use carbon_gpu_canvas::gpu;
-
 // Native QuickJS heap snapshot/restore (fixed-address arena). Gated behind the
 // `snapshot` cargo feature; the module itself always compiles (Windows-only
 // internals) but is only wired into startup + the spike under the feature.

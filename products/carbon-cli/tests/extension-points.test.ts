@@ -9,7 +9,7 @@
 // belongs to — `carbon ext check`.
 
 import { describe, expect, test } from "bun:test";
-import { extensionPointUseCases } from "@carbon/extension-points";
+import { extensionPointUseCases } from "@carbon/registry";
 import { CARBON_ROOT } from "@carbon/workspace";
 
 describe("the checked-in artifacts", () => {

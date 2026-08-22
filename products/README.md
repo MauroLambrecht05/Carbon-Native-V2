@@ -69,7 +69,7 @@ but a library, so it has no `main.ts` and no commands.
 
 It still has the two slots that matter. `presentation/` is what an author
 touches, and `composition/` is `build.zig`, which names every module and joins
-the surface to the implementation in `solutions/capabilities/plugin-sdk` and
+the surface to the implementation in `solutions/capabilities/plugin/sdk` and
 the registry in `solutions/contracts/plugin`. That is a composition root in the
 same sense `main.ts` is.
 

@@ -48,5 +48,5 @@ plugin would fill them in.
 ## Why it is a Zig plugin now
 
 Carbon plugins are Zig — see
-[`solutions/capabilities/plugin-sdk/README.md`](../../solutions/capabilities/plugin-sdk/README.md).
+[`solutions/capabilities/plugin/sdk/README.md`](../../solutions/capabilities/plugin/sdk/README.md).
 This was the last Rust one, and porting it was part of that change.

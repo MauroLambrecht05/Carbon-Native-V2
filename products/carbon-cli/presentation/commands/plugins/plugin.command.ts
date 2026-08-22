@@ -5,7 +5,7 @@
 // meant `carbon help plugin` could not see the subcommands and none of them
 // declared their flags.
 //
-// All the work is @carbon/plugins. What is left here is argv in, output out.
+// All the work is @carbon/plugin. What is left here is argv in, output out.
 
 import {
   Command,
@@ -17,7 +17,7 @@ import {
   type CommandMeta,
   type ExitCode,
 } from "@carbon/cli";
-import { forwardSlashes, PluginError, pluginUseCases } from "@carbon/plugins";
+import { forwardSlashes, PluginError, pluginUseCases } from "@carbon/lifecycle";
 import { PRODUCTS_DIR } from "@carbon/workspace";
 import { join, resolve } from "node:path";
 
@@ -26,7 +26,7 @@ import { join, resolve } from "node:path";
  *
  * carbon-ext IS the SDK — the C ABI header an author includes, the templates
  * `plugin new` scaffolds from, and the build.zig that wires them to the
- * implementation in solutions. @carbon/plugins cannot work this out for
+ * implementation in solutions. @carbon/plugin cannot work this out for
  * itself: it is a solution, and a solution may not name a path inside a
  * product. So this product, which knows where its siblings are, hands it over.
  */

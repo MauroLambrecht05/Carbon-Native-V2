@@ -15,8 +15,8 @@
 package(default_visibility = ["//visibility:public"])
 
 # The surface an author compiles against and scaffolds from. Depended on by
-# //solutions/capabilities/plugins, which reads the templates, and by any
-# plugin build.
+# //solutions/capabilities/plugin/lifecycle, which reads the templates,
+# and by any plugin build.
 filegroup(
     name = "surface",
     srcs = glob([
@@ -26,7 +26,7 @@ filegroup(
 )
 
 # The package definition that joins the surface to the implementation in
-# solutions/capabilities/plugin-sdk and the registry in
+# solutions/capabilities/plugin/sdk and the registry in
 # solutions/contracts/plugin.
 filegroup(
     name = "package",

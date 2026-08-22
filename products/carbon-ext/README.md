@@ -31,9 +31,9 @@ What it composes, from `solutions/`:
 
 | Piece | Where it lives | Why there |
 |---|---|---|
-| The SDK implementation | `solutions/capabilities/plugin-sdk/zig/src/` | `CarbonApp`, the comptime manifest builder, the extension-point helpers. Detail, not surface. |
+| The SDK implementation | `solutions/capabilities/plugin/sdk/zig/src/` | `CarbonApp`, the comptime manifest builder, the extension-point helpers. Detail, not surface. |
 | The extension-point registry | `solutions/contracts/plugin/registry/` | A **contract**. `products/carbon` needs it too, and a runtime cannot depend on an SDK. |
-| Parsing and rendering that registry | `solutions/capabilities/extension-points/` | Logic, used by `carbon ext generate`. |
+| Parsing and rendering that registry | `solutions/capabilities/plugin/registry/` | Logic, used by `carbon ext generate`. |
 
 `composition/build.zig` is the one file that names all three and joins them.
 That is what a composition root is, and it is why an SDK is shaped like every

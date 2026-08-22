@@ -1,6 +1,6 @@
 // `carbon cloud` — talk to a Carbon Cloud control plane: log in, trigger a
 // build, check its status. The actual build/sign/package logic lives with
-// the worker that claims the job (@carbon/cloud-workers); this command only
+// the worker that claims the job (@carbon/worker); this command only
 // creates the build and reports back what the API says.
 
 import { Command, type CommandMeta, type ExitCode } from "@carbon/cli";

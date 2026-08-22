@@ -15,17 +15,17 @@ Measured, not estimated:
 |---|---:|---|
 | `carbon/runtime/mini.rs` | 4,441 | `products/carbon/` composition + several capabilities |
 | `carbon/runtime/blitz.rs` | 1,344 | `products/carbon/` + `integrations/renderer/blitz` |
-| `carbon/runtime/engine/paint` | 3,915 | `capabilities/painting` |
-| `carbon/runtime/engine/layout` | 3,726 | `capabilities/layout` |
-| `carbon/runtime/engine/gpu-canvas` | 3,406 | `capabilities/gpu-canvas` |
-| `carbon/runtime/features/math` | 3,791 | `capabilities/math` |
-| `carbon/host/audio` | 3,538 | `capabilities/audio` |
+| `carbon/runtime/engine/paint` | 3,915 | `capabilities/rendering/painting` |
+| `carbon/runtime/engine/layout` | 3,726 | `capabilities/rendering/layout` |
+| `carbon/runtime/engine/gpu-canvas` | 3,406 | `capabilities/rendering/gpu` |
+| `carbon/runtime/features/math` | 3,791 | `capabilities/rendering/math` |
+| `carbon/host/audio` | 3,538 | `capabilities/rendering/audio` |
 | `carbon/host/native` (19 modules) | 3,997 | `infrastructure/os/*` |
-| `carbon/runtime/features/image` | 1,603 | `capabilities/imaging` |
-| `ecosystem/users/sdk/rust` + `zig` | 1,157 | `capabilities/plugin-sdk` |
+| `carbon/runtime/features/image` | 1,603 | `capabilities/rendering/imaging` |
+| `ecosystem/users/sdk/rust` + `zig` | 1,157 | `capabilities/plugin/sdk` |
 | `carbon/api` | 950 | `infrastructure/plugin-host` |
-| `carbon/runtime/features/snapshot` | 881 | `capabilities/snapshot` |
-| `carbon/runtime/engine/text-renderer` | 831 | `capabilities/text` |
+| `carbon/runtime/features/snapshot` | 881 | `capabilities/rendering/snapshot` |
+| `carbon/runtime/engine/text-renderer` | 831 | `capabilities/rendering/text` |
 | `shared/logic/core` | 643 | `contracts/app` (Rust side) + `infrastructure/` |
 | `ecosystem/system/clipboard` | 524 | `labs/` or an example plugin |
 | `carbon/platform` | 83 | `infrastructure/platform` |
@@ -97,7 +97,7 @@ Rationale for the placements that are not obvious:
 - **`host/native` is infrastructure, not a capability.** Reading a file is a
   driven adapter. The capability is whatever calls it.
 - **`plugin-sdk` is a capability, not a product.** It is not a binary we ship;
-  it is a library plugin authors depend on. `capabilities/plugins` (already in
+  it is a library plugin authors depend on. `capabilities/plugin/lifecycle` (already in
   V2) points at it, which closes the `packages/carbon-sdk` gap noted there.
 
 ## Phases
@@ -381,7 +381,7 @@ Twenty-six findings, closed here. The ones that were breaking something:
 | `ignore` crate | drifted to 0.4.30, which needs rustc 1.88 | pinned to V1's 0.4.23; `products/carbon` compiles on the declared MSRV again |
 | `carbon-paint` | `#[cfg(feature = "profiling")]` on an undeclared feature | feature declared and forwarded from `products/carbon` — the paint zones were unreachable |
 | notes-app, discord-app | imported `theme.tsx` / `Sidebar.tsx` / `store.ts`, none copied | restored; all four buildable examples import-complete |
-| `publish.ts` delta path | `.tools/vendor/{bsdiff,zig-zstd}.exe` did not exist | replaced by `carbon-delta` in `capabilities/publishing/rust`; the vendored binaries are gone and delta publishing works off Windows |
+| `publish.ts` delta path | `.tools/vendor/{bsdiff,zig-zstd}.exe` did not exist | replaced by `carbon-delta` in `capabilities/distribution/publishing/rust`; the vendored binaries are gone and delta publishing works off Windows |
 | `bun_compile` | documented as excluded from `//...`, but untagged | `tags = ["manual"]`, applied by the macro |
 | `bench-phase3.ps1` | built a `bench_runner` whose source never migrated | source restored as an explicit `[[bin]]`; script's V1 paths fixed |
 

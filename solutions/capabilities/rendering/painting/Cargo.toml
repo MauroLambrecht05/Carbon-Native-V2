@@ -1,0 +1,58 @@
+# @carbon/painting — turning a laid-out scene into pixels.
+#
+# Capability: the scene graph from @carbon/layout becomes a tiny-skia Pixmap.
+#
+#   domain/          blur — a box-blur kernel over a pixel buffer. Imports
+#                    nothing at all: pure arithmetic.
+#   infrastructure/  canvas2d and svg. Both drive tiny-skia, and both would be
+#                    replaced together if the rasterizer changed.
+#
+# The crate root is the paint dispatch: it walks the scene and decides what each
+# node kind draws.
+#
+# ── NO TESTS ────────────────────────────────────────────────────────────────
+# 3,900 lines with no coverage. Unlike layout, this one has an obvious testing
+# strategy that does not need a window: paint into a Pixmap and compare pixels.
+# tiny-skia is deterministic and already a dependency.
+
+[package]
+# carbon-kind = "engine"
+name = "carbon-paint"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+description = "tiny-skia paint dispatch for the carbon runtime: node painting, Canvas2D, SVG rendering and blur, over the carbon-layout scene graph."
+# The workspace manifest lives in .tools/orchestration/bazel/cargo, beside the
+# Bazel rules that drive it. Cargo only walks UP from a crate, so it would
+# never find it — the link has to be explicit.
+workspace = "../../../../.tools/orchestration/bazel/cargo"
+
+[lib]
+name = "carbon_paint"
+path = "lib.rs"
+
+# Clippy runs with -D warnings; the shared allow-list lives in the workspace
+# root so one rationale covers every crate. See //.tools/orchestration/bazel/cargo/Cargo.toml.
+[lints]
+workspace = true
+
+[dependencies]
+carbon-layout = { path = "../layout" }
+carbon-text-renderer = { path = "../text" }
+# Optional so a build without the `gpu` feature never compiles wgpu — see the
+# note in the gpu-canvas manifest about its ~2.5 MB.
+carbon-gpu-canvas = { path = "../gpu", optional = true }
+serde_json = { workspace = true }
+tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd", "png-format"] }
+
+[features]
+gpu = ["dep:carbon-gpu-canvas"]
+
+# Frame zone markers around the paint dispatch, printed when
+# CARBON_MINI_PROFILING is set. lib.rs has always had the `#[cfg(feature =
+# "profiling")]` / `#[cfg(not(...))]` pair for its `prof_zone!` macro, but the
+# feature was never DECLARED here — so the enabled arm was unreachable no matter
+# what the caller asked for, and the paint layer silently emitted no zones even
+# under `--features profiling`. Declaring it makes the existing code reachable;
+# products/carbon forwards its own `profiling` feature into this one.
+profiling = []

@@ -1,5 +1,5 @@
 // The HTTP surface. Thin on purpose: every handler here does request
-// parsing, calls exactly one solutions/capabilities/cloud-orchestration use
+// parsing, calls exactly one solutions/capabilities/cloud/orchestration use
 // case, and maps the result (or the error it threw) to a Response. No
 // business logic lives in this file — that's the rule products/README.md
 // states and this product follows deliberately.
@@ -13,7 +13,7 @@ import {
   type CreateBuildUseCase,
   type GetBuildUseCase,
   type ListOrgBuildsUseCase,
-} from "@carbon/cloud-orchestration";
+} from "@carbon/orchestration";
 import {
   type CreateOrganizationUseCase,
   type IssueWorkerTokenUseCase,

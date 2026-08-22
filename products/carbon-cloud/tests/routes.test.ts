@@ -14,7 +14,7 @@ import {
   ListOrgBuildsUseCase,
   InMemoryBuildRepository,
   type BuildProps,
-} from "@carbon/cloud-orchestration";
+} from "@carbon/orchestration";
 import {
   CreateOrganizationUseCase,
   IssueWorkerTokenUseCase,

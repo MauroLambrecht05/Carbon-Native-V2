@@ -28,12 +28,27 @@ def validate_workspace(root: Path) -> bool:
         "core", "app", "plugin", "host", "security", "versioning", "update",
         "distribution", "toolchain", "runtime",
     ]
+    # capabilities/ has a category layer now: <category>/<capability>, every
+    # category and every capability name a single word — no exceptions, no
+    # ungrouped leftovers at capabilities/ root (math included: it lives
+    # under rendering/, its only real consumer, rather than sitting alone).
+    # Kept current with what's actually on disk below, not hand-maintained
+    # against drift — this list previously named only 13 of the (then-)21
+    # folders and nothing caught it, since it feeds an existence check, not
+    # an exhaustiveness one. See CAPABILITIES_ROOT usage below.
     CAPABILITIES = [
-        # TypeScript
-        "signing", "updating", "bundling", "packaging", "publishing",
-        "scaffolding", "plugins", "extension-points",
-        # Rust, migrated from V1's carbon/ — see products/carbon/MIGRATION.md
-        "math", "text", "snapshot", "imaging", "audio",
+        # cloud/
+        "cloud/billing", "cloud/orchestration", "cloud/worker", "cloud/identity",
+        # distribution/
+        "distribution/packaging", "distribution/publishing",
+        "distribution/signing", "distribution/updating",
+        # rendering/ (Rust, migrated from V1's carbon/ — see products/carbon/MIGRATION.md)
+        "rendering/audio", "rendering/gpu", "rendering/imaging", "rendering/math",
+        "rendering/layout", "rendering/painting", "rendering/snapshot", "rendering/text",
+        # plugin/
+        "plugin/registry", "plugin/lifecycle", "plugin/sdk",
+        # tooling/
+        "tooling/bundling", "tooling/scaffolding",
     ]
     INFRASTRUCTURE = ["logging", "process", "workspace"]
 
@@ -148,7 +163,7 @@ def validate_workspace(root: Path) -> bool:
         # product template below.
         "products/carbon-ext/composition/build.zig",
         "products/carbon-ext/presentation/include/carbon_plugin.h",
-        "solutions/capabilities/extension-points/index.ts",
+        "solutions/capabilities/plugin/registry/index.ts",
         "solutions/README.md",
         "solutions/contracts/defs.bzl",
         "solutions/contracts/BUILD.bazel",
@@ -176,8 +191,8 @@ def validate_workspace(root: Path) -> bool:
         ".tools/environments/docker/Dockerfile",
         ".tools/environments/docker/docker-compose.yml",
         ".tools/environments/devcontainer/devcontainer.json",
-        "solutions/capabilities/signing/index.ts",
-        "solutions/capabilities/updating/index.ts",
+        "solutions/capabilities/distribution/signing/index.ts",
+        "solutions/capabilities/distribution/updating/index.ts",
         "solutions/infrastructure/workspace/index.ts",
         "solutions/interface/cli/index.ts",
         "products/README.md",
@@ -200,7 +215,12 @@ def validate_workspace(root: Path) -> bool:
     # not trip it.
     FORBIDDEN_IN_DOMAIN = ("/application/", "/infrastructure/", "smol-toml")
     domain_violations = 0
-    for domain_dir in root.glob("solutions/capabilities/*/domain"):
+    # capabilities/ has a category layer now — math sits directly under it
+    # (*/domain), everything else one level deeper (*/*/domain).
+    domain_dirs = sorted(root.glob("solutions/capabilities/*/domain")) + sorted(
+        root.glob("solutions/capabilities/*/*/domain")
+    )
+    for domain_dir in domain_dirs:
         for source in sorted(domain_dir.rglob("*.ts")):
             if source.name.endswith(".test.ts"):
                 continue
@@ -232,7 +252,10 @@ def validate_workspace(root: Path) -> bool:
     path_attr = re.compile(r'#\[path\s*=\s*"([^"]+)"\]\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)\s*;')
     use_crate = re.compile(r'^\s*use\s+crate::(\w+)')
 
-    for lib in sorted(root.glob("solutions/capabilities/*/lib.rs")):
+    lib_rs_files = sorted(root.glob("solutions/capabilities/*/lib.rs")) + sorted(
+        root.glob("solutions/capabilities/*/*/lib.rs")
+    )
+    for lib in lib_rs_files:
         capability = lib.parent
         # module name -> the directory its file actually lives in
         layer_of = {}
@@ -634,10 +657,23 @@ def validate_workspace(root: Path) -> bool:
     # What is checked is only what is load-bearing: a service must have the
     # layers its shape promises, and an engine must NOT grow use cases (which is
     # how an engine turns into a service by accident).
+    # A capability is a directory carrying its own package.json/Cargo.toml.
+    # Anything else directly under capabilities/ is a category (cloud/,
+    # distribution/, plugin/, rendering/, tooling/) — has no manifest of its
+    # own, so its children are the real capabilities, one level deeper.
+    def iter_capabilities():
+        for entry in sorted((root / "solutions" / "capabilities").iterdir()):
+            if not entry.is_dir():
+                continue
+            if (entry / "package.json").is_file() or (entry / "Cargo.toml").is_file():
+                yield entry
+                continue
+            for child in sorted(entry.iterdir()):
+                if child.is_dir():
+                    yield child
+
     shape_violations = 0
-    for capability in sorted((root / "solutions" / "capabilities").iterdir()):
-        if not capability.is_dir():
-            continue
+    for capability in iter_capabilities():
         rel = capability.relative_to(root).as_posix()
 
         kind = None
@@ -776,7 +812,7 @@ def validate_workspace(root: Path) -> bool:
             if is_vendored(package):
                 continue
             # A library is defined by being flat — pure computation with no
-            # layers to name. carbon-plugin-sdk is four files at its root and
+            # layers to name. plugin/sdk is four files at its root and
             # that is its declared shape, not drift.
             manifests = "".join(
                 (package / name).read_text(encoding="utf-8", errors="replace")
@@ -837,7 +873,7 @@ def validate_workspace(root: Path) -> bool:
     # Layers sit at the package root — the same rule products/ has, for the
     # same reason: `src/` is a directory that says a file is source, which its
     # extension already said, and it pushes every meaningful name one level
-    # down. Fourteen Rust crates put lib.rs at their root; carbon-plugin-sdk
+    # down. Fourteen Rust crates put lib.rs at their root; plugin/sdk
     # was the fifteenth and did not, and nothing noticed.
     #
     # Two exceptions, both about code that is not ours to lay out. Zig's

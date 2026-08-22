@@ -22,11 +22,13 @@ V2/
 │   │                     runtime/  the 139 host fns + 34 dispatchers
 │   │                     plugin/   carbon_abi.h — frozen, ships in the wild
 │   │                     app/      carbon.toml: schema + TS + Rust
-│   ├── capabilities/   what carbon DOES
-│   │                     layout · painting · text · imaging · audio · math
-│   │                     snapshot · gpu-canvas · bundling · packaging
-│   │                     signing · publishing · updating · scaffolding
-│   │                     plugins · plugin-sdk
+│   ├── capabilities/   what carbon DOES — one category, then its capabilities
+│   │                     cloud/        billing · identity · orchestration · worker
+│   │                     distribution/ packaging · publishing · signing · updating
+│   │                     plugin/       lifecycle · registry · sdk
+│   │                     rendering/    audio · gpu · imaging · layout
+│   │                                   math · painting · snapshot · text
+│   │                     tooling/      bundling · scaffolding
 │   ├── infrastructure/ vendor-neutral technical services
 │   │                     os/ (the 19 host modules) · platform · plugin-host
 │   │                     logging · process · workspace

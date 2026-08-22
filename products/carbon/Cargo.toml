@@ -140,26 +140,26 @@ softbuffer = { version = "0.4", default-features = false, features = ["x11", "wa
 # Box3, Frustum, Color). The bundle opts in via `globalThis.__cm_register_math()`
 # so UI-only apps that never construct a Vector3 don't pay the prototype-
 # allocation cost.
-carbon-fast-math = { path = "../../solutions/capabilities/math", optional = true }
+carbon-fast-math = { path = "../../solutions/capabilities/rendering/math", optional = true }
 # carbon-text-renderer — fontdue text engine, no dependency on carbon-mini,
 # reusable by any future paint backend.
-carbon-text-renderer = { path = "../../solutions/capabilities/text", optional = true }
+carbon-text-renderer = { path = "../../solutions/capabilities/rendering/text", optional = true }
 # carbon-snapshot — heap snapshot/restore.
-carbon-snapshot = { path = "../../solutions/capabilities/snapshot", optional = true }
+carbon-snapshot = { path = "../../solutions/capabilities/rendering/snapshot", optional = true }
 # carbon-layout — scene graph + Taffy + CSS value parsing.
-carbon-layout = { path = "../../solutions/capabilities/layout", optional = true }
+carbon-layout = { path = "../../solutions/capabilities/rendering/layout", optional = true }
 # carbon-paint — the tiny-skia paint dispatch, plus canvas2d/svg/blur/css_parse.
-carbon-paint = { path = "../../solutions/capabilities/painting", optional = true }
+carbon-paint = { path = "../../solutions/capabilities/rendering/painting", optional = true }
 # carbon-image — opt-in image loading (OPTIONAL via 'image' feature).
 # Still gated by CARBON_IMAGE_PATHS env var or carbon.toml at runtime.
 # Note: default features = no avif (keeps binary small).
-carbon-image = { path = "../../solutions/capabilities/imaging", optional = true }
+carbon-image = { path = "../../solutions/capabilities/rendering/imaging", optional = true }
 # Web Audio API — opt-in (OPTIONAL via 'audio' feature).
-carbon-audio = { path = "../../solutions/capabilities/audio", optional = true }
+carbon-audio = { path = "../../solutions/capabilities/rendering/audio", optional = true }
 # carbon-gpu-canvas — the GPU canvas subsystem. Optional via the 'gpu' feature.
-carbon-gpu-canvas = { path = "../../solutions/capabilities/gpu-canvas", optional = true }
+carbon-gpu-canvas = { path = "../../solutions/capabilities/rendering/gpu", optional = true }
 # carbon-updater — A/B partition state machine and manifest verification (OPTIONAL via 'updater' feature).
-carbon-updater = { path = "../../solutions/capabilities/updating/rust", optional = true }
+carbon-updater = { path = "../../solutions/capabilities/distribution/updating/rust", optional = true }
 # Tracy profiler — optional profiling zones for frame-level analysis.
 # Connect with Tracy server: https://github.com/wolfpld/tracy
 tracy-client = { version = "0.17", optional = true }

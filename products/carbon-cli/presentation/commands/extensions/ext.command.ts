@@ -10,7 +10,7 @@
 // what exists to plug into, and whether the four renderings of that declaration
 // still agree.
 //
-// All the work is @carbon/extension-points. What is left here is argv in,
+// All the work is @carbon/registry. What is left here is argv in,
 // output out.
 
 import {
@@ -26,7 +26,7 @@ import {
   ExtensionPointError,
   extensionPointUseCases,
   type ExtensionPoint,
-} from "@carbon/extension-points";
+} from "@carbon/registry";
 import { CARBON_ROOT } from "@carbon/workspace";
 
 /**

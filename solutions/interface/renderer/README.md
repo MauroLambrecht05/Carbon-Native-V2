@@ -17,7 +17,7 @@ rasterization.
 A renderer here is a *driving* adapter in the same sense the CLI is: it is how
 application code reaches the runtime. `<view style={{...}}>` becomes
 `__cm_create_node` / `__cm_set_prop` / `__cm_insert_node` calls, and that
-translation is presentation, not the paint engine. `capabilities/painting` never
+translation is presentation, not the paint engine. `capabilities/rendering/painting` never
 imports them — it receives a scene graph that already exists.
 
 Two renderers rather than one is the point of the split: Solid and React
