@@ -146,8 +146,10 @@ Three things are **not** here, and each was:
 products/
 ├── carbon/                            # The runtime: carbon-mini and carbon-blitz
 ├── carbon-cli/                        # The app developer's surface
+├── carbon-cloud/                      # Build/release platform: signed installers, auto-update
 ├── carbon-ext/                        # The plugin SDK: header, templates, package definition
 ├── carbon-vscode/                     # .ctsx syntax highlighting, in the editor
+├── carbon-website/                    # The public marketing site
 └── README.md                          # The product template every one of them follows
 ```
 

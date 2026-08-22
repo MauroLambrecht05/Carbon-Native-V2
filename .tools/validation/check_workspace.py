@@ -79,6 +79,9 @@ def validate_workspace(root: Path) -> bool:
         "products/carbon/composition",
         "products/carbon/presentation",
         "products/carbon/tests",
+        "products/carbon-website",
+        "products/carbon-website/composition",
+        "products/carbon-website/presentation",
     ]
 
     solution_dirs = (

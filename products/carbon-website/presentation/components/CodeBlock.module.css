@@ -1,0 +1,70 @@
+.block {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-md);
+}
+
+.chrome {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+
+.dot[data-color="red"] {
+  background: #ff5f57;
+  opacity: 0.5;
+}
+.dot[data-color="yellow"] {
+  background: #febc2e;
+  opacity: 0.5;
+}
+.dot[data-color="green"] {
+  background: #28c840;
+  opacity: 0.5;
+}
+
+.title {
+  margin-left: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+.pre {
+  padding: var(--space-5);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.85;
+  overflow-x: auto;
+}
+
+.line {
+  display: flex;
+  gap: var(--space-3);
+  color: var(--text-primary);
+}
+
+.line[data-continuation] {
+  padding-left: calc(1ch + var(--space-3));
+}
+
+.prompt {
+  color: var(--accent);
+  user-select: none;
+}
+
+.muted {
+  color: var(--text-tertiary);
+  padding-left: calc(1ch + var(--space-3));
+}

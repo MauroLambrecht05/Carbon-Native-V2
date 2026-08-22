@@ -1,0 +1,120 @@
+.section {
+  padding-block: var(--space-12);
+  border-top: 1px solid var(--border);
+}
+
+.inner {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-12);
+  align-items: center;
+}
+
+.eyebrow {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+}
+
+.title {
+  margin-top: var(--space-3);
+  font-size: var(--text-3xl);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.body {
+  margin-top: var(--space-5);
+  color: var(--text-secondary);
+  line-height: 1.65;
+}
+
+.points {
+  margin-top: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  list-style: none;
+}
+
+.points li {
+  position: relative;
+  padding-left: var(--space-5);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.points li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.5em;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.cta {
+  margin-top: var(--space-8);
+}
+
+.panel {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-3);
+  box-shadow: var(--shadow-glow);
+}
+
+.panelRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  border-radius: var(--radius-md);
+}
+
+.panelRow:not(:last-child) {
+  border-bottom: 1px solid var(--border);
+}
+
+.panelDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.panelDot[data-status="done"] {
+  background: var(--success);
+}
+
+.panelDot[data-status="active"] {
+  background: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-wash);
+}
+
+.panelDot[data-status="queued"] {
+  background: var(--text-tertiary);
+}
+
+.panelStatus {
+  margin-left: auto;
+  color: var(--text-tertiary);
+}
+
+.panelStatus[data-active="true"] {
+  color: var(--accent);
+}
+
+@media (max-width: 900px) {
+  .inner {
+    grid-template-columns: 1fr;
+  }
+}

@@ -7,8 +7,10 @@ shape.
 |---|---|
 | `carbon` | the runtime an app runs on |
 | `carbon-cli` | an app developer: init, run, build, publish, plugin |
+| `carbon-cloud` | a build/release platform — push a repo, get a signed installer and auto-update |
 | `carbon-ext` | an extension author — the plugin SDK itself |
 | `carbon-vscode` | an app developer, in the editor — `.ctsx` syntax highlighting |
+| `carbon-website` | a visitor deciding whether to try Carbon at all — the public marketing site |
 
 ```
 products/<name>/
@@ -123,12 +125,14 @@ exit code.
 
 ## The other product directories
 
-There are none. `carbon-builder`, `carbon-studio`, `carbon-cloud`, `carbon-hub`,
-`carbon-marketplace`, `carbon-registry`, `carbon-identity`, `carbon-playground`,
-`carbon-templates`, `carbon-updater`, `carbon-docs` and `graphite` used to exist
-here as empty directories, which contradicted this file's own rule two sections
-up — *unused slots are omitted, not created empty* — and made `products/` read
-as twelve unfinished products rather than two finished ones.
+There are none beyond the table above. `carbon-builder`, `carbon-studio`,
+`carbon-hub`, `carbon-marketplace`, `carbon-registry`, `carbon-identity`,
+`carbon-playground`, `carbon-templates`, `carbon-updater`, `carbon-docs` and
+`graphite` used to exist here as empty directories (`carbon-cloud` among
+them, before it had code) — which contradicted this file's own rule two
+sections up — *unused slots are omitted, not created empty* — and made
+`products/` read as twelve unfinished products rather than two finished
+ones.
 
 They are names on a roadmap, and a roadmap is not a directory tree. When one of
 them gets code it gets a directory, in the shape described above.
