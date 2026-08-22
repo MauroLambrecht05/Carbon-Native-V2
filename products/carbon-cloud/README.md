@@ -106,17 +106,15 @@ workers' packaging code (`dpkg-deb`/`appimagetool`/`makensis`/`wix`/`appdmg`,
 Authenticode on Windows, codesign+notarization on macOS, upload to
 S3-compatible storage), two separate token scopes gating every `/v1/*`
 request — `org` (carbon-cli: create a build, read usage) and `worker`
-(claim/complete any org's queue, minted separately via
-`carbon cloud worker-token`) — usage metering (a build over the free plan's
-60 included minutes/month gets a 402).
+(minted separately via `carbon cloud worker-token`, scoped to claim/complete
+only the queue of the org that minted it — verified for real against
+Postgres with two real orgs: a second org's worker token gets `204` against
+the first org's queued build, not the build) — usage metering (a build over
+the free plan's 60 included minutes/month gets a 402).
 
 The Windows and macOS workers' Dockerfile/no-Dockerfile split is still
 unverified the way the Linux one now partly is — no Windows Docker host, no
 Mac in this dev sandbox.
-
-Not real yet: `@carbon/billing`'s `PaymentProvider` — `UpgradePlanUseCase`
-changes the stored plan on a successful charge, but the only implementation
-is `FakePaymentProvider`, which always succeeds without moving any money.
 
 The dashboard (`presentation/`, React) covers signup, pasting an
 existing token, usage against the plan, queuing a build, a recent-builds
@@ -125,11 +123,8 @@ its full status, and looking a build up by id directly — a token typed in
 lives in the browser's localStorage for the tab's session; there's no
 cookie session yet. `carbon cloud list` is the CLI equivalent.
 
-Not yet: a worker token isn't scoped to the specific org that minted it —
-any worker token can claim/complete any org's queued work, which is correct
-for a shared worker fleet but means a compromised worker token from one org
-can see what other orgs are building (fine for one self-hosted deployment
-you run every worker for yourself; a real gap for multiple mutually
-untrusting tenants). Also: a proper `.app` bundle for macOS (`dmg`'s
-builder packages the raw runtime binary today — see the KNOWN GAP note in
-`packaging/infrastructure/builders/dmg.ts`).
+Not yet: a proper `.app` bundle for macOS (`dmg`'s builder packages the raw
+runtime binary today — see the KNOWN GAP note in
+`packaging/infrastructure/builders/dmg.ts`) and a real `PaymentProvider`
+implementation (Stripe/Paddle) to replace `FakePaymentProvider` — needs a
+real (even test-mode) API key this environment doesn't have.
