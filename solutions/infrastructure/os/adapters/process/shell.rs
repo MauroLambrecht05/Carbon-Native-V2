@@ -51,7 +51,7 @@ pub fn register(js_ctx: &JsContext) -> Result<()> {
                     #[cfg(target_os = "macos")]
                     {
                         carbon_platform::macos::reveal_in_file_manager(p);
-                        return Ok(());
+                        Ok(())
                     }
                     #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
                     {
