@@ -53,7 +53,7 @@ fn main() -> ExitCode {
 
 fn run(args: &[String]) -> Result<()> {
     let Some(command) = args.first().map(String::as_str) else {
-        bail!("{}", USAGE);
+        bail!("{USAGE}");
     };
 
     match command {

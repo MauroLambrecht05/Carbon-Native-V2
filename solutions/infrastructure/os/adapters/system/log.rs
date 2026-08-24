@@ -76,7 +76,7 @@ fn ensure_open() -> Option<()> {
 fn rotate(s: &mut LogState) -> std::io::Result<()> {
     // Drop oldest, shift others up by one. New file starts empty.
     let base = s.path.clone();
-    let _ = std::fs::remove_file(base.with_extension(format!("log.{}", MAX_ROLLED)));
+    let _ = std::fs::remove_file(base.with_extension(format!("log.{MAX_ROLLED}")));
     for i in (1..MAX_ROLLED).rev() {
         let src = base.with_extension(format!("log.{i}"));
         let dst = base.with_extension(format!("log.{}", i + 1));

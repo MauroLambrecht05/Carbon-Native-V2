@@ -89,8 +89,7 @@ pub fn register(js_ctx: &JsContext) -> Result<()> {
                             .unwrap_or_default();
                     let code = out.status.code().unwrap_or(-1);
                     Ok(format!(
-                        r#"{{"stdout":{},"stderr":{},"code":{}}}"#,
-                        stdout, stderr, code
+                        r#"{{"stdout":{stdout},"stderr":{stderr},"code":{code}}}"#
                     ))
                 },
             )?,
