@@ -9,7 +9,7 @@ pub fn in_rollout(installation_id: &str, version: &str, rollout_pct: u8) -> bool
         return false;
     }
 
-    let input = format!("{}{}", installation_id, version);
+    let input = format!("{installation_id}{version}");
     let mut hasher = Sha256::new();
     hasher.update(input.as_bytes());
     let hash = hasher.finalize();

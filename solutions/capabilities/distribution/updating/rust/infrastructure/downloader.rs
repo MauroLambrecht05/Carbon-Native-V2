@@ -17,7 +17,7 @@ pub fn download_update(
     let platform_entry = manifest
         .platforms
         .get(platform)
-        .ok_or_else(|| anyhow!("Platform {} not found in manifest", platform))?;
+        .ok_or_else(|| anyhow!("Platform {platform} not found in manifest"))?;
 
     fs::create_dir_all(staging_dir)?;
 
@@ -61,11 +61,7 @@ fn verify_file(path: &Path, expected_sha256: &str) -> Result<()> {
     if hash == expected_sha256 {
         Ok(())
     } else {
-        Err(anyhow!(
-            "SHA256 mismatch: expected {}, got {}",
-            expected_sha256,
-            hash
-        ))
+        Err(anyhow!("SHA256 mismatch: expected {expected_sha256}, got {hash}"))
     }
 }
 

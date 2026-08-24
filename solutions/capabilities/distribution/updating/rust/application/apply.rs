@@ -8,7 +8,7 @@ pub fn promote_staging(staging_dir: &Path, slots_dir: &Path, version: &str) -> R
     let target_slot = slots_dir.join(version);
 
     if !staged_version.exists() {
-        anyhow::bail!("Staged version {} does not exist", version);
+        anyhow::bail!("Staged version {version} does not exist");
     }
 
     fs::create_dir_all(slots_dir)?;
