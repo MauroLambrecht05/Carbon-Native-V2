@@ -38,7 +38,7 @@ jobs:
       # rustfmt only — this job does not compile anything. The toolchain
       # VERSION comes from RUSTUP_TOOLCHAIN in the Bazel cargo launcher, not
       # from here; naming it in both places is how the two drift apart.
-      - uses: dtolnay/rust-toolchain@1.86
+      - uses: dtolnay/rust-toolchain@1.88
         with:
           components: rustfmt
       - uses: bazel-contrib/setup-bazel@0.8.0
@@ -73,7 +73,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.3.10"
-      - uses: dtolnay/rust-toolchain@1.86
+      - uses: dtolnay/rust-toolchain@1.88
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
@@ -127,7 +127,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.3.10"
-      - uses: dtolnay/rust-toolchain@1.86
+      - uses: dtolnay/rust-toolchain@1.88
       - uses: Swatinem/rust-cache@v2
       - uses: bazel-contrib/setup-bazel@0.8.0
         with:

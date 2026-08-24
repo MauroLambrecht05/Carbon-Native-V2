@@ -92,7 +92,7 @@ _MANIFEST = ".tools/orchestration/bazel/cargo/Cargo.toml"
 #                        directory, so it would have to sit at the workspace
 #                        root, and the root is Bazel's.
 #
-#                        Not decorative. `rust-version = "1.86"` in
+#                        Not decorative. `rust-version = "1.88"` in
 #                        .tools/orchestration/bazel/cargo/Cargo.toml is an MSRV *assertion* — it
 #                        makes Cargo complain about a dependency needing more,
 #                        but it does not select a toolchain. Without this, the
