@@ -78,6 +78,17 @@ Individually, for a faster loop:
 not a member of the shared Cargo workspace, so `bazel test //...` never sees
 it at all. Build or test it standalone: `cd labs/gpu-canvas && cargo build`.
 
+CI's `test` and `examples` jobs run on whatever OSes the `CI_WINDOWS_ONLY`
+repo variable says to (computed once, in the `structure` job): `true` means
+windows-latest only, matching this project's current ship target; anything
+else runs the full windows/ubuntu/macos matrix. Flip it with
+`gh variable set CI_WINDOWS_ONLY --body false` (or Settings -> Secrets and
+variables -> Actions -> Variables) — no workflow edit needed. Branch
+protection on `main` only requires the windows-latest checks, since the
+other two are conditional on this toggle; widen it back to all three the
+same day you flip the toggle to `false`, or a real ubuntu/macos regression
+can merge silently.
+
 ## The rules CI enforces
 
 Two checks, split by what they can see.

@@ -23,10 +23,14 @@ env:
 
 jobs:
   # Cheap, platform-independent gates. Fails in under a minute and says what is
-  # wrong before anyone waits on a Rust build.
+  # wrong before anyone waits on a Rust build. Also decides which OSes the
+  # test/examples matrices below actually run on.
   structure:
     name: structure & format
     runs-on: ubuntu-latest
+    outputs:
+      test_os: ${{ steps.matrix.outputs.test_os }}
+      examples_os: ${{ steps.matrix.outputs.examples_os }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -44,6 +48,7 @@ jobs:
       - uses: bazel-contrib/setup-bazel@0.19.0
         with:
           bazelrc: build --enable_bzlmod
+          bazelisk-cache: true
 
       # check_typescript.py runs tsc, so the deps have to exist first.
       - name: install js deps
@@ -60,13 +65,30 @@ jobs:
       - name: rustfmt
         run: bazel test //:fmt_test --test_output=errors
 
+      # The toggle: flip with `gh variable set CI_WINDOWS_ONLY --body false`
+      # (or Settings -> Secrets and variables -> Actions -> Variables), no
+      # workflow edit needed. windows-latest always runs either way — it's
+      # the only OS this currently ships to; ubuntu/macos are the
+      # opt-back-in extras once that changes.
+      - name: compute os matrix
+        id: matrix
+        shell: bash
+        run: |
+          if [ "${{ vars.CI_WINDOWS_ONLY }}" = "true" ]; then
+            echo 'test_os=["windows-latest"]' >> "$GITHUB_OUTPUT"
+            echo 'examples_os=["windows-latest"]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'test_os=["windows-latest","ubuntu-latest","macos-latest"]' >> "$GITHUB_OUTPUT"
+            echo 'examples_os=["windows-latest","ubuntu-latest"]' >> "$GITHUB_OUTPUT"
+          fi
+
   test:
     name: test (${{ matrix.os }})
     needs: structure
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
+        os: ${{ fromJSON(needs.structure.outputs.test_os) }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -81,10 +103,22 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.88
         with:
           components: clippy, rustfmt
+      # workspaces: the Cargo workspace manifest is NOT at the repo root
+      # (see .tools/orchestration/bazel/cargo/Cargo.toml's own docstring for
+      # why) and CARGO_TARGET_DIR is set inside the Bazel cargo launcher, not
+      # visible to this action. Without pointing rust-cache at both
+      # explicitly, it can't find the real target/ directory to cache —
+      # confirmed on real CI runs: every job re-downloaded and recompiled the
+      # entire dependency graph (reqwest, tokio, resvg, rquickjs's C
+      # bindings, ...) from scratch, every push.
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ".tools/orchestration/bazel/cargo -> target"
+          cache-on-failure: true
       - uses: bazel-contrib/setup-bazel@0.19.0
         with:
           bazelrc: build --enable_bzlmod
+          bazelisk-cache: true
 
       # carbon-mini's Linux build links against X11/Wayland, GL and ALSA through
       # tao, softbuffer and cpal. //products/carbon:mini is inside //... .
@@ -171,7 +205,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        os: ${{ fromJSON(needs.structure.outputs.examples_os) }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -179,10 +213,18 @@ jobs:
         with:
           bun-version: "1.3.10"
       - uses: dtolnay/rust-toolchain@1.88
+      # See the test job's Swatinem/rust-cache step for why workspaces: is
+      # required here — without it this action cannot find the real target/
+      # directory (CARGO_TARGET_DIR, set inside the Bazel cargo launcher) to
+      # cache, and every run recompiles the dependency graph from scratch.
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ".tools/orchestration/bazel/cargo -> target"
+          cache-on-failure: true
       - uses: bazel-contrib/setup-bazel@0.19.0
         with:
           bazelrc: build --enable_bzlmod
+          bazelisk-cache: true
 
       - name: linux system deps
         if: runner.os == 'Linux'
