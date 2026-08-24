@@ -6,6 +6,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
@@ -36,6 +37,11 @@ export class NodePluginWorkspace implements PluginWorkspace {
 
   createDirectory(path: string): void {
     mkdirSync(path, { recursive: true });
+  }
+
+  listDirectories(path: string): string[] {
+    if (!existsSync(path)) return [];
+    return readdirSync(path).filter((entry) => statSync(join(path, entry)).isDirectory());
   }
 
   copyFile(from: string, to: string): void {

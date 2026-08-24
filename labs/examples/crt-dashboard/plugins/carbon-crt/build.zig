@@ -16,16 +16,7 @@ pub fn build(b: *std.Build) void {
     });
 
     const lib = b.addSharedLibrary(.{
-        // @@CRATE@@, not @@NAME@@: this is a hyphenated project name inside
-        // build.zig, which SdkTemplateSource.ts's render() treats as a
-        // non-source file (isSourceFile only matches src/) and so gives the
-        // slug form to plain @@NAME@@ — but the shared-library FILENAME this
-        // produces has to match PluginName.libraryFilename()'s crate-form
-        // convention (a Rust/Zig-identifier-safe, underscored name), which
-        // is exactly what @@CRATE@@ always resolves to regardless of file.
-        // Getting this wrong means `carbon plugin install` reports
-        // "no built artifact found" for a build that actually succeeded.
-        .name = "@@CRATE@@",
+        .name = "carbon_crt",
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,

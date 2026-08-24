@@ -83,6 +83,11 @@ export {
   type PluginProblem,
   type PreflightResult,
 } from "./application/usecases/PreflightPluginsUseCase.ts";
+export {
+  SyncLocalPluginsUseCase,
+  type SyncedLocalPlugin,
+  type SyncLocalPluginsResult,
+} from "./application/usecases/SyncLocalPluginsUseCase.ts";
 
 export { NodePluginWorkspace } from "./infrastructure/NodePluginWorkspace.ts";
 export { SdkTemplateSource } from "./infrastructure/SdkTemplateSource.ts";
@@ -94,6 +99,7 @@ import { PreflightPluginsUseCase } from "./application/usecases/PreflightPlugins
 import { CreatePluginUseCase } from "./application/usecases/CreatePluginUseCase.ts";
 import { InspectPluginsUseCase } from "./application/usecases/InspectPluginsUseCase.ts";
 import { InstallPluginUseCase } from "./application/usecases/InstallPluginUseCase.ts";
+import { SyncLocalPluginsUseCase } from "./application/usecases/SyncLocalPluginsUseCase.ts";
 import { NodePluginWorkspace } from "./infrastructure/NodePluginWorkspace.ts";
 import { SdkTemplateSource } from "./infrastructure/SdkTemplateSource.ts";
 
@@ -110,14 +116,18 @@ import { SdkTemplateSource } from "./infrastructure/SdkTemplateSource.ts";
 export function pluginUseCases(sdkRoot: string) {
   const workspace = new NodePluginWorkspace();
 
+  const build = new BuildPluginUseCase(workspace, nodeProcessRunner);
+  const install = new InstallPluginUseCase(workspace);
+
   return {
     workspace,
     sdkRoot,
     create: new CreatePluginUseCase(workspace, new SdkTemplateSource(workspace, sdkRoot)),
-    build: new BuildPluginUseCase(workspace, nodeProcessRunner),
-    install: new InstallPluginUseCase(workspace),
+    build,
+    install,
     inspect: new InspectPluginsUseCase(workspace),
     check: new CheckPluginUseCase(workspace),
     preflight: new PreflightPluginsUseCase(workspace),
+    syncLocal: new SyncLocalPluginsUseCase(workspace, build, install),
   };
 }

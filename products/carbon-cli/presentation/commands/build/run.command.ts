@@ -74,6 +74,13 @@ export async function runCommand(rest: string[]): Promise<number> {
       noBabelCache,
     });
 
+    // Any plugin whose SOURCE lives in this app's own plugins/<name>/ builds
+    // and installs itself here — no separate `carbon plugin install` step.
+    // A plugin declared by a path elsewhere (or one merely dropped in as a
+    // prebuilt .dll) is untouched; this only matches a directory holding a
+    // language marker file.
+    await syncLocalPlugins(projectDir);
+
     // Plugins, before the window rather than after. Everything reported here
     // the runtime would also report — as `[carbon-plugin] FAILED to load ...`
     // on a stderr stream nobody is watching, once the app is already up and
@@ -115,6 +122,25 @@ export async function runCommand(rest: string[]): Promise<number> {
   }
 }
 
+
+/**
+ * Build + install every plugin whose source lives in this app's own
+ * plugins/<name>/, so the app project is the single source of truth and
+ * there is nothing to remember to run separately.
+ *
+ * A build failure here is fatal — unlike preflightPlugins below, which warns
+ * and lets a load-time failure be the runtime's problem, a plugin this app
+ * owns the source of failing to compile is this app's own build breaking,
+ * not a missing optional feature.
+ */
+async function syncLocalPlugins(projectDir: string): Promise<void> {
+  const { synced } = await pluginUseCases(join(PRODUCTS_DIR, "carbon-ext")).syncLocal.execute(
+    projectDir,
+  );
+  for (const plugin of synced) {
+    log.step(c.dim(`plugin ${plugin.name}: built + installed from ./plugins/${plugin.name}`));
+  }
+}
 
 /**
  * Report anything that will stop a declared plugin loading.

@@ -43,7 +43,15 @@ export const ZIG: PluginLanguage = {
   id: "zig",
   marker: "build.zig",
   buildCommand: "zig",
-  releaseArgs: ["build", "-Doptimize=ReleaseFast"],
+  // NOT -Doptimize=ReleaseFast. Every plugin's build.zig calls
+  // standardOptimizeOption WITH .preferred_optimize_mode set (see
+  // products/carbon-ext/presentation/templates/plugin/build.zig.tmpl) — and
+  // passing that argument is what turns the option from the usual 4-way
+  // -Doptimize=<Mode> enum into a boolean -Drelease=[bool] toggle instead.
+  // Confirmed against a real `zig build --help` in the plugin directory:
+  // -Doptimize errors "invalid option", -Drelease=true is what's offered and
+  // what actually builds.
+  releaseArgs: ["build", "-Drelease=true"],
   debugArgs: ["build"],
   artifactDirs: [
     ["zig-out", "lib"],

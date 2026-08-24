@@ -245,15 +245,17 @@ impl Canvas {
 /// `before_paint` hooks (which write GPU readbacks into it) before this
 /// rasterizes UI on top. After this returns, the pixmap holds the final
 /// composited frame in RGBA8 premultiplied; we then convert to XRGB.
-pub fn paint(
-    scene: &Scene,
-    pixmap: &mut Pixmap,
-    buffer: &mut [u32],
-    w: u32,
-    h: u32,
-    scale: f32,
-    text_engine: &mut TextEngine,
-) {
+/// Draws the scene into `pixmap` only — no buffer conversion. Split out from
+/// `paint` so a caller can insert something between "the scene is drawn" and
+/// "the presented buffer is written" — which is exactly the seam
+/// `paint.before` plugins need. Calling this alone and never following it
+/// with `blit_to_buffer` leaves nothing on screen; see `paint` for the
+/// normal single-call path.
+///
+/// No `w`/`h` params — `pixmap` already carries its own dimensions, unlike
+/// `blit_to_buffer`, which needs them because `buffer` (a flat `&mut [u32]`)
+/// does not.
+pub fn paint_scene(scene: &Scene, pixmap: &mut Pixmap, scale: f32, text_engine: &mut TextEngine) {
     prof_zone!("frame_paint");
     let pt0 = Instant::now();
     psub("pixmap_provided", pt0);
@@ -309,6 +311,15 @@ pub fn paint(
         }
         PAINT_PERF.with(|p| *p.borrow_mut() = [0.0; 4]);
     }
+    psub("nodes_painted_done", pt0);
+}
+
+/// Converts `pixmap`'s already-painted RGBA (premultiplied) into the
+/// presented buffer's packed 0x00RRGGBB. The other half of `paint`, split
+/// out for the same reason as `paint_scene` — see its doc comment.
+pub fn blit_to_buffer(pixmap: &Pixmap, buffer: &mut [u32], w: u32, h: u32) {
+    let pt0 = Instant::now();
+    let _perf = std::env::var_os("CARBON_PERF").is_some();
     let _perf_rgba = Instant::now();
 
     // Convert RGBA premultiplied -> 0x00RRGGBB.
@@ -330,6 +341,24 @@ pub fn paint(
             eprintln!("[perf]   rgba_convert: {ms:.1}ms");
         }
     }
+}
+
+/// Paint a frame and write it to the presented buffer in one call — the
+/// normal path for a caller with no plugin (or other) work to do between
+/// "scene drawn" and "buffer written". See `paint_scene` and
+/// `blit_to_buffer` for the two halves this composes, and the seam between
+/// them.
+pub fn paint(
+    scene: &Scene,
+    pixmap: &mut Pixmap,
+    buffer: &mut [u32],
+    w: u32,
+    h: u32,
+    scale: f32,
+    text_engine: &mut TextEngine,
+) {
+    paint_scene(scene, pixmap, scale, text_engine);
+    blit_to_buffer(pixmap, buffer, w, h);
 }
 
 #[allow(clippy::too_many_arguments)]

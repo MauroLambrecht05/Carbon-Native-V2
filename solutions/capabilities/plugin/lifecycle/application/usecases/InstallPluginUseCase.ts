@@ -23,6 +23,18 @@ export interface InstallPluginRequest {
   readonly directory: string;
   /** Where to start looking for the host app. Usually the cwd. */
   readonly from: string;
+  /**
+   * Write the bare `name = "path"` line into carbon.toml. Default true.
+   *
+   * `false` for a re-install over an entry an author has since upgraded to
+   * the `[plugins.<name>]` table form (to grant capabilities, say) —
+   * upsertPluginEntry only understands the bare form, so it would either
+   * clobber the grant back to a plain path or, worse, add a SECOND
+   * declaration of the same key that TOML treats as a duplicate. Copying the
+   * refreshed artifact in is still correct either way; only the declare step
+   * is conditional.
+   */
+  readonly declare?: boolean;
 }
 
 export interface InstallPluginResult {
@@ -95,12 +107,14 @@ export class InstallPluginUseCase {
     // for everyone else.
     const declaredPath = `./plugins/${filename}`;
 
-    const tomlPath = join(host, "carbon.toml");
-    const existing = this.workspace.exists(tomlPath) ? this.workspace.readFile(tomlPath) : "";
-    this.workspace.writeFile(
-      tomlPath,
-      upsertPluginEntry(existing, { name: artifact.name.slug, path: declaredPath }),
-    );
+    if (request.declare ?? true) {
+      const tomlPath = join(host, "carbon.toml");
+      const existing = this.workspace.exists(tomlPath) ? this.workspace.readFile(tomlPath) : "";
+      this.workspace.writeFile(
+        tomlPath,
+        upsertPluginEntry(existing, { name: artifact.name.slug, path: declaredPath }),
+      );
+    }
 
     return { name: artifact.name, host, installedAt, declaredPath };
   }

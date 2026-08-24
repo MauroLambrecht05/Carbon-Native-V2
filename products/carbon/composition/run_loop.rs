@@ -1368,10 +1368,33 @@ impl State {
                                 .unwrap_or_else(|e| e.into_inner())
                                 .dirty_rect = None;
                         }
-                        // before_paint now hands plugins a real RGBA8 buffer
-                        // they can blit into. Canvas plugins read their
-                        // wgpu offscreen render target and blit to their
-                        // layout box; FPS / telemetry plugins just observe.
+                        let _perf_paint = std::time::Instant::now();
+                        paint::paint_scene(
+                            &self.scene.lock().unwrap_or_else(|e| e.into_inner()),
+                            &mut canvas.pixmap,
+                            scale_f,
+                            &mut self.text_engine.borrow_mut(),
+                        );
+                        // before_paint hands plugins the real, already-drawn
+                        // RGBA8 frame — after the rasterizer has drawn the
+                        // scene and before the pixmap is presented, matching
+                        // solutions/contracts/plugin/registry/extension-points.zig's
+                        // own documented dispatch for this point exactly.
+                        // Previously dispatched BEFORE paint_scene ran, so
+                        // every plugin only ever saw a blank just-cleared
+                        // buffer that paint_scene immediately overwrote —
+                        // confirmed on a real run: a paint.before plugin's
+                        // edits never reached the screen, no matter how
+                        // strong, because blit_to_buffer below reads
+                        // whatever is in the pixmap at ITS call time, and
+                        // that was always post-paint_scene, pre-plugin.
+                        // Canvas plugins blitting a GPU offscreen target
+                        // into their <canvas> node's region still work here:
+                        // paint_scene already painted the node's own
+                        // background/border, leaving pixel content the
+                        // plugin's blit now draws over, the same "belongs to
+                        // its <canvas> node" region the doc comment on the
+                        // registry entry describes.
                         let stride = canvas.stride_bytes();
                         self.plugin_registry.dispatch_before_paint(
                             canvas.as_bytes_mut(),
@@ -1379,16 +1402,7 @@ impl State {
                             h,
                             stride,
                         );
-                        let _perf_paint = std::time::Instant::now();
-                        paint::paint(
-                            &self.scene.lock().unwrap_or_else(|e| e.into_inner()),
-                            &mut canvas.pixmap,
-                            &mut buffer,
-                            w,
-                            h,
-                            scale_f,
-                            &mut self.text_engine.borrow_mut(),
-                        );
+                        paint::blit_to_buffer(&canvas.pixmap, &mut buffer, w, h);
                         if std::env::var_os("CARBON_PERF").is_some() {
                             let ms = _perf_paint.elapsed().as_secs_f64() * 1000.0;
                             if ms > 2.0 {

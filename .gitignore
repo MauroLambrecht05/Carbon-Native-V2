@@ -31,6 +31,14 @@ dist/
 # per-path list, because a plugin can exist anywhere a Zig project can.
 .zig-cache/
 zig-out/
+# SyncLocalPluginsUseCase (@carbon/lifecycle) writes one of these next to
+# every app-owned plugins/<name>/ source directory on every `carbon run` /
+# `carbon dev` — the built artifact `carbon plugin install` copies in.
+# Regenerated on every launch; boundaries_test's LOCAL_PLUGIN_ARTIFACT
+# pattern also excludes it, since that check does not read .gitignore.
+plugins/*.dll
+plugins/*.so
+plugins/*.dylib
 
 # EXCEPTION: the launch test's fixture bundle is an INPUT, not build output.
 #
