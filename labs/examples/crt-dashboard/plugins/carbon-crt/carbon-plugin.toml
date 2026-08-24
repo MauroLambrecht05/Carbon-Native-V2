@@ -1,0 +1,35 @@
+# carbon-crt — what this plugin tells the toolchain about itself.
+#
+# `carbon plugin install` and `carbon plugin list` read this. The RUNTIME
+# reads the manifest returned by `carbon_plugin_manifest()` in src/main.zig
+# instead, because by then this file is not shipped — so the two must agree,
+# and `carbon plugin check` is what verifies they do.
+name = "carbon-crt"
+version = "0.1.0"
+language = "zig"
+
+# Extension points this plugin implements. Every id must exist in
+# solutions/contracts/plugin/registry/extension-points.zig — run
+# `carbon ext list` to see them, or `carbon plugin check` to verify these.
+#
+# Must stay above [abi]: `carbon plugin check`'s TOML reader looks for this
+# as a top-level key, and real TOML makes anything after a [section] header
+# belong to that section until the next one — placing it below [abi] silently
+# makes it unreadable, not an error.
+extension-points = ["lifecycle.register", "paint.before"]
+
+[abi]
+major = 1
+minor = 0
+
+[capabilities]
+# paint.before contributes paint.pixmap on its own inside sdk.manifest.build
+# (see src/main.zig) — but that derivation only affects the REAL manifest a
+# plugin returns at runtime. This file is a separate, hand-maintained
+# declaration `carbon plugin check` verifies against the registry directly,
+# so the capability still has to be written down here too.
+required = ["paint.pixmap"]
+optional = []
+
+# No JS-facing surface — the effect is unconditional once the plugin loads.
+modules = []

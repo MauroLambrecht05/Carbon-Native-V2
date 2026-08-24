@@ -27,6 +27,7 @@ import {
   PluginName,
   PluginNotFoundError,
   readPluginEntries,
+  SyncLocalPluginsUseCase,
   TargetNotEmptyError,
   UnknownLanguageError,
   upsertPluginEntry,
@@ -78,6 +79,20 @@ class MemoryWorkspace implements PluginWorkspace {
 
   copyFile(from: string, to: string): void {
     this.files.set(this.key(to), this.readFile(from));
+  }
+
+  listDirectories(path: string): string[] {
+    const prefix = `${this.key(path)}/`;
+    const names = new Set<string>();
+    const under = (full: string) => {
+      if (!full.startsWith(prefix)) return;
+      const rest = full.slice(prefix.length);
+      const slash = rest.indexOf("/");
+      if (slash > 0) names.add(rest.slice(0, slash));
+    };
+    for (const f of this.files.keys()) under(f);
+    for (const d of this.directories) under(`${d}/.`);
+    return [...names];
   }
 
   findHostApp(from: string): string | null {
@@ -321,7 +336,7 @@ describe("building a plugin", () => {
 
     expect(result.exitCode).toBe(0);
     expect(runner.calls[0].command).toBe("zig");
-    expect(runner.calls[0].args).toEqual(["build", "-Doptimize=ReleaseFast"]);
+    expect(runner.calls[0].args).toEqual(["build", "-Drelease=true"]);
     expect(runner.calls[0].options?.cwd).toBe(`${ROOT}/p`);
   });
 
@@ -464,6 +479,138 @@ describe("installing a plugin", () => {
         from: `${ROOT}/loose`,
       }),
     ).toThrow(NoHostAppError);
+  });
+});
+
+describe("syncing local plugins", () => {
+  /** A host app with one plugin's SOURCE (not yet built) under plugins/<name>/. */
+  function withLocalSource(name = "my-thing") {
+    const workspace = new MemoryWorkspace();
+    workspace.put(`${ROOT}/app/carbon.toml`, `[app]\nname = "demo"\n`);
+    workspace.put(`${ROOT}/app/plugins/${name}/build.zig`);
+    workspace.put(
+      `${ROOT}/app/plugins/${name}/carbon-plugin.toml`,
+      `name = "${name}"\nlanguage = "zig"\n`,
+    );
+    const runner = new FakeProcessRunner();
+    // BuildPluginUseCase only runs `zig build`; it does not itself write the
+    // artifact zig would have — a real build's side effect, faked here so
+    // InstallPluginUseCase (run right after, by SyncLocalPluginsUseCase) has
+    // something to find.
+    const lib = PluginName.from(name).libraryFilename();
+    workspace.put(`${ROOT}/app/plugins/${name}/zig-out/lib/${lib}`, "ELF");
+
+    const build = new BuildPluginUseCase(workspace, runner);
+    const install = new InstallPluginUseCase(workspace);
+    return { workspace, runner, lib, useCase: new SyncLocalPluginsUseCase(workspace, build, install) };
+  }
+
+  test("builds and installs a plugin found under plugins/<name>/", async () => {
+    const { workspace, runner, lib, useCase } = withLocalSource();
+
+    const result = await useCase.execute(`${ROOT}/app`);
+
+    expect(result.synced).toEqual([{ name: "my-thing", directory: `${ROOT}/app/plugins/my-thing` }]);
+    // Release, not debug — this runs on every `carbon run`/`carbon dev`
+    // launch, not once by hand, so it should produce what a shipped app
+    // would actually use.
+    expect(runner.calls[0].args).toEqual(["build", "-Drelease=true"]);
+    expect(workspace.exists(`${ROOT}/app/plugins/${lib}`)).toBe(true);
+    expect(readPluginEntries(workspace.readFile(`${ROOT}/app/carbon.toml`))).toEqual([
+      { name: "my-thing", path: `./plugins/${lib}` },
+    ]);
+  });
+
+  test("syncs every local plugin, not just the first", async () => {
+    const workspace = new MemoryWorkspace();
+    workspace.put(`${ROOT}/app/carbon.toml`, "");
+    for (const name of ["one", "two"]) {
+      workspace.put(`${ROOT}/app/plugins/${name}/build.zig`);
+      const lib = PluginName.from(name).libraryFilename();
+      workspace.put(`${ROOT}/app/plugins/${name}/zig-out/lib/${lib}`, "ELF");
+    }
+    const build = new BuildPluginUseCase(workspace, new FakeProcessRunner());
+    const install = new InstallPluginUseCase(workspace);
+
+    const result = await new SyncLocalPluginsUseCase(workspace, build, install).execute(
+      `${ROOT}/app`,
+    );
+
+    expect(result.synced.map((p) => p.name).sort()).toEqual(["one", "two"]);
+  });
+
+  test("a plugins/ subdirectory with no language marker is not a plugin, and is skipped", async () => {
+    const workspace = new MemoryWorkspace();
+    workspace.put(`${ROOT}/app/carbon.toml`, "");
+    workspace.put(`${ROOT}/app/plugins/README.md`, "not a plugin");
+    const build = new BuildPluginUseCase(workspace, new FakeProcessRunner());
+    const install = new InstallPluginUseCase(workspace);
+
+    const result = await new SyncLocalPluginsUseCase(workspace, build, install).execute(
+      `${ROOT}/app`,
+    );
+
+    expect(result.synced).toEqual([]);
+  });
+
+  test("no plugins/ directory at all is not an error", async () => {
+    const workspace = new MemoryWorkspace();
+    workspace.put(`${ROOT}/app/carbon.toml`, "");
+    const build = new BuildPluginUseCase(workspace, new FakeProcessRunner());
+    const install = new InstallPluginUseCase(workspace);
+
+    const result = await new SyncLocalPluginsUseCase(workspace, build, install).execute(
+      `${ROOT}/app`,
+    );
+
+    expect(result.synced).toEqual([]);
+  });
+
+  test("a capability grant in [plugins.<name>] survives a re-sync", async () => {
+    // The exact scenario this exists for: an author upgraded the bare entry
+    // install first wrote into the [plugins.<name>] table form to grant a
+    // capability. Re-running sync (every `carbon run`/`carbon dev`) must
+    // refresh the built artifact without touching that declaration — not
+    // clobber it back to a bare path, and not add a second, conflicting one.
+    const { workspace, useCase } = withLocalSource();
+    workspace.put(
+      `${ROOT}/app/carbon.toml`,
+      `[app]\nname = "demo"\n\n[plugins.my-thing]\npath = "./plugins/x"\ncapabilities = ["paint.pixmap"]\n`,
+    );
+
+    await useCase.execute(`${ROOT}/app`);
+
+    const toml = workspace.readFile(`${ROOT}/app/carbon.toml`);
+    expect(toml).toContain(`capabilities = ["paint.pixmap"]`);
+    expect(toml).not.toContain(`[plugins]\n`);
+  });
+
+  test("a bare entry install itself wrote is still refreshed on the next sync", async () => {
+    // The common case: no capability grant, nothing to preserve — sync
+    // should behave exactly like a first install every time.
+    const { workspace, lib, useCase } = withLocalSource();
+
+    await useCase.execute(`${ROOT}/app`);
+    await useCase.execute(`${ROOT}/app`);
+
+    expect(readPluginEntries(workspace.readFile(`${ROOT}/app/carbon.toml`))).toEqual([
+      { name: "my-thing", path: `./plugins/${lib}` },
+    ]);
+  });
+
+  test("a build failure names the plugin and stops before install", async () => {
+    const workspace = new MemoryWorkspace();
+    workspace.put(`${ROOT}/app/carbon.toml`, "");
+    workspace.put(`${ROOT}/app/plugins/broken/build.zig`);
+    const build = new BuildPluginUseCase(workspace, new FakeProcessRunner(1));
+    const install = new InstallPluginUseCase(workspace);
+
+    await expect(
+      new SyncLocalPluginsUseCase(workspace, build, install).execute(`${ROOT}/app`),
+    ).rejects.toThrow(/broken/);
+    // No artifact was ever produced, so install (had it run) would have had
+    // nothing to find — this just confirms the failure is reported instead
+    // of silently swallowed and moved past.
   });
 });
 

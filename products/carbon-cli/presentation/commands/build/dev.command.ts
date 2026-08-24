@@ -18,12 +18,14 @@ import type { CommandContext } from "@carbon/cli";
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { watch as fsWatch } from "node:fs";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { computeCacheKey } from "@carbon/bundling";
 import { loadCarbonConfig } from "@carbon/workspace";
 import { log, c } from "@carbon/logging";
 import { isBackend, VALID_BACKENDS } from "@carbon/contracts/app/backend";
 import { buildProject, ensureNodeModules, ensureRuntime } from "@carbon/bundling";
+import { pluginUseCases } from "@carbon/lifecycle";
+import { PRODUCTS_DIR } from "@carbon/workspace";
 
 const SKIP_DIRS = new Set([
   "node_modules", "dist", ".carbon-cache", "target", ".git",
@@ -120,6 +122,10 @@ export async function devCommand(rest: string[]): Promise<number> {
     const DEV_BYTECODE = false;
     await buildProject(projectDir, backend, log, { bytecode: DEV_BYTECODE, noBabelCache, dev: true });
 
+    // Any plugin whose SOURCE lives in this app's own plugins/<name>/ builds
+    // and installs itself here — no separate `carbon plugin install` step.
+    await syncLocalPlugins(projectDir);
+
     let proc: ChildProcess | null = null;
     let pendingReload = false;
     let reloadInFlight = false;
@@ -175,6 +181,10 @@ export async function devCommand(rest: string[]): Promise<number> {
           noBabelCache,
           dev: true,
         });
+        // A source change under plugins/<name>/ hits the same watcher as any
+        // other file (SKIP_DIRS does not exclude it), so a rebuild here also
+        // rebuilds+reinstalls a local plugin whose Zig source changed.
+        await syncLocalPlugins(projectDir);
       } catch (e: any) {
         log.error(`build failed: ${e.message ?? e}`);
         reloadInFlight = false;
@@ -239,6 +249,24 @@ export async function devCommand(rest: string[]): Promise<number> {
   }
 }
 
+
+/**
+ * Build + install every plugin whose source lives in this app's own
+ * plugins/<name>/, so the app project is the single source of truth and
+ * there is nothing to remember to run separately.
+ *
+ * A build failure here is fatal — a plugin this app owns the source of
+ * failing to compile is this app's own build breaking, not a missing
+ * optional feature.
+ */
+async function syncLocalPlugins(projectDir: string): Promise<void> {
+  const { synced } = await pluginUseCases(join(PRODUCTS_DIR, "carbon-ext")).syncLocal.execute(
+    projectDir,
+  );
+  for (const plugin of synced) {
+    log.step(c.dim(`plugin ${plugin.name}: built + installed from ./plugins/${plugin.name}`));
+  }
+}
 
 // ── Command ─────────────────────────────────────────────────────────────────
 // The implementation above is the ported V1 body, unchanged. This class is

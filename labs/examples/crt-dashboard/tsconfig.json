@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "preserve",
+    "jsxImportSource": "solid-js",
+    "strict": false,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "skipLibCheck": true,
+    "types": [],
+    "paths": {
+      "@carbon/mini-solid": ["../../../solutions/interface/renderer/solid/index.ts"],
+      "@carbon/mini-solid/*": ["../../../solutions/interface/renderer/solid/*"]
+    }
+  },
+  "include": ["App.tsx", "src/**/*"]
+}

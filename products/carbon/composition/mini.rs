@@ -647,15 +647,27 @@ fn main() -> Result<()> {
                         scene_g.compute_layout(w as f32, h as f32, &mut text_engine.borrow_mut());
                         if let Some(mut canvas) = paint::Canvas::new(w, h) {
                             canvas.clear_white();
-                            paint::paint(
+                            paint::paint_scene(
                                 &scene_g,
                                 &mut canvas.pixmap,
-                                &mut buffer,
-                                w,
-                                h,
                                 1.0,
                                 &mut text_engine.borrow_mut(),
                             );
+                            // Same fix as run_loop.rs's RedrawRequested handler,
+                            // and for the same reason: dispatching before
+                            // paint_scene ran meant every paint.before plugin
+                            // only ever saw a blank cleared buffer here too.
+                            // This is the pre-show startup paint specifically
+                            // (not the main event loop), so it is its own call
+                            // site rather than shared code.
+                            let stride = canvas.stride_bytes();
+                            plugin_registry.dispatch_before_paint(
+                                canvas.as_bytes_mut(),
+                                w,
+                                h,
+                                stride,
+                            );
+                            paint::blit_to_buffer(&canvas.pixmap, &mut buffer, w, h);
                             let _ = buffer.present();
                         }
                     }

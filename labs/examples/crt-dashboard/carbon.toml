@@ -1,0 +1,17 @@
+[app]
+name = "crt-dashboard"
+version = "0.1.0"
+display_name = "Crt Dashboard"
+
+[runtime]
+backend = "mini"
+bytecode = true
+
+# carbon-crt's source lives in plugins/carbon-crt/ — `carbon run`/`carbon dev`
+# build and install it automatically, no `carbon plugin install` step. This
+# grant has to be written by hand once: paint.before is capability-gated
+# (it can write the framebuffer), and a plugin requesting a capability is
+# never enough on its own to receive it.
+[plugins.carbon-crt]
+path = "./plugins/carbon_crt.dll"
+capabilities = ["paint.pixmap"]

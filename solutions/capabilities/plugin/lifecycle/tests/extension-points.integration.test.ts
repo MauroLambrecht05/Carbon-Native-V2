@@ -49,6 +49,17 @@ class MemoryWorkspace implements PluginWorkspace {
   copyFile(from: string, to: string): void {
     this.files.set(this.key(to), this.readFile(from));
   }
+  listDirectories(path: string): string[] {
+    const prefix = `${this.key(path)}/`;
+    const names = new Set<string>();
+    for (const f of this.files.keys()) {
+      if (!f.startsWith(prefix)) continue;
+      const rest = f.slice(prefix.length);
+      const slash = rest.indexOf("/");
+      if (slash > 0) names.add(rest.slice(0, slash));
+    }
+    return [...names];
+  }
   isEmptyDirectory(path: string): boolean {
     return !this.exists(path);
   }

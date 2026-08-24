@@ -1,0 +1,102 @@
+/* styles.css — compiled to inline styles at build time.
+ *
+ * Palette: a warm near-black (not pure #000, which reads flat under the
+ * plugin's vignette) and a soft mint-green "phosphor" ink, with one amber
+ * accent for the single stat worth drawing the eye to. No text-shadow/glow
+ * here — this engine doesn't support it, and the plugin's own scanline +
+ * vignette pass is what actually gives the screen its CRT character.
+ */
+
+.app {
+  background: #0a0f0c;
+  color: #8fffb0;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+}
+
+.screen {
+  flex-direction: column;
+  align-items: center;
+  width: 560px;
+  padding-top: 48px;
+  padding-bottom: 48px;
+  padding-left: 48px;
+  padding-right: 48px;
+  gap: 4px;
+}
+
+.eyebrow {
+  color: #4d6b55;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.clock {
+  color: #8fffb0;
+  font-size: 72px;
+  font-weight: 700;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.divider {
+  width: 100%;
+  height: 1px;
+  background: #1c2a1e;
+  margin-top: 20px;
+  margin-bottom: 20px;
+}
+
+.stats {
+  flex-direction: column;
+  width: 100%;
+  gap: 10px;
+}
+
+.stat-row {
+  flex-direction: row;
+  justify-content: space-between;
+  width: 100%;
+  background: #10160f;
+  border-radius: 3px;
+  padding-top: 9px;
+  padding-bottom: 9px;
+  padding-left: 14px;
+  padding-right: 14px;
+}
+
+.stat-label {
+  color: #4d6b55;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.stat-value {
+  color: #8fffb0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.stat-value-accent {
+  color: #e8a94a;
+}
+
+.boot-log {
+  flex-direction: column;
+  width: 100%;
+  gap: 4px;
+}
+
+.boot-line {
+  color: #4d6b55;
+  font-size: 11px;
+}
+
+.footer {
+  color: #2f4436;
+  font-size: 10px;
+  padding-top: 24px;
+  width: 100%;
+}

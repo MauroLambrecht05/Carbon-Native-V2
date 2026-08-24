@@ -16,6 +16,14 @@ export interface PluginWorkspace {
   copyFile(from: string, to: string): void;
 
   /**
+   * Immediate subdirectory names of `path`, or `[]` if it does not exist.
+   *
+   * What `SyncLocalPluginsUseCase` walks to find every `plugins/<name>/` an
+   * app owns the source of.
+   */
+  listDirectories(path: string): string[];
+
+  /**
    * Nearest ancestor of `from` (inclusive) containing a carbon.toml.
    *
    * Walking up is what makes `carbon plugin install` work from anywhere inside
