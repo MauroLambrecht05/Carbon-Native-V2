@@ -11,6 +11,7 @@
 // pointer stays valid across processes. See capabilities/snapshot.
 
 use super::*;
+use super::snapshot_spike::*;
 
 /// Isolated proof-of-mechanism for the heap snapshot. Two sub-modes:
 ///   --snapshot-spike build   <snap>  [bundle.js]
