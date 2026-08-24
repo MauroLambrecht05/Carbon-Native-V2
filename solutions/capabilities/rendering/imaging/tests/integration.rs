@@ -426,7 +426,10 @@ fn cache_second_hit_is_same_arc() {
     let elapsed = t0.elapsed();
 
     // Cache hit should be fast (no decode = no disk I/O).
-    assert!(elapsed < Duration::from_millis(5), "cache hit too slow: {elapsed:?}");
+    assert!(
+        elapsed < Duration::from_millis(5),
+        "cache hit too slow: {elapsed:?}"
+    );
     // Same pixel data (pointer equality via Arc).
     assert!(Arc::ptr_eq(&img1, &img2), "cache must return the same Arc");
 }
