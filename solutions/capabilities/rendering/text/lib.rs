@@ -810,12 +810,11 @@ impl TextEngine {
             let m = self.fonts.get(idx as usize).map(|f| f.metrics(ch, px));
             let (xmin, w) = m.map(|mm| (mm.xmin, mm.width)).unwrap_or((0, 0));
             out.push_str(&format!(
-                "  {:?} idx={} adv={:.2} xmin={} w={} pen->{:.2}\n",
-                ch, idx, adv, xmin, w, pen
+                "  {ch:?} idx={idx} adv={adv:.2} xmin={xmin} w={w} pen->{pen:.2}\n"
             ));
             pen += adv;
         }
-        out.push_str(&format!("  total_w={:.2}\n", pen));
+        out.push_str(&format!("  total_w={pen:.2}\n"));
         out
     }
 
