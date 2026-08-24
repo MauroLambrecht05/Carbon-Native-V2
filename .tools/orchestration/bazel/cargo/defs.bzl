@@ -363,13 +363,29 @@ def cargo_library(name, **kwargs):
     )
 
 def cargo_test(name, **kwargs):
-    """`cargo test` for one package, as a Bazel test target."""
+    """`cargo test` for one package, as a Bazel test target.
+
+    Untagged, this failed for real on macOS CI: every cargo_test target
+    shares one CARGO_TARGET_DIR (this file's own docstring explains why —
+    cargo runs against the real tree, not a declared Bazel input set), so
+    they all lock the same target/debug/.cargo-lock, and Bazel's
+    darwin-sandbox denies the flock() syscall Cargo needs for that —
+    "failed to open: .../.cargo-lock, Caused by: Operation not permitted
+    (os error 1)", immediately, on every cargo_test target at once.
+    _UNCACHEABLE's no-sandbox is the fix (same reasoning already applied
+    to cargo_fmt_test/cargo_clippy_test below, just never extended here);
+    no-cache/external ride along because the staleness problem their own
+    comment describes — a real-tree run Bazel cannot see changed, cached
+    PASS forever — applies here for the identical reason, not because
+    this test failed on it.
+    """
     _cargo_test(
         name = name,
         is_windows = select({
             "@platforms//os:windows": True,
             "//conditions:default": False,
         }),
+        tags = _with_tags(kwargs),
         **kwargs
     )
 
