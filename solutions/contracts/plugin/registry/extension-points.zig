@@ -25,7 +25,8 @@
 //! ── ADDING A POINT ──────────────────────────────────────────────────────────
 //!   1. Append an entry to POINTS. Never reorder or remove — see STABILITY.
 //!   2. Set `.since_minor` to the NEXT ABI minor, and bump
-//!      CARBON_PLUGIN_ABI_VERSION_MINOR in plugin-sdk/include/carbon_plugin.h.
+//!      CARBON_PLUGIN_ABI_VERSION_MINOR in
+//!      products/carbon-ext/presentation/include/carbon_plugin.h.
 //!   3. Run `carbon ext generate`.
 //!   4. Call the new point from products/carbon — a declared point the runtime
 //!      never dispatches is a promise to plugin authors that nothing keeps.
@@ -393,7 +394,10 @@ pub fn find(comptime id: []const u8) ?ExtensionPoint {
 }
 
 test "every point is discoverable by its own id" {
-    for (POINTS) |point| {
+    // find()'s id is comptime by design (the SDK's plugin-side comptime
+    // check calls it that way) — inline for to keep `point.id` comptime
+    // here too, not a plain for's runtime-copied loop variable.
+    inline for (POINTS) |point| {
         try std.testing.expect(find(point.id) != null);
     }
     try std.testing.expect(find("nope.missing") == null);

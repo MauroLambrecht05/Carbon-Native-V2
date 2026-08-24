@@ -26,6 +26,11 @@ node_modules/
 dist/
 # Per-app build cache the CLI pipeline writes next to a project's dist/.
 .carbon-cache/
+# zig build's own output — every plugin and the SDK package
+# (products/carbon-ext/composition) grows one of each. Bare, not an explicit
+# per-path list, because a plugin can exist anywhere a Zig project can.
+.zig-cache/
+zig-out/
 
 # EXCEPTION: the launch test's fixture bundle is an INPUT, not build output.
 #

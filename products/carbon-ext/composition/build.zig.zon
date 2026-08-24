@@ -11,7 +11,7 @@
 //
 // `paths` reaches outside this directory three times, and each is deliberate:
 //   ../presentation                    the C ABI header and the templates
-//   ../../../solutions/capabilities/plugin-sdk/zig/src
+//   ../../../solutions/capabilities/plugin/sdk/zig/src
 //                                      the implementation this composes
 //   ../../../solutions/contracts/plugin/registry
 //                                      the extension-point source of truth
@@ -28,7 +28,7 @@
         "build.zig",
         "build.zig.zon",
         "../presentation",
-        "../../../solutions/capabilities/plugin-sdk/zig/src",
+        "../../../solutions/capabilities/plugin/sdk/zig/src",
         "../../../solutions/contracts/plugin/registry",
     },
 }

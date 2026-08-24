@@ -7,7 +7,7 @@
 //
 // ── WHAT IT COMPOSES ────────────────────────────────────────────────────────
 //   ../presentation/include/           the C ABI an author compiles against
-//   ../../../solutions/capabilities/plugin-sdk/zig/src/
+//   ../../../solutions/capabilities/plugin/sdk/zig/src/
 //                                      the SDK's implementation — CarbonApp,
 //                                      the comptime manifest builder, the
 //                                      extension-point helpers
@@ -21,7 +21,7 @@
 const std = @import("std");
 
 /// The SDK's implementation, in solutions.
-const SRC = "../../../solutions/capabilities/plugin-sdk/zig/src";
+const SRC = "../../../solutions/capabilities/plugin/sdk/zig/src";
 
 /// The extension-point registry — a CONTRACT, not part of this product. The
 /// runtime needs it too, and a runtime cannot depend on an SDK.
