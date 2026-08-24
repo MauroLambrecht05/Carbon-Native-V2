@@ -31,7 +31,20 @@ fn build() -> Option<AutoLaunch> {
     let exe_path = exe.to_str()?.to_string();
     let guard = cfg().lock().unwrap_or_else(|e| e.into_inner());
     let args: Vec<&str> = guard.1.iter().map(|s| s.as_str()).collect();
-    Some(AutoLaunch::new(&guard.0, &exe_path, &args))
+    // macOS's AutoLaunch::new takes a fourth `use_launch_agent: bool` other
+    // platforms don't: true writes a LaunchAgent plist
+    // (~/Library/LaunchAgents/<bundle>.plist, this file's own doc comment
+    // above already promises that path), false drives it via AppleScript
+    // instead. #[cfg] rather than a shared call: the other platforms'
+    // `new` doesn't take this parameter at all, not merely default it.
+    #[cfg(target_os = "macos")]
+    {
+        Some(AutoLaunch::new(&guard.0, &exe_path, true, &args))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Some(AutoLaunch::new(&guard.0, &exe_path, &args))
+    }
 }
 
 /// Throw a real JS Error with `e`'s message (see fs.rs's `throw` doc
