@@ -18,6 +18,9 @@ node_modules/
 # ── Build output ────────────────────────────────────────────────────────────
 # Cargo's target directory, beside the workspace manifest that produces it.
 /.tools/orchestration/bazel/cargo/target/
+# labs/gpu-canvas is parked, standalone, and outside that shared workspace —
+# its own target directory, from its own `cargo build`.
+/labs/gpu-canvas/target/
 # Generated FlatBuffers bindings, beside the generator that writes them.
 /.tools/generators/out/
 dist/

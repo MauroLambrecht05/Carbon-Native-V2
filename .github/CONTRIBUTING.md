@@ -74,11 +74,9 @@ Individually, for a faster loop:
 | `bazel test //.tools/validation/...` | structure, host boundary, every tsconfig |
 | `bazel test //.tools/automation/ci:boundaries_test` | the rules below |
 
-`carbon-gpu-canvas` is tagged `manual` and excluded from `//...`: its tests need
-a real GPU adapter CI runners don't have. Run it deliberately with
-`bazel test //solutions/capabilities/rendering/gpu:all` — no `RUSTUP_TOOLCHAIN`
-override needed for the toolchain itself: the shared pin above (1.88.0) already
-matches what its wgpu stack requires.
+`carbon-gpu-canvas` lives at `labs/gpu-canvas` — parked, not actively used, and
+not a member of the shared Cargo workspace, so `bazel test //...` never sees
+it at all. Build or test it standalone: `cd labs/gpu-canvas && cargo build`.
 
 ## The rules CI enforces
 

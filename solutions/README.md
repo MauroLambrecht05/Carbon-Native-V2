@@ -42,7 +42,7 @@ solutions/
 │   │   ├── lifecycle/        authoring, building and installing native plugins
 │   │   └── sdk/               the Zig SDK's implementation
 │   ├── rendering/         the runtime's own paint/layout/media stack
-│   │   ├── audio/ · gpu/ · imaging/ · layout/ · painting/ · text/
+│   │   ├── audio/ · imaging/ · layout/ · painting/ · text/
 │   │   ├── math/              pure vector/matrix computation — a library
 │   │   │                      (see "kinds" below), filed here because this
 │   │   │                      is where its only real consumer lives, not

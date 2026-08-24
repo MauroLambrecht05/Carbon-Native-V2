@@ -43,7 +43,9 @@ def validate_workspace(root: Path) -> bool:
         "distribution/packaging", "distribution/publishing",
         "distribution/signing", "distribution/updating",
         # rendering/ (Rust, migrated from V1's carbon/ — see products/carbon/MIGRATION.md)
-        "rendering/audio", "rendering/gpu", "rendering/imaging", "rendering/math",
+        # gpu (carbon-gpu-canvas) moved to labs/gpu-canvas — parked, not
+        # actively used. See its Cargo.toml.
+        "rendering/audio", "rendering/imaging", "rendering/math",
         "rendering/layout", "rendering/painting", "rendering/snapshot", "rendering/text",
         # plugin/
         "plugin/registry", "plugin/lifecycle", "plugin/sdk",

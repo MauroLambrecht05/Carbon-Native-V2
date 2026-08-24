@@ -415,10 +415,11 @@ def _with_tags(kwargs):
     tags = kwargs.pop("tags", [])
     return tags + [t for t in _UNCACHEABLE if t not in tags]
 
-# carbon-gpu-canvas is excluded from clippy for the same reason it is excluded
-# from `bazel test`: its wgpu stack needs a real GPU adapter. Lint it explicitly
-# on a machine that has one.
-_LINT_SCOPE = ["--workspace", "--exclude", "carbon-gpu-canvas"]
+# carbon-gpu-canvas moved to labs/gpu-canvas and left the Cargo workspace
+# entirely (see its Cargo.toml), so there is nothing left to --exclude here
+# — `--exclude carbon-gpu-canvas` against a workspace that no longer has it
+# as a member is itself a cargo error, not a no-op.
+_LINT_SCOPE = ["--workspace"]
 
 def cargo_fmt_test(name, **kwargs):
     """Fails if any file in the workspace is not rustfmt-clean."""

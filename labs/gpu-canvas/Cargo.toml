@@ -11,6 +11,19 @@
 #                    forbids circular crate dependencies, and a cycle cannot
 #                    straddle a layer boundary either.
 #
+# ── PARKED IN labs/, NOT ACTIVELY USED ──────────────────────────────────────
+# Moved out of solutions/ and out of the shared Cargo workspace — wgpu/canvas
+# work is picked up again later, not now. products/carbon's `gpu` feature and
+# carbon-paint's `gpu` feature are both now empty (see their Cargo.toml
+# comments) rather than pointing here, since labs/README.md's own rule is
+# "nothing may depend on labs/". The #[cfg(feature = "gpu")] host imports in
+# products/carbon/presentation/host/scene.rs and the #[cfg(feature = "gpu")]
+# code in carbon-paint are left exactly as they were, just permanently
+# inert — restoring this is re-adding the dependency + feature wiring there,
+# not rewriting integration code.
+#
+# Standalone now, not a workspace member: `cd labs/gpu-canvas && cargo build`.
+#
 # ── NO TESTS, AND A REASON IT IS HARD ───────────────────────────────────────
 # This crate needs a GPU adapter to do anything. It has no tests in V1 and none
 # here, and a headless CI machine or the dev container cannot run them without a
@@ -21,28 +34,19 @@
 name = "carbon-gpu-canvas"
 version = "0.1.0"
 edition = "2021"
-rust-version.workspace = true
-description = "Optional GPU canvas subsystem for the carbon runtime: a wgpu-backed 2D/3D drawing surface driven by JSON draw commands from JS."
-# The workspace manifest lives in .tools/orchestration/bazel/cargo, beside the
-# Bazel rules that drive it. Cargo only walks UP from a crate, so it would
-# never find it — the link has to be explicit.
-workspace = "../../../../.tools/orchestration/bazel/cargo"
+rust-version = "1.88"
+description = "Optional GPU canvas subsystem for the carbon runtime: a wgpu-backed 2D/3D drawing surface driven by JSON draw commands from JS. Parked in labs/ — not currently wired into any product."
 
 [lib]
 name = "carbon_gpu_canvas"
 path = "lib.rs"
 
-# Clippy runs with -D warnings; the shared allow-list lives in the workspace
-# root so one rationale covers every crate. See //.tools/orchestration/bazel/cargo/Cargo.toml.
-[lints]
-workspace = true
-
 [dependencies]
-anyhow = { workspace = true }
+anyhow = { version = "1", default-features = false, features = ["std"] }
 # executor.rs parses the JSON draw-command stream from JS. V1's manifest never
 # declared this — the crate is excluded from every workspace build there (see
 # .config/justfile), so nothing ever compiled it and the omission stayed hidden.
-serde_json = { workspace = true }
+serde_json = "1"
 # wgpu with only dx12 + wgsl. Defaults would pull in every backend and the SPIR-V
 # and GLSL front-ends; the runtime's premise is a small binary, and this crate is
 # already the single largest optional feature at ~2.5 MB.

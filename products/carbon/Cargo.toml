@@ -72,9 +72,14 @@ blitz = ["dep:blitz-dom", "dep:blitz-paint", "dep:blitz-traits", "dep:anyrender"
 
 # ── mini's optional sub-features (all imply "mini" — they only mean
 #    anything for that backend) ──
-# GPU canvas support. Off by default to extract 2.5 MB.
-# Phase 2: migrates to carbon-canvas plugin with dynamic loading.
-gpu = ["mini", "dep:carbon-gpu-canvas", "carbon-paint/gpu"]
+# GPU canvas support — parked, not actively used. carbon-gpu-canvas moved
+# to labs/gpu-canvas (standalone, out of the shared Cargo workspace) rather
+# than being deleted, since labs/README.md's own rule is "nothing may
+# depend on labs/". Left declared and empty rather than removed, so the
+# #[cfg(feature = "gpu")] host imports in presentation/host/scene.rs stay
+# compiled-out (not deleted) — re-enable by restoring the dependency line
+# below and this feature's activation list, not by rewriting that code.
+gpu = []
 # Image loading. Off by default to extract 0.8 MB.
 # Phase 2: migrates to carbon-image plugin with dynamic loading.
 image = ["mini", "dep:carbon-image"]
@@ -156,8 +161,6 @@ carbon-paint = { path = "../../solutions/capabilities/rendering/painting", optio
 carbon-image = { path = "../../solutions/capabilities/rendering/imaging", optional = true }
 # Web Audio API — opt-in (OPTIONAL via 'audio' feature).
 carbon-audio = { path = "../../solutions/capabilities/rendering/audio", optional = true }
-# carbon-gpu-canvas — the GPU canvas subsystem. Optional via the 'gpu' feature.
-carbon-gpu-canvas = { path = "../../solutions/capabilities/rendering/gpu", optional = true }
 # carbon-updater — A/B partition state machine and manifest verification (OPTIONAL via 'updater' feature).
 carbon-updater = { path = "../../solutions/capabilities/distribution/updating/rust", optional = true }
 # Tracy profiler — optional profiling zones for frame-level analysis.

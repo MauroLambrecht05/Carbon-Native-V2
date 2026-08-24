@@ -124,6 +124,9 @@ function walk(dir: string, onFile: (abs: string, rel: string) => void) {
     // dependency bump in the repo cannot silently move a measurement.
     ".tools/automation/benchmarks/forkbun/bun.lock",
     ".tools/automation/benchmarks/microbench/bun.lock",
+    // carbon-gpu-canvas is parked, standalone and deliberately not a member
+    // of the shared workspace above — see labs/gpu-canvas/Cargo.toml.
+    "labs/gpu-canvas/Cargo.lock",
   ]);
   for (const f of found) {
     if (allowed.has(f) || isApp(f)) continue;

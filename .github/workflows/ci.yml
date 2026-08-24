@@ -120,8 +120,9 @@ jobs:
         run: bazel test //:clippy_test --test_output=errors
 
       # //products/carbon-cli:compile is tagged `manual` (it needs node_modules
-      # and writes into the source tree), so //... skips it. carbon-gpu-canvas's
-      # tests need a real GPU adapter and are excluded at the rule level.
+      # and writes into the source tree), so //... skips it. carbon-gpu-canvas
+      # lives at labs/gpu-canvas now (parked, not a Cargo workspace member),
+      # so //... never sees it at all.
       - name: build
         run: bazel build //...
 

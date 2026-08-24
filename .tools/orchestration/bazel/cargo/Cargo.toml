@@ -51,7 +51,6 @@ members = [
   # Phase 3 — engines:
   "../../../../solutions/capabilities/rendering/layout",
   "../../../../solutions/capabilities/rendering/painting",
-  "../../../../solutions/capabilities/rendering/gpu",
   #
   # Phase 4 — host and platform:
   "../../../../solutions/contracts/runtime/rust",
@@ -68,6 +67,9 @@ members = [
   # solutions/capabilities/plugins/domain/value-objects/PluginLanguage.ts —
   # so a plugin is built by `zig build` and never enters this workspace.
   # labs/clipboard-plugin was the last Cargo member here.
+  #
+  # carbon-gpu-canvas left too — parked at labs/gpu-canvas, standalone, not
+  # actively used. See its Cargo.toml for why and how it comes back.
 ]
 
 [workspace.package]

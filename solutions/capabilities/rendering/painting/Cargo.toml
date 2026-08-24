@@ -39,14 +39,18 @@ workspace = true
 [dependencies]
 carbon-layout = { path = "../layout" }
 carbon-text-renderer = { path = "../text" }
-# Optional so a build without the `gpu` feature never compiles wgpu — see the
-# note in the gpu-canvas manifest about its ~2.5 MB.
-carbon-gpu-canvas = { path = "../gpu", optional = true }
 serde_json = { workspace = true }
 tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd", "png-format"] }
 
+# Parked, not actively used — carbon-gpu-canvas moved to labs/gpu-canvas
+# (standalone, out of the shared Cargo workspace), so this can no longer
+# depend on it: labs/README.md's own rule is "nothing may depend on labs/".
+# Left declared and empty rather than removed, so the
+# #[cfg(feature = "gpu")] code in lib.rs stays compiled-out (not deleted) —
+# re-enable by restoring the dependency above and this feature's
+# activation list, not by rewriting that code.
 [features]
-gpu = ["dep:carbon-gpu-canvas"]
+gpu = []
 
 # Frame zone markers around the paint dispatch, printed when
 # CARBON_MINI_PROFILING is set. lib.rs has always had the `#[cfg(feature =
