@@ -133,9 +133,7 @@ jobs:
         if: runner.os == 'macOS' && env.CARBON_DEVELOPER_ID != ''
         env:
           CARBON_DEVELOPER_ID: ${{ secrets.CARBON_DEVELOPER_ID }}
-        run: |
-          chmod +x ./.tools/automation/ci/sign-macos.sh
-          ./.tools/automation/ci/sign-macos.sh dist/*.app
+        run: ./.tools/automation/ci/sign-macos.sh dist/*.app
 
       - name: notarize (macos)
         if: runner.os == 'macOS' && env.CARBON_APPLE_ID != ''
@@ -143,9 +141,7 @@ jobs:
           CARBON_APPLE_ID: ${{ secrets.CARBON_APPLE_ID }}
           CARBON_APP_PASSWORD: ${{ secrets.CARBON_APP_PASSWORD }}
           CARBON_TEAM_ID: ${{ secrets.CARBON_TEAM_ID }}
-        run: |
-          chmod +x ./.tools/automation/ci/notarize-poll.sh
-          ./.tools/automation/ci/notarize-poll.sh dist/*.app
+        run: ./.tools/automation/ci/notarize-poll.sh dist/*.app
 
       - name: sign update manifest
         if: env.CARBON_SIGNING_KEY != ''
