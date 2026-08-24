@@ -83,18 +83,23 @@ jobs:
 
       # carbon-mini's Linux build links against X11/Wayland, GL and ALSA through
       # tao, softbuffer and cpal. //products/carbon:mini is inside //... .
-      # libgtk-3-dev specifically: tao's Linux backend depends on the `gtk`
-      # crate, which needs glib-2.0/gobject-2.0/gio-2.0 via pkg-config — none
-      # of which the other packages here provide. Confirmed on a real CI run:
-      # `failed to run custom build command for gobject-sys` /
-      # `Package glib-2.0 was not found in the pkg-config search path`,
-      # first on a plain `cargo build`, not something specific to clippy.
+      #
+      # libgtk-3-dev / libdbus-1-dev / libx11-xcb-dev: this is the same list
+      # products/carbon-cloud/composition/docker/worker-linux.Dockerfile
+      # arrived at building the real thing in a real container (see its own
+      # comment for the reasoning on each — gtk for tao's Linux backend,
+      # dbus for notify-rust's "dbus" feature, x11-xcb for softbuffer's "x11"
+      # feature). Confirmed missing here independently, on a real CI run:
+      # gobject-sys/glib-sys failing pkg-config first (this file's own
+      # history — libgtk-3-dev alone got further, then tiny-xlib's x11-xcb
+      # check failed the same way build-examples had already hit it).
       - name: linux system deps
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libxkbcommon-dev libwayland-dev libxrandr-dev \
-            libxi-dev libgl1-mesa-dev libasound2-dev libgtk-3-dev pkg-config
+            libxi-dev libgl1-mesa-dev libasound2-dev libgtk-3-dev libdbus-1-dev \
+            libx11-xcb-dev pkg-config
 
       - name: install js deps
         shell: bash
@@ -144,7 +149,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libxkbcommon-dev libwayland-dev libxrandr-dev \
-            libxi-dev libgl1-mesa-dev libasound2-dev libgtk-3-dev pkg-config
+            libxi-dev libgl1-mesa-dev libasound2-dev libgtk-3-dev libdbus-1-dev \
+            libx11-xcb-dev pkg-config
 
       - name: install js deps
         shell: bash
