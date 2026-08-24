@@ -154,8 +154,14 @@ describe("the Rust table", () => {
     expect(rust).toContain(
       'pub type PaintBeforeFn = unsafe extern "C" fn(app: *mut CarbonApp, pixmap: *mut u8, width: u32);',
     );
+    // Over rustfmt's 100-char width as one line, so the generator wraps it
+    // after `=` — see RustRenderer.ts's renderFnTypedef. Asserted as two
+    // lines rather than joined back into one, so a regression here (the
+    // generator's output no longer being rustfmt-clean) fails this test
+    // instead of only ever showing up as a `bazel test //:fmt_test` failure
+    // on a generated file nobody can hand-fix.
     expect(rust).toContain(
-      'pub type HostResolveAssetFn = unsafe extern "C" fn(app: *mut CarbonApp, request: *const c_char) -> i32;',
+      'pub type HostResolveAssetFn =\n    unsafe extern "C" fn(app: *mut CarbonApp, request: *const c_char) -> i32;',
     );
   });
 

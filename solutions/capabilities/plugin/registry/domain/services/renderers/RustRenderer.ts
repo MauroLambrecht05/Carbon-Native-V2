@@ -152,7 +152,7 @@ export function renderRust(registry: ExtensionPointRegistry): string {
     for (const line of wrapComment(`\`${point.id}\` — ${point.dispatch}`, 76)) {
       out.push(`/// ${line}`.trimEnd());
     }
-    out.push(`pub type ${point.pascalName}Fn = unsafe extern "C" fn(${rustParams(point)})${rustReturn(point)};`);
+    out.push(...renderFnTypedef(point));
     out.push("");
   }
 
@@ -166,11 +166,42 @@ export function renderRust(registry: ExtensionPointRegistry): string {
   return out.join("\n");
 }
 
+function rustParamList(point: ExtensionPoint): string[] {
+  return ["app: *mut CarbonApp", ...point.params.map((p) => `${p.name}: ${p.type.rust}`)];
+}
+
 function rustParams(point: ExtensionPoint): string {
-  const params = ["app: *mut CarbonApp", ...point.params.map((p) => `${p.name}: ${p.type.rust}`)];
-  return params.join(", ");
+  return rustParamList(point).join(", ");
 }
 
 function rustReturn(point: ExtensionPoint): string {
   return point.returns.id === "void" ? "" : ` -> ${point.returns.rust}`;
+}
+
+// rustfmt's default max_width (100) decides whether `pub type ...Fn = ...;`
+// fits on one line, needs only a break after `=`, or needs one parameter per
+// line — matched here so the generator's own output is already rustfmt-
+// clean. Without this, two points (paint.before's 5 params, host.resolve_
+// asset's long name) rendered over width in the one-line form, and nothing
+// here wrapped them to match: generated.rs failed `bazel test //:fmt_test`
+// on every run, since a GENERATED file can't be hand-formatted without the
+// next `carbon ext generate` undoing it.
+const RUSTFMT_MAX_WIDTH = 100;
+
+function renderFnTypedef(point: ExtensionPoint): string[] {
+  const name = `${point.pascalName}Fn`;
+  const params = rustParams(point);
+  const ret = rustReturn(point);
+
+  const oneLine = `pub type ${name} = unsafe extern "C" fn(${params})${ret};`;
+  if (oneLine.length <= RUSTFMT_MAX_WIDTH) return [oneLine];
+
+  const afterEquals = `    unsafe extern "C" fn(${params})${ret};`;
+  if (afterEquals.length <= RUSTFMT_MAX_WIDTH) return [`pub type ${name} =`, afterEquals];
+
+  return [
+    `pub type ${name} = unsafe extern "C" fn(`,
+    ...rustParamList(point).map((p) => `    ${p},`),
+    `)${ret};`,
+  ];
 }

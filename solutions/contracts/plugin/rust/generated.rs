@@ -238,7 +238,13 @@ pub type LifecycleShutdownFn = unsafe extern "C" fn(app: *mut CarbonApp);
 
 /// `paint.before` — Every frame, after the rasterizer has drawn the scene and
 /// before the pixmap is presented.
-pub type PaintBeforeFn = unsafe extern "C" fn(app: *mut CarbonApp, pixmap: *mut u8, width: u32, height: u32, stride_bytes: u32);
+pub type PaintBeforeFn = unsafe extern "C" fn(
+    app: *mut CarbonApp,
+    pixmap: *mut u8,
+    width: u32,
+    height: u32,
+    stride_bytes: u32,
+);
 
 /// `paint.after` — Every frame, after present.
 pub type PaintAfterFn = unsafe extern "C" fn(app: *mut CarbonApp);
@@ -254,7 +260,8 @@ pub type WindowThemeChangedFn = unsafe extern "C" fn(app: *mut CarbonApp, is_dar
 /// `host.resolve_asset` — NOT YET DISPATCHED — see the doc. Intended: when the
 /// runtime cannot resolve an asset specifier itself, before it reports a load
 /// failure.
-pub type HostResolveAssetFn = unsafe extern "C" fn(app: *mut CarbonApp, request: *const c_char) -> i32;
+pub type HostResolveAssetFn =
+    unsafe extern "C" fn(app: *mut CarbonApp, request: *const c_char) -> i32;
 
 /// Keeps `c_char` used when no point in the registry takes a string.
 #[allow(dead_code)]
