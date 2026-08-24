@@ -29,8 +29,12 @@ cargo_library(
 # literals with no window, device or scene.
 #
 # scene.rs is still uncovered. That is the next piece of work here.
+# size = "large" (900s, default "medium"/300s): TIMEOUT on a real CI run
+# under full workspace parallelism — see products/carbon:launch_test's
+# comment for the same reasoning.
 cargo_test(
     name = "layout_test",
     package = "carbon-layout",
     srcs = [":srcs", ":tests"],
+    size = "large",
 )

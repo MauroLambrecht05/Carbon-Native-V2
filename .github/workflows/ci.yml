@@ -73,9 +73,14 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.3.10"
+      # rustfmt, not just clippy: //:fmt_test is part of //... and this job
+      # runs `bazel test //...` — without rustfmt on THIS job's toolchain,
+      # fmt_test fails here with "'cargo-fmt' is not installed for the
+      # toolchain", even though the separate "structure & format" job above
+      # already installs it (that job's toolchain is not this job's).
       - uses: dtolnay/rust-toolchain@1.88
         with:
-          components: clippy
+          components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       - uses: bazel-contrib/setup-bazel@0.8.0
         with:
@@ -127,9 +132,15 @@ jobs:
       # immediately (1 of 27 startup phases reached) with no $DISPLAY at
       # all. xvfb-run gives it a real (virtual) one rather than changing
       # what the runtime does at startup to avoid needing one.
+      #
+      # --test_env=DISPLAY: xvfb-run sets $DISPLAY on the job's own shell,
+      # but Bazel's sandboxed test actions are hermetic by default and do
+      # not inherit the invoking shell's environment — confirmed on a real
+      # CI run: the same "cannot open display" GTK warning persisted even
+      # under xvfb-run until this flag told Bazel to pass DISPLAY through.
       - name: test (linux)
         if: runner.os == 'Linux'
-        run: xvfb-run -a bazel test //... --test_output=errors
+        run: xvfb-run -a bazel test //... --test_output=errors --test_env=DISPLAY
 
       - name: test (non-linux)
         if: runner.os != 'Linux'

@@ -25,8 +25,12 @@ cargo_library(
 #
 # The rest of this crate drives real OS facilities and stays untested here; its
 # surface is checked by the host-boundary validator against contracts/runtime.
+# size = "large" (900s, default "medium"/300s): TIMEOUT on a real CI run
+# under full workspace parallelism — see products/carbon:launch_test's
+# comment for the same reasoning.
 cargo_test(
     name = "plugin_loader_test",
     package = "carbon-plugin-host",
     srcs = [":srcs"],
+    size = "large",
 )
