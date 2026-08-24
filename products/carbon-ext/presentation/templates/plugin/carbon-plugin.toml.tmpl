@@ -8,14 +8,19 @@ name = "@@NAME@@"
 version = "0.1.0"
 language = "zig"
 
-[abi]
-major = 1
-minor = 1
-
 # Extension points this plugin implements. Every id must exist in
 # solutions/contracts/plugin/registry/extension-points.zig — run
 # `carbon ext list` to see them, or `carbon plugin check` to verify these.
+#
+# Must stay above [abi]: `carbon plugin check`'s TOML reader looks for this
+# as a top-level key, and real TOML makes anything after a [section] header
+# belong to that section until the next one — placing it below [abi] silently
+# makes it unreadable, not an error.
 extension-points = ["lifecycle.register"]
+
+[abi]
+major = 1
+minor = 1
 
 [capabilities]
 # Points that gate on a capability contribute it automatically; anything here

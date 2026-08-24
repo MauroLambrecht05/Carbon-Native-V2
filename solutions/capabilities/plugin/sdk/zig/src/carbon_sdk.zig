@@ -17,6 +17,7 @@
 // table was generated from.
 
 const std = @import("std");
+const builtin = @import("builtin");
 
 /// The extension-point registry, and the comptime helpers that check an id.
 pub const ext = @import("extension_points.zig");
@@ -44,6 +45,61 @@ pub const CARBON_ERR_NO_CTX: i32 = c.CARBON_ERR_NO_CTX;
 /// directly can do so. Most should prefer the helpers below.
 pub const RawApp = c.CarbonApp;
 pub const RawJsContext = c.CarbonJSContext;
+
+// carbon_plugin.h's "RESOLUTION MODEL" comment (above the carbon_js_*
+// declarations) is the contract this section implements: those symbols are
+// exported by the carbon-mini/carbon-blitz HOST executable
+// (products/carbon/build.rs emits the /EXPORT: linker args on Windows,
+// -rdynamic elsewhere), not linked by a plugin — there is no host .exe on
+// disk for a plugin to link against when it builds standalone. Calling them
+// through @cImport's plain `extern "c"` declarations instead makes the
+// PLUGIN's own linker demand them at build time, which fails with
+// "undefined symbol" (confirmed building labs/clipboard-plugin before this
+// fix). They have to be resolved at LOAD time, once the plugin DLL is
+// inside the host process — GetProcAddress on Windows, dlsym elsewhere —
+// looked up once and cached, exactly as the header says the SDK should.
+fn resolveHostSymbol(comptime name: [:0]const u8) *anyopaque {
+    return switch (builtin.os.tag) {
+        .windows => blk: {
+            const k32 = std.os.windows.kernel32;
+            const module = k32.GetModuleHandleW(null) orelse
+                @panic("carbon plugin: could not get a handle to the host process");
+            const proc = k32.GetProcAddress(module, name) orelse
+                @panic("carbon plugin: host process does not export " ++ name ++
+                    " — was it built without the /EXPORT linker args in products/carbon/build.rs?");
+            break :blk @as(*anyopaque, @ptrCast(proc));
+        },
+        else => blk: {
+            // RTLD_DEFAULT isn't exposed by Zig's std.c. glibc/musl define
+            // it as NULL; Darwin's dlfcn.h defines it as -2 — fixed,
+            // documented per-platform values, not something to guess.
+            const rtld_default: ?*anyopaque = if (builtin.target.isDarwin())
+                @ptrFromInt(@as(usize, @bitCast(@as(isize, -2))))
+            else
+                null;
+            break :blk std.c.dlsym(rtld_default, name) orelse
+                @panic("carbon plugin: host process does not export " ++ name ++
+                    " — was it built with -rdynamic (see products/carbon/build.rs)?");
+        },
+    };
+}
+
+const SetGlobalStringFn = *const fn (*c.CarbonJSContext, [*:0]const u8, [*:0]const u8) callconv(.C) i32;
+const SetGlobalNumberFn = *const fn (*c.CarbonJSContext, [*:0]const u8, f64) callconv(.C) i32;
+const SetGlobalFunctionFn = *const fn (*c.CarbonJSContext, [*:0]const u8, c.CarbonJSCallback) callconv(.C) i32;
+const EvalFn = *const fn (*c.CarbonJSContext, [*:0]const u8) callconv(.C) i32;
+
+var set_global_string_fn: ?SetGlobalStringFn = null;
+var set_global_number_fn: ?SetGlobalNumberFn = null;
+var set_global_function_fn: ?SetGlobalFunctionFn = null;
+var eval_fn: ?EvalFn = null;
+
+fn resolved(comptime T: type, cache: *?T, comptime name: [:0]const u8) T {
+    if (cache.*) |f| return f;
+    const f: T = @ptrCast(@alignCast(resolveHostSymbol(name)));
+    cache.* = f;
+    return f;
+}
 
 /// A safe-ish view over a `*c.CarbonApp` pointer. Construct one inside
 /// each entry point with `CarbonApp.fromRaw(app)`.
@@ -81,22 +137,26 @@ pub const CarbonApp = struct {
 
     pub fn setGlobalString(self: CarbonApp, name: [*:0]const u8, value: [*:0]const u8) i32 {
         const ctx = self.raw.js_ctx orelse return CARBON_ERR_NO_CTX;
-        return c.carbon_js_set_global_string(ctx, name, value);
+        const f = resolved(SetGlobalStringFn, &set_global_string_fn, "carbon_js_set_global_string");
+        return f(ctx, name, value);
     }
 
     pub fn setGlobalNumber(self: CarbonApp, name: [*:0]const u8, value: f64) i32 {
         const ctx = self.raw.js_ctx orelse return CARBON_ERR_NO_CTX;
-        return c.carbon_js_set_global_number(ctx, name, value);
+        const f = resolved(SetGlobalNumberFn, &set_global_number_fn, "carbon_js_set_global_number");
+        return f(ctx, name, value);
     }
 
     pub fn setGlobalFunction(self: CarbonApp, name: [*:0]const u8, cb: c.CarbonJSCallback) i32 {
         const ctx = self.raw.js_ctx orelse return CARBON_ERR_NO_CTX;
-        return c.carbon_js_set_global_function(ctx, name, cb);
+        const f = resolved(SetGlobalFunctionFn, &set_global_function_fn, "carbon_js_set_global_function");
+        return f(ctx, name, cb);
     }
 
     pub fn eval(self: CarbonApp, source: [*:0]const u8) i32 {
         const ctx = self.raw.js_ctx orelse return CARBON_ERR_NO_CTX;
-        return c.carbon_js_eval(ctx, source);
+        const f = resolved(EvalFn, &eval_fn, "carbon_js_eval");
+        return f(ctx, source);
     }
 };
 

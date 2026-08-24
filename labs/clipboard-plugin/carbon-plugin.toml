@@ -7,13 +7,18 @@ name = "carbon-clipboard"
 version = "0.2.0"
 language = "zig"
 
+# Both points this plugin implements. `carbon plugin check` resolves each
+# against solutions/contracts/plugin/registry/extension-points.zig.
+#
+# Must stay above [abi]: `carbon plugin check`'s TOML reader looks for this
+# as a top-level key, and real TOML makes anything after a [section] header
+# belong to that section until the next one — placing it below [abi] silently
+# makes it unreadable, not an error.
+extension-points = ["lifecycle.register", "window.theme_changed"]
+
 [abi]
 major = 1
 minor = 1
-
-# Both points this plugin implements. `carbon plugin check` resolves each
-# against solutions/contracts/plugin/registry/extension-points.zig.
-extension-points = ["lifecycle.register", "window.theme_changed"]
 
 [capabilities]
 # Not extension-point capabilities — no point gates on these. They are this
