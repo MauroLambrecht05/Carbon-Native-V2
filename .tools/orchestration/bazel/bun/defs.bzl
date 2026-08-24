@@ -76,7 +76,16 @@ if not "%BUILD_WORKSPACE_DIRECTORY%"=="" (
     )
   )
 )
-rem Same defensive check as the .sh launcher: a resolved-but-wrong PRELOAD
+rem bun treats a --preload argument with no leading "./" or "/" as a bare
+rem module specifier, not a filesystem path, and errors instead of falling
+rem back to one — reproduced directly (not guessed from the error text):
+rem `bun test --preload sub/x.ts` fails the exact same way, `--preload
+rem ./sub/x.ts` works. ENTRY never hit this because {entry_prefix} is "./"
+rem for every bun_test; nothing gave PRELOAD the same treatment. Verified
+rem this exact chained-if form on real cmd.exe first (absolute, already-
+rem relative and empty PRELOAD all correctly left alone).
+if not "!PRELOAD!"=="" if not "!PRELOAD:~0,1!"=="/" if not "!PRELOAD:~0,2!"=="./" set "PRELOAD=./!PRELOAD!"
+rem Belt and braces, same as the .sh launcher: a resolved-but-wrong PRELOAD
 rem must not hard-fail the run — see its comment for why this exists.
 if not "!PRELOAD!"=="" if not exist "!PRELOAD!" set "PRELOAD="
 set "PRELOAD_ARG="
@@ -115,14 +124,23 @@ elif [ -f "$RUNFILES_DIR/MANIFEST" ]; then
 else
   cd "$RUNFILES_DIR/{workspace}"
 fi
-# Confirmed on a real `bazel test` run (Linux, processwrapper-sandbox): this
-# branch's cd target does not consistently place the preload's short_path
-# where a plain relative reference finds it, even when the same relative
-# form correctly resolves ENTRY seconds later — bun then hard-errors with
-# "preload not found", which is exactly the failure mode the comment above
-# already said skipping was supposed to prevent. That fallback was never
-# actually implemented; this is it: check the resolved path is a real file
-# before ever passing --preload, on every branch, not just this one.
+# Confirmed by reproducing it directly, not guessed from the error text:
+# `bun test --preload sub/x.ts` fails with this exact message
+# ("error: preload not found ..."), `--preload ./sub/x.ts` works — bun
+# treats an argument with no "./" or "/" prefix as a bare module specifier,
+# not a filesystem path, and never falls back to trying it as one. ENTRY
+# never hit this because entry_prefix is "./" for every bun_test; nothing
+# gave PRELOAD the same treatment. This branch's PRELOAD is still the raw
+# short_path from Starlark (".tools/..."), so it needs it; the MANIFEST
+# branch's is already the absolute path grep resolved, so it already
+# passes the "starts with /" check below and is left alone.
+if [ -n "$PRELOAD" ] && [ "${{PRELOAD#/}}" = "$PRELOAD" ] && [ "${{PRELOAD#./}}" = "$PRELOAD" ]; then
+  PRELOAD="./$PRELOAD"
+fi
+# Belt and braces: whichever branch and prefix produced it, if it still
+# does not name a real file, degrade to running without one rather than
+# letting bun hard-error — exactly what the comment above always said
+# skipping was supposed to do, which nothing actually implemented before.
 if [ -n "$PRELOAD" ] && [ ! -f "$PRELOAD" ]; then PRELOAD=""; fi
 PRELOAD_ARG=""
 if [ -n "$PRELOAD" ]; then PRELOAD_ARG="--preload"; fi
