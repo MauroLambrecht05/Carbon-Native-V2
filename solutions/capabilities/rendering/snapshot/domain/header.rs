@@ -25,17 +25,17 @@ pub(crate) struct Hdr {
 pub(crate) struct Control {
     pub(crate) magic: u64,
     pub(crate) version: u64,
-    pub(crate) exe_base: u64,    // module base of carbon-mini.exe at build time (ASLR guard)
-    pub(crate) base: u64,        // == ARENA_BASE_ADDR
-    pub(crate) reserve: u64,     // == ARENA_RESERVE
-    pub(crate) committed: u64,   // bytes committed from base
-    pub(crate) bump: u64,        // next fresh-allocation address
-    pub(crate) data_start: u64,  // first allocatable address (past this struct)
-    pub(crate) rt: u64,          // *mut JSRuntime
-    pub(crate) ctx: u64,         // *mut JSContext
-    pub(crate) huge_head: u64,   // free list of huge blocks (header addresses)
+    pub(crate) exe_base: u64, // module base of carbon-mini.exe at build time (ASLR guard)
+    pub(crate) base: u64,     // == ARENA_BASE_ADDR
+    pub(crate) reserve: u64,  // == ARENA_RESERVE
+    pub(crate) committed: u64, // bytes committed from base
+    pub(crate) bump: u64,     // next fresh-allocation address
+    pub(crate) data_start: u64, // first allocatable address (past this struct)
+    pub(crate) rt: u64,       // *mut JSRuntime
+    pub(crate) ctx: u64,      // *mut JSContext
+    pub(crate) huge_head: u64, // free list of huge blocks (header addresses)
     pub(crate) alloc_calls: u64, // stats
-    pub(crate) live_bytes: u64,  // stats: currently-handed-out payload bytes (approx)
+    pub(crate) live_bytes: u64, // stats: currently-handed-out payload bytes (approx)
     pub(crate) free_heads: [u64; NUM_CLASSES], // per-class free-list heads (header addrs)
 }
 
@@ -49,4 +49,3 @@ pub(crate) fn align_up(n: usize, a: usize) -> usize {
 }
 
 // ── Windows VirtualAlloc bindings ────────────────────────────────────────────
-

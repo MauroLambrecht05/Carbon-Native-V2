@@ -42,9 +42,7 @@
 use crate::host_exports::{HostCarbonApp, CARBON_PLUGIN_ABI_VERSION_MAJOR};
 use anyhow::{anyhow, Result};
 use carbon_core::config::PluginEntry;
-use carbon_plugin_contract::{
-    self as contract, Arity, CarbonApp, PointId, Stability, POINTS,
-};
+use carbon_plugin_contract::{self as contract, Arity, CarbonApp, PointId, Stability, POINTS};
 use libloading::{Library, Symbol};
 use serde::Deserialize;
 use std::collections::BTreeMap;

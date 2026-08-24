@@ -178,9 +178,7 @@ fn two(args: &[String], usage: &str) -> Result<(PathBuf, PathBuf)> {
 
 fn three(args: &[String], usage: &str) -> Result<(PathBuf, PathBuf, PathBuf)> {
     match (args.get(1), args.get(2), args.get(3)) {
-        (Some(a), Some(b), Some(c)) => {
-            Ok((PathBuf::from(a), PathBuf::from(b), PathBuf::from(c)))
-        }
+        (Some(a), Some(b), Some(c)) => Ok((PathBuf::from(a), PathBuf::from(b), PathBuf::from(c))),
         _ => Err(anyhow!("usage: carbon-delta {usage}")),
     }
 }
@@ -223,7 +221,9 @@ mod tests {
 
     /// Something compressible and diffable, like a tar of a release layer.
     fn layer(seed: u8, len: usize) -> Vec<u8> {
-        (0..len).map(|i| (i as u8).wrapping_mul(seed).wrapping_add(7)).collect()
+        (0..len)
+            .map(|i| (i as u8).wrapping_mul(seed).wrapping_add(7))
+            .collect()
     }
 
     #[test]

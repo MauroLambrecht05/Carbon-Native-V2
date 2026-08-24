@@ -68,12 +68,11 @@ use std::ffi::c_void;
 // capabilities use rather than the `format/` + `platform/` this crate invented
 // for itself; a frozen byte layout is a model and a Win32 call is an adapter,
 // which is exactly what those two words mean everywhere else in solutions/.
-#[path = "infrastructure/win.rs"]
-mod win;
 #[path = "domain/header.rs"]
 mod header;
+#[path = "infrastructure/win.rs"]
+mod win;
 use header::*;
-
 
 // ── Fixed arena geometry ────────────────────────────────────────────────────
 

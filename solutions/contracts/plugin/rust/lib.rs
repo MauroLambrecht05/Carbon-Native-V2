@@ -40,9 +40,7 @@ pub struct CarbonApp {
 
 mod generated;
 
-pub use generated::{
-    Arity, PointId, PointSpec, Stability, EXTENSION_POINTS_MINOR, POINTS,
-};
+pub use generated::{Arity, PointId, PointSpec, Stability, EXTENSION_POINTS_MINOR, POINTS};
 
 // The per-point function-pointer typedefs. Re-exported as a group rather than
 // named one by one: the list changes every time a point is added, and a

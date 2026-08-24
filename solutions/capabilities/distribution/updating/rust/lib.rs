@@ -10,14 +10,14 @@
 //   infrastructure/  fetching an artifact over the network
 //
 // `#[path]` keeps the module names, so every call site is unchanged.
-#[path = "domain/state.rs"]
-pub mod state;
-#[path = "domain/rollout.rs"]
-pub mod rollout;
-#[path = "domain/stop_list.rs"]
-pub mod stop_list;
 #[path = "domain/manifest.rs"]
 pub mod manifest;
+#[path = "domain/rollout.rs"]
+pub mod rollout;
+#[path = "domain/state.rs"]
+pub mod state;
+#[path = "domain/stop_list.rs"]
+pub mod stop_list;
 
 #[path = "application/apply.rs"]
 pub mod apply;
