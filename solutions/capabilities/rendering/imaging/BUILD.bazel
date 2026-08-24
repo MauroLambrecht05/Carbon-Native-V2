@@ -25,8 +25,12 @@ cargo_library(
 # 14 unit tests plus 16 integration tests, each running a real QuickJS
 # context. Five more are #[ignore]d in V1 and stay that way — they leak GC
 # objects when the Runtime drops; run them with --ignored --test-threads=1.
+# size = "large" (900s, default "medium"/300s): TIMEOUT on a real CI run
+# under full workspace parallelism — see products/carbon:launch_test's
+# comment for the same reasoning.
 cargo_test(
     name = "imaging_test",
     package = "carbon-image",
     srcs = [":srcs", ":tests"],
+    size = "large",
 )

@@ -26,9 +26,13 @@ cargo_library(
 # 9 integration tests. They run with the `no-audio` feature so there is no
 # attempt to open an output device — which is what makes them work in CI and
 # in the container.
+# size = "large" (900s, default "medium"/300s): TIMEOUT on a real CI run
+# under full workspace parallelism — see products/carbon:launch_test's
+# comment for the same reasoning.
 cargo_test(
     name = "audio_test",
     package = "carbon-audio",
     crate_features = ["no-audio"],
     srcs = [":srcs", ":tests"],
+    size = "large",
 )

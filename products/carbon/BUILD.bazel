@@ -55,6 +55,10 @@ cargo_binary(
 #
 # It needs no display: the runtime paints into a softbuffer surface and
 # CARBON_TEST_EXIT_MS brings it down cleanly.
+# size = "large" (900s, default is "medium"/300s): TIMEOUT at exactly 300.1s
+# on a real CI run under full workspace parallelism (bazel test //... runs
+# ~30 actions at once) — this compiles and launches the real runtime binary,
+# not something a bigger budget papers over incorrectly.
 cargo_test(
     name = "launch_test",
     package = "carbon-runtime",
@@ -66,4 +70,5 @@ cargo_test(
         ":srcs",
         ":tests",
     ],
+    size = "large",
 )

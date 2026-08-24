@@ -18,7 +18,15 @@ load("//.tools/orchestration/bazel/cargo:defs.bzl", "cargo_clippy_test", "cargo_
 # .tools/orchestration/bazel/cargo/Cargo.toml, named lint by lint with a reason and a count, so the
 # inherited debt is countable rather than hidden behind -A clippy::all.
 
-cargo_fmt_test(name = "fmt_test")
+# size = "large" (900s, default is "medium"/300s): confirmed timing out under
+# real CI parallelism (bazel test //... runs ~30 actions at once, and this one
+# does a fresh rustup toolchain sync each invocation) — "-- Test timed out --"
+# on a real run, immediately followed by cargo-fmt genuinely not being
+# installed yet. Not a fmt_test bug; a CI-parallelism headroom problem.
+cargo_fmt_test(
+    name = "fmt_test",
+    size = "large",
+)
 
 cargo_fmt(name = "fmt")
 
