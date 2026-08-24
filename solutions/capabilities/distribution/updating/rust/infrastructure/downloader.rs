@@ -61,7 +61,9 @@ fn verify_file(path: &Path, expected_sha256: &str) -> Result<()> {
     if hash == expected_sha256 {
         Ok(())
     } else {
-        Err(anyhow!("SHA256 mismatch: expected {expected_sha256}, got {hash}"))
+        Err(anyhow!(
+            "SHA256 mismatch: expected {expected_sha256}, got {hash}"
+        ))
     }
 }
 
