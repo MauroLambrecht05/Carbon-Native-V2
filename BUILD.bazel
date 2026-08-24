@@ -30,7 +30,14 @@ cargo_fmt_test(
 
 cargo_fmt(name = "fmt")
 
-cargo_clippy_test(name = "clippy_test")
+# size = "large" (900s, default "medium"/300s): TIMEOUT on a real CI run
+# under full workspace parallelism — clippy lints the whole workspace in one
+# invocation, so it pays the same real-tree-compile cost fmt_test's comment
+# above describes, just for `clippy` instead of `fmt`.
+cargo_clippy_test(
+    name = "clippy_test",
+    size = "large",
+)
 
 package_group(
     name = "carbon_internal",

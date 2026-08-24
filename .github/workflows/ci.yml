@@ -138,9 +138,17 @@ jobs:
       # not inherit the invoking shell's environment — confirmed on a real
       # CI run: the same "cannot open display" GTK warning persisted even
       # under xvfb-run until this flag told Bazel to pass DISPLAY through.
+      #
+      # --test_env=XAUTHORITY: DISPLAY alone was not enough — confirmed on a
+      # real CI run: "cannot open display: :99", i.e. the display NAME now
+      # resolved correctly but the connection still failed. xvfb-run -a also
+      # writes a per-run .Xauthority cookie and points XAUTHORITY at it;
+      # without forwarding that too, Bazel's test action has a display name
+      # but no credential Xvfb accepts, and GTK reports that the same way it
+      # reports a display that does not exist.
       - name: test (linux)
         if: runner.os == 'Linux'
-        run: xvfb-run -a bazel test //... --test_output=errors --test_env=DISPLAY
+        run: xvfb-run -a bazel test //... --test_output=errors --test_env=DISPLAY --test_env=XAUTHORITY
 
       - name: test (non-linux)
         if: runner.os != 'Linux'
