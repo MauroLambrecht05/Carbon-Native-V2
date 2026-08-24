@@ -76,6 +76,9 @@ if not "%BUILD_WORKSPACE_DIRECTORY%"=="" (
     )
   )
 )
+rem Same defensive check as the .sh launcher: a resolved-but-wrong PRELOAD
+rem must not hard-fail the run — see its comment for why this exists.
+if not "!PRELOAD!"=="" if not exist "!PRELOAD!" set "PRELOAD="
 set "PRELOAD_ARG="
 if not "!PRELOAD!"=="" set "PRELOAD_ARG=--preload "!PRELOAD!""
 "!BUN_EXE!" {subcommand}!PRELOAD_ARG! "!ENTRY!" {trailing} %*
@@ -112,6 +115,15 @@ elif [ -f "$RUNFILES_DIR/MANIFEST" ]; then
 else
   cd "$RUNFILES_DIR/{workspace}"
 fi
+# Confirmed on a real `bazel test` run (Linux, processwrapper-sandbox): this
+# branch's cd target does not consistently place the preload's short_path
+# where a plain relative reference finds it, even when the same relative
+# form correctly resolves ENTRY seconds later — bun then hard-errors with
+# "preload not found", which is exactly the failure mode the comment above
+# already said skipping was supposed to prevent. That fallback was never
+# actually implemented; this is it: check the resolved path is a real file
+# before ever passing --preload, on every branch, not just this one.
+if [ -n "$PRELOAD" ] && [ ! -f "$PRELOAD" ]; then PRELOAD=""; fi
 PRELOAD_ARG=""
 if [ -n "$PRELOAD" ]; then PRELOAD_ARG="--preload"; fi
 exec "$BUN_EXE" {subcommand}${{PRELOAD_ARG:+$PRELOAD_ARG "$PRELOAD"}} "$ENTRY" {trailing} "$@"
