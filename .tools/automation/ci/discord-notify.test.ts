@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
-import { formatPrEmbed, formatReleaseEmbed, parsePrBody, postToDiscord } from "./discord-notify.ts";
+import { formatCommitDigestEmbed, formatPrEmbed, formatReleaseEmbed, parsePrBody, postToDiscord } from "./discord-notify.ts";
 
 const TEMPLATE_BODY = (checkedType: string) => `## Type
 - [${checkedType === "feat" ? "x" : " "}] feat
@@ -104,6 +104,45 @@ describe("formatReleaseEmbed", () => {
   });
 });
 
+describe("formatCommitDigestEmbed", () => {
+  test("lists each commit as sha, message and author, singular title for one commit", () => {
+    const embed = formatCommitDigestEmbed(
+      [{ sha: "abcdef1234567", message: "Fix the thing", author: "mauro" }],
+      "https://github.com/x/y/commit/abcdef1234567",
+    );
+
+    expect(embed.title).toBe("1 commit landed on main");
+    expect(embed.description).toBe("`abcdef1` Fix the thing — mauro");
+  });
+
+  test("pluralizes the title and joins multiple commits with newlines, oldest first as given", () => {
+    const embed = formatCommitDigestEmbed(
+      [
+        { sha: "1111111aaaa", message: "First fix", author: "mauro" },
+        { sha: "2222222bbbb", message: "Second fix", author: "mauro" },
+      ],
+      "https://github.com/x/y/compare/aaa...bbb",
+    );
+
+    expect(embed.title).toBe("2 commits landed on main");
+    expect(embed.url).toBe("https://github.com/x/y/compare/aaa...bbb");
+    expect(embed.description).toBe("`1111111` First fix — mauro\n`2222222` Second fix — mauro");
+  });
+
+  test("truncates past Discord's 4096-char embed description limit", () => {
+    const commits = Array.from({ length: 200 }, (_, i) => ({
+      sha: `${i}`.padStart(40, "0"),
+      message: "x".repeat(50),
+      author: "mauro",
+    }));
+
+    const embed = formatCommitDigestEmbed(commits, "https://github.com/x/y/compare/a...b");
+
+    expect(embed.description?.length).toBe(4096);
+    expect(embed.description?.endsWith("…")).toBe(true);
+  });
+});
+
 describe("postToDiscord", () => {
   const originalFetch = globalThis.fetch;
   afterEach(() => {
@@ -120,6 +159,19 @@ describe("postToDiscord", () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("https://discord.com/api/webhooks/x/y");
     expect(JSON.parse(init.body as string)).toEqual({ embeds: [{ title: "hi" }] });
+  });
+
+  test("adds content only when given, since that's what actually pings on Discord", async () => {
+    const fetchMock = mock((_url: string, _init: RequestInit) => Promise.resolve(new Response("", { status: 204 })));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await postToDiscord("https://discord.com/api/webhooks/x/y", { title: "hi" }, "<@478580096454623235>");
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({
+      embeds: [{ title: "hi" }],
+      content: "<@478580096454623235>",
+    });
   });
 
   test("throws instead of silently swallowing a rejected webhook", async () => {

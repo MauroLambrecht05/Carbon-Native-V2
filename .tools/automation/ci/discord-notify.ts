@@ -114,11 +114,37 @@ export function formatReleaseEmbed(release: ReleaseInfo): DiscordEmbed {
   };
 }
 
-export async function postToDiscord(webhookUrl: string, embed: DiscordEmbed): Promise<void> {
+export interface CommitInfo {
+  readonly sha: string;
+  // First line only — a commit message's body belongs in `git log`, not a
+  // one-line-per-commit digest.
+  readonly message: string;
+  readonly author: string;
+}
+
+// One digest per green CI run on main, not one message per commit — a
+// backfill (or a run covering several quick pushes) would otherwise mean one
+// ping per commit. See .tools/automation/ci/notify-push-commits.ts for what
+// decides the commit range and moves the "last notified" marker.
+export function formatCommitDigestEmbed(commits: readonly CommitInfo[], compareUrl: string): DiscordEmbed {
+  const count = commits.length;
+  const lines = commits.map((c) => `\`${c.sha.slice(0, 7)}\` ${c.message} — ${c.author}`);
+
+  return {
+    title: `${count} commit${count === 1 ? "" : "s"} landed on main`,
+    url: compareUrl,
+    color: 0x2b7a4b,
+    description: truncate(lines.join("\n"), 4096),
+  };
+}
+
+export async function postToDiscord(webhookUrl: string, embed: DiscordEmbed, content?: string): Promise<void> {
   const response = await fetch(webhookUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ embeds: [embed] }),
+    // content, not the embed, is what Discord actually pings on — an
+    // @mention inside an embed field renders as text and pings nobody.
+    body: JSON.stringify({ embeds: [embed], ...(content ? { content } : {}) }),
   });
 
   if (!response.ok) {
