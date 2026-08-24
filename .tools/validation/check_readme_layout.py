@@ -115,6 +115,13 @@ def main() -> int:
             continue
 
         for entry in sorted(directory.iterdir()):
+            # .env is optional and machine-local by design (see .gitignore):
+            # a developer may or may not have created one from .env.example,
+            # so it can be either absent (a fresh clone, CI) or present
+            # (a workstation) without either state being wrong. Declaring it
+            # would make one of those two truths fail the other direction.
+            if parent == "" and entry.name == ".env":
+                continue
             # Bazel's convenience symlinks are created by a build, not by a
             # person, and their names depend on the workspace name.
             if entry.name.startswith("bazel-"):

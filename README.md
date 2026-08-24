@@ -78,8 +78,7 @@ V2/
 ├── labs/                              # Experiments. Disposable contents, permanent directory
 ├── products/                          # Shipping deliverables
 ├── solutions/                         # Everything the products are built out of
-├── .env                               # Machine-local, gitignored
-├── .env.example                       # …and the template that documents it
+├── .env.example                       # Template for the machine-local .env nothing here commits
 ├── .gitattributes
 ├── .gitignore
 ├── .dockerignore                      # products/carbon-cloud's Dockerfiles build with this
@@ -119,12 +118,11 @@ A workspace manifest is a build definition, so it moved to
 ├── automation/                        # bootstrap · build · release · testing · ci · benchmarks
 ├── environments/                      # docker · devcontainer
 ├── generators/                        # FlatBuffers binding generator (Python)
-├── integrations/                      # Editor and external-tool glue
 ├── orchestration/                     # Bazel rules: bazel/bun · bazel/cargo (Cargo.toml + target/)
 └── validation/                        # The workspace validators (Python)
 ```
 
-Three things are **not** here, and each was:
+Four things are **not** here, and each was:
 
 - **`.build/`** held 11 GB of Cargo output under a name the root README never
   declared, that only one line in `defs.bzl` pointed at, and that a hand-typed
@@ -139,6 +137,15 @@ Three things are **not** here, and each was:
   `automation/` is TypeScript — `orchestration/` is Starlark, `generators/` and
   `validation/` are Python — and its own `include` already said so. It now sits
   at `.tools/automation/tsconfig.json`.
+- **`integrations/`** ("editor and external-tool glue") existed only as an
+  empty directory — nothing was ever added to it, so it held no files and
+  git never tracked it. `check_readme_layout.py` caught the drift the first
+  time it ran somewhere that didn't already have the directory sitting on
+  disk from before the check existed: a fresh clone doesn't get an empty
+  directory git never committed, so the README declaring one is a promise a
+  checkout can't keep. Removed rather than populated with nothing, matching
+  `products/README.md`'s own rule — unused slots are omitted, not created
+  empty.
 
 ### The tiers
 
