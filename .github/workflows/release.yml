@@ -230,6 +230,19 @@ jobs:
             <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View details>
           webhook_url: ${{ secrets.SLACK_WEBHOOK }}
 
+      # Success-only, deliberately not always() the way the Slack step is:
+      # notify-release.ts always says "Released <tag>", so running it on a
+      # failed pipeline would announce a release that did not happen. If
+      # failure visibility in Discord is wanted later, that is the Slack
+      # step's job to extend (it already carries job.status), not this one's.
+      - name: notify discord
+        if: env.DISCORD_WEBHOOK_URL != ''
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ github.ref_name }}
+        run: bun .tools/automation/ci/notify-release.ts
+
   # Rollout starts at 10% (set above). Widening it is a deliberate act, not a
   # timer — V1 had a `canary-deploy` job whose "Wait for Metrics (24h)" step was
   # `sleep 60` and whose health check echoed "All systems nominal"

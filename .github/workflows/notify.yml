@@ -1,0 +1,31 @@
+name: Notify Discord
+
+# Announces a merged PR to the community server, parsed from the strict
+# Type/Affected/Explanation sections .github/PULL_REQUEST_TEMPLATE.md asks
+# every PR to fill in — see .tools/automation/ci/discord-notify.ts for the
+# parser and .tools/automation/ci/notify-pr-merged.ts for what this runs.
+#
+# A separate workflow from ci.yml (which gates merge) and release.yml (which
+# announces releases) because this fires on a different lifecycle event —
+# after merge, not on every push or PR update.
+
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  notify:
+    # pull_request(closed) fires on close-without-merge too; only a merge is
+    # an announcement. notify-pr-merged.ts checks this again itself, so
+    # running the script directly can't skip it either.
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.10"
+      - name: post to discord
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: bun .tools/automation/ci/notify-pr-merged.ts

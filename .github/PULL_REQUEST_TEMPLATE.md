@@ -1,13 +1,24 @@
-## Description
-<!-- Provide a clear summary of the changes introduced in this PR -->
+## Type
+<!-- Check exactly one. This drives the Discord announcement's color and label. -->
+- [ ] feat
+- [ ] fix
+- [ ] refactor
+- [ ] docs
+- [ ] chore
 
-## Affected Layers & Languages
-- [ ] C++ Core Compute (`solutions/internal/cpp`)
-- [ ] Zig Extension / Plugin (`solutions/internal/zig`)
-- [ ] Rust Systems / Network (`solutions/internal/rust`)
-- [ ] FlatBuffers Contracts (`solutions/shared/idl`)
-- [ ] Developer Tooling / Config (`.tools`, `.config`)
-- [ ] Infrastructure / Bazel (`MODULE.bazel`, `BUILD.bazel`)
+## Affected
+<!--
+The real path(s) this touches — a product or a solution, not a vague
+description. Examples:
+  products/carbon-discord
+  solutions/capabilities/cloud/billing
+  products/carbon-cli, solutions/interface/cli
+-->
+
+
+## Explanation
+<!-- Why this change, in prose. What problem it solves or what it adds. -->
+
 
 ## Verification Checklist
 - [ ] `python .tools/validation/check_workspace.py` passes
