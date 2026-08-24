@@ -1,0 +1,16 @@
+{
+  "name": "carbon-discord",
+  "version": "0.1.0",
+  "description": "Carbon Discord: the bot surface for the Carbon Native community server.",
+  "type": "module",
+  "scripts": {
+    "start": "bun ./main.ts",
+    "deploy-commands": "bun ./composition/deploy-commands.ts"
+  },
+  "dependencies": {
+    "discord.js": "^14.16.3"
+  },
+  "engines": {
+    "bun": ">=1.3.0"
+  }
+}

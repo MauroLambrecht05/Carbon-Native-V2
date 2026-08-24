@@ -8,6 +8,7 @@ shape.
 | `carbon` | the runtime an app runs on |
 | `carbon-cli` | an app developer: init, run, build, publish, plugin |
 | `carbon-cloud` | a build/release platform — push a repo, get a signed installer and auto-update |
+| `carbon-discord` | the Carbon Native community server — a bot reachable through Discord slash commands |
 | `carbon-ext` | an extension author — the plugin SDK itself |
 | `carbon-vscode` | an app developer, in the editor — `.ctsx` syntax highlighting |
 | `carbon-website` | a visitor deciding whether to try Carbon at all — the public marketing site |
