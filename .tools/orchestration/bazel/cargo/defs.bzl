@@ -109,7 +109,15 @@ _CARGO_ENV = {
     "CARGO_INCREMENTAL": "0",
     "CARGO_BUILD_RUSTFLAGS": "--remap-path-prefix=.=carbon-native",
     "CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS": "fallback",
-    "RUSTUP_TOOLCHAIN": "1.88",
+    # Fully qualified, not "1.88": rustup treats a bare channel spec as a
+    # DIFFERENT toolchain identity from the exact version CI actually
+    # installs (`rustup toolchain install 1.88.0 --component rustfmt`
+    # creates "1.88.0-<host>"), so "1.88" here made rustup silently
+    # auto-install a separate, component-less "1.88-<host>" the moment
+    # cargo/rustfmt ran — confirmed on a real CI run: "error: 'cargo-fmt'
+    # is not installed for the toolchain '1.88-x86_64-unknown-linux-gnu'"
+    # right after a green "Run dtolnay/rust-toolchain@1.88" install step.
+    "RUSTUP_TOOLCHAIN": "1.88.0",
 }
 
 # Locating cargo is identical on both platforms in intent, so the two launchers

@@ -50,7 +50,7 @@ nothing else.
 
 Bazel owns the graph; Cargo and Bun stay the compiler drivers. The reasoning is
 in [`.tools/orchestration/bazel/cargo/defs.bzl`](../.tools/orchestration/bazel/cargo/defs.bzl),
-which also pins the Rust toolchain to 1.88 via `RUSTUP_TOOLCHAIN` and carries
+which also pins the Rust toolchain to 1.88.0 via `RUSTUP_TOOLCHAIN` and carries
 the four settings a root `.cargo/config.toml` would otherwise hold.
 
 The workspace root holds Bazel's files and the tier directories, nothing else.
@@ -77,7 +77,7 @@ Individually, for a faster loop:
 `carbon-gpu-canvas` is tagged `manual` and excluded from `//...`: its tests need
 a real GPU adapter CI runners don't have. Run it deliberately with
 `bazel test //solutions/capabilities/rendering/gpu:all` — no `RUSTUP_TOOLCHAIN`
-override needed for the toolchain itself: the shared pin above (1.88) already
+override needed for the toolchain itself: the shared pin above (1.88.0) already
 matches what its wgpu stack requires.
 
 ## The rules CI enforces

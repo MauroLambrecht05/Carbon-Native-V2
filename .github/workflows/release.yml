@@ -26,7 +26,11 @@ env:
   CARGO_INCREMENTAL: "0"
   CARGO_BUILD_RUSTFLAGS: "--remap-path-prefix=.=carbon-native"
   CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS: fallback
-  RUSTUP_TOOLCHAIN: "1.88"
+  # Fully qualified, not "1.88": rustup treats a bare channel spec as a
+  # different toolchain identity from the exact version actually installed
+  # below, and auto-installs it component-less the moment cargo runs. See
+  # _CARGO_ENV in the Bazel cargo launcher, the definition this follows.
+  RUSTUP_TOOLCHAIN: "1.88.0"
 
 jobs:
   build-matrix:
@@ -51,14 +55,15 @@ jobs:
         with:
           fetch-depth: 0
 
-      # 1.88 here matches RUSTUP_TOOLCHAIN in env above, which in turn matches
-      # _CARGO_ENV in the Bazel cargo launcher. Three places, because a GitHub
-      # action cannot read a .bzl file — the launcher is the definition and the
-      # others follow it. `rust-version` in the workspace manifest is an MSRV
-      # assertion, not a toolchain selector, so it does not substitute for this.
+      # 1.88.0 here matches RUSTUP_TOOLCHAIN in env above, which in turn
+      # matches _CARGO_ENV in the Bazel cargo launcher. Three places, because
+      # a GitHub action cannot read a .bzl file — the launcher is the
+      # definition and the others follow it. `rust-version` in the workspace
+      # manifest is an MSRV assertion, not a toolchain selector, so it does
+      # not substitute for this.
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.88"
+          toolchain: "1.88.0"
           targets: ${{ matrix.target }}
 
       - uses: bazel-contrib/setup-bazel@0.8.0
