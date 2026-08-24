@@ -463,6 +463,25 @@ fn main() -> Result<()> {
     }
     timing_log("window_built", t0);
 
+    // Force GTK to realize the window immediately. On Linux, tao's rwh_06
+    // handle is None (HandleError::Unavailable) until the GdkWindow exists,
+    // which GTK otherwise defers until .show() — but this runtime paints
+    // before showing (see the non-Windows paint-then-show dance below), so
+    // softbuffer needs a real handle first. realize() creates the X11/Wayland
+    // backing window without mapping it on screen, so nothing is shown early.
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+    ))]
+    {
+        use gtk::prelude::WidgetExt;
+        use tao::platform::unix::WindowExtUnix;
+        window.gtk_window().realize();
+    }
+
     // softbuffer context bound to the window
     let context =
         softbuffer::Context::new(window.clone()).map_err(|e| anyhow!("softbuffer ctx: {e}"))?;

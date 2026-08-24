@@ -224,3 +224,15 @@ globset = "0.4"
 grep-regex = "0.1"
 grep-searcher = "0.1"
 shared_child = "1"
+
+[target.'cfg(any(target_os = "linux", target_os = "dragonfly", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
+# Forcing GTK to realize the window before softbuffer needs it. tao's rwh_06
+# handle on Linux/GTK returns HandleError::Unavailable until the GdkWindow is
+# realized (self.window.window() is None pre-realize — confirmed by reading
+# tao 0.30's raw_window_handle_rwh_06 source directly), which normally
+# happens on .show(). This runtime deliberately paints before showing (see
+# composition/mini.rs's non-Windows paint-then-show comment), so softbuffer
+# asks for the handle first. Pinned to match gtk-rs's version exactly because
+# tao 0.30 pins gtk = "0.18" itself; a mismatched version would give a
+# second, incompatible gtk-rs in the dependency graph.
+gtk = { version = "0.18", default-features = false }
