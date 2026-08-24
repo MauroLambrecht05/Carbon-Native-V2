@@ -164,10 +164,7 @@ fn time_eval<F: Fn()>(label: &str, f: F) -> f64 {
     samples.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let median = samples[samples.len() / 2];
     let ns_per_op = (median * 1_000_000.0) / ITERATIONS as f64;
-    eprintln!(
-        "  {:30}  median = {:>8.2} ms   |   {:>7.2} ns/op",
-        label, median, ns_per_op
-    );
+    eprintln!("  {label:30}  median = {median:>8.2} ms   |   {ns_per_op:>7.2} ns/op");
     median
 }
 
@@ -177,7 +174,7 @@ fn run_bench(
     js_setup: &str,
     native_setup: &str,
 ) -> (f64, f64) {
-    eprintln!("\n=== {} ===", label);
+    eprintln!("\n=== {label} ===");
     let js_ms = time_eval("JS three.js-like (baseline)", || {
         ctx.eval::<(), _>(js_setup.as_bytes()).unwrap();
     });
@@ -185,7 +182,7 @@ fn run_bench(
         ctx.eval::<(), _>(native_setup.as_bytes()).unwrap();
     });
     let speedup = js_ms / native_ms;
-    eprintln!("  ⇒ speedup: {:.2}× (Rust is faster)", speedup);
+    eprintln!("  ⇒ speedup: {speedup:.2}× (Rust is faster)");
     (js_ms, native_ms)
 }
 
@@ -197,7 +194,7 @@ fn main() {
         carbon_fast_math::register_math(&ctx).expect("register_math");
         ctx.eval::<(), _>(JS_BASELINE.as_bytes()).expect("baseline JS classes");
 
-        eprintln!("\nPhase 3 benchmarks — {} iterations × {} samples (median).\n", ITERATIONS, SAMPLES);
+        eprintln!("\nPhase 3 benchmarks — {ITERATIONS} iterations × {SAMPLES} samples (median).\n");
 
         // ─── 1. Vector3 add chain ───────────────────────────────────────
         let n = ITERATIONS;
@@ -366,8 +363,7 @@ fn main() {
         let scene_total = 1_000_000_u32;
         eprintln!("\n=== Realistic scene-traversal-style workload ===");
         eprintln!(
-            "    ({} objects × 1000 frames = {} applyMatrix4 calls + Box3-style min/max bookkeeping)",
-            scene_n, scene_total
+            "    ({scene_n} objects × 1000 frames = {scene_total} applyMatrix4 calls + Box3-style min/max bookkeeping)"
         );
         let js7 = time_eval("JS three.js-like (baseline)", || {
             ctx.eval::<(), _>(js_src.as_bytes()).unwrap();
@@ -376,7 +372,7 @@ fn main() {
             ctx.eval::<(), _>(rust_src.as_bytes()).unwrap();
         });
         let speedup7 = js7 / rust7;
-        eprintln!("  ⇒ speedup: {:.2}× (Rust is faster)", speedup7);
+        eprintln!("  ⇒ speedup: {speedup7:.2}× (Rust is faster)");
 
         // Emit a compact JSON-ish summary at the end. The bench script in
         // scripts/bench-phase3.ps1 greps these lines to populate the
