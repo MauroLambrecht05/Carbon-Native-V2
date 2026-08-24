@@ -100,7 +100,10 @@ impl State {
                 let sf = (self.window.scale_factor() as f32).max(0.1);
                 self.mouse_pos = (position.x as f32 / sf, position.y as f32 / sf);
                 if std::env::var_os("CARBON_MINI_CLICK_DEBUG").is_some() {
-                    eprintln!("[carbon-mini-move] ({:.1}, {:.1})", self.mouse_pos.0, self.mouse_pos.1);
+                    eprintln!(
+                        "[carbon-mini-move] ({:.1}, {:.1})",
+                        self.mouse_pos.0, self.mouse_pos.1
+                    );
                 }
                 // While any pointer-down is in flight, route pointer-move
                 // events back to the original target (implicit capture).
@@ -148,8 +151,12 @@ impl State {
                         let prev = s.hovered;
                         s.hovered = hit;
                         if std::env::var_os("CARBON_MINI_HOVER_DEBUG").is_some() {
-                            let bg_hov = hit.and_then(|i| s.nodes.get(&i)).and_then(|n| n.props.background_hover);
-                            let col_hov = hit.and_then(|i| s.nodes.get(&i)).and_then(|n| n.props.color_hover);
+                            let bg_hov = hit
+                                .and_then(|i| s.nodes.get(&i))
+                                .and_then(|n| n.props.background_hover);
+                            let col_hov = hit
+                                .and_then(|i| s.nodes.get(&i))
+                                .and_then(|n| n.props.color_hover);
                             eprintln!(
                                 "[carbon-mini-hover] prev={:?} -> hit={:?} bg_hover={:?} color_hover={:?}",
                                 prev, hit, bg_hov.map(|c| format!("#{:08x}", c)), col_hov.map(|c| format!("#{:08x}", c))
@@ -181,12 +188,8 @@ impl State {
                                     Some("default") | Some("auto") | Some("inherit") => {
                                         tao::window::CursorIcon::Default
                                     }
-                                    Some("pointer") | Some("hand") => {
-                                        tao::window::CursorIcon::Hand
-                                    }
-                                    Some("text") | Some("ibeam") => {
-                                        tao::window::CursorIcon::Text
-                                    }
+                                    Some("pointer") | Some("hand") => tao::window::CursorIcon::Hand,
+                                    Some("text") | Some("ibeam") => tao::window::CursorIcon::Text,
                                     Some("crosshair") => tao::window::CursorIcon::Crosshair,
                                     Some("not-allowed") | Some("notallowed") => {
                                         tao::window::CursorIcon::NotAllowed
@@ -204,9 +207,7 @@ impl State {
                                     }
                                     // No explicit cursor — clickable nodes
                                     // get the pointer hand by default.
-                                    _ if n.props.clickable => {
-                                        tao::window::CursorIcon::Hand
-                                    }
+                                    _ if n.props.clickable => tao::window::CursorIcon::Hand,
                                     _ => tao::window::CursorIcon::Default,
                                 },
                                 None => tao::window::CursorIcon::Default,
@@ -244,22 +245,38 @@ impl State {
                     {
                         let s = self.scene.lock().unwrap_or_else(|e| e.into_inner());
                         let (mx, my) = self.mouse_pos;
-                        let mut hits: Vec<(u32, String, f32, f32, f32, f32, bool, bool)> = Vec::new();
+                        let mut hits: Vec<(u32, String, f32, f32, f32, f32, bool, bool)> =
+                            Vec::new();
                         fn collect(
                             s: &crate::scene::Scene,
                             id: u32,
-                            ox: f32, oy: f32,
-                            mx: f32, my: f32,
+                            ox: f32,
+                            oy: f32,
+                            mx: f32,
+                            my: f32,
                             out: &mut Vec<(u32, String, f32, f32, f32, f32, bool, bool)>,
                         ) {
-                            let Some(n) = s.nodes.get(&id) else { return; };
-                            let Some(layout) = n.computed_layout else { return; };
+                            let Some(n) = s.nodes.get(&id) else {
+                                return;
+                            };
+                            let Some(layout) = n.computed_layout else {
+                                return;
+                            };
                             let nx = ox + layout.location.x;
                             let ny = oy + layout.location.y;
                             let nw = layout.size.width;
                             let nh = layout.size.height;
                             if mx >= nx && my >= ny && mx <= nx + nw && my <= ny + nh {
-                                out.push((id, n.tag.clone(), nx, ny, nw, nh, n.props.clickable, n.props.drag_region));
+                                out.push((
+                                    id,
+                                    n.tag.clone(),
+                                    nx,
+                                    ny,
+                                    nw,
+                                    nh,
+                                    n.props.clickable,
+                                    n.props.drag_region,
+                                ));
                                 for &c in &n.children {
                                     collect(s, c, nx, ny, mx, my, out);
                                 }
@@ -278,25 +295,43 @@ impl State {
                         fn collect<'a>(
                             s: &'a crate::scene::Scene,
                             id: u32,
-                            ox: f32, oy: f32,
-                            mx: f32, my: f32,
+                            ox: f32,
+                            oy: f32,
+                            mx: f32,
+                            my: f32,
                             out: &mut Vec<(u32, &'a str, f32, f32, f32, f32, bool, bool)>,
                         ) {
-                            let Some(n) = s.nodes.get(&id) else { return; };
-                            let Some(layout) = n.computed_layout else { return; };
+                            let Some(n) = s.nodes.get(&id) else {
+                                return;
+                            };
+                            let Some(layout) = n.computed_layout else {
+                                return;
+                            };
                             let nx = ox + layout.location.x;
                             let ny = oy + layout.location.y;
                             let nw = layout.size.width;
                             let nh = layout.size.height;
                             if mx >= nx && my >= ny && mx <= nx + nw && my <= ny + nh {
-                                out.push((id, n.tag.as_str(), nx, ny, nw, nh, n.props.clickable, n.props.drag_region));
+                                out.push((
+                                    id,
+                                    n.tag.as_str(),
+                                    nx,
+                                    ny,
+                                    nw,
+                                    nh,
+                                    n.props.clickable,
+                                    n.props.drag_region,
+                                ));
                                 for &c in &n.children {
                                     collect(s, c, nx, ny, mx, my, out);
                                 }
                             }
                         }
                         collect(&s, s.root, 0.0, 0.0, mx, my, &mut hits);
-                        eprintln!("[carbon-mini-click]   nodes containing point ({:.0},{:.0}):", mx, my);
+                        eprintln!(
+                            "[carbon-mini-click]   nodes containing point ({:.0},{:.0}):",
+                            mx, my
+                        );
                         for (id, tag, nx, ny, nw, nh, cl, dr) in hits.iter().rev().take(15) {
                             eprintln!("    id={} tag={} box=({:.0},{:.0}) {:.0}x{:.0} clickable={} drag={}", id, tag, nx, ny, nw, nh, cl, dr);
                         }
@@ -325,8 +360,7 @@ impl State {
                         let s = self.scene.lock().unwrap_or_else(|e| e.into_inner());
                         let n = s.nodes.get(&node_id).cloned();
                         match n.as_ref().map(|n| n.kind.clone()) {
-                            Some(scene::NodeKind::Input)
-                            | Some(scene::NodeKind::Textarea) => {
+                            Some(scene::NodeKind::Input) | Some(scene::NodeKind::Textarea) => {
                                 // Walk up the tree to compute the node's
                                 // absolute screen x-position from layout
                                 // locations.
@@ -341,7 +375,8 @@ impl State {
                         // when it lands on the same input fast enough and
                         // close enough to the previous one.
                         let now = Instant::now();
-                        let same_target = self.last_click
+                        let same_target = self
+                            .last_click
                             .as_ref()
                             .map(|(t, p, n)| {
                                 *n == node_id
@@ -350,7 +385,11 @@ impl State {
                                     && (self.mouse_pos.1 - p.1).abs() < 5.0
                             })
                             .unwrap_or(false);
-                        self.click_streak = if same_target { self.click_streak + 1 } else { 1 };
+                        self.click_streak = if same_target {
+                            self.click_streak + 1
+                        } else {
+                            1
+                        };
                         if self.click_streak > 3 {
                             self.click_streak = 1;
                         }
@@ -461,7 +500,8 @@ impl State {
                 // themselves and therefore have their own colours to swap. A
                 // plugin that only renders through JS is already covered by the
                 // dispatch above.
-                self.plugin_registry.dispatch_theme_changed(matches!(theme, Theme::Dark));
+                self.plugin_registry
+                    .dispatch_theme_changed(matches!(theme, Theme::Dark));
             }
             Event::WindowEvent {
                 event: WindowEvent::Focused(focused),
@@ -484,8 +524,7 @@ impl State {
                 // (one event per file). Forwarded as a single 'enter'
                 // dispatch — JS-side handlers can aggregate.
                 let path_str = path.to_string_lossy().to_string();
-                let path_json = serde_json::to_string(&path_str)
-                    .unwrap_or_else(|_| "\"\"".into());
+                let path_json = serde_json::to_string(&path_str).unwrap_or_else(|_| "\"\"".into());
                 let script = format!(
                     "globalThis.__cm_dispatch_file_drag && globalThis.__cm_dispatch_file_drag('enter', {});",
                     path_json
@@ -516,8 +555,7 @@ impl State {
                 // want a "drop session complete" signal can debounce in
                 // JS (the events arrive in the same event-loop tick).
                 let path_str = path.to_string_lossy().to_string();
-                let path_json = serde_json::to_string(&path_str)
-                    .unwrap_or_else(|_| "\"\"".into());
+                let path_json = serde_json::to_string(&path_str).unwrap_or_else(|_| "\"\"".into());
                 let script = format!(
                     "globalThis.__cm_dispatch_file_drag && globalThis.__cm_dispatch_file_drag('drop', {});",
                     path_json
@@ -581,7 +619,10 @@ impl State {
                 }
             }
             Event::WindowEvent {
-                event: WindowEvent::KeyboardInput { event: key_event, .. },
+                event:
+                    WindowEvent::KeyboardInput {
+                        event: key_event, ..
+                    },
                 ..
             } => {
                 if key_event.state != ElementState::Pressed {
@@ -625,10 +666,14 @@ impl State {
                         other => format!("{:?}", other),
                     };
                     if std::env::var_os("CARBON_PERF").is_some() {
-                        eprintln!("[perf] keydown key={:?} ctrl={}", key_label, self.modifiers_state.control_key());
+                        eprintln!(
+                            "[perf] keydown key={:?} ctrl={}",
+                            key_label,
+                            self.modifiers_state.control_key()
+                        );
                     }
-                    let key_json = serde_json::to_string(&key_label)
-                        .unwrap_or_else(|_| "\"\"".into());
+                    let key_json =
+                        serde_json::to_string(&key_label).unwrap_or_else(|_| "\"\"".into());
                     let script = format!(
                         "globalThis.__cm_dispatch_keydown && globalThis.__cm_dispatch_keydown({},{},{},{},{});",
                         key_json,
@@ -667,7 +712,8 @@ impl State {
                     Some(f) => f,
                     None => return,
                 };
-                let kind = self.scene
+                let kind = self
+                    .scene
                     .lock()
                     .unwrap()
                     .nodes
@@ -738,10 +784,13 @@ impl State {
                         // newly-focused input; selection cleared.
                         let focusables = s.focusable_inputs();
                         if !focusables.is_empty() {
-                            let cur_idx =
-                                focusables.iter().position(|id| *id == fid).unwrap_or(0);
+                            let cur_idx = focusables.iter().position(|id| *id == fid).unwrap_or(0);
                             let next_idx = if shift {
-                                if cur_idx == 0 { focusables.len() - 1 } else { cur_idx - 1 }
+                                if cur_idx == 0 {
+                                    focusables.len() - 1
+                                } else {
+                                    cur_idx - 1
+                                }
                             } else {
                                 (cur_idx + 1) % focusables.len()
                             };
@@ -794,8 +843,7 @@ impl State {
                                         } else {
                                             t.replace(['\n', '\r'], " ")
                                         };
-                                        value_changed =
-                                            s.input_insert_str(fid, &to_paste);
+                                        value_changed = s.input_insert_str(fid, &to_paste);
                                     }
                                 }
                             }
@@ -852,8 +900,12 @@ impl State {
                 // and the DOM wheel event work in LOGICAL px, so scale down.
                 let sf = (self.window.scale_factor() as f32).max(0.1);
                 let (dx, dy) = match delta {
-                    tao::event::MouseScrollDelta::PixelDelta(p) => (p.x as f32 / sf, p.y as f32 / sf),
-                    tao::event::MouseScrollDelta::LineDelta(cols, lines) => (cols * 32.0, lines * 32.0),
+                    tao::event::MouseScrollDelta::PixelDelta(p) => {
+                        (p.x as f32 / sf, p.y as f32 / sf)
+                    }
+                    tao::event::MouseScrollDelta::LineDelta(cols, lines) => {
+                        (cols * 32.0, lines * 32.0)
+                    }
                     _ => (0.0, 0.0),
                 };
                 // For the DOM `wheel` event we keep the OS-native delta kind:
@@ -862,7 +914,9 @@ impl State {
                 // (deltaMode=0). xterm's wheel normalizer divides pixel deltas
                 // heavily, so sending line deltas as pixels scrolls <1 row.
                 let (wheel_dx, wheel_dy, wheel_mode): (f32, f32, i32) = match delta {
-                    tao::event::MouseScrollDelta::PixelDelta(p) => (-(p.x as f32) / sf, -(p.y as f32) / sf, 0),
+                    tao::event::MouseScrollDelta::PixelDelta(p) => {
+                        (-(p.x as f32) / sf, -(p.y as f32) / sf, 0)
+                    }
                     tao::event::MouseScrollDelta::LineDelta(cols, lines) => {
                         (-cols * 3.0, -lines * 3.0, 1)
                     }
@@ -883,14 +937,19 @@ impl State {
                     // terminal "scrolls" but never reaches its real top/bottom
                     // because the canvas is being slid instead of its rows
                     // re-rendered). DOM delta sign is the negative of tao's.
-                    let hit = self.scene.lock().unwrap_or_else(|e| e.into_inner()).hit_test(self.mouse_pos.0, self.mouse_pos.1);
+                    let hit = self
+                        .scene
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .hit_test(self.mouse_pos.0, self.mouse_pos.1);
                     let mut handled = false;
                     if let Some(node_id) = hit {
                         let script = format!(
                             "(globalThis.__cm_dispatch_wheel && globalThis.__cm_dispatch_wheel({},{},{},{},{},{}))||false",
                             node_id, wheel_dx, wheel_dy, wheel_mode, self.mouse_pos.0, self.mouse_pos.1
                         );
-                        handled = self.js_ctx
+                        handled = self
+                            .js_ctx
                             .with(|ctx| ctx.eval::<bool, _>(script.as_bytes()).unwrap_or(false));
                     }
                     if std::env::var_os("CARBON_MINI_SCROLL_DEBUG").is_some() {
@@ -927,7 +986,11 @@ impl State {
             Event::UserEvent(UserEvent::RequestPaint) => {
                 self.window.request_redraw();
             }
-            Event::UserEvent(UserEvent::FetchHeaders { id, status, headers_json }) => {
+            Event::UserEvent(UserEvent::FetchHeaders {
+                id,
+                status,
+                headers_json,
+            }) => {
                 // headers_json is already a valid JSON array literal, so
                 // it's a legal JS expression — splice it directly into
                 // the dispatch call instead of double-stringifying.
@@ -988,7 +1051,8 @@ impl State {
                 let _ = self.js_ctx.with(|ctx| ctx.eval::<(), _>(script.as_bytes()));
             }
             Event::UserEvent(UserEvent::WsClose { id, code, reason }) => {
-                let reason_json = serde_json::to_string(&reason).unwrap_or_else(|_| "\"\"".to_string());
+                let reason_json =
+                    serde_json::to_string(&reason).unwrap_or_else(|_| "\"\"".to_string());
                 let script = format!(
                     "globalThis.__cm_ws_dispatch_close && globalThis.__cm_ws_dispatch_close({},{},{});",
                     id, code, reason_json,
@@ -1043,7 +1107,8 @@ impl State {
             }
             Event::UserEvent(UserEvent::WindowSetFullscreen(on)) => {
                 if on {
-                    self.window.set_fullscreen(Some(tao::window::Fullscreen::Borderless(None)));
+                    self.window
+                        .set_fullscreen(Some(tao::window::Fullscreen::Borderless(None)));
                 } else {
                     self.window.set_fullscreen(None);
                 }
@@ -1091,8 +1156,7 @@ impl State {
                     //    so the next mount() builds a fresh tree.
                     let _ = self.js_ctx.with(|ctx| -> Result<()> {
                         ctx.eval::<(), _>(
-                            "globalThis.__cm_hmr_reset && globalThis.__cm_hmr_reset();"
-                                .as_bytes(),
+                            "globalThis.__cm_hmr_reset && globalThis.__cm_hmr_reset();".as_bytes(),
                         )
                         .ok();
                         Ok(())
@@ -1162,7 +1226,8 @@ impl State {
                         // so the rAF loop continues.
                         let q_size: i64 = ctx
                             .eval::<i64, _>(
-                                "globalThis.__cm_raf_queue ? globalThis.__cm_raf_queue.size : 0".as_bytes(),
+                                "globalThis.__cm_raf_queue ? globalThis.__cm_raf_queue.size : 0"
+                                    .as_bytes(),
                             )
                             .unwrap_or(0);
                         q_size > 0
@@ -1204,7 +1269,9 @@ impl State {
                     // insert_node / set_text), so genuine changes still paint.
                     // Keep the rAF loop ticking (so timers/animations fire next
                     // frame) but skip the paint pass entirely.
-                    if drained { self.window.request_redraw(); }
+                    if drained {
+                        self.window.request_redraw();
+                    }
                     return;
                 }
 
@@ -1222,7 +1289,9 @@ impl State {
                             self.paint_canvas.is_some()
                         }
                     };
-                    if !canvas_ok { return; }
+                    if !canvas_ok {
+                        return;
+                    }
                     let canvas = self.paint_canvas.as_mut().unwrap();
                     if let Ok(mut buffer) = self.surface.buffer_mut() {
                         // HiDPI: the buffer/pixmap are PHYSICAL px (w,h), but
@@ -1267,10 +1336,17 @@ impl State {
                             // alpha-stacking artifact that "skip clear +
                             // rely on bg fills" left at edges where the
                             // bg fill didn't fully cover.
-                            if let Some((dx, dy, dw, dh)) = self.scene.lock().unwrap_or_else(|e| e.into_inner()).dirty_rect {
+                            if let Some((dx, dy, dw, dh)) = self
+                                .scene
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .dirty_rect
+                            {
                                 // dirty_rect is in LOGICAL px (scene coords);
                                 // the pixmap is physical, so scale the erase.
-                                if let Some(rect) = Rect::from_xywh(dx, dy, dw.max(0.001), dh.max(0.001)) {
+                                if let Some(rect) =
+                                    Rect::from_xywh(dx, dy, dw.max(0.001), dh.max(0.001))
+                                {
                                     let mut p = Paint::default();
                                     p.set_color_rgba8(255, 255, 255, 255);
                                     p.anti_alias = false;
@@ -1287,7 +1363,10 @@ impl State {
                             // Throw away any stale damage rect so the
                             // paint_node cull doesn't apply during a
                             // full-window paint.
-                            self.scene.lock().unwrap_or_else(|e| e.into_inner()).dirty_rect = None;
+                            self.scene
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .dirty_rect = None;
                         }
                         // before_paint now hands plugins a real RGBA8 buffer
                         // they can blit into. Canvas plugins read their
@@ -1312,7 +1391,9 @@ impl State {
                         );
                         if std::env::var_os("CARBON_PERF").is_some() {
                             let ms = _perf_paint.elapsed().as_secs_f64() * 1000.0;
-                            if ms > 2.0 { eprintln!("[perf] paint: {ms:.1}ms"); }
+                            if ms > 2.0 {
+                                eprintln!("[perf] paint: {ms:.1}ms");
+                            }
                         }
 
                         // Clear all damage flags after successful paint.
@@ -1333,11 +1414,15 @@ impl State {
                                 std::sync::atomic::AtomicBool::new(false);
                             if !FIRST_FRAME_MARKED.swap(true, std::sync::atomic::Ordering::SeqCst) {
                                 if let Ok(install_dir) = std::env::var("CARBON_INSTALL_DIR") {
-                                    let _ = carbon_updater::SlotState::load(std::path::Path::new(&install_dir))
-                                        .and_then(|mut state| {
-                                            state.mark_first_frame(std::path::Path::new(&install_dir))
-                                        })
-                                        .map_err(|e| eprintln!("[updater] first-frame mark failed: {e}"));
+                                    let _ = carbon_updater::SlotState::load(std::path::Path::new(
+                                        &install_dir,
+                                    ))
+                                    .and_then(|mut state| {
+                                        state.mark_first_frame(std::path::Path::new(&install_dir))
+                                    })
+                                    .map_err(|e| {
+                                        eprintln!("[updater] first-frame mark failed: {e}")
+                                    });
                                 }
                             }
                         }
@@ -1370,6 +1455,5 @@ impl State {
             }
             _ => {}
         }
-
     }
 }
