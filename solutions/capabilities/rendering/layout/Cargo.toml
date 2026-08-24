@@ -8,11 +8,12 @@
 # css_parse while building nodes; css_parse reads scene's types back), so they
 # share a crate and a layer; a boundary between them would be a cycle across it.
 #
-# ── NO TESTS ────────────────────────────────────────────────────────────────
-# 3,700 lines, none of them covered, and this is the crate that decides where
-# everything on screen ends up. It is the highest-value place in the migration
-# to add tests, and the most tractable: the whole crate is pure functions over
-# plain data — no device, no filesystem, no JS context needed.
+# ── Tests ───────────────────────────────────────────────────────────────────
+# 3,700 lines deciding where everything on screen ends up, now with 101 tests
+# (see //solutions/capabilities/rendering/layout:layout_test) across css_parse
+# and scene.rs. Still the highest-value place in the migration to add more:
+# the whole crate is pure functions over plain data — no device, no
+# filesystem, no JS context needed.
 
 [package]
 # carbon-kind = "engine"

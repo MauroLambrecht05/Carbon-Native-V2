@@ -22,13 +22,17 @@ cargo_library(
     srcs = [":srcs"],
 )
 
-# 27 tests over css_parse — the first this crate has ever had. It arrived from
-# V1 with 3,700 lines and zero coverage, and it decides where everything on
+# 101 tests: 27 over css_parse, 74 over scene.rs. This crate arrived from V1
+# with 3,700 lines and zero coverage, and it decides where everything on
 # screen ends up. css_parse is where an app author's strings become typed
-# values: the layer most exposed to malformed input, and testable against
-# literals with no window, device or scene.
-#
-# scene.rs is still uncovered. That is the next piece of work here.
+# values: the layer most exposed to malformed input, testable against
+# literals with no window, device or scene. scene.rs's tests extend that same
+# bias one layer up — tree mutation, hit testing, scroll/damage bookkeeping
+# and the text-input editor — by constructing taffy::Layout values directly
+# instead of running a real layout pass, so none of it needs a window, a
+# device, or the font engine either. compute_layout and the other methods
+# that measure real glyphs via TextEngine are still uncovered; that belongs
+# with carbon-text-renderer's own tests, not faked out here.
 # size = "large" (900s, default "medium"/300s): TIMEOUT on a real CI run
 # under full workspace parallelism — see products/carbon:launch_test's
 # comment for the same reasoning.
