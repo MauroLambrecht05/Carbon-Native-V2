@@ -1,5 +1,5 @@
 {
-  "name": "@carbon/cloud-orchestration",
+  "name": "@carbon/orchestration",
   "version": "0.1.0",
   "private": true,
   "description": "A repo + commit, turned into a tracked, claimable build.",
