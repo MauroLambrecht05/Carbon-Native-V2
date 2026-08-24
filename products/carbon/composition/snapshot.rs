@@ -10,6 +10,7 @@
 // The riskiest code in the runtime, and it has no tests: it assumes every heap
 // pointer stays valid across processes. See capabilities/snapshot.
 
+use super::snapshot_spike::*;
 use super::*;
 
 /// Isolated proof-of-mechanism for the heap snapshot. Two sub-modes:
