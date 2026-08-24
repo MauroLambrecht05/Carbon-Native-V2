@@ -49,9 +49,15 @@ cargo_binary(
 # real bundle and watch it reach first paint.
 #
 # Six assertions, and the one that earns its keep is the phase sequence — 27
-# names in a fixed order that encodes the startup dependency graph. Splitting
-# the 4,400-line composition root is the next piece of work, and reordering is
-# exactly how that goes wrong.
+# names in a fixed order that encodes the startup dependency graph. mini.rs
+# used to be a single 2,300-line file holding that whole sequence plus the
+# event loop; it's now composition/mini.rs (bootstrap: window, softbuffer,
+# JS runtime, host imports, bundle eval — ~800 lines), composition/cli.rs
+# (argv parsing + the --compile-bundle/--snapshot-* build-time dispatch),
+# and composition/run_loop.rs (the winit/tao event loop's match arms, the
+# single largest piece). This test is exactly why that split was safe:
+# reordering any of it is exactly how it goes wrong, and this is what
+# would catch it.
 #
 # It needs no display: the runtime paints into a softbuffer surface and
 # CARBON_TEST_EXIT_MS brings it down cleanly.

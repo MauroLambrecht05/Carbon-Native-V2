@@ -5,11 +5,14 @@ project directory and run it as a desktop application.
 
 ```
 composition/     how the runtime assembles itself for a given app
-├── mini.rs          entry point: composes the scene-graph stack
-├── blitz.rs         entry point: composes the document stack
+├── mini.rs          entry point: composes the scene-graph stack     (mini)
+├── blitz.rs         entry point: composes the document stack       (blitz)
+├── cli.rs           argv parsing + build-time tool dispatch         (mini)
+├── run_loop.rs      the winit/tao event loop's match arms           (mini)
 ├── manifest.rs      reading carbon.toml at startup
 ├── bundle.rs        loading and evaluating the app's JavaScript
 ├── snapshot.rs      restoring or building the QuickJS heap snapshot
+├── snapshot_spike.rs  raw-FFI helpers snapshot.rs's spike/build use (mini)
 └── features.rs      which optional subsystems get registered
 
 presentation/    every surface something reaches in or out through

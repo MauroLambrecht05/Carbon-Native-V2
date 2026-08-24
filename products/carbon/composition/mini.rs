@@ -48,9 +48,10 @@ macro_rules! prof_zone {
 // V1 spliced carbon/runtime/mod.rs in here textually (`include!`), so that
 // unqualified `native::`, `platform::`, `os_theme::`, `host_exports::` and
 // `plugin_loader::` call sites resolved without a module path. Those are five
-// crates now. Re-binding the old names keeps every call site in this file
-// exactly as it was, which is the point: a 4,400-line composition root is not
-// where you want to also be rewriting a few hundred paths.
+// crates now. Re-binding the old names keeps every call site across this
+// binary's composition/presentation files exactly as it was, which is the
+// point: a few hundred call sites migrated from V1 is not where you also
+// want to be rewriting paths.
 use carbon_runtime_contract::{UserEvent, WindowOp};
 // ── Module map ──────────────────────────────────────────────────────────────
 // Structured by CONCERN, not by binary. `carbon-mini` and `carbon-blitz` are
