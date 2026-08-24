@@ -27,8 +27,13 @@ cargo_library(
 # Gaussian rounds to zero in 8 bits, so a spread test needs a filled block.
 #
 # The paint dispatch, canvas2d and svg are still uncovered.
+# size = "large" (900s, default "medium"/300s): observed running 270-330s
+# under full workspace parallelism on a real CI run, close enough to the
+# default 300s ceiling to fail intermittently — see products/carbon:launch_test's
+# comment for the same underlying reasoning.
 cargo_test(
     name = "painting_test",
     package = "carbon-paint",
     srcs = [":srcs"],
+    size = "large",
 )

@@ -146,9 +146,17 @@ jobs:
       # without forwarding that too, Bazel's test action has a display name
       # but no credential Xvfb accepts, and GTK reports that the same way it
       # reports a display that does not exist.
+      #
+      # --server-args="-screen 0 1280x1024x24": with both of the above fixed,
+      # the window itself now builds — but softbuffer failed next: "softbuffer
+      # surface: the underlying handle is not available", confirmed on a real
+      # CI run. Xvfb's own default screen visual does not include the 24-bit
+      # TrueColor visual softbuffer's XCB backend needs; a real X server or a
+      # correctly configured Xvfb has one, but xvfb-run's default does not
+      # request it explicitly. This pins the screen depth so it does.
       - name: test (linux)
         if: runner.os == 'Linux'
-        run: xvfb-run -a bazel test //... --test_output=errors --test_env=DISPLAY --test_env=XAUTHORITY
+        run: xvfb-run -a --server-args="-screen 0 1280x1024x24" bazel test //... --test_output=errors --test_env=DISPLAY --test_env=XAUTHORITY
 
       - name: test (non-linux)
         if: runner.os != 'Linux'

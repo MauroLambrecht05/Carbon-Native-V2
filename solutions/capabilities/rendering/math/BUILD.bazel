@@ -20,8 +20,12 @@ filegroup(
 # 13 tests, each spinning up a real QuickJS context and running JS that
 # exercises the class bindings — so this covers the FFI surface, not just the
 # math. Migrated from V1 unchanged.
+# size = "large" (900s, default "medium"/300s): TIMEOUT on a real CI run
+# under full workspace parallelism — see products/carbon:launch_test's
+# comment for the same reasoning.
 cargo_test(
     name = "math_test",
     package = "carbon-fast-math",
     srcs = [":srcs", ":tests"],
+    size = "large",
 )
