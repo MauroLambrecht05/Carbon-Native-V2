@@ -16,22 +16,33 @@ export interface DiscordEmbed {
 const PR_TYPES = ["feat", "fix", "refactor", "docs", "chore"] as const;
 export type PrType = (typeof PR_TYPES)[number];
 
-const TYPE_LABEL: Record<PrType, string> = {
+// The full set CONTRIBUTING.md's "Commits and PRs" section documents for
+// commit message prefixes — a superset of PR_TYPES (adds perf: and test:,
+// which the PR template's Type checkboxes deliberately don't offer; a PR
+// gets a fuller description than a single-word label covers).
+const COMMIT_TYPES = ["feat", "fix", "refactor", "perf", "docs", "test", "chore"] as const;
+export type CommitType = (typeof COMMIT_TYPES)[number];
+
+const TYPE_LABEL: Record<CommitType, string> = {
   feat: "Feature",
   fix: "Fix",
   refactor: "Refactor",
+  perf: "Performance",
   docs: "Docs",
+  test: "Test",
   chore: "Chore",
 };
 
-// Discord decimal color values. feat/fix/refactor get a color that means
-// something at a glance in a fast-moving channel; docs/chore share a neutral
-// grey since neither changes runtime behavior.
-const TYPE_COLOR: Record<PrType, number> = {
+// Discord decimal color values. feat/fix/refactor/perf each get a color that
+// means something at a glance in a fast-moving channel; docs/test/chore
+// share a neutral grey since none changes runtime behavior.
+const TYPE_COLOR: Record<CommitType, number> = {
   feat: 0x2b7a4b,
   fix: 0xd64545,
   refactor: 0x3b82c4,
+  perf: 0xf5a623,
   docs: 0x8a8f98,
+  test: 0x8a8f98,
   chore: 0x8a8f98,
 };
 
@@ -114,37 +125,70 @@ export function formatReleaseEmbed(release: ReleaseInfo): DiscordEmbed {
   };
 }
 
-export interface CommitInfo {
-  readonly sha: string;
-  // First line only — a commit message's body belongs in `git log`, not a
-  // one-line-per-commit digest.
-  readonly message: string;
-  readonly author: string;
+// CONTRIBUTING.md's "Commits and PRs" section documents this exact shape:
+// `type: message` or `type(scope): message`. Unlike parseType above (which
+// picks among checkboxes a PR body either did or didn't check), a commit
+// summary that doesn't match the pattern at all is not ambiguous — it's
+// just untyped, the same "Unspecified" fallback formatPrEmbed already uses
+// for a PR whose Type section is empty or over-checked.
+function parseCommitType(summary: string): { type: CommitType | null; scope: string | null; title: string } {
+  const match = summary.match(/^\s*(feat|fix|refactor|perf|docs|test|chore)(?:\(([^)]+)\))?\s*:\s*(.+)$/i);
+  if (!match) return { type: null, scope: null, title: summary.trim() };
+  return { type: match[1].toLowerCase() as CommitType, scope: match[2] ?? null, title: match[3].trim() };
 }
 
-// One digest per green CI run on main, not one message per commit — a
-// backfill (or a run covering several quick pushes) would otherwise mean one
-// ping per commit. See .tools/automation/ci/notify-push-commits.ts for what
-// decides the commit range and moves the "last notified" marker.
-export function formatCommitDigestEmbed(commits: readonly CommitInfo[], compareUrl: string): DiscordEmbed {
-  const count = commits.length;
-  const lines = commits.map((c) => `\`${c.sha.slice(0, 7)}\` ${c.message} — ${c.author}`);
+export interface CommitInfo {
+  readonly sha: string;
+  // First line, as written — may or may not carry a "type: " prefix.
+  readonly summary: string;
+  // Everything after the summary line (git's %b) — the commit's equivalent
+  // of a PR body's Explanation section.
+  readonly body: string;
+  readonly author: string;
+  readonly url: string;
+}
+
+// Same structure as formatPrEmbed on purpose: a type-labeled, type-colored
+// title, "by {author}", and an Explanation field — just sourced from a
+// commit's "type: message" prefix and body instead of a PR template's
+// checkboxes and Explanation section. See
+// .tools/automation/ci/notify-push-commits.ts for how these get chunked
+// into Discord's 10-embeds-per-message limit and posted.
+export function formatCommitEmbed(commit: CommitInfo): DiscordEmbed {
+  const { type, scope, title } = parseCommitType(commit.summary);
+  const label = type ? (scope ? `${TYPE_LABEL[type]} (${scope})` : TYPE_LABEL[type]) : "Unspecified";
 
   return {
-    title: `${count} commit${count === 1 ? "" : "s"} landed on main`,
-    url: compareUrl,
-    color: 0x2b7a4b,
-    description: truncate(lines.join("\n"), 4096),
+    title: truncate(`${label}: ${title}`, 256),
+    url: commit.url,
+    color: type ? TYPE_COLOR[type] : UNSPECIFIED_COLOR,
+    description: `by ${commit.author}`,
+    fields: [{ name: "Explanation", value: truncate(commit.body || "_not specified_", 1024) }],
   };
 }
 
-export async function postToDiscord(webhookUrl: string, embed: DiscordEmbed, content?: string): Promise<void> {
+// Discord rejects a webhook payload with more than 10 embeds in one
+// message, and a backfill digest can easily cover more commits than that.
+export function chunkEmbeds(embeds: readonly DiscordEmbed[], size = 10): DiscordEmbed[][] {
+  const chunks: DiscordEmbed[][] = [];
+  for (let i = 0; i < embeds.length; i += size) chunks.push(embeds.slice(i, i + size));
+  return chunks;
+}
+
+export async function postToDiscord(
+  webhookUrl: string,
+  embeds: DiscordEmbed | readonly DiscordEmbed[],
+  content?: string,
+): Promise<void> {
   const response = await fetch(webhookUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     // content, not the embed, is what Discord actually pings on — an
     // @mention inside an embed field renders as text and pings nobody.
-    body: JSON.stringify({ embeds: [embed], ...(content ? { content } : {}) }),
+    body: JSON.stringify({
+      embeds: Array.isArray(embeds) ? embeds : [embeds],
+      ...(content ? { content } : {}),
+    }),
   });
 
   if (!response.ok) {

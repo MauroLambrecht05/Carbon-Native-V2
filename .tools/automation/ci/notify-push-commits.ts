@@ -1,11 +1,16 @@
 #!/usr/bin/env bun
-// Posts one digest to Discord for every green CI run on a direct push to
-// main. Run by .github/workflows/notify-push.yml, which triggers on
-// workflow_run(CI, completed) rather than on push directly — that is what
-// lets this only fire once CI has actually passed, catching up on every
-// commit since the last successful notification (including ones pushed
-// while CI was red and never announced) in one message instead of one ping
-// per commit.
+// Posts one Discord embed per commit, same Type/title/Explanation structure
+// as formatPrEmbed, for every green CI run on a direct push to main. Run by
+// .github/workflows/notify-push.yml, which triggers on workflow_run(CI,
+// completed) rather than on push directly — that is what lets this only
+// fire once CI has actually passed, catching up on every commit since the
+// last successful notification (including ones pushed while CI was red and
+// never announced) in one batch instead of leaving them unannounced.
+//
+// A commit's Type comes from CONTRIBUTING.md's own documented convention
+// (`type: message` / `type(scope): message`) rather than the PR template's
+// checkboxes, since a raw commit has no template to check boxes in — see
+// formatCommitEmbed in discord-notify.ts.
 //
 // PR merges are handled by notify.yml already (parsed from the strict
 // Type/Affected/Explanation template), so this explicitly excludes merge
@@ -16,12 +21,12 @@
 // shape alone, so they will still appear here too.
 //
 // "Last notified" is tracked as a lightweight tag (discord-last-notified)
-// moved forward only after a successful post, so a failed webhook call
-// leaves the marker where it was and the same commits get retried on the
-// next green run instead of silently vanishing from the announcement.
+// moved forward only after every chunk posts successfully, so a failed
+// webhook call leaves the marker where it was and the same commits get
+// retried on the next green run instead of silently vanishing.
 
 import { spawnSync } from "node:child_process";
-import { formatCommitDigestEmbed, postToDiscord, type CommitInfo } from "./discord-notify.ts";
+import { chunkEmbeds, formatCommitEmbed, postToDiscord, type CommitInfo } from "./discord-notify.ts";
 
 const MARKER_TAG = "discord-last-notified";
 
@@ -46,32 +51,37 @@ function markerSha(): string | null {
 }
 
 const marker = markerSha();
-// %x1f (unit separator) between fields, one commit per line — a byte no
-// commit message legitimately contains, so it splits unambiguously even
-// through a message with embedded pipes or colons.
+// %x1e (record separator) between commits, %x1f (unit separator) between
+// fields — bytes no commit message legitimately contains, so a multi-line
+// body (%b) can't be confused for a record boundary the way a plain
+// newline-per-commit format would.
+const RS = "\x1e";
+const FS = "\x1f";
 const range = marker ? `${marker}..${headSha}` : headSha;
-const log = git(["log", "--no-merges", "--format=%H%x1f%s%x1f%an", range]);
+const log = git(["log", "--no-merges", `--format=%H${FS}%s${FS}%an${FS}%b${RS}`, range]);
 
 const commits: CommitInfo[] = log
-  .split("\n")
-  .filter((line) => line.length > 0)
-  .map((line) => {
-    const [sha, message, author] = line.split("\x1f");
-    return { sha, message, author };
+  .split(RS)
+  .map((record) => record.trim())
+  .filter((record) => record.length > 0)
+  .map((record) => {
+    const [sha, summary, author, body] = record.split(FS);
+    return { sha, summary, author, body: (body ?? "").trim(), url: `https://github.com/${repo}/commit/${sha}` };
   })
-  // git log lists newest first; the digest should read oldest-first, the
-  // order the commits actually landed in.
+  // git log lists newest first; the announcement should read oldest-first,
+  // the order the commits actually landed in.
   .reverse();
 
 if (commits.length === 0) {
   console.log("no new non-merge commits since the last notification — nothing to announce");
 } else {
-  const compareUrl = marker
-    ? `https://github.com/${repo}/compare/${marker}...${headSha}`
-    : `https://github.com/${repo}/commit/${headSha}`;
-
-  await postToDiscord(webhookUrl, formatCommitDigestEmbed(commits, compareUrl), `<@${pingUserId}>`);
-  console.log(`posted a digest of ${commits.length} commit(s) to Discord`);
+  const chunks = chunkEmbeds(commits.map(formatCommitEmbed));
+  for (const [i, chunk] of chunks.entries()) {
+    // Ping once for the whole batch, on the first message, not once per
+    // chunk — a multi-chunk backfill would otherwise ping repeatedly.
+    await postToDiscord(webhookUrl, chunk, i === 0 ? `<@${pingUserId}>` : undefined);
+  }
+  console.log(`posted ${commits.length} commit(s) to Discord across ${chunks.length} message(s)`);
 }
 
 // Move the marker even when there was nothing to announce (e.g. HEAD only

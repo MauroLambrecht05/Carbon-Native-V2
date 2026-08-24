@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
-import { formatCommitDigestEmbed, formatPrEmbed, formatReleaseEmbed, parsePrBody, postToDiscord } from "./discord-notify.ts";
+import {
+  chunkEmbeds,
+  formatCommitEmbed,
+  formatPrEmbed,
+  formatReleaseEmbed,
+  parsePrBody,
+  postToDiscord,
+} from "./discord-notify.ts";
 
 const TEMPLATE_BODY = (checkedType: string) => `## Type
 - [${checkedType === "feat" ? "x" : " "}] feat
@@ -104,42 +111,75 @@ describe("formatReleaseEmbed", () => {
   });
 });
 
-describe("formatCommitDigestEmbed", () => {
-  test("lists each commit as sha, message and author, singular title for one commit", () => {
-    const embed = formatCommitDigestEmbed(
-      [{ sha: "abcdef1234567", message: "Fix the thing", author: "mauro" }],
-      "https://github.com/x/y/commit/abcdef1234567",
-    );
+describe("formatCommitEmbed", () => {
+  const base = { sha: "abcdef1234567", author: "mauro", url: "https://github.com/x/y/commit/abcdef1234567" };
 
-    expect(embed.title).toBe("1 commit landed on main");
-    expect(embed.description).toBe("`abcdef1` Fix the thing — mauro");
+  test("parses a typed, scoped commit summary the same way CONTRIBUTING.md documents it", () => {
+    const embed = formatCommitEmbed({
+      ...base,
+      summary: "fix(products/carbon): softbuffer surface unavailable on Linux",
+      body: "GTK never realizes the window before softbuffer needs its handle.",
+    });
+
+    expect(embed.title).toBe("Fix (products/carbon): softbuffer surface unavailable on Linux");
+    expect(embed.color).toBe(0xd64545);
+    expect(embed.description).toBe("by mauro");
+    expect(embed.fields).toEqual([
+      { name: "Explanation", value: "GTK never realizes the window before softbuffer needs its handle." },
+    ]);
   });
 
-  test("pluralizes the title and joins multiple commits with newlines, oldest first as given", () => {
-    const embed = formatCommitDigestEmbed(
-      [
-        { sha: "1111111aaaa", message: "First fix", author: "mauro" },
-        { sha: "2222222bbbb", message: "Second fix", author: "mauro" },
-      ],
-      "https://github.com/x/y/compare/aaa...bbb",
-    );
+  test("parses an unscoped type the same as formatPrEmbed's own labels", () => {
+    const embed = formatCommitEmbed({ ...base, summary: "feat: add /help command", body: "" });
 
-    expect(embed.title).toBe("2 commits landed on main");
-    expect(embed.url).toBe("https://github.com/x/y/compare/aaa...bbb");
-    expect(embed.description).toBe("`1111111` First fix — mauro\n`2222222` Second fix — mauro");
+    expect(embed.title).toBe("Feature: add /help command");
+    expect(embed.color).toBe(0x2b7a4b);
   });
 
-  test("truncates past Discord's 4096-char embed description limit", () => {
-    const commits = Array.from({ length: 200 }, (_, i) => ({
-      sha: `${i}`.padStart(40, "0"),
-      message: "x".repeat(50),
-      author: "mauro",
-    }));
+  test("labels perf and test — types the PR template's checkboxes don't offer at all", () => {
+    expect(formatCommitEmbed({ ...base, summary: "perf: cut cold start by 40ms", body: "" }).color).toBe(
+      0xf5a623,
+    );
+    expect(formatCommitEmbed({ ...base, summary: "test: cover the empty-bundle case", body: "" }).color).toBe(
+      0x8a8f98,
+    );
+  });
 
-    const embed = formatCommitDigestEmbed(commits, "https://github.com/x/y/compare/a...b");
+  test("labels a commit with no recognized prefix Unspecified rather than guessing from its verb", () => {
+    const embed = formatCommitEmbed({ ...base, summary: "Force GTK to realize the window", body: "" });
 
-    expect(embed.description?.length).toBe(4096);
-    expect(embed.description?.endsWith("…")).toBe(true);
+    expect(embed.title).toBe("Unspecified: Force GTK to realize the window");
+    expect(embed.color).toBe(0x5865f2);
+  });
+
+  test("falls back to a placeholder when the commit has no body", () => {
+    const embed = formatCommitEmbed({ ...base, summary: "chore: bump a dependency", body: "" });
+
+    expect(embed.fields).toEqual([{ name: "Explanation", value: "_not specified_" }]);
+  });
+
+  test("truncates the Explanation field past Discord's 1024-char limit", () => {
+    const embed = formatCommitEmbed({ ...base, summary: "chore: x", body: "x".repeat(2000) });
+
+    const explanationField = embed.fields?.find((f) => f.name === "Explanation");
+    expect(explanationField?.value.length).toBe(1024);
+    expect(explanationField?.value.endsWith("…")).toBe(true);
+  });
+});
+
+describe("chunkEmbeds", () => {
+  test("passes a short list through as one chunk", () => {
+    const embeds = [{ title: "a" }, { title: "b" }];
+    expect(chunkEmbeds(embeds)).toEqual([embeds]);
+  });
+
+  test("splits at Discord's 10-embeds-per-message limit", () => {
+    const embeds = Array.from({ length: 23 }, (_, i) => ({ title: `${i}` }));
+
+    const chunks = chunkEmbeds(embeds);
+
+    expect(chunks.map((c) => c.length)).toEqual([10, 10, 3]);
+    expect(chunks.flat()).toEqual(embeds);
   });
 });
 
@@ -159,6 +199,16 @@ describe("postToDiscord", () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("https://discord.com/api/webhooks/x/y");
     expect(JSON.parse(init.body as string)).toEqual({ embeds: [{ title: "hi" }] });
+  });
+
+  test("sends multiple embeds in one payload when given an array", async () => {
+    const fetchMock = mock((_url: string, _init: RequestInit) => Promise.resolve(new Response("", { status: 204 })));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await postToDiscord("https://discord.com/api/webhooks/x/y", [{ title: "a" }, { title: "b" }]);
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({ embeds: [{ title: "a" }, { title: "b" }] });
   });
 
   test("adds content only when given, since that's what actually pings on Discord", async () => {
