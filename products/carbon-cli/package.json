@@ -20,6 +20,8 @@
     "smol-toml": "^1.3.0",
     "vite": "^5.4.0"
   },
+  "//trustedDependencies": "DELIBERATELY EMPTY, and the empty array itself is the point. Bun blocks dependency lifecycle scripts (preinstall/postinstall/prepare) by default — but only relative to a BUILT-IN default allowlist of ~366 package names (`bun pm default-trusted`), which includes esbuild, the package vite pulls in here. Omitting this field means that default list applies; declaring it REPLACES the default list rather than extending it, so `[]` is the only way to say 'no dependency of this CLI may execute install-time code'. Verified against bun 1.3.10: with this field absent, esbuild's postinstall runs; with `[]`, `bun install` reports 'Blocked 1 postinstall'. Verified on 2026-08-25 that none of the 73 packages this CLI resolves to need a lifecycle script — a full `bun install --frozen-lockfile` with this array empty produces a working tree (esbuild's platform binary arrives via its optionalDependencies, not its postinstall). Add a name here ONLY with evidence that the package is broken without it. NOTE: Bun matches plain package names only — `\"esbuild@0.25.0\"` matches nothing (verified), so trust cannot be version-pinned here; the roadmap's version/hash-pinned trust needs the Layer 2 broker.",
+  "trustedDependencies": [],
   "engines": {
     "bun": ">=1.3.0"
   }

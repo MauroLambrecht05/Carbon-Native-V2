@@ -10,4 +10,5 @@
 
 export { buildProject, ensureNodeModules, ensureRuntime } from "./application/usecases/BuildProjectUseCase.ts";
 export { computeCacheKey } from "./infrastructure/BuildCache.ts";
+export { installIsCurrent, installKey, writeInstallStamp } from "./infrastructure/InstallState.ts";
 export type { Bundler, BundleRequest } from "./application/ports/Bundler.ts";
