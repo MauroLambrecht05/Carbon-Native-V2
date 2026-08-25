@@ -38,12 +38,88 @@ draft decision (`network-security-stance.md`'s "no ambient fetch" stance) and wh
 - `products/carbon-cli`'s own toolchain dependencies (`vite`, `@babel/core`, etc.) now
   have a committed `bun.lock` pinning exact resolved versions — previously had none at
   all, so every install re-resolved caret ranges against whatever was newly published.
+- npm lifecycle-script lockdown: `products/carbon-cli/package.json` and
+  `.config/package.json` ship `"trustedDependencies": []`; `BuildProjectUseCase`'s
+  `ensureNodeModules` uses `--frozen-lockfile` when a lockfile exists (with a
+  sha256-stamp cache, `InstallState.ts`, so an already-in-sync build skips the bun
+  spawn); all 5 scaffolding presets carry the same lockdown. 11 real integration tests,
+  no mocks. (`solutions/capabilities/tooling/bundling/...`,
+  `solutions/capabilities/tooling/scaffolding/infrastructure/templates/package-json.ts`)
+- Zig plugin signing and load-time verification (Layer 3 step 7): Ed25519,
+  `carbon-plugin-trust` crate — SHA-256 content hash, detached `.sig` files, a
+  hardcoded revocation-list stub, `carbon-plugin-sign` (keygen/sign/verify/hash).
+  `plugin_loader.rs` verifies + checks revocation immediately before
+  `Library::new`, hardcoded public key. `CARBON_ALLOW_UNSIGNED_PLUGINS` is the
+  deliberate escape hatch — set only by `carbon dev` (never `carbon run` or a
+  distributed build) so the local-source plugin edit/reload loop keeps working
+  unsigned; `carbon run`'s `release: true` build still needs a real signature, same
+  as anything Carbon publishes. Verified by flipping the env var and watching
+  `an_unsigned_plugin_is_refused` go from refused to loaded.
+  (`solutions/capabilities/plugin/trust/rust/`,
+  `solutions/infrastructure/plugin-host/adapters/plugin_loader.rs`)
+- The Zig import-table denylist checker (Layer 3 step 3), `carbon-import-check`,
+  merged into the same `carbon-plugin-trust` crate (`domain/import_policy.rs` +
+  `application/import_check.rs` + `tools/import_check.rs`): a module denylist
+  (`kernel32`/`user32`/`ntdll`/`advapi32`/network DLLs) plus a symbol denylist
+  (`LoadLibrary*`/`GetProcAddress`/`GetModuleHandle*`, denied from *every* module,
+  unconditionally — the loophole a static check alone can't see through) on top of
+  an allowlist for the MSVC CRT a Zig artifact needs. `tests/fixtures/zig/{allowed,
+  denied}-plugin` are real compiled positive/negative fixtures, not assertions
+  against synthetic data.
+- **The checker-vs-SDK reconciliation** — the real gap the checker's original design
+  surfaced: every legitimate Carbon plugin calls `setGlobalString`/`setGlobalNumber`/
+  `setGlobalFunction`/`eval`, and the SDK used to resolve those via
+  `GetProcAddress(GetModuleHandle(NULL))` at load time — exactly the symbols the
+  checker denies unconditionally, for the reason the checker names ("a plugin that
+  can resolve one arbitrary OS symbol at runtime can resolve any of them"). Fixed by
+  widening the ABI instead of weakening the checker: `carbon_plugin.h` bumped to ABI
+  1.1, appending `set_global_string`/`set_global_number`/`set_global_function`/`eval`
+  as function pointers on `CarbonApp` itself — the same shape `push_event`/
+  `request_paint` already used — so a plugin gets JS-global installation without any
+  dynamic symbol resolution at all. `host_exports.rs` fills the four fields in
+  `HostCarbonAppStorage::new()`; the Zig SDK's four wrapper methods call through
+  `self.raw.set_global_*`/`self.raw.eval` instead of the old
+  `resolveHostSymbol`/`GetProcAddress` machinery, which is deleted. The old
+  `carbon_js_*` free functions stay exported for ABI-1.0 plugins and non-C SDKs that
+  haven't moved yet. **Verified empirically, not just by type-checking**: rebuilt all
+  three real Pulse plugins (`carbon-hotkey`/`carbon-idle`/`carbon-pulse`) against the
+  new SDK and ran `carbon-import-check --list` against each compiled `.dll` — zero
+  `GetProcAddress`/`GetModuleHandle*` imports in any of them, where before the fix
+  every one would have failed the checker by construction. `carbon-hotkey` still
+  legitimately imports `user32.dll` (`RegisterHotKey`) — the documented first-party
+  escape hatch (`ImportPolicy::allow_module`), a different, already-accounted-for
+  case. (`products/carbon-ext/presentation/include/carbon_plugin.h`,
+  `solutions/infrastructure/plugin-host/abi/host_exports.rs`,
+  `solutions/capabilities/plugin/sdk/zig/src/carbon_sdk.zig`)
+- zig 0.16.0 toolchain drift: `std.os.windows(.kernel32)` no longer declares
+  `GetModuleHandleW`/`GetProcAddress` (confirmed by grepping the installed std
+  source) — moot now that the SDK doesn't call them at all, but the finding stays
+  useful for anything else that might reach for them. All three Pulse plugins'
+  `build.zig.zon` also needed the zig-0.16-mandatory `.fingerprint` field, real
+  values from real `zig build` errors.
+- `carbon-blitz` wired into the same `[net]`/`[runtime]` gating `carbon-mini` already
+  had (`composition/blitz.rs`) — previously hardcoded `process_enabled = false` and no
+  origin allowlist at all.
 
-**Not yet started** (real, separate pieces of work, each roughly the size of what's
-above): the sandboxed install/build broker (Layer 2), the full Zig plugin trust
-pipeline — hash-pinned deps enforcement, the import-table denylist checker, mandatory
-`ReleaseSafe`, signing infrastructure (Layer 3) — and wiring `--frozen-lockfile`-style
-enforcement into whatever actually installs `carbon-cli`'s dependencies day to day.
+**Known, separate gap found incidentally, not yet fixed**: `labs/examples/pulse`'s
+`App.tsx` imports `setActive` from the `carbon:carbon-pulse` virtual module, but
+`carbon-pulse`'s Zig source registers the JS-visible function as
+`__carbon_pulse_set_active` — the bundler's per-plugin virtual-module resolution has
+no mapping between the two, so `carbon build`/`carbon dev` on the Pulse example fails
+at the bundle step. Pre-existing (present in the commit that added the Pulse example,
+before this round of work), unrelated to the ABI/checker changes above, and NOT yet
+diagnosed past locating the mismatch — the fix is somewhere in how a plugin's
+declared `modules` entry gets turned into named exports, which is a bundler-side
+question, not a Rust/Zig one.
+
+**Not yet started** (real, separate pieces of work): the sandboxed install/build
+broker (Layer 2); hash-pinned Zig dependency enforcement; mandatory `ReleaseSafe`
+enforcement (nothing currently refuses to sign a Debug-built plugin); wiring
+`carbon-import-check` and `carbon-plugin-sign` into an actual publish pipeline (both
+exist and work as standalone binaries, run by hand so far); the Pulse example's
+bundler-wiring gap noted above; `--frozen-lockfile`-style enforcement for whatever
+end users' own `carbon.toml` machinery installs day to day, beyond `carbon-cli`'s own
+toolchain deps.
 
 ## The two things that make Carbon Carbon, restated as constraints on this plan
 

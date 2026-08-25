@@ -17,7 +17,6 @@
 // table was generated from.
 
 const std = @import("std");
-const builtin = @import("builtin");
 
 /// The extension-point registry, and the comptime helpers that check an id.
 pub const ext = @import("extension_points.zig");
@@ -47,69 +46,23 @@ pub const RawApp = c.CarbonApp;
 pub const RawJsContext = c.CarbonJSContext;
 
 // carbon_plugin.h's "RESOLUTION MODEL" comment (above the carbon_js_*
-// declarations) is the contract this section implements: those symbols are
-// exported by the carbon-mini/carbon-blitz HOST executable
-// (products/carbon/build.rs emits the /EXPORT: linker args on Windows,
-// -rdynamic elsewhere), not linked by a plugin — there is no host .exe on
-// disk for a plugin to link against when it builds standalone. Calling them
-// through @cImport's plain `extern "c"` declarations instead makes the
-// PLUGIN's own linker demand them at build time, which fails with
-// "undefined symbol" (confirmed building labs/clipboard-plugin before this
-// fix). They have to be resolved at LOAD time, once the plugin DLL is
-// inside the host process — GetProcAddress on Windows, dlsym elsewhere —
-// looked up once and cached, exactly as the header says the SDK should.
-// GetModuleHandleW/GetProcAddress used to be reachable via
-// std.os.windows.kernel32, but zig 0.16's std no longer declares either —
-// confirmed by grepping the real installed std/os/windows.zig and
-// std/os/windows/kernel32.zig, not assumed. Declared locally instead: these
-// are two of the most stable, unchanged Win32 signatures there are (both
-// predate Win32's own versioning), so pulling them straight from kernel32.dll
-// ourselves is lower-risk than depending on wherever std currently re-exports
-// them, if anywhere.
-extern "kernel32" fn GetModuleHandleW(lpModuleName: ?[*:0]const u16) callconv(.c) ?*anyopaque;
-extern "kernel32" fn GetProcAddress(hModule: *anyopaque, lpProcName: [*:0]const u8) callconv(.c) ?*anyopaque;
-
-fn resolveHostSymbol(comptime name: [:0]const u8) *anyopaque {
-    return switch (builtin.os.tag) {
-        .windows => blk: {
-            const module = GetModuleHandleW(null) orelse
-                @panic("carbon plugin: could not get a handle to the host process");
-            const proc = GetProcAddress(module, name) orelse
-                @panic("carbon plugin: host process does not export " ++ name ++
-                    " — was it built without the /EXPORT linker args in products/carbon/build.rs?");
-            break :blk @as(*anyopaque, @ptrCast(proc));
-        },
-        else => blk: {
-            // RTLD_DEFAULT isn't exposed by Zig's std.c. glibc/musl define
-            // it as NULL; Darwin's dlfcn.h defines it as -2 — fixed,
-            // documented per-platform values, not something to guess.
-            const rtld_default: ?*anyopaque = if (builtin.target.isDarwin())
-                @ptrFromInt(@as(usize, @bitCast(@as(isize, -2))))
-            else
-                null;
-            break :blk std.c.dlsym(rtld_default, name) orelse
-                @panic("carbon plugin: host process does not export " ++ name ++
-                    " — was it built with -rdynamic (see products/carbon/build.rs)?");
-        },
-    };
-}
-
-const SetGlobalStringFn = *const fn (*c.CarbonJSContext, [*:0]const u8, [*:0]const u8) callconv(.c) i32;
-const SetGlobalNumberFn = *const fn (*c.CarbonJSContext, [*:0]const u8, f64) callconv(.c) i32;
-const SetGlobalFunctionFn = *const fn (*c.CarbonJSContext, [*:0]const u8, c.CarbonJSCallback) callconv(.c) i32;
-const EvalFn = *const fn (*c.CarbonJSContext, [*:0]const u8) callconv(.c) i32;
-
-var set_global_string_fn: ?SetGlobalStringFn = null;
-var set_global_number_fn: ?SetGlobalNumberFn = null;
-var set_global_function_fn: ?SetGlobalFunctionFn = null;
-var eval_fn: ?EvalFn = null;
-
-fn resolved(comptime T: type, cache: *?T, comptime name: [:0]const u8) T {
-    if (cache.*) |f| return f;
-    const f: T = @ptrCast(@alignCast(resolveHostSymbol(name)));
-    cache.* = f;
-    return f;
-}
+// declarations) explains why the four methods below (setGlobalString,
+// setGlobalNumber, setGlobalFunction, eval) call through
+// `self.raw.set_global_*`/`self.raw.eval` function pointers rather than
+// resolving `carbon_js_*` symbols at load time: those pointers are ABI 1.1
+// fields on `CarbonApp` itself, filled in by the host before
+// `carbon_plugin_register` runs — the same shape `request_paint` and
+// `push_event` already use — specifically so this SDK never needs
+// GetProcAddress/GetModuleHandleW (or dlsym/RTLD_DEFAULT on POSIX) at all.
+// The plugin trust checker (solutions/capabilities/plugin/trust) denies
+// those two symbol families from a compiled plugin's import table
+// unconditionally, for every module, because a plugin that can resolve one
+// arbitrary OS symbol at runtime can resolve any of them — and every
+// legitimate Carbon plugin calls at least one of these four, so an SDK that
+// still resolved them dynamically would fail its own trust check by
+// construction. This is not a workaround for the checker; it closes a real
+// gap the checker's own design doc names: "no static import-table check
+// means anything" once dynamic resolution is available at all.
 
 /// A safe-ish view over a `*c.CarbonApp` pointer. Construct one inside
 /// each entry point with `CarbonApp.fromRaw(app)`.
@@ -147,25 +100,25 @@ pub const CarbonApp = struct {
 
     pub fn setGlobalString(self: CarbonApp, name: [*:0]const u8, value: [*:0]const u8) i32 {
         const ctx = self.raw.js_ctx orelse return CARBON_ERR_NO_CTX;
-        const f = resolved(SetGlobalStringFn, &set_global_string_fn, "carbon_js_set_global_string");
+        const f = self.raw.set_global_string orelse return CARBON_ERR_GENERIC;
         return f(ctx, name, value);
     }
 
     pub fn setGlobalNumber(self: CarbonApp, name: [*:0]const u8, value: f64) i32 {
         const ctx = self.raw.js_ctx orelse return CARBON_ERR_NO_CTX;
-        const f = resolved(SetGlobalNumberFn, &set_global_number_fn, "carbon_js_set_global_number");
+        const f = self.raw.set_global_number orelse return CARBON_ERR_GENERIC;
         return f(ctx, name, value);
     }
 
     pub fn setGlobalFunction(self: CarbonApp, name: [*:0]const u8, cb: c.CarbonJSCallback) i32 {
         const ctx = self.raw.js_ctx orelse return CARBON_ERR_NO_CTX;
-        const f = resolved(SetGlobalFunctionFn, &set_global_function_fn, "carbon_js_set_global_function");
+        const f = self.raw.set_global_function orelse return CARBON_ERR_GENERIC;
         return f(ctx, name, cb);
     }
 
     pub fn eval(self: CarbonApp, source: [*:0]const u8) i32 {
         const ctx = self.raw.js_ctx orelse return CARBON_ERR_NO_CTX;
-        const f = resolved(EvalFn, &eval_fn, "carbon_js_eval");
+        const f = self.raw.eval orelse return CARBON_ERR_GENERIC;
         return f(ctx, source);
     }
 };
@@ -216,7 +169,7 @@ fn jsonStringArray(comptime arr: []const []const u8) []const u8 {
 
 test "the deprecated manifest builder still produces what the loader parses" {
     const want =
-        \\{"name":"hello","version":"0.1.0","abi_version_major":1,"abi_version_minor":0,"capabilities":{"required":[],"optional":["fs.read"]},"modules":["carbon:hello"],"lifecycle_hooks":["register"]}
+        \\{"name":"hello","version":"0.1.0","abi_version_major":1,"abi_version_minor":1,"capabilities":{"required":[],"optional":["fs.read"]},"modules":["carbon:hello"],"lifecycle_hooks":["register"]}
     ;
     const got = comptime buildManifestJson(.{
         .name = "hello",

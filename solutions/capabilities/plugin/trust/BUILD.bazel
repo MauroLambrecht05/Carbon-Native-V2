@@ -1,7 +1,9 @@
 # Carbon Native V2 - @carbon/plugin-trust
 #
 # Capability: deciding whether a native plugin is allowed to run at all —
-# Ed25519 signing at publish time, signature and revocation checks at load time.
+# the import-table policy at publish time (before Carbon will sign anything),
+# Ed25519 signing at publish time, and signature and revocation checks at
+# load time.
 #
 # Rust-only for now, so everything is under rust/ the way
 # distribution/updating and distribution/publishing put their Rust halves

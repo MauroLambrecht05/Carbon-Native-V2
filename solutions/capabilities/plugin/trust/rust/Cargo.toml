@@ -1,6 +1,11 @@
-# carbon-plugin-trust — the signing and verification half of the Zig plugin
-# trust pipeline (Layer 3 of
+# carbon-plugin-trust — the signing, verification, and import-table-policy
+# half of the Zig plugin trust pipeline (Layer 3 of
 # .local/notes/roadmap/04-security-and-capabilities/README.md).
+#
+# Two checks, one crate — see lib.rs's "TWO INDEPENDENT CHECKS, ONE CRATE"
+# note for why signing/verification (Ed25519, pure Rust) and the import-table
+# policy (reads a compiled PE artifact, needs `goblin`) live together despite
+# using different dependencies.
 #
 # ── WHY IT IS ITS OWN CRATE ─────────────────────────────────────────────────
 # Two callers with opposite privileges have to agree byte-for-byte about what a
@@ -48,6 +53,13 @@ name = "carbon-plugin-sign"
 # the ONLY thing in the tree that ever opens the private key.
 path = "tools/sign.rs"
 
+[[bin]]
+name = "carbon-import-check"
+# Reads a compiled artifact's import table and judges it against
+# ImportPolicy::carbon_plugin(). Runs at publish time, before
+# carbon-plugin-sign — Carbon does not sign what this refuses.
+path = "tools/import_check.rs"
+
 # Clippy runs with -D warnings; the shared allow-list lives in the workspace
 # root so one rationale covers every crate. See //.tools/orchestration/bazel/cargo/Cargo.toml.
 [lints]
@@ -64,3 +76,9 @@ sha2 = "0.10"
 # part of this crate's public dependency surface — `SigningKey::from_bytes`
 # needs no feature at all, and this fills the 32 seed bytes it wants.
 getrandom = "0.2"
+# The PE parser for the import-table check. `goblin` over `pelite` because it
+# parses PE, ELF and Mach-O behind one API — the checker has to grow a `.so`
+# (ELF DT_NEEDED) and a `.dylib` (Mach-O load commands) arm eventually, and
+# goblin is the crate that already has both. Only the PE features are on
+# today, because only the PE arm is written.
+goblin = { version = "0.10", default-features = false, features = ["std", "pe32", "pe64"] }

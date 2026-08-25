@@ -1,0 +1,14 @@
+// No `.dependencies`, for the same reason the negative fixture has none: the
+// import table has to be a statement about src/main.zig alone.
+.{
+    .name = .allowed_plugin,
+    .fingerprint = 0x61a5dc6801a2558b,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{},
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

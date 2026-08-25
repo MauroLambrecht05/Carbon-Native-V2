@@ -46,7 +46,10 @@ pub const CARBON_ERR_QUEUE_FULL: i32 = -3;
 pub const CARBON_ERR_NO_CTX: i32 = -4;
 
 pub const CARBON_PLUGIN_ABI_VERSION_MAJOR: u32 = 1;
-pub const CARBON_PLUGIN_ABI_VERSION_MINOR: u32 = 0;
+// 1, not 0: ABI 1.1 appended set_global_string/set_global_number/
+// set_global_function/eval to HostCarbonApp — see the note on those fields
+// below and carbon_plugin.h's APPEND-ONLY ZONE.
+pub const CARBON_PLUGIN_ABI_VERSION_MINOR: u32 = 1;
 
 // ── CarbonJSContext — opaque to plugins ───────────────────────────────────
 //
@@ -56,6 +59,16 @@ pub const CARBON_PLUGIN_ABI_VERSION_MINOR: u32 = 0;
 pub struct CarbonJSContext {
     _private: [u8; 0],
 }
+
+// Type alias matching the SDK's `CarbonJSCallback` so plugins can pass the
+// same fn pointer they declared in their own code. Declared here, ahead of
+// `HostCarbonApp`, because `set_global_function` below is typed with it.
+pub type CarbonJSCallback = unsafe extern "C" fn(
+    ctx: *mut CarbonJSContext,
+    args_json: *const c_char,
+    result_buf: *mut c_char,
+    result_buf_len: usize,
+);
 
 // ── HostCarbonApp — runtime-side mirror of `struct CarbonApp` ─────────────
 //
@@ -90,6 +103,35 @@ pub struct HostCarbonApp {
     pub alloc: Option<unsafe extern "C" fn(size: usize) -> *mut c_void>,
     pub free: Option<unsafe extern "C" fn(ptr: *mut c_void)>,
     // ── APPEND-ONLY ZONE — see header. New fields go below this line.
+
+    // ABI 1.1. The carbon_js_* operations as struct fields rather than a
+    // runtime GetProcAddress/dlsym lookup — see carbon_plugin.h's note on
+    // these same four fields for why: the plugin trust checker
+    // (solutions/capabilities/plugin/trust) denies GetProcAddress and
+    // GetModuleHandle* from a compiled plugin's import table unconditionally,
+    // because a plugin that can resolve one arbitrary symbol at runtime can
+    // resolve any of them. These fields are how a plugin gets the one
+    // resolution it actually needs (installing JS globals) without going
+    // through that door — the same shape push_event and request_paint above
+    // already use.
+    pub set_global_string: Option<
+        unsafe extern "C" fn(
+            ctx: *mut CarbonJSContext,
+            name: *const c_char,
+            value: *const c_char,
+        ) -> i32,
+    >,
+    pub set_global_number: Option<
+        unsafe extern "C" fn(ctx: *mut CarbonJSContext, name: *const c_char, value: f64) -> i32,
+    >,
+    pub set_global_function: Option<
+        unsafe extern "C" fn(
+            ctx: *mut CarbonJSContext,
+            name: *const c_char,
+            cb: CarbonJSCallback,
+        ) -> i32,
+    >,
+    pub eval: Option<unsafe extern "C" fn(ctx: *mut CarbonJSContext, source: *const c_char) -> i32>,
 }
 
 /// Owns the heap allocation backing the strings inside `HostCarbonApp` plus
@@ -243,6 +285,10 @@ impl HostCarbonAppStorage {
                 request_paint: Some(host_request_paint),
                 alloc: Some(host_alloc),
                 free: Some(host_free),
+                set_global_string: Some(carbon_js_set_global_string),
+                set_global_number: Some(carbon_js_set_global_number),
+                set_global_function: Some(carbon_js_set_global_function),
+                eval: Some(carbon_js_eval),
             },
             _app_name: app_name_c,
             _app_version: app_version_c,
@@ -373,15 +419,6 @@ pub unsafe extern "C" fn carbon_js_set_global_number(
         CARBON_OK
     }
 }
-
-// Type alias matching the SDK's `CarbonJSCallback` so plugins can pass
-// the same fn pointer they declared in their own code.
-pub type CarbonJSCallback = unsafe extern "C" fn(
-    ctx: *mut CarbonJSContext,
-    args_json: *const c_char,
-    result_buf: *mut c_char,
-    result_buf_len: usize,
-);
 
 // Bridge: QuickJS calls our generic JSCFunction wrapper, which:
 //   1. Extracts the user's CarbonJSCallback from the function's "data" slot.

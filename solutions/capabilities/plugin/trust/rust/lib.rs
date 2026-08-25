@@ -1,14 +1,26 @@
 // carbon-plugin-trust — what makes a native plugin trustworthy at load time.
 //
+// ── TWO INDEPENDENT CHECKS, ONE CRATE ───────────────────────────────────────
+// Signing/verification (below) answers "did Carbon produce this exact byte
+// sequence". The import-table policy (domain::import_policy) answers a
+// different question the signature cannot: "even if Carbon signed it, can
+// this binary reach the OS behind the SDK's back". Carbon signs a plugin only
+// after `carbon-import-check` passes it, so the two run in sequence at
+// publish time — but the loader only ever needs the first at load time, which
+// is why they are one crate (shared domain vocabulary, one place a signer and
+// a loader both depend on) rather than one dependency graph.
+//
 // ── Layout ──────────────────────────────────────────────────────────────────
 // The same three layers the rest of solutions/capabilities uses, because the
 // split is real here rather than decorative:
 //
 //   domain/          what a plugin's identity IS (its SHA-256 content hash),
-//                    the detached-signature layout, and the revocation list.
-//                    No I/O, no key material, no filesystem.
-//   application/     the two operations — sign an artifact, verify one — each
-//                    of which is a few lines on top of domain.
+//                    the detached-signature layout, the revocation list, and
+//                    the import-table allow/deny policy. No I/O, no key
+//                    material, no filesystem.
+//   application/     the operations — sign an artifact, verify one, read an
+//                    artifact's import table — each a few lines on top of
+//                    domain.
 //   infrastructure/  the private key on disk. The ONLY module that knows what
 //                    a key file looks like, and the only one the loader does
 //                    not compile.
@@ -59,11 +71,15 @@
 
 #[path = "domain/digest.rs"]
 pub mod digest;
+#[path = "domain/import_policy.rs"]
+pub mod import_policy;
 #[path = "domain/revocation.rs"]
 pub mod revocation;
 #[path = "domain/signature.rs"]
 pub mod signature;
 
+#[path = "application/import_check.rs"]
+pub mod import_check;
 #[path = "application/signing.rs"]
 pub mod signing;
 #[path = "application/verification.rs"]
@@ -73,6 +89,8 @@ pub mod verification;
 pub mod keyfile;
 
 pub use digest::ContentHash;
+pub use import_check::read_pe_imports;
+pub use import_policy::{Import, ImportPolicy, ImportReport, ImportScanError, Violation};
 pub use revocation::ensure_not_revoked;
 pub use signature::signature_path;
 pub use signing::sign_artifact;

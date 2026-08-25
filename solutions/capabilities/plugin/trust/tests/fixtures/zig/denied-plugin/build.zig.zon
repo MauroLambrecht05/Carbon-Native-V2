@@ -1,0 +1,18 @@
+// No `.dependencies` at all — the fixture links nothing, which is exactly
+// what makes its import table readable as a statement about its own source.
+//
+// `.name` is an enum literal and `.fingerprint` is mandatory: both are zig
+// 0.16 requirements, and both values here came from a real `zig build` error
+// printing the value to paste, not from memory.
+.{
+    .name = .denied_plugin,
+    .fingerprint = 0x91fb0a1548771542,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{},
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
