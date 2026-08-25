@@ -36,9 +36,14 @@ zig-out/
 # `carbon dev` — the built artifact `carbon plugin install` copies in.
 # Regenerated on every launch; boundaries_test's LOCAL_PLUGIN_ARTIFACT
 # pattern also excludes it, since that check does not read .gitignore.
-plugins/*.dll
-plugins/*.so
-plugins/*.dylib
+#
+# No leading slash and a `/` in the middle anchors a gitignore pattern to
+# THIS file's directory — plain `plugins/*.dll` only ever matched a
+# repo-root `plugins/` dir, never `labs/examples/<app>/plugins/`, which is
+# where every example app's actually lands. `**/` matches at any depth.
+**/plugins/*.dll
+**/plugins/*.so
+**/plugins/*.dylib
 
 # EXCEPTION: the launch test's fixture bundle is an INPUT, not build output.
 #
