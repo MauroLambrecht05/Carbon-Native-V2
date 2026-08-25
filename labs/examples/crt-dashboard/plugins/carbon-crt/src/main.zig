@@ -55,7 +55,7 @@ const MANIFEST = sdk.manifest.build(.{
     .points = &.{ "lifecycle.register", "paint.before" },
 });
 
-export fn carbon_plugin_manifest() callconv(.C) [*:0]const u8 {
+export fn carbon_plugin_manifest() callconv(.c) [*:0]const u8 {
     return MANIFEST;
 }
 
@@ -69,7 +69,7 @@ comptime {
     std.debug.assert(std.mem.eql(u8, point.symbol, "carbon_plugin_register"));
 }
 
-export fn carbon_plugin_register(app_raw: *sdk.RawApp) callconv(.C) void {
+export fn carbon_plugin_register(app_raw: *sdk.RawApp) callconv(.c) void {
     const app = sdk.CarbonApp.fromRaw(app_raw);
 
     // A major ABI mismatch means the struct layout differs; every field read
@@ -112,7 +112,7 @@ export fn carbon_plugin_before_paint(
     width: u32,
     height: u32,
     stride_bytes: u32,
-) callconv(.C) void {
+) callconv(.c) void {
     _ = app_raw;
     applyCrt(pixmap[0 .. @as(usize, stride_bytes) * height], width, height, stride_bytes);
 }

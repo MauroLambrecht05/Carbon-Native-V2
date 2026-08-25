@@ -57,32 +57,49 @@ pub fn build(b: *std.Build) void {
     carbon_sdk_mod.addIncludePath(b.path(INCLUDE));
 
     // Build a tiny library so `zig build` from here checks compilation.
-    const lib = b.addStaticLibrary(.{
-        .name = "carbon_sdk_check",
+    //
+    // .addLibrary/.addTest take a pre-built *Module (.root_module) rather
+    // than .root_source_file/.target/.optimize directly — the Build API this
+    // was written against (0.13) offered both forms; the module-only form is
+    // the one that survived. Include paths and libc linkage go through the
+    // *Module directly, not the *Step.Compile forwarding methods (addIncludePath,
+    // linkLibC) — those wrappers have appeared and disappeared across Zig
+    // releases; the Module fields and methods underneath have not.
+    const lib_mod = b.createModule(.{
         .root_source_file = b.path(SRC ++ "/carbon_sdk.zig"),
         .target = target,
         .optimize = optimize,
     });
-    lib.root_module.addImport("carbon_extension_points", registry_mod);
-    lib.addIncludePath(b.path(INCLUDE));
+    lib_mod.addImport("carbon_extension_points", registry_mod);
+    lib_mod.addIncludePath(b.path(INCLUDE));
+
+    const lib = b.addLibrary(.{
+        .linkage = .static,
+        .name = "carbon_sdk_check",
+        .root_module = lib_mod,
+    });
     b.installArtifact(lib);
 
     // `zig build test` — the SDK's own comptime assertions, plus the
     // registry's. The registry asserts its invariants in a `comptime` block,
     // so importing it at all is most of the check.
-    const tests = b.addTest(.{
+    const tests_mod = b.createModule(.{
         .root_source_file = b.path(SRC ++ "/carbon_sdk.zig"),
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
     });
-    tests.root_module.addImport("carbon_extension_points", registry_mod);
-    tests.addIncludePath(b.path(INCLUDE));
-    tests.linkLibC();
+    tests_mod.addImport("carbon_extension_points", registry_mod);
+    tests_mod.addIncludePath(b.path(INCLUDE));
+
+    const tests = b.addTest(.{ .root_module = tests_mod });
 
     const registry_tests = b.addTest(.{
-        .root_source_file = b.path(REGISTRY),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path(REGISTRY),
+            .target = target,
+            .optimize = optimize,
+        }),
     });
 
     const test_step = b.step("test", "Run the SDK and registry tests");

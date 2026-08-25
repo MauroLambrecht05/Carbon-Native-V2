@@ -40,7 +40,7 @@ pub const REGISTRY_MINOR: u32 = blk: {
 /// Use it beside every `export fn`:
 ///
 ///     comptime { _ = ext.expect("paint.before"); }
-///     export fn carbon_plugin_before_paint(...) callconv(.C) void { ... }
+///     export fn carbon_plugin_before_paint(...) callconv(.c) void { ... }
 ///
 /// A misspelled id then fails the plugin build with the list of real ones,
 /// rather than producing a shared library that loads, exports a symbol nothing

@@ -1,7 +1,7 @@
 // The SDK by path: a plugin must be built against the same extension-point
 // registry as the runtime it loads into, and a fetched copy would not be.
 .{
-    .name = "carbon-clipboard",
+    .name = .carbon_clipboard,
     .version = "0.2.0",
     .minimum_zig_version = "0.13.0",
     .dependencies = .{

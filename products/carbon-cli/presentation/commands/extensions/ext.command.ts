@@ -322,7 +322,7 @@ function zigStub(point: ExtensionPoint): string {
       ? "    const app = sdk.CarbonApp.fromRaw(app_raw);\n    _ = app;"
       : "    const app = sdk.CarbonApp.fromRaw(app_raw);\n    _ = app;\n    return sdk.CARBON_OK;";
 
-  return `export fn ${point.symbol}(${params.join(", ")}) callconv(.C) ${returns} {\n${body}\n}`;
+  return `export fn ${point.symbol}(${params.join(", ")}) callconv(.c) ${returns} {\n${body}\n}`;
 }
 
 function zigType(id: string): string {

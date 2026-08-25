@@ -15,30 +15,40 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const lib = b.addSharedLibrary(.{
-        .name = "carbon_crt",
+    // Include paths and libc linkage go through the *Module directly, not
+    // the *Step.Compile forwarding methods (addIncludePath, linkLibC) —
+    // those wrappers have appeared and disappeared across Zig releases; the
+    // Module fields and methods underneath have not.
+    const lib_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
     });
-    lib.root_module.addImport("carbon_sdk", sdk.module("carbon_sdk"));
+    lib_mod.addImport("carbon_sdk", sdk.module("carbon_sdk"));
     // The C ABI header the SDK @cImports. It lives in the SDK product's
     // presentation/, beside the templates — both are surface.
-    lib.addIncludePath(sdk.path("../presentation/include"));
-    lib.linkLibC();
+    lib_mod.addIncludePath(sdk.path("../presentation/include"));
 
+    const lib = b.addLibrary(.{
+        .linkage = .dynamic,
+        .name = "carbon_crt",
+        .root_module = lib_mod,
+    });
     b.installArtifact(lib);
 
     // `zig build test` runs the comptime assertions in src/main.zig — which
     // is where a wrong extension-point id or symbol name is caught.
-    const tests = b.addTest(.{
+    const tests_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
     });
-    tests.root_module.addImport("carbon_sdk", sdk.module("carbon_sdk"));
-    tests.addIncludePath(sdk.path("../presentation/include"));
-    tests.linkLibC();
+    tests_mod.addImport("carbon_sdk", sdk.module("carbon_sdk"));
+    tests_mod.addIncludePath(sdk.path("../presentation/include"));
+
+    const tests = b.addTest(.{ .root_module = tests_mod });
 
     const test_step = b.step("test", "Check the plugin against the extension-point registry");
     test_step.dependOn(&b.addRunArtifact(tests).step);
