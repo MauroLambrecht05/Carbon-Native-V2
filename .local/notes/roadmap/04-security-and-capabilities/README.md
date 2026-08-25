@@ -101,25 +101,29 @@ draft decision (`network-security-stance.md`'s "no ambient fetch" stance) and wh
   had (`composition/blitz.rs`) — previously hardcoded `process_enabled = false` and no
   origin allowlist at all.
 
-**Known, separate gap found incidentally, not yet fixed**: `labs/examples/pulse`'s
-`App.tsx` imports `setActive` from the `carbon:carbon-pulse` virtual module, but
-`carbon-pulse`'s Zig source registers the JS-visible function as
-`__carbon_pulse_set_active` — the bundler's per-plugin virtual-module resolution has
-no mapping between the two, so `carbon build`/`carbon dev` on the Pulse example fails
-at the bundle step. Pre-existing (present in the commit that added the Pulse example,
-before this round of work), unrelated to the ABI/checker changes above, and NOT yet
-diagnosed past locating the mismatch — the fix is somewhere in how a plugin's
-declared `modules` entry gets turned into named exports, which is a bundler-side
-question, not a Rust/Zig one.
+- **Found and fixed, not just noted**: CI's "build examples" job caught the Pulse
+  bundler-wiring gap for real (`No matching export ... for import "setActive"`). Two
+  independent bugs in `solutions/integrations/bundler/vite`'s manifest discovery:
+  `discoverManifests` only ever scanned a `<workspaceRoot>/packages/*/` layout nothing
+  in this tree uses — an app's own plugins live at `<projectRoot>/plugins/<name>/`
+  (`run.command.ts`'s `syncLocalPlugins`), never scanned at all until
+  `discoverLocalManifests(projectRoot)` was added; and `normalizeManifest` required a
+  `[plugin]` wrapper section no real `carbon-plugin.toml` has ever used. Diagnosing it
+  also surfaced a third bug it was masking: all three Pulse plugins' own
+  `carbon-plugin.toml` had `modules = [...]` sitting right after `[capabilities]` with
+  no section header of its own — real TOML parses that as `capabilities.modules`, the
+  exact gotcha the same file's own comment already warned about for
+  `extension-points`. Verified: 3 new regression tests reproducing the real manifest
+  shape and the TOML-misplacement gotcha directly, `carbon build` on all 6 real
+  example apps (the exact loop CI's job runs) succeeding, pulse included.
 
 **Not yet started** (real, separate pieces of work): the sandboxed install/build
 broker (Layer 2); hash-pinned Zig dependency enforcement; mandatory `ReleaseSafe`
 enforcement (nothing currently refuses to sign a Debug-built plugin); wiring
 `carbon-import-check` and `carbon-plugin-sign` into an actual publish pipeline (both
-exist and work as standalone binaries, run by hand so far); the Pulse example's
-bundler-wiring gap noted above; `--frozen-lockfile`-style enforcement for whatever
-end users' own `carbon.toml` machinery installs day to day, beyond `carbon-cli`'s own
-toolchain deps.
+exist and work as standalone binaries, run by hand so far); `--frozen-lockfile`-style
+enforcement for whatever end users' own `carbon.toml` machinery installs day to day,
+beyond `carbon-cli`'s own toolchain deps.
 
 ## The two things that make Carbon Carbon, restated as constraints on this plan
 
