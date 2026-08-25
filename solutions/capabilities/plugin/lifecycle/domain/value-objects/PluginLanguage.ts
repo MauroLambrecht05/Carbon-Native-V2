@@ -8,7 +8,7 @@
 // Zig is the one, for reasons that are properties of the job rather than
 // taste:
 //
-//   * A plugin is a C-ABI shared library. Zig's `export fn ... callconv(.C)`
+//   * A plugin is a C-ABI shared library. Zig's `export fn ... callconv(.c)`
 //     IS that, with no attribute soup and no `#[no_mangle]` unsafe block.
 //   * `@cImport` reads `carbon_plugin.h` directly, so the SDK does not
 //     hand-mirror the ABI — the Rust SDK had a whole `ffi.rs` doing exactly

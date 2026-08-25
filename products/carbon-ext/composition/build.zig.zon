@@ -19,7 +19,10 @@
 // Copying any of them in would create a second version of a contract, which is
 // the failure the registry exists to prevent.
 .{
-    .name = "carbon-plugin-sdk",
+    .name = .carbon_plugin_sdk,
+    // Identifies this package across renames — zig's own suggested value for
+    // this exact name, taken from a real `zig build` error, not guessed.
+    .fingerprint = 0x4f180a803fb94181,
     .version = "0.2.0",
     // Zig 0.13 is what .config/toolchains/zig pins. The SDK uses
     // `std.fmt.comptimePrint` and `b.addModule`, both stable since 0.12.

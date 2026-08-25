@@ -48,7 +48,7 @@ pub const Config = struct {
 ///         .points = &.{ "lifecycle.register", "paint.before" },
 ///     });
 ///
-///     export fn carbon_plugin_manifest() callconv(.C) [*:0]const u8 {
+///     export fn carbon_plugin_manifest() callconv(.c) [*:0]const u8 {
 ///         return MANIFEST;
 ///     }
 pub fn build(comptime cfg: Config) [*:0]const u8 {

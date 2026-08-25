@@ -452,6 +452,49 @@
   }
   globalThis.fetch = fetch;
 
+  // ─── fetchWithStoredCredential ─────────────────────────────────────────
+  // The credential-broker path — not a web-standard API, so it's a
+  // deliberately Carbon-named global rather than living on `fetch` itself.
+  // The stored secret never enters this function, never enters JS at all:
+  // it's looked up and substituted into the header by Rust, server-side of
+  // this boundary. Same request/response machinery as fetch() otherwise —
+  // reuses the same `fetches` map and dispatch handlers below.
+  function fetchWithStoredCredential(url, credential, init) {
+    init = init || {};
+    return new Promise(function (resolve, reject) {
+      var headersArr = [];
+      if (init.headers) {
+        for (var k in init.headers) {
+          if (Object.prototype.hasOwnProperty.call(init.headers, k)) {
+            headersArr.push([k, String(init.headers[k])]);
+          }
+        }
+      }
+      var body = typeof init.body === "string" ? init.body : null;
+      var initJson = JSON.stringify({ method: init.method || "GET", headers: headersArr, body: body });
+      var id = __cm_fetch_start_with_credential(
+        url,
+        initJson,
+        credential.service,
+        credential.account,
+        credential.headerName || "Authorization",
+        credential.headerTemplate || "Bearer {}",
+      );
+      fetches.set(id, {
+        resolve: resolve,
+        reject: reject,
+        response: null,
+        chunks: [],
+        chunkReaders: [],
+        bodyConsumers: [],
+        done: false,
+        error: null,
+        url: url,
+      });
+    });
+  }
+  globalThis.__carbon_fetch_with_stored_credential = fetchWithStoredCredential;
+
   // ─── Fetch dispatchers (called by main-thread event loop) ───────────────
   globalThis.__cm_fetch_dispatch_headers = function (id, status, headersArr) {
     var p = fetches.get(id);

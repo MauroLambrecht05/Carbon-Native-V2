@@ -84,10 +84,10 @@ fn resolveHostSymbol(comptime name: [:0]const u8) *anyopaque {
     };
 }
 
-const SetGlobalStringFn = *const fn (*c.CarbonJSContext, [*:0]const u8, [*:0]const u8) callconv(.C) i32;
-const SetGlobalNumberFn = *const fn (*c.CarbonJSContext, [*:0]const u8, f64) callconv(.C) i32;
-const SetGlobalFunctionFn = *const fn (*c.CarbonJSContext, [*:0]const u8, c.CarbonJSCallback) callconv(.C) i32;
-const EvalFn = *const fn (*c.CarbonJSContext, [*:0]const u8) callconv(.C) i32;
+const SetGlobalStringFn = *const fn (*c.CarbonJSContext, [*:0]const u8, [*:0]const u8) callconv(.c) i32;
+const SetGlobalNumberFn = *const fn (*c.CarbonJSContext, [*:0]const u8, f64) callconv(.c) i32;
+const SetGlobalFunctionFn = *const fn (*c.CarbonJSContext, [*:0]const u8, c.CarbonJSCallback) callconv(.c) i32;
+const EvalFn = *const fn (*c.CarbonJSContext, [*:0]const u8) callconv(.c) i32;
 
 var set_global_string_fn: ?SetGlobalStringFn = null;
 var set_global_number_fn: ?SetGlobalNumberFn = null;

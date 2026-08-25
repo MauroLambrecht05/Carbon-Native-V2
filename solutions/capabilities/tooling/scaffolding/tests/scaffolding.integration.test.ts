@@ -121,6 +121,15 @@ describe("every preset produces a coherent project", () => {
       expect(pkg).toContain("solid-js");
     });
 
+    test(`${preset}: starts with lifecycle scripts locked down`, () => {
+      // An EMPTY array, present. bun's default-deny is measured against a
+      // built-in allowlist that applies when the field is absent, so omitting
+      // it would leave ~366 package names able to run install-time code in
+      // every project carbon scaffolds. Declaring it replaces that list.
+      const pkg = JSON.parse(planFor(preset).fileAt("package.json")!.contents);
+      expect(pkg.trustedDependencies).toEqual([]);
+    });
+
     test(`${preset}: the editor can still resolve @carbon/mini-solid`, () => {
       // Not installed, so without a tsconfig path the imports would be red in
       // an editor while building fine — its own kind of broken.

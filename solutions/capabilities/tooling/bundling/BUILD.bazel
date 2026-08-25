@@ -13,3 +13,22 @@ filegroup(
     name = "tests",
     srcs = glob(["**/*.test.ts"], allow_empty = True),
 )
+
+load("//.tools/orchestration/bazel/bun:defs.bzl", "bun_test")
+
+# Real `bun install` runs against a real throwaway tarball — see the file
+# header for why this is not mocked. The srcs below are what
+# BuildProjectUseCase imports; the test calls `ensureNodeModules` directly
+# rather than asserting on a fake ProcessRunner, so they all have to resolve.
+bun_test(
+    name = "lifecycle_scripts_integration_test",
+    entry = "tests/lifecycle-scripts.integration.test.ts",
+    srcs = [
+        ":srcs",
+        ":tests",
+        "//solutions/contracts:srcs",
+        "//solutions/infrastructure/logging:srcs",
+        "//solutions/infrastructure/process:srcs",
+        "//solutions/infrastructure/workspace:srcs",
+    ],
+)

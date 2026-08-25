@@ -52,6 +52,31 @@ import { buildSpecifierMap, discoverManifests } from "../../domain/import-manife
 const VIRTUAL_PREFIX = "\0carbon-imports:";
 
 /**
+ * `carbon:*` specifiers with no real web-platform equivalent — process
+ * spawning, raw hardware access. These are resolvable only from the app's
+ * own source, never from a dependency, because there is no "looks like web"
+ * ergonomics being preserved by exposing them broadly: no legitimate
+ * frontend library expects ambient process-spawning to exist at all. See
+ * .local/notes/roadmap/04-security-and-capabilities/README.md, Layer 1.
+ *
+ * This is defense-in-depth, not the primary boundary — the primary one is
+ * that `carbon.toml [runtime] process = true` gates whether the underlying
+ * `__cm_proc_*` globals are ever installed on `globalThis` at all (see
+ * `solutions/infrastructure/os/lib.rs::register_all`). A dependency that
+ * somehow reached the raw global directly wouldn't be stopped by this
+ * check alone; this closes the *import* path specifically, so a dependency
+ * can't even get the ergonomic named export.
+ */
+const FIRST_PARTY_ONLY_SPECIFIERS = new Set(["process"]);
+
+/** True when `importer` is a path inside some `node_modules/` tree. */
+function isDependencyImporter(importer) {
+  if (typeof importer !== "string") return false;
+  const normalized = importer.replace(/\\/g, "/");
+  return normalized.includes("/node_modules/");
+}
+
+/**
  * @typedef {Object} CarbonImportsOptions
  * @property {boolean} [debug]            Log per-file rewrites + manifest discovery.
  * @property {string}  [carbonToml]       Override path to carbon.toml. Default: <root>/carbon.toml.
@@ -157,6 +182,19 @@ export function carbonImports(options = {}) {
               `[plugins] or remove the import.`,
           );
         }
+      }
+
+      // First-party-only specifiers: refuse the import outright if it comes
+      // from inside node_modules, regardless of capability grants — a
+      // dependency has no legitimate reason to ask for process spawning,
+      // and a compromised one shouldn't get the ergonomic named-export path
+      // even as a convenience.
+      if (pluginName && FIRST_PARTY_ONLY_SPECIFIERS.has(pluginName) && isDependencyImporter(importer)) {
+        this.error(
+          `[carbon] '${source}' imported from ${importer} — this module is only ` +
+            `importable from the app's own source, never from a dependency. ` +
+            `See .local/notes/roadmap/04-security-and-capabilities/README.md.`,
+        );
       }
 
       // Whether or not we recognize the specifier in our merged table, we

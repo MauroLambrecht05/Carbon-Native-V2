@@ -44,6 +44,8 @@
     "three": "^0.169.0",
     "typescript": "^5.6.0"
   },
+  "//trustedDependencies": "DELIBERATELY EMPTY. This is the repository's real dependency root — `bun install --cwd .config` is the command every contributor and the devcontainer run — so it is the highest-value place in the repo for an npm install script to execute. Bun blocks dependency lifecycle scripts by default, but only against a BUILT-IN allowlist of ~366 names (`bun pm default-trusted`); declaring this field REPLACES that list instead of extending it, so `[]` is the only spelling of 'nothing runs'. Verified on 2026-08-25 against bun 1.3.10 with this exact package.json + bun.lock: `bun install --frozen-lockfile` installs all 136 packages with no lockfile drift, and vite/react/three/discord.js all import and run. Of those 136 only esbuild@0.21.5 has a postinstall that would otherwise fire (its platform binary arrives via optionalDependencies, not that script — checked, esbuild transforms fine without it); the `prepare` scripts on rollup/undici/@tweenjs/tween.js/magic-bytes.js/babel-plugin-jsx-dom-expressions only run for git or linked deps, never for registry tarballs. Add a name here ONLY with evidence the package is broken without it.",
+  "trustedDependencies": [],
   "engines": {
     "bun": ">=1.3.0"
   }

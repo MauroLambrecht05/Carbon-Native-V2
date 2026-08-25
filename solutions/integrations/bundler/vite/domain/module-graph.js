@@ -93,11 +93,37 @@ export const BUILTIN_MODULES = {
     { name: "write", global: "__carbon_clipboard_write_async" },
   ],
 
-  // ── carbon-fs ──────────────────────────────────────────────────────────
-  "carbon:fs": [
-    { name: "readFile", global: "__carbon_fs_read_file" },
-    { name: "writeFile", global: "__carbon_fs_write_file" },
-    { name: "readDir", global: "__carbon_fs_read_dir" },
+  // ── carbon-process ─────────────────────────────────────────────────────
+  // Deliberately absent: `carbon:fs`. Per .local/notes/roadmap/04-security-
+  // and-capabilities/README.md's Fs/Net split, raw filesystem access has no
+  // virtual module for anyone, first-party code included — file access is
+  // dialog-mediated (see `dialog.openFileText`/`saveFileText`) or the
+  // bounds-checked `readOwnAsset`, never an arbitrary path. This entry
+  // previously here referenced globals (`__carbon_fs_read_file` etc.) that
+  // never matched what fs.rs actually installs — it was unreachable dead
+  // config, not a real, working module.
+  "carbon:process": [
+    { name: "exec", global: "__cm_proc_exec" },
+    { name: "spawn", global: "__cm_proc_spawn" },
+    { name: "kill", global: "__cm_proc_kill" },
+    { name: "wait", global: "__cm_proc_wait" },
+    { name: "tryStatus", global: "__cm_proc_try_status" },
+    { name: "writeStdin", global: "__cm_proc_write_stdin" },
+    { name: "readStdout", global: "__cm_proc_read_stdout" },
+    { name: "readStderr", global: "__cm_proc_read_stderr" },
+    { name: "pidSelf", global: "__cm_proc_pid_self" },
+    { name: "relaunchSelf", global: "__cm_proc_relaunch_self" },
+  ],
+
+  // ── carbon-secrets ─────────────────────────────────────────────────────
+  // The credential-broker path: request an authenticated call by naming a
+  // stored keychain entry, never by holding the secret value itself — see
+  // .local/notes/roadmap/04-security-and-capabilities/README.md's secret-
+  // handling section.
+  //   import { fetchWithStoredCredential } from "carbon:secrets";
+  //   await fetchWithStoredCredential(url, { service, account });
+  "carbon:secrets": [
+    { name: "fetchWithStoredCredential", global: "__carbon_fetch_with_stored_credential" },
   ],
 
   // ── carbon-notify ──────────────────────────────────────────────────────

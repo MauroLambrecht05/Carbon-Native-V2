@@ -59,7 +59,28 @@ export async function runCommand(rest: string[]): Promise<number> {
   );
 
   try {
+    // Wall-clock timing for everything before the runtime process exists —
+    // see the matching block in dev.command.ts for why. Read alongside
+    // carbon-mini's own [timing] phase trace (products/carbon/presentation/
+    // timing/trace.rs, ending in first_paint_visible), this covers the whole
+    // command-to-first-render path.
+    const tPipelineStart = performance.now();
+    let tStageLast = tPipelineStart;
+    const stage = (name: string) => {
+      const now = performance.now();
+      const delta = now - tStageLast;
+      const total = now - tPipelineStart;
+      tStageLast = now;
+      log.info(
+        c.dim(
+          `[timing] stage=${name.padEnd(24)} +${delta.toFixed(0).padStart(6)}ms   total ${total.toFixed(0).padStart(7)}ms`,
+        ),
+      );
+    };
+
     await ensureNodeModules(projectDir, log);
+    stage("node_modules");
+
     const exe = await ensureRuntime(backend, log, {
       // The manifest decides which optional subsystems get linked — see
       // backendCargoFeatures. Without this an app declaring `image = true`
@@ -68,11 +89,17 @@ export async function runCommand(rest: string[]): Promise<number> {
       audio: cfg.runtime.audio,
       updater: cfg.updater?.enabled,
     });
+    // Huge delta here means cargo just compiled the runtime from scratch —
+    // ensureRuntime's own "runtime binary not built" log line right before
+    // this says so. Near-zero means the binary already existed.
+    stage("runtime_binary");
+
     await buildProject(projectDir, backend, log, {
       bytecode: cfg.runtime.bytecode,
       force,
       noBabelCache,
     });
+    stage("bundle");
 
     // Any plugin whose SOURCE lives in this app's own plugins/<name>/ builds
     // and installs itself here — no separate `carbon plugin install` step.
@@ -80,6 +107,7 @@ export async function runCommand(rest: string[]): Promise<number> {
     // prebuilt .dll) is untouched; this only matches a directory holding a
     // language marker file.
     await syncLocalPlugins(projectDir);
+    stage("plugins");
 
     // Plugins, before the window rather than after. Everything reported here
     // the runtime would also report — as `[carbon-plugin] FAILED to load ...`
@@ -88,6 +116,7 @@ export async function runCommand(rest: string[]): Promise<number> {
     // plugin it cannot load and the app still runs, so this warns loudly and
     // carries on rather than refusing to launch something that works.
     preflightPlugins(projectDir);
+    stage("preflight");
 
     log.info(`launching runtime…`);
     log.step(c.dim(exe));
@@ -105,6 +134,12 @@ export async function runCommand(rest: string[]): Promise<number> {
       ? [join(projectDir, "dist", "bundle.js")]
       : [projectDir];
     const child = start(exe, runtimeArgs);
+    stage("spawn");
+    log.info(
+      c.dim(
+        "[timing] — carbon-mini's own [timing] phase trace continues from here (its own process start) —",
+      ),
+    );
 
     // Forward Ctrl-C to the runtime so it can shut down cleanly.
     const onSig = () => {
@@ -132,10 +167,14 @@ export async function runCommand(rest: string[]): Promise<number> {
  * and lets a load-time failure be the runtime's problem, a plugin this app
  * owns the source of failing to compile is this app's own build breaking,
  * not a missing optional feature.
+ *
+ * `release: true` — this is the artifact that ships, unlike `carbon dev`'s
+ * fast Debug builds.
  */
 async function syncLocalPlugins(projectDir: string): Promise<void> {
   const { synced } = await pluginUseCases(join(PRODUCTS_DIR, "carbon-ext")).syncLocal.execute(
     projectDir,
+    { release: true },
   );
   for (const plugin of synced) {
     log.step(c.dim(`plugin ${plugin.name}: built + installed from ./plugins/${plugin.name}`));

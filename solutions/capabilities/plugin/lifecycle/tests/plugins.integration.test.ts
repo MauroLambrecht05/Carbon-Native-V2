@@ -511,14 +511,23 @@ describe("syncing local plugins", () => {
     const result = await useCase.execute(`${ROOT}/app`);
 
     expect(result.synced).toEqual([{ name: "my-thing", directory: `${ROOT}/app/plugins/my-thing` }]);
-    // Release, not debug — this runs on every `carbon run`/`carbon dev`
-    // launch, not once by hand, so it should produce what a shipped app
-    // would actually use.
-    expect(runner.calls[0].args).toEqual(["build", "-Drelease=true"]);
+    // Debug by default (no `release` option) — this runs on every `carbon
+    // dev` rebuild, including every hot-reload, so wall-clock compile time
+    // matters more than the plugin binary's own runtime speed. A ReleaseSafe
+    // rebuild on every keystroke was the original, uncaught version of this.
+    expect(runner.calls[0].args).toEqual(["build"]);
     expect(workspace.exists(`${ROOT}/app/plugins/${lib}`)).toBe(true);
     expect(readPluginEntries(workspace.readFile(`${ROOT}/app/carbon.toml`))).toEqual([
       { name: "my-thing", path: `./plugins/${lib}` },
     ]);
+  });
+
+  test("release: true builds what a shipped app would actually use — carbon run's mode", async () => {
+    const { runner, useCase } = withLocalSource();
+
+    await useCase.execute(`${ROOT}/app`, { release: true });
+
+    expect(runner.calls[0].args).toEqual(["build", "-Drelease=true"]);
   });
 
   test("syncs every local plugin, not just the first", async () => {

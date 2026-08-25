@@ -123,6 +123,15 @@ function walk(dir: string, onFile: (abs: string, rel: string) => void) {
     // through a junction instead. See .config/package.json.
     ".tools/orchestration/bazel/cargo/Cargo.lock",
     ".config/bun.lock",
+    // carbon-cli is published as its own npm package, so it resolves its own
+    // toolchain dependencies rather than borrowing .config/'s — and a
+    // published package that ships no lockfile is a package whose caret ranges
+    // re-resolve to whatever was published most recently, every install. That
+    // is precisely the supply-chain hole `--frozen-lockfile` exists to close
+    // (see .local/notes/roadmap/04-security-and-capabilities), so this
+    // lockfile is required, not merely tolerated. It is a second resolution on
+    // purpose; the rule above is about accidental ones.
+    "products/carbon-cli/bun.lock",
     // Self-contained benchmark harnesses, pinned apart on purpose so a
     // dependency bump in the repo cannot silently move a measurement.
     ".tools/automation/benchmarks/forkbun/bun.lock",
