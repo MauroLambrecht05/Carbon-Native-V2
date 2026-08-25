@@ -32,8 +32,8 @@ pub const PUBLIC_KEY_LEN: usize = 32;
 /// Refuses when the signature file is missing, unreadable, not exactly
 /// [`SIGNATURE_LEN`] bytes, or does not verify against `public_key`.
 pub fn verify_artifact(artifact: &Path, public_key: &[u8; PUBLIC_KEY_LEN]) -> Result<ContentHash> {
-    let bytes = fs::read(artifact)
-        .with_context(|| format!("reading plugin {}", artifact.display()))?;
+    let bytes =
+        fs::read(artifact).with_context(|| format!("reading plugin {}", artifact.display()))?;
 
     let sig_path = signature_path(artifact);
     let sig_bytes = fs::read(&sig_path).map_err(|e| {

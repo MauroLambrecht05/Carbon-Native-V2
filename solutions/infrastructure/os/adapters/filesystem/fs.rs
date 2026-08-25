@@ -42,10 +42,15 @@ fn throw<E: std::fmt::Display>(ctx: &Ctx<'_>, e: E) -> rquickjs::Error {
 /// and none of them overlap with where a user's real documents or secrets
 /// (SSH keys, cloud credentials, browser profiles) live.
 fn allowed_roots() -> Vec<PathBuf> {
-    [dirs::data_dir(), dirs::config_dir(), dirs::cache_dir(), Some(std::env::temp_dir())]
-        .into_iter()
-        .flatten()
-        .collect()
+    [
+        dirs::data_dir(),
+        dirs::config_dir(),
+        dirs::cache_dir(),
+        Some(std::env::temp_dir()),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
 }
 
 /// Resolve `path` to the real, symlink-free location it (or its nearest
@@ -64,9 +69,12 @@ fn validate_path<'js>(ctx: &Ctx<'js>, path: &str) -> rquickjs::Result<PathBuf> {
             Ok(real) => break real,
             Err(_) => {
                 if !probe.pop() {
-                    return Err(throw(ctx, format!(
-                        "fs: could not resolve \"{path}\" (no existing ancestor directory)"
-                    )));
+                    return Err(throw(
+                        ctx,
+                        format!(
+                            "fs: could not resolve \"{path}\" (no existing ancestor directory)"
+                        ),
+                    ));
                 }
             }
         }
@@ -76,10 +84,13 @@ fn validate_path<'js>(ctx: &Ctx<'js>, path: &str) -> rquickjs::Result<PathBuf> {
     if roots.iter().any(|root| resolved.starts_with(root)) {
         Ok(requested.to_path_buf())
     } else {
-        Err(throw(ctx, format!(
-            "fs: \"{path}\" is outside the app's own data/config/cache/temp directories — \
+        Err(throw(
+            ctx,
+            format!(
+                "fs: \"{path}\" is outside the app's own data/config/cache/temp directories — \
              use a native file dialog for anything the user chooses themselves"
-        )))
+            ),
+        ))
     }
 }
 
@@ -119,23 +130,32 @@ pub fn register(js_ctx: &JsContext) -> Result<()> {
 
         g.set(
             "__cm_fs_exists",
-            Function::new(ctx.clone(), |ctx: Ctx<'_>, path: String| -> rquickjs::Result<bool> {
-                Ok(validate_path(&ctx, &path).is_ok() && Path::new(&path).exists())
-            })?,
+            Function::new(
+                ctx.clone(),
+                |ctx: Ctx<'_>, path: String| -> rquickjs::Result<bool> {
+                    Ok(validate_path(&ctx, &path).is_ok() && Path::new(&path).exists())
+                },
+            )?,
         )?;
 
         g.set(
             "__cm_fs_is_file",
-            Function::new(ctx.clone(), |ctx: Ctx<'_>, path: String| -> rquickjs::Result<bool> {
-                Ok(validate_path(&ctx, &path).is_ok() && Path::new(&path).is_file())
-            })?,
+            Function::new(
+                ctx.clone(),
+                |ctx: Ctx<'_>, path: String| -> rquickjs::Result<bool> {
+                    Ok(validate_path(&ctx, &path).is_ok() && Path::new(&path).is_file())
+                },
+            )?,
         )?;
 
         g.set(
             "__cm_fs_is_dir",
-            Function::new(ctx.clone(), |ctx: Ctx<'_>, path: String| -> rquickjs::Result<bool> {
-                Ok(validate_path(&ctx, &path).is_ok() && Path::new(&path).is_dir())
-            })?,
+            Function::new(
+                ctx.clone(),
+                |ctx: Ctx<'_>, path: String| -> rquickjs::Result<bool> {
+                    Ok(validate_path(&ctx, &path).is_ok() && Path::new(&path).is_dir())
+                },
+            )?,
         )?;
 
         g.set(

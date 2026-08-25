@@ -352,7 +352,12 @@ fn main() -> Result<()> {
     // Synchronous OS calls + an async tokio runtime for networking,
     // with results posted back via UserEvent.
     // `tlog` is this binary's own — see the PhaseLogger note in carbon-os.
-    native::register_all(&js_ctx, proxy.clone(), &tlog, read_process_enabled(&project_dir))?;
+    native::register_all(
+        &js_ctx,
+        proxy.clone(),
+        &tlog,
+        read_process_enabled(&project_dir),
+    )?;
     timing_log("native_registered", t0);
 
     // Plugin loader bootstrap. Order is intentional:

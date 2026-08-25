@@ -86,9 +86,15 @@ impl fmt::Display for Import {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Violation {
     /// The module itself is on the denylist.
-    DeniedModule { import: Import, reason: &'static str },
+    DeniedModule {
+        import: Import,
+        reason: &'static str,
+    },
     /// The symbol is denied wherever it appears, whatever module it came from.
-    DeniedSymbol { import: Import, reason: &'static str },
+    DeniedSymbol {
+        import: Import,
+        reason: &'static str,
+    },
     /// The module is neither denied nor allowed. Not a lesser finding: an
     /// allowlist that silently passes what it has not heard of is a denylist.
     UnknownModule { import: Import },
@@ -190,8 +196,14 @@ const DENIED_SYMBOLS: &[(&str, &str)] = &[
     ("GetProcAddressForCaller", "dynamic symbol resolution"),
     ("GetModuleHandleA", "reaching another module's base address"),
     ("GetModuleHandleW", "reaching another module's base address"),
-    ("GetModuleHandleExA", "reaching another module's base address"),
-    ("GetModuleHandleExW", "reaching another module's base address"),
+    (
+        "GetModuleHandleExA",
+        "reaching another module's base address",
+    ),
+    (
+        "GetModuleHandleExW",
+        "reaching another module's base address",
+    ),
 ];
 
 /// The one place a DENIED module is still allowed, symbol by symbol.
@@ -361,7 +373,10 @@ impl ImportPolicy {
     /// Judge a whole import table.
     pub fn check(&self, imports: Vec<Import>) -> ImportReport {
         let violations = imports.iter().filter_map(|i| self.judge(i)).collect();
-        ImportReport { imports, violations }
+        ImportReport {
+            imports,
+            violations,
+        }
     }
 }
 
@@ -486,7 +501,14 @@ mod tests {
     #[test]
     fn every_denied_module_is_denied_whatever_symbol_it_carries() {
         let policy = ImportPolicy::carbon_plugin();
-        for module in ["kernel32.dll", "user32.dll", "ntdll.dll", "ws2_32.dll", "wininet.dll", "winhttp.dll"] {
+        for module in [
+            "kernel32.dll",
+            "user32.dll",
+            "ntdll.dll",
+            "ws2_32.dll",
+            "wininet.dll",
+            "winhttp.dll",
+        ] {
             let v = policy
                 .judge(&import(module, "SomethingHarmless"))
                 .unwrap_or_else(|| panic!("{module} should be denied"));

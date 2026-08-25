@@ -149,10 +149,7 @@ fn origin_of(url: &reqwest::Url) -> Option<String> {
 /// `build_safe_client`'s redirect policy) every redirect hop, so a 302 from
 /// an allowed origin to a disallowed one fails instead of being followed.
 fn check_origin_allowed(url: &reqwest::Url) -> Result<(), String> {
-    let list = allowed_origins()
-        .get()
-        .map(|v| v.as_slice())
-        .unwrap_or(&[]);
+    let list = allowed_origins().get().map(|v| v.as_slice()).unwrap_or(&[]);
     if list.iter().any(|o| o == "*") {
         return Ok(());
     }
@@ -357,8 +354,7 @@ fn start_fetch_with_credential(
         // calls (Credential Manager / Keychain Services / Secret Service)
         // are synchronous, and this task is running on the async runtime.
         let secret = match tokio::task::spawn_blocking(move || {
-            keyring::Entry::new(&service, &account)
-                .and_then(|e| e.get_password())
+            keyring::Entry::new(&service, &account).and_then(|e| e.get_password())
         })
         .await
         {
@@ -371,11 +367,17 @@ fn start_fetch_with_credential(
                 return;
             }
             Ok(Err(e)) => {
-                post(UserEvent::FetchError { id, message: e.to_string() });
+                post(UserEvent::FetchError {
+                    id,
+                    message: e.to_string(),
+                });
                 return;
             }
             Err(e) => {
-                post(UserEvent::FetchError { id, message: e.to_string() });
+                post(UserEvent::FetchError {
+                    id,
+                    message: e.to_string(),
+                });
                 return;
             }
         };
@@ -423,8 +425,14 @@ fn start_fetch_with_credential(
         let resp = match req.send().await {
             Ok(r) => r,
             Err(e) => {
-                post(UserEvent::FetchError { id, message: e.to_string() });
-                fetch_registry().lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+                post(UserEvent::FetchError {
+                    id,
+                    message: e.to_string(),
+                });
+                fetch_registry()
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(&id);
                 return;
             }
         };
@@ -436,21 +444,37 @@ fn start_fetch_with_credential(
             }
         }
         let headers_json = serde_json::to_string(&headers_pairs).unwrap_or("[]".to_string());
-        post(UserEvent::FetchHeaders { id, status, headers_json });
+        post(UserEvent::FetchHeaders {
+            id,
+            status,
+            headers_json,
+        });
 
         let mut stream = resp.bytes_stream();
         while let Some(item) = stream.next().await {
             match item {
-                Ok(chunk) => post(UserEvent::FetchChunk { id, data: chunk.to_vec() }),
+                Ok(chunk) => post(UserEvent::FetchChunk {
+                    id,
+                    data: chunk.to_vec(),
+                }),
                 Err(e) => {
-                    post(UserEvent::FetchError { id, message: e.to_string() });
-                    fetch_registry().lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+                    post(UserEvent::FetchError {
+                        id,
+                        message: e.to_string(),
+                    });
+                    fetch_registry()
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .remove(&id);
                     return;
                 }
             }
         }
         post(UserEvent::FetchEnd { id });
-        fetch_registry().lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+        fetch_registry()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&id);
     });
     fetch_registry()
         .lock()

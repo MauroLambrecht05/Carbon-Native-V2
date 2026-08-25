@@ -31,8 +31,8 @@ pub struct SignedArtifact {
 /// case, and a stale signature left in place would fail verification in a way
 /// that looks like tampering.
 pub fn sign_artifact(artifact: &Path, key: &SigningKey) -> Result<SignedArtifact> {
-    let bytes = fs::read(artifact)
-        .with_context(|| format!("reading artifact {}", artifact.display()))?;
+    let bytes =
+        fs::read(artifact).with_context(|| format!("reading artifact {}", artifact.display()))?;
     let content_hash = ContentHash::of(&bytes);
     let signature = sign_hash(&content_hash, key);
 

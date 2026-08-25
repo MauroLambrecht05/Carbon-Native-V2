@@ -169,8 +169,7 @@ fn hash(args: &[String]) -> Result<()> {
         return Err(anyhow!("hash needs at least one artifact path"));
     }
     for artifact in &artifacts {
-        let bytes = std::fs::read(artifact)
-            .map_err(|e| anyhow!("reading {artifact}: {e}"))?;
+        let bytes = std::fs::read(artifact).map_err(|e| anyhow!("reading {artifact}: {e}"))?;
         println!("{}  {artifact}", ContentHash::of(&bytes));
     }
     Ok(())

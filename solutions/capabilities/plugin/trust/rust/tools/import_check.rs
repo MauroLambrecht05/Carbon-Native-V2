@@ -103,8 +103,8 @@ fn run() -> anyhow::Result<ExitCode> {
     let mut any_failed = false;
 
     for path in &args.artifacts {
-        let imports = read_pe_imports(path)
-            .map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
+        let imports =
+            read_pe_imports(path).map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
 
         if args.list_only {
             println!("{} — {} imports", path.display(), imports.len());

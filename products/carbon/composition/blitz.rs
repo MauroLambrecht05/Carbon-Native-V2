@@ -330,7 +330,10 @@ fn main() -> Result<()> {
     // present but have nowhere they're allowed to connect, not a silent
     // default-allow.
     crate::native::net::set_allowed_origins(
-        project_dir.as_ref().map(read_net_section).unwrap_or_default(),
+        project_dir
+            .as_ref()
+            .map(read_net_section)
+            .unwrap_or_default(),
     );
 
     // Native OS layer (reused from mini): fs, process, shell, pty, net,
@@ -349,7 +352,10 @@ fn main() -> Result<()> {
         &js_ctx,
         proxy.clone(),
         &tlog,
-        project_dir.as_ref().map(read_process_enabled).unwrap_or(false),
+        project_dir
+            .as_ref()
+            .map(read_process_enabled)
+            .unwrap_or(false),
     )?;
     host_exports::mark_current_thread_as_js();
     host_exports::install_event_loop_proxy(proxy.clone());
