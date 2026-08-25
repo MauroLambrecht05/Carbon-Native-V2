@@ -1,0 +1,31 @@
+# carbon-hotkey — what this plugin tells the toolchain about itself.
+#
+# `carbon plugin install` and `carbon plugin list` read this. The RUNTIME
+# reads the manifest returned by `carbon_plugin_manifest()` in src/main.zig
+# instead, because by then this file is not shipped — so the two must agree,
+# and `carbon plugin check` is what verifies they do.
+name = "carbon-hotkey"
+version = "0.1.0"
+language = "zig"
+
+# Extension points this plugin implements. Every id must exist in
+# solutions/contracts/plugin/registry/extension-points.zig — run
+# `carbon ext list` to see them, or `carbon plugin check` to verify these.
+#
+# Must stay above [abi]: `carbon plugin check`'s TOML reader looks for this
+# as a top-level key, and real TOML makes anything after a [section] header
+# belong to that section until the next one — placing it below [abi] silently
+# makes it unreadable, not an error.
+extension-points = ["lifecycle.register"]
+
+[abi]
+major = 1
+minor = 1
+
+[capabilities]
+# Points that gate on a capability contribute it automatically; anything here
+# is for what the plugin does BESIDES its extension points.
+required = []
+optional = []
+
+modules = ["carbon:carbon-hotkey"]
