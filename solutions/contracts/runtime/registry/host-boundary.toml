@@ -65,8 +65,10 @@ functions = [
   "__cm_dialog_message",
   "__cm_dialog_open_dir",
   "__cm_dialog_open_file",
+  "__cm_dialog_open_file_text",
   "__cm_dialog_open_files",
   "__cm_dialog_save_file",
+  "__cm_dialog_save_file_text",
 ]
 
 [imports.fs]
@@ -121,6 +123,7 @@ component = "os"
 functions = [
   "__cm_fetch_abort",
   "__cm_fetch_start",
+  "__cm_fetch_start_with_credential",
   "__cm_ws_close",
   "__cm_ws_connect",
   "__cm_ws_send_binary_b64",

@@ -74,6 +74,11 @@ V2/
 ├── .cargo/                            # Cargo's own config — it walks UP from cwd to find it
 ├── .config/                           # Configuration, and nothing that is not
 ├── .github/                           # Workflows, CONTRIBUTING, SECURITY, issue templates
+├── .local/                            # Design-rationale notes: why a decision was made, not
+│                                      # what the code does — the code says that. Mirrors V1's
+│                                      # own .local/notes/roadmap/ convention. Committed, unlike
+│                                      # the name suggests: "local" as in "not part of the
+│                                      # shipped product," not "not tracked."
 ├── .tools/                            # Developer automation that never ships
 ├── labs/                              # Experiments. Disposable contents, permanent directory
 ├── products/                          # Shipping deliverables
