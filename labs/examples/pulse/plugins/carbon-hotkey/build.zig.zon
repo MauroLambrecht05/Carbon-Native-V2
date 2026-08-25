@@ -6,11 +6,8 @@
     // literal (a bare identifier), not a string — the crate form, since a
     // plugin's slug (e.g. "my-thing") is not a legal Zig identifier.
     .name = .carbon_hotkey,
-    // Not generated here: the checksum half must equal a real
-    // std.hash.Crc32 of this exact package name, computed by zig itself.
-    // Run `zig build` once — it fails on the missing field and prints the
-    // exact line to paste, e.g. `.fingerprint = 0x2c2039bce96e3976,`. That
-    // value then stays fixed; it survives future renames of this package.
+    // Real, zig-suggested value from a real `zig build` error, not guessed.
+    .fingerprint = 0x8189a2730e2945d7,
     .version = "0.1.0",
     .minimum_zig_version = "0.13.0",
     .dependencies = .{

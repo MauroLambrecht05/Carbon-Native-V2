@@ -58,13 +58,23 @@ pub const RawJsContext = c.CarbonJSContext;
 // fix). They have to be resolved at LOAD time, once the plugin DLL is
 // inside the host process — GetProcAddress on Windows, dlsym elsewhere —
 // looked up once and cached, exactly as the header says the SDK should.
+// GetModuleHandleW/GetProcAddress used to be reachable via
+// std.os.windows.kernel32, but zig 0.16's std no longer declares either —
+// confirmed by grepping the real installed std/os/windows.zig and
+// std/os/windows/kernel32.zig, not assumed. Declared locally instead: these
+// are two of the most stable, unchanged Win32 signatures there are (both
+// predate Win32's own versioning), so pulling them straight from kernel32.dll
+// ourselves is lower-risk than depending on wherever std currently re-exports
+// them, if anywhere.
+extern "kernel32" fn GetModuleHandleW(lpModuleName: ?[*:0]const u16) callconv(.c) ?*anyopaque;
+extern "kernel32" fn GetProcAddress(hModule: *anyopaque, lpProcName: [*:0]const u8) callconv(.c) ?*anyopaque;
+
 fn resolveHostSymbol(comptime name: [:0]const u8) *anyopaque {
     return switch (builtin.os.tag) {
         .windows => blk: {
-            const k32 = std.os.windows.kernel32;
-            const module = k32.GetModuleHandleW(null) orelse
+            const module = GetModuleHandleW(null) orelse
                 @panic("carbon plugin: could not get a handle to the host process");
-            const proc = k32.GetProcAddress(module, name) orelse
+            const proc = GetProcAddress(module, name) orelse
                 @panic("carbon plugin: host process does not export " ++ name ++
                     " — was it built without the /EXPORT linker args in products/carbon/build.rs?");
             break :blk @as(*anyopaque, @ptrCast(proc));

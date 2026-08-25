@@ -382,9 +382,41 @@ fn load_one(
     //
     // Both steps are refusals, never panics: the inputs are a `.dll` and a
     // `.sig` that, by assumption, someone else put there.
-    let content_hash = carbon_plugin_trust::verify_artifact(&path, &CARBON_PLUGIN_PUBLIC_KEY)?;
-    carbon_plugin_trust::ensure_not_revoked(&content_hash)?;
-    eprintln!("[carbon-plugin] `{name}` signature OK — {content_hash}");
+    //
+    // CARBON_ALLOW_UNSIGNED_PLUGINS is the deliberate first-party escape
+    // hatch this gate was always meant to have — see .local/notes/roadmap/
+    // 04-security-and-capabilities/README.md, "Escape hatch, deliberately
+    // preserved": a developer's own local-source plugin (built and
+    // auto-installed by SyncLocalPluginsUseCase on every `carbon dev`/`carbon
+    // run`, with no manual sign step) is not going through Carbon's public
+    // trust channel at all. Only `carbon dev` sets this env var (see
+    // dev.command.ts) — that command builds fast unsigned Debug plugins for
+    // the local edit/reload loop. `carbon run` deliberately never sets it:
+    // it builds `release: true` plugins (see run.command.ts's
+    // syncLocalPlugins), the same artifact a distributed build ships, and
+    // that artifact must carry a real signature like any other. This is an
+    // explicit opt-in a human's own CLI invocation makes, never a flag baked
+    // into a shipped binary, and it still prints loudly rather than silently
+    // accepting the plugin.
+    if std::env::var_os("CARBON_ALLOW_UNSIGNED_PLUGINS").is_some() {
+        match carbon_plugin_trust::verify_artifact(&path, &CARBON_PLUGIN_PUBLIC_KEY) {
+            Ok(content_hash) => {
+                carbon_plugin_trust::ensure_not_revoked(&content_hash)?;
+                eprintln!("[carbon-plugin] `{name}` signature OK — {content_hash}");
+            }
+            Err(e) => {
+                eprintln!(
+                    "[carbon-plugin] WARNING: `{name}` has no valid Carbon signature ({e}) — \
+                     loading anyway because CARBON_ALLOW_UNSIGNED_PLUGINS is set. This must \
+                     never be set for a distributed build."
+                );
+            }
+        }
+    } else {
+        let content_hash = carbon_plugin_trust::verify_artifact(&path, &CARBON_PLUGIN_PUBLIC_KEY)?;
+        carbon_plugin_trust::ensure_not_revoked(&content_hash)?;
+        eprintln!("[carbon-plugin] `{name}` signature OK — {content_hash}");
+    }
 
     // SAFETY: libloading::Library::new is unsafe because loading arbitrary
     // user code can run static initializers that violate any invariant. The

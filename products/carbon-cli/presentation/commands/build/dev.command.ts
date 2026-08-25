@@ -171,7 +171,17 @@ export async function devCommand(rest: string[]): Promise<number> {
     const launch = () => {
       const args = useHmr ? [projectDir, "--dev"] : [projectDir];
       log.info(c.dim(useHmr ? "launching runtime (in-process HMR enabled)…" : "launching runtime…"));
-      proc = spawn(exe, args, { stdio: "inherit" });
+      // CARBON_ALLOW_UNSIGNED_PLUGINS: `carbon dev` builds and installs an
+      // app's own plugins/<name>/ source locally (SyncLocalPluginsUseCase),
+      // with no manual sign step — that flow was never meant to require
+      // Carbon's signing key, only `carbon run`'s and a distributed build's
+      // ever should. See the matching comment in plugin_loader.rs's
+      // load_one — this is the one place that env var gets set, deliberately
+      // never in run.command.ts.
+      proc = spawn(exe, args, {
+        stdio: "inherit",
+        env: { ...process.env, CARBON_ALLOW_UNSIGNED_PLUGINS: "1" },
+      });
       proc.on("close", (code, sig) => {
         // If the user manually closed the window we'll exit cleanly here too,
         // unless we're in the middle of an intentional reload-respawn.
