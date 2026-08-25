@@ -17,6 +17,7 @@
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -62,6 +63,13 @@ use carbon_runtime_contract::{UserEvent, WindowOp};
 // the backend is an implementation of the renderer, not a kind of thing a
 // product has.
 
+// composition — sibling of this file, shared verbatim with carbon-mini (same
+// physical manifest.rs, compiled separately into each binary crate — see its
+// own doc comment). Only the [net]/[runtime] readers are pulled in here:
+// blitz doesn't yet read [app]/[window]/[plugins] from carbon.toml the way
+// mini does (see the project_dir derivation note in main() below).
+mod manifest;
+
 // presentation — blitz renders into a real document rather than a scene graph,
 // so its `host` is the document surface and its `pump` drives that model.
 #[path = "../presentation/host/css.rs"]
@@ -78,6 +86,7 @@ mod trace;
 use css::*;
 use dom::*;
 use host::*;
+use manifest::{read_net_section, read_process_enabled};
 use pump::*;
 use trace::*;
 
@@ -181,6 +190,37 @@ fn main() -> Result<()> {
     let event_loop: EventLoop<UserEvent> = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
 
+    // Bundle file argument, read early (moved up from where it used to be
+    // read further down, next to its eval) so `project_dir` can be derived
+    // from it before `native::register_all` needs the [net]/[runtime]
+    // manifest reads below. Still read again in the same `Option<String>`
+    // form the eval step further down expects — no behavior change there.
+    let bundle_arg = std::env::args().nth(1);
+
+    // project_dir, best-effort: `carbon run` always invokes blitz with
+    // `<project_dir>/dist/bundle.js` (see products/carbon-cli's
+    // run.command.ts, `runtimeArgs` for the "blitz" backend — the same
+    // convention the app.css lookup further down already relies on via
+    // `bpath.with_file_name("app.css")`). Unlike mini, blitz's own CLI
+    // contract is a bundle FILE, not a project directory, so there's no
+    // argument that names carbon.toml's location directly — this walks up
+    // two levels (bundle -> dist/ -> project root) to recover it instead of
+    // widening the CLI contract itself, which is out of scope here.
+    //
+    // Best-effort like every other manifest.rs reader: a bundle path with
+    // fewer than two ancestors (e.g. no bundle argument at all — the M2
+    // inline-harness path) yields `None`, and `read_net_section` /
+    // `read_process_enabled` already default closed (no origins allowed, no
+    // process globals) when they don't find a carbon.toml at the derived
+    // path — so a wrong or absent derivation degrades to the same safe
+    // defaults as an app with no carbon.toml at all, never to an open one.
+    let project_dir: Option<PathBuf> = bundle_arg
+        .as_deref()
+        .map(std::path::Path::new)
+        .and_then(|p| p.parent()) // .../dist
+        .and_then(|p| p.parent()) // project root
+        .map(|p| p.to_path_buf());
+
     // Window label/opts (native::window reads these; multi-window support).
     native::window::set_window_label("main".to_string());
     native::window::set_window_opts_json("{}".to_string());
@@ -282,6 +322,17 @@ fn main() -> Result<()> {
     let js_ctx = JsContext::full(&js_rt).map_err(|e| anyhow!("js ctx: {e}"))?;
     register_host_imports(&js_ctx)?;
 
+    // The network origin allowlist — must land before register_all wires up
+    // fetch/WebSocket, since both refuse every connection until this has run
+    // at least once (see the matching comment in mini.rs). `project_dir` is
+    // the best-effort derivation above; an app with no `[net] allowed_origins`
+    // (or no carbon.toml found at all) gets an empty list: fetch/WebSocket are
+    // present but have nowhere they're allowed to connect, not a silent
+    // default-allow.
+    crate::native::net::set_allowed_origins(
+        project_dir.as_ref().map(read_net_section).unwrap_or_default(),
+    );
+
     // Native OS layer (reused from mini): fs, process, shell, pty, net,
     // clipboard, dialog, keychain, notification, autostart, window ops, os,
     // invoke, store, log — everything terax's host imports need. register_all
@@ -289,13 +340,17 @@ fn main() -> Result<()> {
     // blitz's own tlog — one line per phase, gated IN by CARBON_MINI_TIMING,
     // where mini's traces deltas and is gated OUT by CARBON_NO_TIMING. That
     // difference is why tlog is a port rather than a shared function.
-    // process_enabled = false: blitz takes a bundle file directly rather
-    // than a project directory (unlike mini, it never reads carbon.toml at
-    // all today), so there's no `[runtime] process` declaration to read
-    // yet. Defaulting closed here is the conservative choice — wiring
-    // blitz's own carbon.toml read is follow-up work, not something to
-    // improvise in the same pass as mini's.
-    native::register_all(&js_ctx, proxy.clone(), &tlog, false)?;
+    // process_enabled: same `[runtime] process = true` read mini does, now
+    // that `project_dir` is derived above — still defaults to false (no raw
+    // process-spawning globals installed) when no carbon.toml is found at
+    // the derived path, e.g. the M2 inline-harness run with no bundle
+    // argument at all.
+    native::register_all(
+        &js_ctx,
+        proxy.clone(),
+        &tlog,
+        project_dir.as_ref().map(read_process_enabled).unwrap_or(false),
+    )?;
     host_exports::mark_current_thread_as_js();
     host_exports::install_event_loop_proxy(proxy.clone());
 
@@ -305,7 +360,7 @@ fn main() -> Result<()> {
     // exists triggers a stylo invalidation that panics on the partially-styled
     // tree (is_display_none on a node with no primary style) — so it must
     // happen up front, into the empty html/body scaffold.
-    let bundle_arg = std::env::args().nth(1);
+    // (bundle_arg was read earlier, alongside the project_dir derivation.)
     if let Some(bpath) = &bundle_arg {
         let css_path = std::path::Path::new(bpath).with_file_name("app.css");
         match std::fs::read_to_string(&css_path) {
