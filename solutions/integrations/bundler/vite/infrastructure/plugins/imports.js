@@ -47,7 +47,11 @@ import {
   BUILTIN_SPECIFIERS,
   pluginNameOf,
 } from "../../domain/module-graph.js";
-import { buildSpecifierMap, discoverManifests } from "../../domain/import-manifest.js";
+import {
+  buildSpecifierMap,
+  discoverLocalManifests,
+  discoverManifests,
+} from "../../domain/import-manifest.js";
 
 const VIRTUAL_PREFIX = "\0carbon-imports:";
 
@@ -118,7 +122,17 @@ export function carbonImports(options = {}) {
     projectRoot = root ?? null;
     const wsRoot =
       workspaceRootOverride ?? (root ? findWorkspaceRoot(root) : null);
+    // Local manifests (the app's own plugins/<name>/carbon-plugin.toml,
+    // per run.command.ts's syncLocalPlugins) take priority over a
+    // packages/-workspace manifest of the same name — an app's own plugin
+    // source is more specific than whatever a monorepo-wide package
+    // declares, and is in practice the only kind that exists today.
     const manifests = wsRoot ? discoverManifests(wsRoot) : new Map();
+    if (root) {
+      for (const [name, m] of discoverLocalManifests(root)) {
+        manifests.set(name, m);
+      }
+    }
     const merged = buildSpecifierMap(manifests, {
       ...BUILTIN_MODULES,
       // Allow callers to register extras; the array is in [name, name, ...]

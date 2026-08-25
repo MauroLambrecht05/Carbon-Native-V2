@@ -15,8 +15,14 @@ language = "zig"
 # Must stay above [abi]: `carbon plugin check`'s TOML reader looks for this
 # as a top-level key, and real TOML makes anything after a [section] header
 # belong to that section until the next one — placing it below [abi] silently
-# makes it unreadable, not an error.
+# makes it unreadable, not an error. The same rule is why `modules` sits here
+# too, alongside extension-points, rather than after [capabilities] below —
+# the vite import-manifest reader (solutions/integrations/bundler/vite/
+# domain/import-manifest.js) reads it as a top-level key, and a `modules =`
+# line placed after any [section] header silently becomes that section's
+# field instead.
 extension-points = ["lifecycle.register", "lifecycle.shutdown"]
+modules = ["carbon:carbon-idle"]
 
 [abi]
 major = 1
@@ -29,8 +35,6 @@ minor = 1
 # actual keystrokes or mouse coordinates.
 required = []
 optional = []
-
-modules = ["carbon:carbon-idle"]
 
 # ── JS API surface (consumed by the vite imports plugin) ────────────────────
 # The virtual module body is generated as
