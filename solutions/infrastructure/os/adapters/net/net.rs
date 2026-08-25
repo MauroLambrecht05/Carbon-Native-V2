@@ -362,7 +362,7 @@ fn start_fetch_with_credential(
             Ok(Err(keyring::Error::NoEntry)) => {
                 post(UserEvent::FetchError {
                     id,
-                    message: format!("no stored credential for this request"),
+                    message: "no stored credential for this request".to_string(),
                 });
                 return;
             }

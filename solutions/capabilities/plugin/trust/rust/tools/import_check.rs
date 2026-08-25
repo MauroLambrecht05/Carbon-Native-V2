@@ -58,7 +58,7 @@ fn parse_args() -> anyhow::Result<Args> {
                 )
             }
             "-h" | "--help" => {
-                println!("{}", HELP);
+                println!("{HELP}");
                 std::process::exit(0);
             }
             other if other.starts_with("--") => {
