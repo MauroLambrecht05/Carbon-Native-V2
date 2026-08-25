@@ -58,7 +58,7 @@ const MANIFEST = sdk.manifest.build(.{
     .modules = &.{"carbon:my-plugin"},
 });
 
-export fn carbon_plugin_manifest() callconv(.C) [*:0]const u8 {
+export fn carbon_plugin_manifest() callconv(.c) [*:0]const u8 {
     return MANIFEST;
 }
 
@@ -67,7 +67,7 @@ comptime {
     std.debug.assert(std.mem.eql(u8, point.symbol, "carbon_plugin_register"));
 }
 
-export fn carbon_plugin_register(app_raw: *sdk.RawApp) callconv(.C) void {
+export fn carbon_plugin_register(app_raw: *sdk.RawApp) callconv(.c) void {
     const app = sdk.CarbonApp.fromRaw(app_raw);
     if (!app.abiCompatible()) return;
     _ = app.setGlobalString("hello_from_my_plugin", "world");
@@ -81,7 +81,7 @@ That block turns both into build errors.
 
 ## Why Zig, and only Zig
 
-- A plugin is a C-ABI shared library. `export fn ... callconv(.C)` *is* that.
+- A plugin is a C-ABI shared library. `export fn ... callconv(.c)` *is* that.
 - `@cImport` reads `carbon_plugin.h` directly, so the SDK does not hand-mirror
   the ABI. The Rust SDK had a whole `ffi.rs` doing exactly that — a second
   source of truth for a frozen contract.

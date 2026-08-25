@@ -42,7 +42,7 @@ const MANIFEST = sdk.manifest.build(.{
     .modules = &.{"carbon:@@NAME@@"},
 });
 
-export fn carbon_plugin_manifest() callconv(.C) [*:0]const u8 {
+export fn carbon_plugin_manifest() callconv(.c) [*:0]const u8 {
     return MANIFEST;
 }
 
@@ -61,7 +61,7 @@ comptime {
     std.debug.assert(std.mem.eql(u8, point.symbol, "carbon_plugin_register"));
 }
 
-export fn carbon_plugin_register(app_raw: *sdk.RawApp) callconv(.C) void {
+export fn carbon_plugin_register(app_raw: *sdk.RawApp) callconv(.c) void {
     const app = sdk.CarbonApp.fromRaw(app_raw);
 
     // A major ABI mismatch means the struct layout differs; every field read
@@ -82,7 +82,7 @@ export fn carbon_plugin_register(app_raw: *sdk.RawApp) callconv(.C) void {
 //     export fn carbon_ext_window_theme_changed(
 //         app_raw: *sdk.RawApp,
 //         is_dark: i32,
-//     ) callconv(.C) void {
+//     ) callconv(.c) void {
 //         const app = sdk.CarbonApp.fromRaw(app_raw);
 //         _ = app.setGlobalString(
 //             "theme_from_@@NAME@@",

@@ -340,12 +340,19 @@ fn main() -> Result<()> {
     register_host_imports(&js_ctx, scene.clone(), proxy.clone(), text_engine.clone())?;
     timing_log("host_imports_registered", t0);
 
+    // The network origin allowlist — must land before register_all wires up
+    // fetch/WebSocket, since both refuse every connection until this has
+    // run at least once. An app with no `[net] allowed_origins` in
+    // carbon.toml gets an empty list: fetch/WebSocket are present but have
+    // nowhere they're allowed to connect, not a silent default-allow.
+    crate::native::net::set_allowed_origins(read_net_section(&project_dir));
+
     // Native OS integration imports — fs, process, dialog, shell,
     // clipboard, notification, autostart, window_state, keychain, net.
     // Synchronous OS calls + an async tokio runtime for networking,
     // with results posted back via UserEvent.
     // `tlog` is this binary's own — see the PhaseLogger note in carbon-os.
-    native::register_all(&js_ctx, proxy.clone(), &tlog)?;
+    native::register_all(&js_ctx, proxy.clone(), &tlog, read_process_enabled(&project_dir))?;
     timing_log("native_registered", t0);
 
     // Plugin loader bootstrap. Order is intentional:

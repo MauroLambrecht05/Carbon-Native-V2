@@ -47,7 +47,7 @@ const MANIFEST = sdk.manifest.build(.{
     .modules = &.{"carbon:clipboard"},
 });
 
-export fn carbon_plugin_manifest() callconv(.C) [*:0]const u8 {
+export fn carbon_plugin_manifest() callconv(.c) [*:0]const u8 {
     return MANIFEST;
 }
 
@@ -58,7 +58,7 @@ comptime {
     std.debug.assert(std.mem.eql(u8, point.symbol, "carbon_plugin_register"));
 }
 
-export fn carbon_plugin_register(app_raw: *sdk.RawApp) callconv(.C) void {
+export fn carbon_plugin_register(app_raw: *sdk.RawApp) callconv(.c) void {
     const app = sdk.CarbonApp.fromRaw(app_raw);
     if (!app.abiCompatible()) return;
 
@@ -85,7 +85,7 @@ comptime {
     _ = sdk.ext.expect("window.theme_changed");
 }
 
-export fn carbon_ext_window_theme_changed(app_raw: *sdk.RawApp, is_dark: i32) callconv(.C) void {
+export fn carbon_ext_window_theme_changed(app_raw: *sdk.RawApp, is_dark: i32) callconv(.c) void {
     const app = sdk.CarbonApp.fromRaw(app_raw);
     _ = app.setGlobalString(
         "__carbon_clipboard_theme",
@@ -100,7 +100,7 @@ fn jsRead(
     _: [*c]const u8,
     result_buf: [*c]u8,
     result_buf_len: usize,
-) callconv(.C) void {
+) callconv(.c) void {
     var buffer: [4096]u8 = undefined;
     var stream = std.io.fixedBufferStream(&buffer);
 
@@ -123,7 +123,7 @@ fn jsWrite(
     args_json: [*c]const u8,
     result_buf: [*c]u8,
     result_buf_len: usize,
-) callconv(.C) void {
+) callconv(.c) void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
@@ -211,14 +211,14 @@ const windows = struct {
     const HANDLE = *anyopaque;
     const CF_UNICODETEXT: c_uint = 13;
 
-    extern "user32" fn OpenClipboard(hWndNewOwner: ?HANDLE) callconv(.C) c_int;
-    extern "user32" fn CloseClipboard() callconv(.C) c_int;
-    extern "user32" fn EmptyClipboard() callconv(.C) c_int;
-    extern "user32" fn GetClipboardData(uFormat: c_uint) callconv(.C) ?HANDLE;
-    extern "user32" fn SetClipboardData(uFormat: c_uint, hMem: ?HANDLE) callconv(.C) ?HANDLE;
-    extern "kernel32" fn GlobalAlloc(uFlags: c_uint, dwBytes: usize) callconv(.C) ?HANDLE;
-    extern "kernel32" fn GlobalLock(hMem: HANDLE) callconv(.C) ?*anyopaque;
-    extern "kernel32" fn GlobalUnlock(hMem: HANDLE) callconv(.C) c_int;
+    extern "user32" fn OpenClipboard(hWndNewOwner: ?HANDLE) callconv(.c) c_int;
+    extern "user32" fn CloseClipboard() callconv(.c) c_int;
+    extern "user32" fn EmptyClipboard() callconv(.c) c_int;
+    extern "user32" fn GetClipboardData(uFormat: c_uint) callconv(.c) ?HANDLE;
+    extern "user32" fn SetClipboardData(uFormat: c_uint, hMem: ?HANDLE) callconv(.c) ?HANDLE;
+    extern "kernel32" fn GlobalAlloc(uFlags: c_uint, dwBytes: usize) callconv(.c) ?HANDLE;
+    extern "kernel32" fn GlobalLock(hMem: HANDLE) callconv(.c) ?*anyopaque;
+    extern "kernel32" fn GlobalUnlock(hMem: HANDLE) callconv(.c) c_int;
 
     const GMEM_MOVEABLE: c_uint = 0x0002;
 };

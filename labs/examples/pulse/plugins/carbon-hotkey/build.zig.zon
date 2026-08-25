@@ -1,0 +1,27 @@
+// The SDK is referenced by path, not fetched: it lives in this workspace and
+// a plugin built against a downloaded copy would be built against a different
+// extension-point registry than the runtime it loads into.
+.{
+    // The zig toolchain this repo targets requires .name to be an enum
+    // literal (a bare identifier), not a string — the crate form, since a
+    // plugin's slug (e.g. "my-thing") is not a legal Zig identifier.
+    .name = .carbon_hotkey,
+    // Not generated here: the checksum half must equal a real
+    // std.hash.Crc32 of this exact package name, computed by zig itself.
+    // Run `zig build` once — it fails on the missing field and prints the
+    // exact line to paste, e.g. `.fingerprint = 0x2c2039bce96e3976,`. That
+    // value then stays fixed; it survives future renames of this package.
+    .version = "0.1.0",
+    .minimum_zig_version = "0.13.0",
+    .dependencies = .{
+        .@"carbon-plugin-sdk" = .{
+            .path = "../../../../../products/carbon-ext/composition",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "carbon-plugin.toml",
+    },
+}

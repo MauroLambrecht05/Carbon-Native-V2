@@ -91,14 +91,28 @@ pub type PhaseLogger<'a> = &'a dyn Fn(&str);
 /// already in place for any startup error messages from these modules.
 ///
 /// `tlog` receives one phase name per group of modules — see PhaseLogger.
+///
+/// `process_enabled` gates `__cm_proc_exec`/`__cm_proc_spawn` and friends —
+/// see `products/carbon/composition/manifest.rs::read_process_enabled` for
+/// why this has to be a startup-time registration decision rather than a
+/// bundler-level import gate: a raw process-spawn primitive that's an
+/// always-present `globalThis` property is reachable by name regardless of
+/// what any import resolver allows, so the only real boundary is whether
+/// the global was ever installed at all. The `native.process` phase marker
+/// still fires either way, to keep the startup-phase sequence
+/// (`.tools/validation/baselines/startup-phases.txt`) stable for apps that
+/// don't opt in — only the registration itself is conditional.
 pub fn register_all(
     js_ctx: &JsContext,
     proxy: EventLoopProxy<UserEvent>,
     tlog: PhaseLogger<'_>,
+    process_enabled: bool,
 ) -> Result<()> {
     fs::register(js_ctx)?;
     tlog("native.fs");
-    process::register(js_ctx)?;
+    if process_enabled {
+        process::register(js_ctx)?;
+    }
     tlog("native.process");
     dialog::register(js_ctx)?;
     shell::register(js_ctx)?;

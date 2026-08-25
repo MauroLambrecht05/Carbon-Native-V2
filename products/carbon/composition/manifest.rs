@@ -71,6 +71,58 @@ pub(crate) fn read_window_cfg(project_dir: &PathBuf) -> (f64, f64, bool) {
     (w, h, decorated)
 }
 
+/// Read `[runtime] process` from carbon.toml — same convention as `audio`/
+/// `image`. Defaults to false: an app that never declares it needs process
+/// spawning never gets `__cm_proc_exec`/`__cm_proc_spawn` installed on
+/// `globalThis` at all, for anyone — closing this at the resolver/import
+/// level alone wouldn't be enough, since the raw global would still be
+/// reachable by name regardless of what any bundler-level import gate says.
+pub(crate) fn read_process_enabled(project_dir: &PathBuf) -> bool {
+    let path = project_dir.join("carbon.toml");
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(_) => return false,
+    };
+    #[derive(serde::Deserialize, Default)]
+    struct RuntimeSection {
+        #[serde(default)]
+        process: bool,
+    }
+    #[derive(serde::Deserialize, Default)]
+    struct LocalCfg {
+        #[serde(default)]
+        runtime: RuntimeSection,
+    }
+    toml::from_str::<LocalCfg>(&text)
+        .map(|c| c.runtime.process)
+        .unwrap_or(false)
+}
+
+/// Read `[net] allowed_origins` from carbon.toml. An app that declares none
+/// has zero network egress — the fetch/WebSocket machinery is present but
+/// every connection is refused, not silently allowed. `"*"` as the sole
+/// entry is an explicit, deliberate opt-out of the check, not a default.
+pub(crate) fn read_net_section(project_dir: &PathBuf) -> Vec<String> {
+    let path = project_dir.join("carbon.toml");
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(_) => return Vec::new(),
+    };
+    #[derive(serde::Deserialize, Default)]
+    struct NetSection {
+        #[serde(default)]
+        allowed_origins: Vec<String>,
+    }
+    #[derive(serde::Deserialize, Default)]
+    struct LocalCfg {
+        #[serde(default)]
+        net: NetSection,
+    }
+    toml::from_str::<LocalCfg>(&text)
+        .map(|c| c.net.allowed_origins)
+        .unwrap_or_default()
+}
+
 /// Read [plugins] from carbon.toml. Returns an empty map if carbon.toml is
 /// missing, has no [plugins] section, or fails to parse the section. The
 /// loader treats an empty map as a no-op.

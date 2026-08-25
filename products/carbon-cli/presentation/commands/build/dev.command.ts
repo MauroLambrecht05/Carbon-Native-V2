@@ -101,7 +101,31 @@ export async function devCommand(rest: string[]): Promise<number> {
   );
 
   try {
+    // Wall-clock timing for everything before the runtime process exists —
+    // cargo (ensureRuntime), the bundler, and zig (syncLocalPlugins) are all
+    // cost the runtime's own [timing] phase trace (in
+    // products/carbon/presentation/timing/trace.rs, printed by carbon-mini
+    // itself, ending in first_paint_visible) never sees, because that trace
+    // starts counting from ITS OWN process start. Same `[timing]` prefix and
+    // column layout on purpose: read one after the other, the two traces
+    // cover the entire command-to-first-render path with no gap.
+    const tPipelineStart = performance.now();
+    let tStageLast = tPipelineStart;
+    const stage = (name: string) => {
+      const now = performance.now();
+      const delta = now - tStageLast;
+      const total = now - tPipelineStart;
+      tStageLast = now;
+      log.info(
+        c.dim(
+          `[timing] stage=${name.padEnd(24)} +${delta.toFixed(0).padStart(6)}ms   total ${total.toFixed(0).padStart(7)}ms`,
+        ),
+      );
+    };
+
     await ensureNodeModules(projectDir, log);
+    stage("node_modules");
+
     const exe = await ensureRuntime(backend, log, {
       // The manifest decides which optional subsystems get linked — see
       // backendCargoFeatures. Without this an app declaring `image = true`
@@ -110,6 +134,12 @@ export async function devCommand(rest: string[]): Promise<number> {
       audio: cfg.runtime.audio,
       updater: cfg.updater?.enabled,
     });
+    // Huge delta here means cargo just compiled the runtime from scratch —
+    // ensureRuntime logs "runtime binary not built — running cargo build
+    // --release" right before that happens, so the two lines together say
+    // which branch this run took. A near-zero delta means the binary was
+    // already there and this stage was just an fs.existsSync check.
+    stage("runtime_binary");
 
     // Dev always builds plain .js (NOT bytecode), regardless of carbon.toml.
     // Measured: in the HMR loop bytecode is a net LOSS — the ~2 s compile +
@@ -121,10 +151,12 @@ export async function devCommand(rest: string[]): Promise<number> {
     // the runtime loads the fresh .js.
     const DEV_BYTECODE = false;
     await buildProject(projectDir, backend, log, { bytecode: DEV_BYTECODE, noBabelCache, dev: true });
+    stage("bundle");
 
     // Any plugin whose SOURCE lives in this app's own plugins/<name>/ builds
     // and installs itself here — no separate `carbon plugin install` step.
     await syncLocalPlugins(projectDir);
+    stage("plugins");
 
     let proc: ChildProcess | null = null;
     let pendingReload = false;
@@ -229,6 +261,12 @@ export async function devCommand(rest: string[]): Promise<number> {
     });
 
     launch();
+    stage("spawn");
+    log.info(
+      c.dim(
+        "[timing] — carbon-mini's own [timing] phase trace continues from here (its own process start) —",
+      ),
+    );
 
     // Wait forever; SIGINT cleanup below.
     const onSig = () => {
@@ -258,6 +296,10 @@ export async function devCommand(rest: string[]): Promise<number> {
  * A build failure here is fatal — a plugin this app owns the source of
  * failing to compile is this app's own build breaking, not a missing
  * optional feature.
+ *
+ * Debug build (the default `release: false`) — same reasoning as
+ * DEV_BYTECODE above: wall-clock rebuild time matters here, the plugin
+ * binary's own runtime speed does not.
  */
 async function syncLocalPlugins(projectDir: string): Promise<void> {
   const { synced } = await pluginUseCases(join(PRODUCTS_DIR, "carbon-ext")).syncLocal.execute(

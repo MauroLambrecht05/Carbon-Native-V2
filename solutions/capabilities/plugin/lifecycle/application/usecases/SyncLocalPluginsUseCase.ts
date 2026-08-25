@@ -33,7 +33,20 @@ export class SyncLocalPluginsUseCase {
     private readonly install: InstallPluginUseCase,
   ) {}
 
-  async execute(projectDir: string): Promise<SyncLocalPluginsResult> {
+  /**
+   * `release` defaults to false: a Debug zig build skips LLVM's optimization
+   * passes entirely, which is most of a native build's compile time. `carbon
+   * dev` wants that on every hot-reload rebuild the same way it already
+   * wants plain .js over bytecode — the plugin binary's own runtime speed
+   * does not matter while iterating, wall-clock rebuild time does. `carbon
+   * run`/`carbon build` pass `release: true` explicitly for the artifact
+   * that ships.
+   */
+  async execute(
+    projectDir: string,
+    options?: { readonly release?: boolean },
+  ): Promise<SyncLocalPluginsResult> {
+    const release = options?.release ?? false;
     const pluginsDir = join(projectDir, "plugins");
     const synced: SyncedLocalPlugin[] = [];
 
@@ -42,7 +55,7 @@ export class SyncLocalPluginsUseCase {
       const isSource = LANGUAGES.some((l) => this.workspace.exists(join(directory, l.marker)));
       if (!isSource) continue;
 
-      const result = await this.build.execute({ directory, release: true });
+      const result = await this.build.execute({ directory, release });
       if (result.exitCode !== 0) {
         throw new Error(
           `local plugin "${entry}" (${join("plugins", entry)}) failed to build — ` +

@@ -108,6 +108,64 @@ pub fn set_proxy(proxy: EventLoopProxy<UserEvent>) {
     *proxy_slot().lock().unwrap_or_else(|e| e.into_inner()) = Some(proxy);
 }
 
+// ─── Origin allowlist ───────────────────────────────────────────────────────
+//
+// The primary control against a compromised dependency exfiltrating data
+// over plain fetch()/WebSocket, per .local/notes/roadmap/04-security-and-
+// capabilities/README.md. An app that never calls `set_allowed_origins`
+// (or calls it with an empty list) has zero network egress through general
+// fetch/WebSocket — the allowlist defaults to empty, not permissive.
+
+fn allowed_origins() -> &'static OnceLock<Vec<String>> {
+    static O: OnceLock<Vec<String>> = OnceLock::new();
+    &O
+}
+
+/// Called once at startup with the app's declared `[net] allowed_origins`.
+/// Must happen before any fetch/WebSocket can succeed. Later calls are
+/// no-ops (`OnceLock`), matching every other piece of this module's
+/// once-per-process global state.
+pub fn set_allowed_origins(origins: Vec<String>) {
+    let _ = allowed_origins().set(origins);
+}
+
+/// `scheme://host[:port]` — the same granularity as a browser's CSP
+/// `connect-src`. `https://api.example.com` and `http://api.example.com`
+/// are different origins; so are `:8080` and no explicit port. Only the
+/// origin is compared, never the path or query — narrowing further than
+/// that is a documentation/UX concern (encourage specific origins), not
+/// something this check can enforce, since it can't tell legitimate query
+/// parameters from smuggled data.
+fn origin_of(url: &reqwest::Url) -> Option<String> {
+    let host = url.host_str()?;
+    Some(match url.port() {
+        Some(p) => format!("{}://{}:{}", url.scheme(), host, p),
+        None => format!("{}://{}", url.scheme(), host),
+    })
+}
+
+/// Refuse anything not on the app's declared allowlist. Checked at
+/// connection time — both the initial request and (via
+/// `build_safe_client`'s redirect policy) every redirect hop, so a 302 from
+/// an allowed origin to a disallowed one fails instead of being followed.
+fn check_origin_allowed(url: &reqwest::Url) -> Result<(), String> {
+    let list = allowed_origins()
+        .get()
+        .map(|v| v.as_slice())
+        .unwrap_or(&[]);
+    if list.iter().any(|o| o == "*") {
+        return Ok(());
+    }
+    let origin = origin_of(url).ok_or_else(|| "url has no host".to_string())?;
+    if list.iter().any(|o| o == &origin) {
+        Ok(())
+    } else {
+        Err(format!(
+            "network request to \"{origin}\" refused — not in this app's carbon.toml [net] allowed_origins"
+        ))
+    }
+}
+
 // ─── HTTP fetch ───────────────────────────────────────────────────────────
 
 #[derive(serde::Deserialize, Default)]
@@ -130,6 +188,37 @@ fn start_fetch(id: u32, url: String, init_json: String) {
     let init: FetchInit = serde_json::from_str(&init_json).unwrap_or_default();
     let method = init.method.as_deref().unwrap_or("GET").to_string();
     let task = rt().spawn(async move {
+        // Origin allowlist first — before DNS, before anything. A request
+        // to a host this app never declared never gets far enough to leak
+        // timing information about whether that host is even reachable.
+        let parsed_url = match validate_url(&url) {
+            Ok(u) => u,
+            Err(e) => {
+                post(UserEvent::FetchError { id, message: e });
+                return;
+            }
+        };
+        if let Err(e) = check_origin_allowed(&parsed_url) {
+            post(UserEvent::FetchError { id, message: e });
+            return;
+        }
+        // SSRF guard: general fetch() never gets the `allow_private = true`
+        // the local-model-server AI proxy deliberately opts into — a
+        // dependency that legitimately needs to reach localhost adds that
+        // origin to its own allowlist entry explicitly; it doesn't get
+        // silent access to every app's loopback/private network by default.
+        if let Err(e) = enforce_host_policy(&parsed_url, false).await {
+            post(UserEvent::FetchError { id, message: e });
+            return;
+        }
+        let client = match build_safe_client(false) {
+            Ok(c) => c,
+            Err(e) => {
+                post(UserEvent::FetchError { id, message: e });
+                return;
+            }
+        };
+
         // Build the request
         let method_parsed = match reqwest::Method::from_bytes(method.as_bytes()) {
             Ok(m) => m,
@@ -141,7 +230,7 @@ fn start_fetch(id: u32, url: String, init_json: String) {
                 return;
             }
         };
-        let mut req = http_client().request(method_parsed, &url);
+        let mut req = client.request(method_parsed, parsed_url);
         for (k, v) in &init.headers {
             req = req.header(k, v);
         }
@@ -227,6 +316,148 @@ fn start_fetch(id: u32, url: String, init_json: String) {
         .insert(id, task.abort_handle());
 }
 
+/// The credential-broker path: JS asks for an authenticated request by
+/// naming a keychain entry, never by holding the secret itself. The value
+/// `keyring::Entry::get_password` returns lives only in this Rust function's
+/// stack — it's substituted into the header server-side of the JS boundary
+/// and never crosses into a value JS code can read, walk, or accidentally
+/// log. `header_template` is the header value with `{}` where the secret
+/// goes (`"Bearer {}"`, `"{}"`, an API-key scheme, whatever the target API
+/// wants) — the header *name* it's attached under is a separate argument so
+/// callers aren't tied to `Authorization`.
+fn start_fetch_with_credential(
+    id: u32,
+    url: String,
+    init_json: String,
+    service: String,
+    account: String,
+    header_name: String,
+    header_template: String,
+) {
+    let init: FetchInit = serde_json::from_str(&init_json).unwrap_or_default();
+    let method = init.method.as_deref().unwrap_or("GET").to_string();
+    let task = rt().spawn(async move {
+        let parsed_url = match validate_url(&url) {
+            Ok(u) => u,
+            Err(e) => {
+                post(UserEvent::FetchError { id, message: e });
+                return;
+            }
+        };
+        if let Err(e) = check_origin_allowed(&parsed_url) {
+            post(UserEvent::FetchError { id, message: e });
+            return;
+        }
+        if let Err(e) = enforce_host_policy(&parsed_url, false).await {
+            post(UserEvent::FetchError { id, message: e });
+            return;
+        }
+
+        // Credential lookup happens on a blocking thread — `keyring`'s OS
+        // calls (Credential Manager / Keychain Services / Secret Service)
+        // are synchronous, and this task is running on the async runtime.
+        let secret = match tokio::task::spawn_blocking(move || {
+            keyring::Entry::new(&service, &account)
+                .and_then(|e| e.get_password())
+        })
+        .await
+        {
+            Ok(Ok(s)) => s,
+            Ok(Err(keyring::Error::NoEntry)) => {
+                post(UserEvent::FetchError {
+                    id,
+                    message: format!("no stored credential for this request"),
+                });
+                return;
+            }
+            Ok(Err(e)) => {
+                post(UserEvent::FetchError { id, message: e.to_string() });
+                return;
+            }
+            Err(e) => {
+                post(UserEvent::FetchError { id, message: e.to_string() });
+                return;
+            }
+        };
+
+        let client = match build_safe_client(false) {
+            Ok(c) => c,
+            Err(e) => {
+                post(UserEvent::FetchError { id, message: e });
+                return;
+            }
+        };
+        let method_parsed = match reqwest::Method::from_bytes(method.as_bytes()) {
+            Ok(m) => m,
+            Err(e) => {
+                post(UserEvent::FetchError {
+                    id,
+                    message: format!("bad method: {e}"),
+                });
+                return;
+            }
+        };
+        let mut req = client.request(method_parsed, parsed_url);
+        for (k, v) in &init.headers {
+            req = req.header(k, v);
+        }
+        req = req.header(header_name, header_template.replacen("{}", &secret, 1));
+        if let Some(b) = init.body {
+            if let Some(b64) = b.strip_prefix("__b64:") {
+                use base64::Engine;
+                match base64::engine::general_purpose::STANDARD.decode(b64) {
+                    Ok(bytes) => req = req.body(bytes),
+                    Err(e) => {
+                        post(UserEvent::FetchError {
+                            id,
+                            message: format!("body base64: {e}"),
+                        });
+                        return;
+                    }
+                }
+            } else {
+                req = req.body(b);
+            }
+        }
+
+        let resp = match req.send().await {
+            Ok(r) => r,
+            Err(e) => {
+                post(UserEvent::FetchError { id, message: e.to_string() });
+                fetch_registry().lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+                return;
+            }
+        };
+        let status = resp.status().as_u16();
+        let mut headers_pairs: Vec<(String, String)> = Vec::new();
+        for (k, v) in resp.headers().iter() {
+            if let Ok(vs) = v.to_str() {
+                headers_pairs.push((k.as_str().to_string(), vs.to_string()));
+            }
+        }
+        let headers_json = serde_json::to_string(&headers_pairs).unwrap_or("[]".to_string());
+        post(UserEvent::FetchHeaders { id, status, headers_json });
+
+        let mut stream = resp.bytes_stream();
+        while let Some(item) = stream.next().await {
+            match item {
+                Ok(chunk) => post(UserEvent::FetchChunk { id, data: chunk.to_vec() }),
+                Err(e) => {
+                    post(UserEvent::FetchError { id, message: e.to_string() });
+                    fetch_registry().lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+                    return;
+                }
+            }
+        }
+        post(UserEvent::FetchEnd { id });
+        fetch_registry().lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+    });
+    fetch_registry()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(id, task.abort_handle());
+}
+
 fn abort_fetch(id: u32) {
     if let Some(h) = fetch_registry()
         .lock()
@@ -240,6 +471,26 @@ fn abort_fetch(id: u32) {
 // ─── WebSocket ────────────────────────────────────────────────────────────
 
 fn start_ws(id: u32, url: String) {
+    // Same allowlist as fetch, checked before the connection attempt.
+    // WebSocket URLs use ws/wss rather than http/https, so this reparses
+    // rather than reusing `validate_url` (which hardcodes http/https) —
+    // only the origin needs checking, not the full HTTP-specific validation
+    // (userinfo, scheme allowlist) that doesn't apply the same way here.
+    match reqwest::Url::parse(&url)
+        .map_err(|e| format!("invalid url: {e}"))
+        .and_then(|u| match u.scheme() {
+            "ws" | "wss" => Ok(u),
+            s => Err(format!("scheme not allowed: {s}")),
+        })
+        .and_then(|u| check_origin_allowed(&u).map(|_| u))
+    {
+        Ok(_) => {}
+        Err(e) => {
+            post(UserEvent::WsError { id, message: e });
+            return;
+        }
+    }
+
     let (tx, mut rx) = mpsc::unbounded_channel::<WsCommand>();
     let task = rt().spawn(async move {
         let stream = match tokio_tungstenite::connect_async(&url).await {
@@ -757,6 +1008,32 @@ pub fn register(js_ctx: &JsContext) -> Result<()> {
                 start_fetch(id, url, init_json);
                 id
             })?,
+        )?;
+
+        g.set(
+            "__cm_fetch_start_with_credential",
+            Function::new(
+                ctx.clone(),
+                |url: String,
+                 init_json: String,
+                 service: String,
+                 account: String,
+                 header_name: String,
+                 header_template: String|
+                 -> u32 {
+                    let id = next_id();
+                    start_fetch_with_credential(
+                        id,
+                        url,
+                        init_json,
+                        service,
+                        account,
+                        header_name,
+                        header_template,
+                    );
+                    id
+                },
+            )?,
         )?;
 
         g.set(
