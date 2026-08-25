@@ -58,9 +58,15 @@ describe("carbonImports plugin", () => {
       expect(BUILTIN_SPECIFIERS.has("carbon:audio")).toBe(true);
       expect(BUILTIN_SPECIFIERS.has("carbon:image")).toBe(true);
       expect(BUILTIN_SPECIFIERS.has("carbon:canvas")).toBe(true);
-      expect(BUILTIN_SPECIFIERS.has("carbon:fs")).toBe(true);
+      expect(BUILTIN_SPECIFIERS.has("carbon:process")).toBe(true);
       expect(BUILTIN_SPECIFIERS.has("carbon:notify")).toBe(true);
       expect(BUILTIN_SPECIFIERS.has("carbon:tray")).toBe(true);
+    });
+
+    test("carbon:fs does not exist — no virtual module for raw filesystem access", () => {
+      // Per the Fs/Net split: file access is dialog-mediated or the
+      // bounds-checked readOwnAsset, never an arbitrary path, for anyone.
+      expect(BUILTIN_SPECIFIERS.has("carbon:fs")).toBe(false);
     });
 
     test("audio module lists the canonical Web Audio classes", () => {
@@ -154,6 +160,36 @@ describe("carbonImports plugin", () => {
           expect(id).toMatch(/^\0carbon-imports:/);
         },
       );
+    });
+  });
+
+  describe("first-party-only specifiers (carbon:process)", () => {
+    test("resolves fine when imported from the app's own src/", () => {
+      const p = makePlugin({ skipCapabilityCheck: true });
+      p.configResolved({ command: "build", root: process.cwd() });
+      const id = resolveId(p, "carbon:process", "/project/src/App.tsx");
+      expect(id).toMatch(/^\0carbon-imports:carbon:process$/);
+    });
+
+    test("refuses when imported from inside node_modules, even with capability checks off", () => {
+      const p = makePlugin({ skipCapabilityCheck: true });
+      p.configResolved({ command: "build", root: process.cwd() });
+      let threw = null;
+      try {
+        resolveId(p, "carbon:process", "/project/node_modules/some-dep/index.js");
+      } catch (e) {
+        threw = e;
+      }
+      expect(threw).not.toBeNull();
+      expect(threw.message).toContain("only importable from the app's own source");
+    });
+
+    test("Windows-style backslash paths are recognized as node_modules too", () => {
+      const p = makePlugin({ skipCapabilityCheck: true });
+      p.configResolved({ command: "build", root: process.cwd() });
+      expect(() =>
+        resolveId(p, "carbon:process", "C:\\project\\node_modules\\some-dep\\index.js"),
+      ).toThrow(/only importable from the app's own source/);
     });
   });
 

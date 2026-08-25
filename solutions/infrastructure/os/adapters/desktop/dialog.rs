@@ -8,8 +8,16 @@
 
 use anyhow::Result;
 use rfd::{FileDialog, MessageButtons, MessageDialog, MessageLevel};
-use rquickjs::{Context as JsContext, Function};
+use rquickjs::{Context as JsContext, Ctx, Exception, Function};
 use serde::Deserialize;
+
+/// Throw a real JS Error with `e`'s message — same reasoning as fs.rs's
+/// `throw`: `Exception::throw_message` avoids the "Error converting from js
+/// ..." prefix that `Error::new_from_js_message` adds for its own, different
+/// purpose (JS->Rust type-conversion diagnostics).
+fn throw<E: std::fmt::Display>(ctx: &Ctx<'_>, e: E) -> rquickjs::Error {
+    Exception::throw_message(ctx, &e.to_string())
+}
 
 #[derive(Deserialize, Default)]
 struct OpenOpts {
@@ -95,6 +103,47 @@ pub fn register(js_ctx: &JsContext) -> Result<()> {
                     .save_file()
                     .and_then(|p| p.to_str().map(|s| s.to_string()))
             })?,
+        )?;
+
+        // ─── Read/write in the same call as the picker ─────────────────
+        // `fs.rs`'s read/write are scoped to the app's own data/config/
+        // cache/temp directories — they refuse anything a user picked from
+        // their own Documents, Desktop, etc. These two exist so a raw path
+        // to a user-chosen file never has to cross into JS at all: the
+        // picker shows, the OS grants access to exactly the file/location
+        // the user clicked, and the read or write happens right here, in
+        // the same host-import call. JS gets content in, or a success flag
+        // out — never a path it could later hand to something else.
+        g.set(
+            "__cm_dialog_open_file_text",
+            Function::new(
+                ctx.clone(),
+                |ctx: Ctx<'_>, opts_json: String| -> rquickjs::Result<Option<String>> {
+                    let opts = parse_opts(&opts_json);
+                    let Some(path) = build_dialog(&opts).pick_file() else {
+                        return Ok(None);
+                    };
+                    std::fs::read_to_string(&path)
+                        .map(Some)
+                        .map_err(|e| throw(&ctx, e))
+                },
+            )?,
+        )?;
+
+        g.set(
+            "__cm_dialog_save_file_text",
+            Function::new(
+                ctx.clone(),
+                |ctx: Ctx<'_>, opts_json: String, content: String| -> rquickjs::Result<bool> {
+                    let opts = parse_opts(&opts_json);
+                    let Some(path) = build_dialog(&opts).save_file() else {
+                        return Ok(false);
+                    };
+                    std::fs::write(&path, content)
+                        .map(|_| true)
+                        .map_err(|e| throw(&ctx, e))
+                },
+            )?,
         )?;
 
         // Message box with a single OK button. `level` is "info" /

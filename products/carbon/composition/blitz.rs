@@ -289,7 +289,13 @@ fn main() -> Result<()> {
     // blitz's own tlog — one line per phase, gated IN by CARBON_MINI_TIMING,
     // where mini's traces deltas and is gated OUT by CARBON_NO_TIMING. That
     // difference is why tlog is a port rather than a shared function.
-    native::register_all(&js_ctx, proxy.clone(), &tlog)?;
+    // process_enabled = false: blitz takes a bundle file directly rather
+    // than a project directory (unlike mini, it never reads carbon.toml at
+    // all today), so there's no `[runtime] process` declaration to read
+    // yet. Defaulting closed here is the conservative choice — wiring
+    // blitz's own carbon.toml read is follow-up work, not something to
+    // improvise in the same pass as mini's.
+    native::register_all(&js_ctx, proxy.clone(), &tlog, false)?;
     host_exports::mark_current_thread_as_js();
     host_exports::install_event_loop_proxy(proxy.clone());
 
