@@ -110,6 +110,13 @@ export function carbonImports(options = {}) {
   // missing context defensively so unit tests can drive the plugin directly).
   /** @type {Map<string, Array<{name: string, global: string}>>} */
   let specifierMap = new Map();
+  /** Specifiers whose exports came from a plugin manifest rather than
+   * BUILTIN_MODULES — see buildSpecifierMap's doc comment for why these need
+   * different codegen (lazy function wrappers, not an eager `export const`
+   * snapshot: the runtime installs a plugin's globals after the bundle
+   * evaluates, so an eager snapshot would permanently capture `undefined`).
+   * @type {Set<string>} */
+  let manifestSpecifiers = new Set();
   /** @type {Set<string>} */
   let grantedPlugins = new Set();
   /** @type {string | null} */
@@ -133,7 +140,7 @@ export function carbonImports(options = {}) {
         manifests.set(name, m);
       }
     }
-    const merged = buildSpecifierMap(manifests, {
+    const { map, manifestSpecifiers: lazySpecs } = buildSpecifierMap(manifests, {
       ...BUILTIN_MODULES,
       // Allow callers to register extras; the array is in [name, name, ...]
       // shape — turn it into the {name, global} list the resolver wants.
@@ -144,7 +151,8 @@ export function carbonImports(options = {}) {
         ]),
       ),
     });
-    specifierMap = merged;
+    specifierMap = map;
+    manifestSpecifiers = lazySpecs;
 
     if (capabilityCheckActive && root) {
       grantedPlugins = readGrantedPlugins(root, carbonTomlOverride);
@@ -238,7 +246,7 @@ export function carbonImports(options = {}) {
           `[carbon-imports] load '${specifier}' → ${exports.length} export(s)`,
         );
       }
-      return synthesizeReExports(specifier, exports);
+      return synthesizeReExports(specifier, exports, manifestSpecifiers.has(specifier));
     },
   };
 }
@@ -298,8 +306,25 @@ function findWorkspaceRoot(projectRoot) {
   return projectRoot;
 }
 
-/** Build the synthesized JS module body for a known specifier. */
-function synthesizeReExports(specifier, list) {
+/**
+ * Build the synthesized JS module body for a known specifier.
+ *
+ * @param {string} specifier
+ * @param {Array<{name: string, global: string}>} list
+ * @param {boolean} lazy When true, emit a function wrapper that reads
+ *   `globalThis.<global>` on every CALL rather than an eager `export const`
+ *   snapshot taken once at import time. Manifest (plugin) exports need this:
+ *   the runtime installs a plugin's globals via `dispatch_register`, which
+ *   runs AFTER the bundle evaluates (see mini.rs's composition root), so an
+ *   eager snapshot at import time would permanently capture `undefined` —
+ *   the exact bug this was written to fix (carbon-pulse's `setActive`
+ *   throwing "not a function" the first time real user code called it).
+ *   BUILTIN_MODULES exports (audio, image, …) don't need this: their
+ *   globals come from native registration that runs BEFORE the bundle, and
+ *   some of them are classes (`new AudioContext()`), which a function
+ *   wrapper cannot stand in for.
+ */
+function synthesizeReExports(specifier, list, lazy = false) {
   const lines = [
     `// @carbon/vite/imports — virtual module for ${JSON.stringify(specifier)}`,
     `// Bridges build-time imports to runtime globals installed by the matching`,
@@ -316,7 +341,13 @@ function synthesizeReExports(specifier, list) {
       lines.push(`// skipped invalid global ref: ${JSON.stringify(global)}`);
       continue;
     }
-    lines.push(`export const ${name} = globalThis.${global};`);
+    if (lazy) {
+      lines.push(
+        `export function ${name}(...args) { return globalThis.${global}(...args); }`,
+      );
+    } else {
+      lines.push(`export const ${name} = globalThis.${global};`);
+    }
   }
   return lines.join("\n") + "\n";
 }
