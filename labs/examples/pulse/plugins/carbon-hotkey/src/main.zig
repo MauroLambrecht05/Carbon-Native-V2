@@ -54,7 +54,10 @@ const MSG = extern struct {
 const MOD_ALT: UINT = 0x0001;
 const MOD_CONTROL: UINT = 0x0002;
 const MOD_NOREPEAT: UINT = 0x4000;
-const VK_SPACE: UINT = 0x20;
+// Win32 defines no named VK_A..VK_Z constants — per the RegisterHotKey/
+// Virtual-Key-Codes docs, 'A'-'Z' share their ASCII values (0x41-0x5A), so
+// VK_P is just 'P''s ASCII code.
+const VK_P: UINT = 0x50;
 const WM_HOTKEY: UINT = 0x0312;
 // Untyped so it coerces to both `c_int` (RegisterHotKey's `id` param) and
 // `usize` (comparing against MSG.wParam) without an explicit cast at either
@@ -146,8 +149,8 @@ fn hotkeyThreadMain() void {
     // A NULL hWnd binds the hotkey to THIS thread's message queue, so the
     // pump below has to run on the very thread that registered it — which
     // is why registration happens here, not in carbon_plugin_register.
-    if (RegisterHotKey(null, HOTKEY_ID, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, VK_SPACE) == 0) {
-        std.debug.print("[carbon-hotkey] RegisterHotKey failed — Ctrl+Alt+Space may already be taken by another app\n", .{});
+    if (RegisterHotKey(null, HOTKEY_ID, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, VK_P) == 0) {
+        std.debug.print("[carbon-hotkey] RegisterHotKey failed — Ctrl+Alt+P may already be taken by another app\n", .{});
         return;
     }
     defer _ = UnregisterHotKey(null, HOTKEY_ID);

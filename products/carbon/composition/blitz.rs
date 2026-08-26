@@ -792,6 +792,9 @@ fn main() -> Result<()> {
                     let _ = js_ctx.with(|ctx| ctx.eval::<(), _>(s.as_bytes()));
                 }
                 UserEvent::ReloadBundle => {}
+                UserEvent::TestEval(script) => {
+                    let _ = js_ctx.with(|ctx| ctx.eval::<(), _>(script.as_bytes()));
+                }
             },
             Event::MainEventsCleared => {
                 // Fire due timers + queued animation-frame callbacks, advance

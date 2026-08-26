@@ -1,7 +1,7 @@
 // App.tsx — Pulse: a focus/capture timer built around three native
 // plugins, each doing something JS alone cannot:
 //
-//   carbon-hotkey  Ctrl+Alt+Space summons the app even minimized/unfocused.
+//   carbon-hotkey  Ctrl+Alt+P summons the app even minimized/unfocused.
 //   carbon-idle    auto-pauses a running capture once the OS has seen no
 //                  input anywhere on the machine for a minute.
 //   carbon-pulse   paints a frame-synced coral ring on the real framebuffer
@@ -44,7 +44,7 @@ function App() {
   const [away, setAway] = createSignal(false);
   const [elapsed, setElapsed] = createSignal(0);
   const [log, setLog] = createSignal<LogEntry[]>([
-    { time: timestamp(), label: "ready — Ctrl+Alt+Space to start, from anywhere" },
+    { time: timestamp(), label: "ready — Ctrl+Alt+P to start, from anywhere" },
   ]);
 
   const pushLog = (label: string) =>
@@ -160,7 +160,7 @@ function App() {
           gap: 10,
         }}
       >
-        <text style={{ color: ACCENT, font_size: 14, font_weight: 700 }}>Ctrl+Alt+Space</text>
+        <text style={{ color: ACCENT, font_size: 14, font_weight: 700 }}>Ctrl+Alt+P</text>
         <text style={{ color: "#64748b", font_size: 12 }}>
           summons Pulse and toggles capture — even minimized, even unfocused
         </text>

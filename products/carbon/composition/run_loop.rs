@@ -452,11 +452,20 @@ impl State {
                         "globalThis.__cm_dispatch_click && globalThis.__cm_dispatch_click({});\nglobalThis.__cm_dispatch_pointer && globalThis.__cm_dispatch_pointer({}, \"down\", {}, {}, 0);",
                         node_id, node_id, self.mouse_pos.0, self.mouse_pos.1
                     );
-                    let _ = self.js_ctx.with(|ctx| -> Result<()> {
+                    // Was `let _ = ...`, discarding the Result entirely — an
+                    // exception thrown inside an onClick handler (or a syntax
+                    // error in the dispatch script itself) vanished with zero
+                    // output anywhere, on stdout or otherwise. Every click
+                    // looked identical to a click whose handler succeeded.
+                    // Logged the same way PluginEvent dispatch a few match
+                    // arms below already does.
+                    if let Err(e) = self.js_ctx.with(|ctx| -> Result<()> {
                         ctx.eval::<(), _>(script.as_bytes())
                             .map_err(|e| anyhow!("dispatch click: {e}"))?;
                         Ok(())
-                    });
+                    }) {
+                        eprintln!("[carbon-mini] click dispatch failed: {e}");
+                    }
                     // Click handlers commonly setState → schedule a render.
                     // Drain queued microtasks now so the render commits
                     // (and useEffects fire) before next user input.
@@ -1119,6 +1128,20 @@ impl State {
                 // the mouse. Errors silently if the window is in a
                 // state that doesn't allow drag (e.g. maximized).
                 let _ = self.window.drag_window();
+            }
+            Event::UserEvent(UserEvent::TestEval(script)) => {
+                // Test-only: same dispatch shape as a real click — eval on
+                // the JS thread, then drain_and_flush_react, exactly what
+                // the WindowEvent::MouseInput(Pressed) arm above does after
+                // its own __cm_dispatch_click eval.
+                if let Err(e) = self.js_ctx.with(|ctx| -> Result<()> {
+                    ctx.eval::<(), _>(script.as_bytes())
+                        .map_err(|e| anyhow!("test eval: {e}"))?;
+                    Ok(())
+                }) {
+                    eprintln!("[carbon-mini] CARBON_TEST_EVAL_AFTER_MS script failed: {e}");
+                }
+                drain_and_flush_react(&self.js_rt, &self.js_ctx);
             }
             Event::UserEvent(UserEvent::PluginEvent { name, payload }) => {
                 // Dispatch the event into JS. The dispatcher (installed at

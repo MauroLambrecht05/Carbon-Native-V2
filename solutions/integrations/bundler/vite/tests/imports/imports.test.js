@@ -295,8 +295,13 @@ describe("carbonImports plugin", () => {
         const id = resolveId(p, "carbon:carbon-pulse");
         const result = load(p, id);
         const code = typeof result === "string" ? result : result.code;
+        // A lazy wrapper, not an eager `export const` snapshot — see the note
+        // on synthesizeReExports's `lazy` parameter. A plugin's globals
+        // install after the bundle evaluates, so an eager binding captured
+        // at import time would be `undefined` forever, which is exactly the
+        // "not a function" bug this locks in against regressing.
         expect(code).toContain(
-          "export const setActive = globalThis.__carbon_pulse_set_active;",
+          "export function setActive(...args) { return globalThis.__carbon_pulse_set_active(...args); }",
         );
       });
     });
@@ -352,11 +357,70 @@ describe("carbonImports plugin", () => {
         const id = resolveId(p, "carbon:audio");
         const result = load(p, id);
         const code = typeof result === "string" ? result : result.code;
+        // Also lazy — this specifier is manifest-sourced (it overrode the
+        // BUILTIN_MODULES "carbon:audio" entry), so it gets the same
+        // deferred-resolution codegen a plugin export always does.
         expect(code).toContain(
-          "export const CustomThing = globalThis.__custom_audio_thing;",
+          "export function CustomThing(...args) { return globalThis.__custom_audio_thing(...args); }",
         );
         expect(code).not.toContain("AudioContext");
       });
+    });
+
+    test("behavioral: the export works when the global is installed AFTER import, not before", async () => {
+      // Not a string-matching test — this actually imports the generated
+      // module and calls the export, in the same order the real runtime
+      // produces: bundle (import) evaluates first, plugin registration
+      // (which installs globalThis.__test_lazy_target) happens after. If
+      // synthesizeReExports ever regresses back to an eager `export const`,
+      // this throws "globalThis.__test_lazy_target is not a function" —
+      // the exact failure this fix was written for.
+      //
+      // The generated module is written OUTSIDE withProject's managed
+      // directory: withProject's cleanup runs synchronously right after this
+      // callback returns, which would race the async `import()` below if the
+      // module lived inside the directory it deletes.
+      const code = withProject({}, (dir) => {
+        writePlugin(
+          dir,
+          "lazy-check",
+          [
+            'name = "lazy-check"',
+            'modules = ["carbon:lazy-check"]',
+            "",
+            '[exports."carbon:lazy-check"]',
+            'names = ["callIt"]',
+            'globals = { callIt = "__test_lazy_target" }',
+            "",
+          ].join("\n"),
+        );
+
+        const p = makePlugin({ skipCapabilityCheck: true });
+        p.configResolved({ command: "build", root: dir });
+        const id = resolveId(p, "carbon:lazy-check");
+        const result = load(p, id);
+        return typeof result === "string" ? result : result.code;
+      });
+
+      const modPath = join(
+        tmpdir(),
+        `carbon-imports-lazy-check-${Date.now()}-${Math.random().toString(36).slice(2)}.mjs`,
+      );
+      writeFileSync(modPath, code);
+      try {
+        const mod = await import(modPath);
+        // Import happened; the plugin "hasn't registered" yet.
+        expect(typeof mod.callIt).toBe("function");
+        expect(globalThis.__test_lazy_target).toBeUndefined();
+
+        // Now the plugin registers, well after import — exactly mini.rs's
+        // dispatch_register-runs-after-bundle-eval order.
+        globalThis.__test_lazy_target = (x) => x * 2;
+        expect(mod.callIt(21)).toBe(42);
+      } finally {
+        delete globalThis.__test_lazy_target;
+        try { rmSync(modPath, { force: true }); } catch {}
+      }
     });
   });
 });

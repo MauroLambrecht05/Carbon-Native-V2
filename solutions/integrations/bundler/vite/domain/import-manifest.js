@@ -165,12 +165,27 @@ function normalizeManifest(raw) {
  * suitable for handing to the resolver. Falls back to the BUILTIN_MODULES
  * table for any specifier no manifest covers.
  *
+ * Also returns which specifiers came from a MANIFEST rather than
+ * BUILTIN_MODULES — the caller needs to tell the two apart at codegen time.
+ * A manifest-declared global is installed by a plugin's `carbon_plugin_
+ * register`, which the runtime deliberately runs AFTER the bundle evaluates
+ * (see products/carbon's mini.rs composition root — "dispatch_register runs
+ * after the bundle eval... so plugins can install globals on top of an
+ * already-live runtime"), so the global does not exist yet at the moment a
+ * top-level `import` snapshots it. A BUILTIN_MODULES global (audio, image,
+ * …) is installed by native registration that runs BEFORE the bundle, so it
+ * has no such problem and can stay a plain, eager `export const`.
+ *
  * @param {Map<string, ParsedManifest>} manifests
  * @param {Record<string, Array<{name: string, global: string}>>} builtin
- * @returns {Map<string, Array<{name: string, global: string}>>}
+ * @returns {{
+ *   map: Map<string, Array<{name: string, global: string}>>,
+ *   manifestSpecifiers: Set<string>,
+ * }}
  */
 export function buildSpecifierMap(manifests, builtin) {
   const out = new Map();
+  const manifestSpecifiers = new Set();
 
   // Seed with hardcoded fallbacks so anything not covered by a manifest
   // still resolves.
@@ -190,8 +205,9 @@ export function buildSpecifierMap(manifests, builtin) {
         global: exp.globals[name] ?? name,
       }));
       out.set(spec, list);
+      manifestSpecifiers.add(spec);
     }
   }
 
-  return out;
+  return { map: out, manifestSpecifiers };
 }

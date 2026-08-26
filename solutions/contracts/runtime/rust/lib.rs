@@ -130,4 +130,11 @@ pub enum UserEvent {
     /// `data-carbon-drag-region` mousedown handlers post this instead of
     /// calling directly.
     WindowStartDrag,
+    /// Test-only hook: eval an arbitrary script on the JS thread, then run
+    /// the exact same post-dispatch step a real click/pointer event does
+    /// (drain_and_flush_react) — see CARBON_TEST_EVAL_AFTER_MS in mini.rs.
+    /// Lets a test drive the JS side through the real event-loop dispatch
+    /// path instead of racing it from a JS-side microtask, which has no way
+    /// to land at the same point in the loop a native event does.
+    TestEval(String),
 }

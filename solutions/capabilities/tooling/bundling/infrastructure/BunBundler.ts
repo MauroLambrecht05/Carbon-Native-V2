@@ -932,6 +932,101 @@ export async function buildBundleWithBabel(
           b.onResolve({ filter: /^@carbon\/mini-solid\/image$/ }, () => {
             return { path: MINI_SOLID_IMAGE_SRC };
           });
+          // solid-js SINGLETON. @carbon/mini-solid (injected above, resolved
+          // from the workspace — see its own comment) imports "solid-js" and
+          // "solid-js/universal" from ITS location; the app imports "solid-js"
+          // from ITS OWN node_modules. Both can independently satisfy the
+          // ordinary `^1.9.0`-range dependency yet resolve to DIFFERENT
+          // physical copies the moment their two `bun install`s happened to
+          // pick different patch versions — Bun dedupes by resolved file
+          // path, not by version equality, so two copies means two separate
+          // module instances with two separate reactive-tracking globals.
+          // The result has no error anywhere: signals read fine (a plain
+          // getter), a hand-written createEffect on one instance fires fine,
+          // but any JSX-embedded reactive binding created through the OTHER
+          // instance's insert() never re-runs, because it was never
+          // registered as an observer on a signal from a different instance's
+          // dependency graph. Found by bisecting exactly this symptom in
+          // Pulse: click handlers ran and updated state correctly, but no
+          // native __cm_set_text/__cm_set_prop call ever followed.
+          //
+          // Fix: force EVERY "solid-js" / "solid-js/*" specifier in this
+          // build, regardless of which file imports it, to resolve from the
+          // renderer's own location — the same one-instance guarantee
+          // @carbon/mini-solid itself already gets by being injected rather
+          // than depended on normally.
+          //
+          // `Bun.resolveSync` alone is NOT enough here — it carries no
+          // "conditions" option (unlike the `Bun.build({ conditions:
+          // ["production"] })` call a few hundred lines down), so it picked
+          // solid-js's DEFAULT export condition rather than "browser". For
+          // the base `"solid-js"` entry those genuinely differ: `exports["."]
+          // ["node"]` (and "deno"/"worker") point at `dist/server.js`, an
+          // SSR build where effects don't need to re-run after the initial
+          // render — while "browser" points at the real `dist/solid.js`
+          // reactive core. Resolved to server.js, App() rendered correctly
+          // ONCE (that's still just a function call) but not a single
+          // createEffect ever fired again, not even its first run — a worse
+          // regression than the duplicate-instance bug this was meant to fix,
+          // caught by testing through a native (non-JS-timing-dependent)
+          // click-dispatch hook rather than trusting the first "looks
+          // reactive" result. `solid-js/universal` has no such split (its
+          // entry is one plain production/development pair, no platform
+          // branch), which is why the renderer's own half looked fine in
+          // isolation — only the app's bare `import ... from "solid-js"`
+          // was actually broken.
+          if (detectedFramework === "solid") {
+            const solidJsBase = dirname(MINI_SOLID_SRC);
+            const resolveSolidJsExport = (subpath: string): string | undefined => {
+              try {
+                const pkgJsonPath = Bun.resolveSync("solid-js/package.json", solidJsBase);
+                const pkgDir = dirname(pkgJsonPath);
+                const pkg = JSON.parse(_carbonReadSync(pkgJsonPath, "utf8"));
+                const key = subpath === "solid-js" ? "." : `.${subpath.slice("solid-js".length)}`;
+                let node = pkg.exports?.[key];
+                if (node == null) return undefined;
+                // Walk conditions in the order that gets us the real browser
+                // build: prefer "browser" explicitly (this project always
+                // targets a browser-shaped JS runtime, never Node's own
+                // require() semantics, whatever process.platform Bun itself
+                // happens to report while resolving) — skip "development"
+                // once inside it, since the surrounding Bun.build call sets
+                // conditions: ["production"] and this must agree — then fall
+                // through to "import"/"default" for entries with no platform
+                // split at all (e.g. "./universal").
+                for (const cond of ["browser", "import", "default"]) {
+                  if (typeof node !== "object" || node === null) break;
+                  if (cond in node) {
+                    node = (node as Record<string, unknown>)[cond];
+                    continue;
+                  }
+                }
+                while (typeof node === "object" && node !== null) {
+                  const obj = node as Record<string, unknown>;
+                  if ("development" in obj) {
+                    // Only "production" is ever wanted here (matches the
+                    // outer Bun.build conditions) — descend past it, not into it.
+                    const { development: _dev, ...rest } = obj;
+                    node = rest.import ?? rest.default ?? rest.require;
+                    continue;
+                  }
+                  node = obj.import ?? obj.default ?? obj.require;
+                }
+                if (typeof node !== "string") return undefined;
+                return join(pkgDir, node);
+              } catch {
+                return undefined;
+              }
+            };
+            b.onResolve({ filter: /^solid-js$/ }, () => {
+              const path = resolveSolidJsExport("solid-js");
+              return path ? { path } : undefined; // fall through to ordinary resolution
+            });
+            b.onResolve({ filter: /^solid-js\// }, (args) => {
+              const path = resolveSolidJsExport(args.path);
+              return path ? { path } : undefined;
+            });
+          }
         },
       },
       // NOTE: xterm.js runs UNMODIFIED now — no shim. Real @xterm/xterm +
