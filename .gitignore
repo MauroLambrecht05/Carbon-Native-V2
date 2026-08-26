@@ -60,6 +60,16 @@ zig-out/
 !/products/carbon/tests/fixtures/hello-app/dist/
 !/products/carbon/tests/fixtures/hello-app/dist/**
 
+# ── Stray tool cache from an unexpanded `~` ─────────────────────────────────
+# Some cargo/bun invocation on Windows Git Bash left CARGO_HOME (or similar)
+# set to the literal two-character string `~` instead of an expanded home
+# directory, so the tool wrote its cache as a real directory NAMED `~`
+# relative to cwd — observed as products/carbon/~/.cargo/registry/... (500+ MB
+# of crates.io cache). `**/` matches at any depth, same reasoning as the
+# plugins/*.dll patterns above: this can land wherever a shell happens to
+# have cwd'd into when the bad env var was set, not only products/carbon/.
+**/~/
+
 # ── Local / machine-specific ────────────────────────────────────────────────
 # .env is machine-specific and the natural place a cache token or signing
 # password ends up. .env.example is the committed template — keep them in sync.
