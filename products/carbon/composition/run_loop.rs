@@ -1129,6 +1129,20 @@ impl State {
                 // state that doesn't allow drag (e.g. maximized).
                 let _ = self.window.drag_window();
             }
+            Event::UserEvent(UserEvent::TestEval(script)) => {
+                // Test-only: same dispatch shape as a real click — eval on
+                // the JS thread, then drain_and_flush_react, exactly what
+                // the WindowEvent::MouseInput(Pressed) arm above does after
+                // its own __cm_dispatch_click eval.
+                if let Err(e) = self.js_ctx.with(|ctx| -> Result<()> {
+                    ctx.eval::<(), _>(script.as_bytes())
+                        .map_err(|e| anyhow!("test eval: {e}"))?;
+                    Ok(())
+                }) {
+                    eprintln!("[carbon-mini] CARBON_TEST_EVAL_AFTER_MS script failed: {e}");
+                }
+                drain_and_flush_react(&self.js_rt, &self.js_ctx);
+            }
             Event::UserEvent(UserEvent::PluginEvent { name, payload }) => {
                 // Dispatch the event into JS. The dispatcher (installed at
                 // startup) routes it to all `globalThis.carbon.on(name, …)`

@@ -378,6 +378,28 @@ fn main() -> Result<()> {
     host_exports::mark_current_thread_as_js();
     host_exports::install_event_loop_proxy(proxy.clone());
 
+    // Test-only hook, matching CARBON_TEST_EXIT_MS's pattern (cli.rs): after
+    // CARBON_TEST_EVAL_AFTER_MS milliseconds, eval CARBON_TEST_EVAL_SCRIPT
+    // through UserEvent::TestEval — the exact same eval-then-drain_and_
+    // flush_react shape a real click uses (see run_loop.rs's TestEval arm
+    // and its WindowEvent::MouseInput(Pressed) sibling). Exists because a
+    // JS-side setTimeout/microtask self-click has no way to land at the
+    // same point in the event loop a native click does, and testing this
+    // renderer's reactivity from JS alone produced non-deterministic
+    // results — this drives it through the real dispatch path instead.
+    if let (Ok(ms), Ok(script)) = (
+        std::env::var("CARBON_TEST_EVAL_AFTER_MS"),
+        std::env::var("CARBON_TEST_EVAL_SCRIPT"),
+    ) {
+        if let Ok(ms) = ms.parse::<u64>() {
+            let proxy_eval = proxy.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(ms));
+                let _ = proxy_eval.send_event(UserEvent::TestEval(script));
+            });
+        }
+    }
+
     let initial_size = window.inner_size();
     let initial_scale = window.scale_factor();
     // Mirror initial size + scale into the @/native/window state slots so
