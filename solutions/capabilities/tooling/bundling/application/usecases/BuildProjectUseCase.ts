@@ -25,18 +25,69 @@ import {
   readCache,
   writeCache,
 } from "../../infrastructure/BuildCache.ts";
+import { installIsCurrent, installKey, writeInstallStamp } from "../../infrastructure/InstallState.ts";
 import { resolveBackendBinary, runtimeBinaryPath, runtimeCargoDir, SCRIPTS_DIR, TARGET_DIR, supportsMiniBytecode, usesMiniBundlePipeline } from "@carbon/workspace";
 import { backendCargoFeatures, type BackendName, type RuntimeFeatureFlags } from "@carbon/contracts/app/backend";
 
-/** `bun install` if node_modules doesn't exist yet. */
+/**
+ * `bun install --frozen-lockfile` when `node_modules` is missing OR no longer
+ * corresponds to the package.json + lockfile on disk.
+ *
+ * ── --frozen-lockfile ───────────────────────────────────────────────────────
+ * Verified against bun 1.3.10 (`bun install --help`): "--frozen-lockfile —
+ * Disallow changes to lockfile". With it, a package.json that disagrees with
+ * the lockfile fails the install ("error: lockfile had changes, but lockfile is
+ * frozen") instead of quietly re-resolving a caret range to whatever was
+ * published since — which is exactly how a compromised release gets pulled into
+ * a build that believed it was pinned.
+ *
+ * It is applied only when a lockfile actually exists. With none, bun does
+ * accept the flag (verified) — but it then installs WITHOUT writing one, so a
+ * freshly scaffolded app would never acquire the lockfile that makes every
+ * later build reproducible. First install resolves and writes; every install
+ * after that is frozen. The security property lives in the second case, and
+ * the first case is what creates the thing the second case enforces.
+ *
+ * ── WHY THE TRIGGER CHANGED ─────────────────────────────────────────────────
+ * "install only if node_modules is absent" made the flag pointless: the one
+ * moment a lockfile most needs checking — someone changed package.json or
+ * pulled a new lockfile — is the moment node_modules already exists, so
+ * nothing ran. See InstallState.ts for why this is a content stamp rather than
+ * an unconditional `bun install` (Layer 0: the build-cache-hit path is ~10 ms
+ * and an in-sync bun install still costs ~45 ms plus a spawn).
+ */
 export async function ensureNodeModules(projectDir: string, logger: Logger): Promise<void> {
   const pkgJson = join(projectDir, "package.json");
   if (!existsSync(pkgJson)) return;  // no JS deps to install
+  const key = installKey(projectDir);
   const nodeModules = join(projectDir, "node_modules");
-  if (existsSync(nodeModules)) return;
-  logger.step(`installing dependencies (bun install)…`);
-  const { code } = await spawnRun("bun", ["install"], { cwd: projectDir });
-  if (code !== 0) throw new Error(`bun install failed (exit ${code})`);
+  if (existsSync(nodeModules) && installIsCurrent(projectDir, key)) return;
+
+  const frozen = existsSync(join(projectDir, "bun.lock")) || existsSync(join(projectDir, "bun.lockb"));
+  const args = frozen ? ["install", "--frozen-lockfile"] : ["install"];
+  const shown = `bun ${args.join(" ")}`;
+  logger.step(
+    existsSync(nodeModules)
+      ? `dependencies changed since last install — re-verifying (${shown})…`
+      : `installing dependencies (${shown})…`,
+  );
+  // Frozen mode refuses rather than silently re-resolving, so a failure here is
+  // a real signal (package.json and the lockfile disagree). It throws, and the
+  // message names the one command that fixes it.
+  const { code } = await spawnRun("bun", args, { cwd: projectDir });
+  if (code !== 0) {
+    throw new Error(
+      `${shown} failed (exit ${code}) in ${projectDir}.` +
+      (frozen
+        ? ` If package.json changed on purpose, run \`bun install\` there and commit the updated bun.lock.`
+        : ``),
+    );
+  }
+  // Recomputed, not reused: the unfrozen first install WRITES bun.lock, so the
+  // key taken before the spawn describes a state that no longer exists.
+  // Stamping it would make the very next build think the project had drifted
+  // and re-verify forever. (Caught by a test, not by reading.)
+  writeInstallStamp(projectDir, installKey(projectDir));
 }
 
 /** `cargo build --release` for the chosen backend if its binary doesn't exist yet. */

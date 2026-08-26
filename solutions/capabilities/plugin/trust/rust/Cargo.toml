@@ -1,0 +1,84 @@
+# carbon-plugin-trust — the signing, verification, and import-table-policy
+# half of the Zig plugin trust pipeline (Layer 3 of
+# .local/notes/roadmap/04-security-and-capabilities/README.md).
+#
+# Two checks, one crate — see lib.rs's "TWO INDEPENDENT CHECKS, ONE CRATE"
+# note for why signing/verification (Ed25519, pure Rust) and the import-table
+# policy (reads a compiled PE artifact, needs `goblin`) live together despite
+# using different dependencies.
+#
+# ── WHY IT IS ITS OWN CRATE ─────────────────────────────────────────────────
+# Two callers with opposite privileges have to agree byte-for-byte about what a
+# signature covers:
+#
+#   the SIGNER   a publish-time tool that holds Carbon's private key and never
+#                runs on a user's machine, and
+#   the LOADER   solutions/infrastructure/plugin-host, which ships inside every
+#                app, holds only the public key, and must refuse anything that
+#                does not verify.
+#
+# Inlining the hashing and the detached-signature layout into plugin_loader.rs
+# would put half the agreement in the runtime and leave the other half to be
+# rewritten by whatever signs. One crate, depended on from both sides, is what
+# makes "signed with the same scheme the loader checks" a compile-time fact
+# rather than a convention.
+#
+# It sits under capabilities/plugin because trusting a plugin is a thing done
+# TO plugins, beside plugin/lifecycle (build/install) and plugin/registry
+# (extension points). `rust/` follows distribution/updating's precedent for a
+# capability whose implementation is Rust; unlike updating there is no
+# TypeScript half yet — `carbon plugin sign` would be it.
+
+[package]
+# carbon-kind = "service"
+name = "carbon-plugin-trust"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+description = "Ed25519 signing and load-time verification for carbon native plugins: SHA-256 content hashing, detached .sig files, and the revocation-list check."
+# The workspace manifest lives in .tools/orchestration/bazel/cargo, beside the
+# Bazel rules that drive it. Cargo only walks UP from a crate, so it would
+# never find it — the link has to be explicit.
+workspace = "../../../../../.tools/orchestration/bazel/cargo"
+
+[lib]
+name = "carbon_plugin_trust"
+path = "lib.rs"
+
+[[bin]]
+name = "carbon-plugin-sign"
+# tools/ is where a capability keeps an executable that supports it rather than
+# being it — the same slot as publishing's carbon-delta and math's bench_runner.
+# Nothing links this binary; the release pipeline shells out to it, and it is
+# the ONLY thing in the tree that ever opens the private key.
+path = "tools/sign.rs"
+
+[[bin]]
+name = "carbon-import-check"
+# Reads a compiled artifact's import table and judges it against
+# ImportPolicy::carbon_plugin(). Runs at publish time, before
+# carbon-plugin-sign — Carbon does not sign what this refuses.
+path = "tools/import_check.rs"
+
+# Clippy runs with -D warnings; the shared allow-list lives in the workspace
+# root so one rationale covers every crate. See //.tools/orchestration/bazel/cargo/Cargo.toml.
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+ed25519-dalek = { workspace = true }
+# The same sha2 line capabilities/distribution/updating carries, for the same
+# reason: a content digest an artifact is checked against.
+sha2 = "0.10"
+# Key generation only. Taken directly rather than through ed25519-dalek's
+# optional `rand_core` feature so that the crate's own RNG-trait version is not
+# part of this crate's public dependency surface — `SigningKey::from_bytes`
+# needs no feature at all, and this fills the 32 seed bytes it wants.
+getrandom = "0.2"
+# The PE parser for the import-table check. `goblin` over `pelite` because it
+# parses PE, ELF and Mach-O behind one API — the checker has to grow a `.so`
+# (ELF DT_NEEDED) and a `.dylib` (Mach-O load commands) arm eventually, and
+# goblin is the crate that already has both. Only the PE features are on
+# today, because only the PE arm is written.
+goblin = { version = "0.10", default-features = false, features = ["std", "pe32", "pe64"] }

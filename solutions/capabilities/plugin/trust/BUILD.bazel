@@ -1,0 +1,38 @@
+# Carbon Native V2 - @carbon/plugin-trust
+#
+# Capability: deciding whether a native plugin is allowed to run at all —
+# the import-table policy at publish time (before Carbon will sign anything),
+# Ed25519 signing at publish time, and signature and revocation checks at
+# load time.
+#
+# Rust-only for now, so everything is under rust/ the way
+# distribution/updating and distribution/publishing put their Rust halves
+# there. There is no TypeScript half yet; `carbon plugin sign` would be it.
+
+package(default_visibility = ["//visibility:public"])
+
+load("//.tools/orchestration/bazel/cargo:defs.bzl", "cargo_test")
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["rust/**/*.rs", "rust/Cargo.toml"], exclude = ["rust/tests/**"], allow_empty = True),
+)
+
+filegroup(
+    name = "tests",
+    srcs = glob(["rust/tests/**/*.rs"], allow_empty = True),
+)
+
+# Unit tests, in-crate: hashing, the detached-signature layout, verification in
+# both directions, the revocation lookup and the key file's round trip. All
+# pure computation plus a temp file or two — no plugin, no dlopen, nothing
+# platform-specific, so the default size is right.
+#
+# The end-to-end check against a REAL compiled `.dll` deliberately lives
+# elsewhere and is deliberately opt-in — see
+# //solutions/infrastructure/plugin-host:tests/plugin_signature.rs for why.
+cargo_test(
+    name = "plugin_trust_test",
+    package = "carbon-plugin-trust",
+    srcs = [":srcs", ":tests"],
+)

@@ -47,6 +47,10 @@ members = [
   "../../../../solutions/capabilities/rendering/snapshot",
   "../../../../solutions/capabilities/rendering/imaging",
   "../../../../solutions/capabilities/rendering/audio",
+  # Signing and load-time verification for native plugins. A leaf: it depends on
+  # nothing in the tree, and plugin-host depends on it (see Phase 4), so it has
+  # to be listed before the host it is a precondition of.
+  "../../../../solutions/capabilities/plugin/trust/rust",
   #
   # Phase 3 — engines:
   "../../../../solutions/capabilities/rendering/layout",
@@ -88,6 +92,18 @@ serde_json = "1"
 toml = { version = "0.8", default-features = false, features = ["parse"] }
 tracing = "0.1"
 libloading = "0.8"
+# Ed25519 for the plugin trust pipeline: carbon-plugin-trust signs with it and
+# carbon-plugin-host verifies with it, and the two MUST be the same version —
+# ed25519-dalek's `Signature` and `VerifyingKey` are its own types, so two
+# copies in the graph would not typecheck across the crate boundary. Hoisted
+# for that reason rather than for the usual one-place-to-bump convenience.
+#
+# 2.x, not 1.x: 2.0 was the audited rewrite that made `verify_strict` the
+# recommended entry point and closed the double-public-key oracle
+# (RUSTSEC-2022-0093). `default-features = false` drops `zeroize` and the
+# `fast` precomputed-table tradeoff — neither is wanted in a runtime that
+# verifies a handful of signatures once at startup and holds no private key.
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 
 # ── Lints ───────────────────────────────────────────────────────────────────
 # //:clippy_test runs clippy with `-D warnings`, so anything not allowed here

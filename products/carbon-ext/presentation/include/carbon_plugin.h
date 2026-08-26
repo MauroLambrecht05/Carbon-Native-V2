@@ -46,7 +46,7 @@ extern "C" {
  * ⇒ register but skip features the runtime doesn't advertise.
  */
 #define CARBON_PLUGIN_ABI_VERSION_MAJOR 1u
-#define CARBON_PLUGIN_ABI_VERSION_MINOR 0u
+#define CARBON_PLUGIN_ABI_VERSION_MINOR 1u
 
 /* --------------------------------------------------------------------------
  * Status codes returned by host-provided helpers
@@ -68,6 +68,15 @@ extern "C" {
  */
 typedef struct CarbonApp        CarbonApp;
 typedef struct CarbonJSContext  CarbonJSContext;
+
+/* Callback type for carbon_js_set_global_function / CarbonApp::set_global_function.
+ * Declared here (ahead of `struct CarbonApp`, which references it as of ABI
+ * 1.1) rather than down with the other carbon_js_* declarations, because C
+ * typedefs must precede their use. */
+typedef void (*CarbonJSCallback)(CarbonJSContext* ctx,
+                                 const char*      args_json,
+                                 char*            result_buf,
+                                 size_t           result_buf_len);
 
 /* --------------------------------------------------------------------------
  * CarbonApp — the host descriptor passed to every plugin entry point.
@@ -157,6 +166,46 @@ struct CarbonApp {
      * above breaks every previously-compiled plugin's struct layout.
      * When you append a field, bump CARBON_PLUGIN_ABI_VERSION_MINOR.
      */
+
+    /* set_global_string / set_global_number / set_global_function / eval:
+     * ABI 1.1. Same operations as the carbon_js_* free functions below,
+     * reached as function pointers on the struct the host already handed
+     * the plugin instead of a runtime symbol lookup.
+     *
+     * WHY THIS EXISTS ALONGSIDE THE carbon_js_* FUNCTIONS: those are resolved
+     * via GetProcAddress(GetModuleHandle(NULL)) / dlsym(RTLD_DEFAULT) — see
+     * the RESOLUTION MODEL note below. A plugin trust checker that reads a
+     * compiled artifact's import table (solutions/capabilities/plugin/trust)
+     * has to deny GetProcAddress/GetModuleHandle* from every module,
+     * unconditionally: a plugin that can resolve one arbitrary OS symbol at
+     * runtime can resolve any of them, and a static import-table check has
+     * nothing left to say once that door is open. That denial is correct and
+     * plugin authors should keep relying on it — which means the ONE
+     * resolution every real plugin needs (carbon_js_*, to install JS globals)
+     * can no longer go through that door either.
+     *
+     * These four fields are the fix: the same values, handed over as
+     * ordinary struct fields the host fills in — exactly how push_event and
+     * request_paint already work, for the same reason. A plugin using only
+     * these four, push_event, request_paint, alloc and free needs no dynamic
+     * symbol resolution of ANY kind, and its import table shows it.
+     *
+     * A plugin built against ABI 1.0 (before these fields existed) still
+     * works: it used the runtime-resolution carbon_js_* path, which is
+     * untouched below. New SDKs should prefer these fields; the free
+     * functions stay for that reason and for non-C SDKs that have not moved
+     * yet.
+     */
+    int32_t (*set_global_string)(CarbonJSContext* ctx,
+                                 const char*      name,
+                                 const char*      value);
+    int32_t (*set_global_number)(CarbonJSContext* ctx,
+                                 const char*      name,
+                                 double           value);
+    int32_t (*set_global_function)(CarbonJSContext* ctx,
+                                   const char*      name,
+                                   CarbonJSCallback fn);
+    int32_t (*eval)(CarbonJSContext* ctx, const char* source);
 };
 
 /* --------------------------------------------------------------------------
@@ -269,14 +318,20 @@ void carbon_plugin_on_shutdown(CarbonApp* app);
  *   - Windows: GetProcAddress(GetModuleHandle(NULL), "carbon_js_…")
  *   - macOS / Linux: dlsym(RTLD_DEFAULT, "carbon_js_…")
  *
- * The Rust SDK (`carbon-plugin-sdk`) and the Zig SDK do this lookup once
- * and cache the function pointer. Pure-C plugins should follow the same
- * pattern. This avoids requiring a Windows .lib import library to ship
- * alongside the SDK and keeps plugins linkable in isolation.
+ * This avoids requiring a Windows .lib import library to ship alongside the
+ * SDK and keeps plugins linkable in isolation.
  *
- * They are NOT function pointers on CarbonApp because we want a single
- * stable address per helper across all plugins and all CarbonApp
- * instances (e.g., across multiple windows once that lands).
+ * AS OF ABI 1.1, `struct CarbonApp` ALSO carries these four as function
+ * pointers (`set_global_string`, `set_global_number`, `set_global_function`,
+ * `eval`) — see the APPEND-ONLY ZONE above. Prefer those: GetProcAddress and
+ * GetModuleHandle* are exactly the loophole a static import-table check
+ * cannot see through (solutions/capabilities/plugin/trust denies them from
+ * every module, unconditionally, for that reason), so a plugin resolving
+ * carbon_js_* this way cannot be told apart, from its import table alone,
+ * from one resolving something else entirely. The struct fields carry the
+ * same four operations without that ambiguity. These free functions remain
+ * for plugins built against ABI 1.0 and for non-C SDKs that have not moved
+ * to the struct fields yet.
  */
 
 /* Return the current JS context. May return NULL during shutdown. */
@@ -301,12 +356,10 @@ int32_t carbon_js_set_global_number(CarbonJSContext* ctx,
  *
  * This is intentionally minimal — most plugins will use the higher-level
  * Rust/Zig SDKs which can register typed classes and methods.
+ *
+ * `CarbonJSCallback` itself is declared up with the opaque types, ahead of
+ * `struct CarbonApp`, which references it from ABI 1.1 onward.
  */
-typedef void (*CarbonJSCallback)(CarbonJSContext* ctx,
-                                 const char*      args_json,
-                                 char*            result_buf,
-                                 size_t           result_buf_len);
-
 int32_t carbon_js_set_global_function(CarbonJSContext* ctx,
                                       const char*      name,
                                       CarbonJSCallback fn);

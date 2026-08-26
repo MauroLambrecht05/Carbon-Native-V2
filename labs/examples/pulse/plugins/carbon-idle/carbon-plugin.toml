@@ -1,0 +1,50 @@
+# carbon-idle — what this plugin tells the toolchain about itself.
+#
+# `carbon plugin install` and `carbon plugin list` read this. The RUNTIME
+# reads the manifest returned by `carbon_plugin_manifest()` in src/main.zig
+# instead, because by then this file is not shipped — so the two must agree,
+# and `carbon plugin check` is what verifies they do.
+name = "carbon-idle"
+version = "0.1.0"
+language = "zig"
+
+# Extension points this plugin implements. Every id must exist in
+# solutions/contracts/plugin/registry/extension-points.zig — run
+# `carbon ext list` to see them, or `carbon plugin check` to verify these.
+#
+# Must stay above [abi]: `carbon plugin check`'s TOML reader looks for this
+# as a top-level key, and real TOML makes anything after a [section] header
+# belong to that section until the next one — placing it below [abi] silently
+# makes it unreadable, not an error. The same rule is why `modules` sits here
+# too, alongside extension-points, rather than after [capabilities] below —
+# the vite import-manifest reader (solutions/integrations/bundler/vite/
+# domain/import-manifest.js) reads it as a top-level key, and a `modules =`
+# line placed after any [section] header silently becomes that section's
+# field instead.
+extension-points = ["lifecycle.register", "lifecycle.shutdown"]
+modules = ["carbon:carbon-idle"]
+
+[abi]
+major = 1
+minor = 1
+
+[capabilities]
+# Points that gate on a capability contribute it automatically; anything here
+# is for what the plugin does BESIDES its extension points. System-wide idle
+# detection needs none — GetLastInputInfo reports a tick count, not the
+# actual keystrokes or mouse coordinates.
+required = []
+optional = []
+
+# ── JS API surface (consumed by the vite imports plugin) ────────────────────
+# The virtual module body is generated as
+#   `export const <name> = globalThis.<global>;`
+# so app code can pull the current idle time on demand:
+#   import { secondsIdle } from "carbon:carbon-idle";
+#   secondsIdle()   // -> number of seconds since the OS last saw input
+#
+# The push side (`carbon.on("idle.changed", cb)`) needs no export — it goes
+# through the event-shim global every pushEvent-using plugin installs.
+[exports."carbon:carbon-idle"]
+names = ["secondsIdle"]
+globals = { secondsIdle = "__carbon_idle_seconds" }

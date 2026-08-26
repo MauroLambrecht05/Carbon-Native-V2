@@ -48,7 +48,7 @@ def validate_workspace(root: Path) -> bool:
         "rendering/audio", "rendering/imaging", "rendering/math",
         "rendering/layout", "rendering/painting", "rendering/snapshot", "rendering/text",
         # plugin/
-        "plugin/registry", "plugin/lifecycle", "plugin/sdk",
+        "plugin/registry", "plugin/lifecycle", "plugin/sdk", "plugin/trust",
         # tooling/
         "tooling/bundling", "tooling/scaffolding",
     ]

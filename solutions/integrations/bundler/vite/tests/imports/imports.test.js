@@ -58,9 +58,15 @@ describe("carbonImports plugin", () => {
       expect(BUILTIN_SPECIFIERS.has("carbon:audio")).toBe(true);
       expect(BUILTIN_SPECIFIERS.has("carbon:image")).toBe(true);
       expect(BUILTIN_SPECIFIERS.has("carbon:canvas")).toBe(true);
-      expect(BUILTIN_SPECIFIERS.has("carbon:fs")).toBe(true);
+      expect(BUILTIN_SPECIFIERS.has("carbon:process")).toBe(true);
       expect(BUILTIN_SPECIFIERS.has("carbon:notify")).toBe(true);
       expect(BUILTIN_SPECIFIERS.has("carbon:tray")).toBe(true);
+    });
+
+    test("carbon:fs does not exist — no virtual module for raw filesystem access", () => {
+      // Per the Fs/Net split: file access is dialog-mediated or the
+      // bounds-checked readOwnAsset, never an arbitrary path, for anyone.
+      expect(BUILTIN_SPECIFIERS.has("carbon:fs")).toBe(false);
     });
 
     test("audio module lists the canonical Web Audio classes", () => {
@@ -157,6 +163,36 @@ describe("carbonImports plugin", () => {
     });
   });
 
+  describe("first-party-only specifiers (carbon:process)", () => {
+    test("resolves fine when imported from the app's own src/", () => {
+      const p = makePlugin({ skipCapabilityCheck: true });
+      p.configResolved({ command: "build", root: process.cwd() });
+      const id = resolveId(p, "carbon:process", "/project/src/App.tsx");
+      expect(id).toMatch(/^\0carbon-imports:carbon:process$/);
+    });
+
+    test("refuses when imported from inside node_modules, even with capability checks off", () => {
+      const p = makePlugin({ skipCapabilityCheck: true });
+      p.configResolved({ command: "build", root: process.cwd() });
+      let threw = null;
+      try {
+        resolveId(p, "carbon:process", "/project/node_modules/some-dep/index.js");
+      } catch (e) {
+        threw = e;
+      }
+      expect(threw).not.toBeNull();
+      expect(threw.message).toContain("only importable from the app's own source");
+    });
+
+    test("Windows-style backslash paths are recognized as node_modules too", () => {
+      const p = makePlugin({ skipCapabilityCheck: true });
+      p.configResolved({ command: "build", root: process.cwd() });
+      expect(() =>
+        resolveId(p, "carbon:process", "C:\\project\\node_modules\\some-dep\\index.js"),
+      ).toThrow(/only importable from the app's own source/);
+    });
+  });
+
   describe("load — synthesized re-export modules", () => {
     test("emits export const for each builtin name", () => {
       const p = makePlugin({ skipCapabilityCheck: true });
@@ -207,6 +243,120 @@ describe("carbonImports plugin", () => {
       const code = typeof result === "string" ? result : result.code;
       expect(code).toContain("export const foo = globalThis.foo;");
       expect(code).toContain("export const bar = globalThis.bar;");
+    });
+  });
+
+  describe("local plugin manifests (plugins/<name>/carbon-plugin.toml)", () => {
+    // Regression test for a real bug: labs/examples/pulse's App.tsx imported
+    // `setActive` from `carbon:carbon-pulse`, and the CI "build examples" job
+    // failed with "No matching export" — the manifest declared the export
+    // correctly, but discoverLocalManifests (a) never looked in the app's own
+    // `plugins/<name>/` directory at all (only a `packages/` workspace root
+    // that nothing in this tree uses), and (b) normalizeManifest expected a
+    // `[plugin]` wrapper section no real carbon-plugin.toml has ever used.
+    // This writes a manifest in the SAME shape as the real Pulse plugins'
+    // (top-level name/modules, [exports."carbon:x"]) so a regression on
+    // either bug fails here before it reaches a real app's build.
+    function writePlugin(projectDir, name, tomlBody) {
+      const dir = join(projectDir, "plugins", name);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "carbon-plugin.toml"), tomlBody);
+    }
+
+    test("a local plugin's declared export resolves and loads", () => {
+      withProject({}, (dir) => {
+        writePlugin(
+          dir,
+          "carbon-pulse",
+          [
+            'name = "carbon-pulse"',
+            'version = "0.1.0"',
+            'language = "zig"',
+            'extension-points = ["lifecycle.register", "paint.before"]',
+            'modules = ["carbon:carbon-pulse"]',
+            "",
+            "[abi]",
+            "major = 1",
+            "minor = 1",
+            "",
+            "[capabilities]",
+            "required = []",
+            "optional = []",
+            "",
+            '[exports."carbon:carbon-pulse"]',
+            'names = ["setActive"]',
+            'globals = { setActive = "__carbon_pulse_set_active" }',
+            "",
+          ].join("\n"),
+        );
+
+        const p = makePlugin({ skipCapabilityCheck: true });
+        p.configResolved({ command: "build", root: dir });
+        const id = resolveId(p, "carbon:carbon-pulse");
+        const result = load(p, id);
+        const code = typeof result === "string" ? result : result.code;
+        expect(code).toContain(
+          "export const setActive = globalThis.__carbon_pulse_set_active;",
+        );
+      });
+    });
+
+    test("a `modules` line placed after a [section] header is NOT picked up — the documented TOML gotcha", () => {
+      // Guards the fix's other half: real plugin manifests once had `modules`
+      // sitting right after [capabilities] with no header of its own, which
+      // TOML parses as capabilities.modules, not top-level. This pins the
+      // (correct) top-level-only behavior so a future edit can't silently
+      // reintroduce the misplacement without a test noticing the module
+      // stops resolving.
+      withProject({}, (dir) => {
+        writePlugin(
+          dir,
+          "carbon-misplaced",
+          [
+            'name = "carbon-misplaced"',
+            "",
+            "[capabilities]",
+            "required = []",
+            'modules = ["carbon:carbon-misplaced"]',
+            "",
+          ].join("\n"),
+        );
+
+        const p = makePlugin({ skipCapabilityCheck: true });
+        p.configResolved({ command: "build", root: dir });
+        const id = resolveId(p, "carbon:carbon-misplaced");
+        const result = load(p, id);
+        const code = typeof result === "string" ? result : result.code;
+        expect(code).toContain("unknown virtual module");
+      });
+    });
+
+    test("an app-local plugin manifest overrides a same-named BUILTIN_MODULES entry", () => {
+      withProject({}, (dir) => {
+        writePlugin(
+          dir,
+          "audio",
+          [
+            'name = "audio"',
+            'modules = ["carbon:audio"]',
+            "",
+            '[exports."carbon:audio"]',
+            'names = ["CustomThing"]',
+            'globals = { CustomThing = "__custom_audio_thing" }',
+            "",
+          ].join("\n"),
+        );
+
+        const p = makePlugin({ skipCapabilityCheck: true });
+        p.configResolved({ command: "build", root: dir });
+        const id = resolveId(p, "carbon:audio");
+        const result = load(p, id);
+        const code = typeof result === "string" ? result : result.code;
+        expect(code).toContain(
+          "export const CustomThing = globalThis.__custom_audio_thing;",
+        );
+        expect(code).not.toContain("AudioContext");
+      });
     });
   });
 });

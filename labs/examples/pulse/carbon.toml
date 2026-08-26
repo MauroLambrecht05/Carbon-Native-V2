@@ -1,0 +1,26 @@
+[app]
+name = "pulse"
+version = "0.1.0"
+display_name = "Pulse"
+
+[runtime]
+backend = "mini"
+bytecode = true
+
+# All three plugins' source lives in plugins/ — `carbon run`/`carbon dev`
+# build and install them automatically, no `carbon plugin install` step.
+# carbon-pulse writes to the framebuffer (paint.before), which is
+# capability-gated: this grant has to be written by hand once, same as
+# crt-dashboard's. carbon-hotkey and carbon-idle need no capability — their
+# points don't gate on one — so their bare entries below are what
+# `carbon dev`'s first sync would have written anyway; spelled out here for
+# the reader.
+[plugins.carbon-hotkey]
+path = "./plugins/carbon_hotkey.dll"
+
+[plugins.carbon-idle]
+path = "./plugins/carbon_idle.dll"
+
+[plugins.carbon-pulse]
+path = "./plugins/carbon_pulse.dll"
+capabilities = ["paint.pixmap"]

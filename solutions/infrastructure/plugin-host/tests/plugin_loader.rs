@@ -147,7 +147,14 @@ fn host_carbon_app_size_matches_sdk_layout() {
     // host_exports' own `carbon_js_*` exports and collide, so the layout is
     // checked against the contract in carbon_abi.h instead:
     //
-    //   2*u32 + ptr + 2*u32 + 2*ptr + 3*ptr + u32 + 4*Option<fn>
+    //   2*u32 + ptr + 2*u32 + 2*ptr + 3*ptr + u32 + 8*Option<fn>
+    //
+    // 8, not 4: ABI 1.1 appended set_global_string/set_global_number/
+    // set_global_function/eval to the APPEND-ONLY ZONE (see carbon_plugin.h
+    // and the note on those fields in host_exports.rs) — the same shape
+    // push_event/request_paint/alloc/free already used, so a plugin that
+    // uses only struct fields for JS globals needs no GetProcAddress/
+    // GetModuleHandle* in its import table.
     //
     // The range absorbs whatever trailing alignment padding the compiler picks.
     // The invariant that matters — stable field OFFSETS — is what carbon_abi.h's
@@ -155,8 +162,8 @@ fn host_carbon_app_size_matches_sdk_layout() {
     // users' machines if violated.
     use std::mem::size_of;
     let sz = size_of::<host_exports::HostCarbonApp>();
-    assert!(sz >= 88, "HostCarbonApp size {sz} smaller than expected");
-    assert!(sz <= 128, "HostCarbonApp size {sz} larger than expected");
+    assert!(sz >= 120, "HostCarbonApp size {sz} smaller than expected");
+    assert!(sz <= 160, "HostCarbonApp size {sz} larger than expected");
 }
 
 #[test]

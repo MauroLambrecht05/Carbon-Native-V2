@@ -16,6 +16,27 @@
 //
 // The generated tsconfig maps @carbon/* to the workspace so the editor and
 // `tsc` still resolve them. Only the installer is bypassed.
+//
+// ── WHY EVERY PRESET SHIPS `"trustedDependencies": []` ──────────────────────
+// A scaffolded project starts with npm lifecycle scripts (preinstall /
+// postinstall / prepare) unable to run at all, for any dependency.
+//
+// The empty array is not a no-op. Bun does block dependency scripts by
+// default, but only relative to a BUILT-IN allowlist of ~366 package names
+// (`bun pm default-trusted`). Declaring the field REPLACES that list instead
+// of extending it, so `[]` — and only `[]` — means "nothing". Verified
+// against bun 1.3.10: a package on the default list runs its postinstall when
+// the field is absent, and reports "Blocked 1 postinstall" when it is `[]`.
+//
+// This is the first of the four independent walls in
+// `.local/notes/roadmap/04-security-and-capabilities`: a compromised
+// dependency's install script never executes on the developer's machine, so
+// it never reaches the runtime-level protections at all.
+//
+// A developer who genuinely needs one adds the package name here themselves —
+// an explicit, reviewable, one-line decision rather than a silent default.
+// Bun matches plain names only; `"pkg@1.2.3"` matches nothing (verified), so
+// version-pinned trust is not expressible here yet.
 
 import type { PresetName } from "../../domain/value-objects/Preset.ts";
 
@@ -30,7 +51,8 @@ const BLANK = `{
   },
   "devDependencies": {
     "typescript": "^5.6.0"
-  }
+  },
+  "trustedDependencies": []
 }
 `;
 
@@ -45,7 +67,8 @@ const BLANK_PLUGINS = `{
   },
   "devDependencies": {
     "typescript": "^5.6.0"
-  }
+  },
+  "trustedDependencies": []
 }
 `;
 
@@ -61,7 +84,8 @@ const TAILWIND = `{
   "devDependencies": {
     "tailwindcss": "^3.4.0",
     "typescript": "^5.6.0"
-  }
+  },
+  "trustedDependencies": []
 }
 `;
 
@@ -78,7 +102,8 @@ const TAILWIND_PLUGINS = `{
 
     "tailwindcss": "^3.4.0",
     "typescript": "^5.6.0"
-  }
+  },
+  "trustedDependencies": []
 }
 `;
 
@@ -95,7 +120,8 @@ const THREE = `{
   "devDependencies": {
 
     "typescript": "^5.6.0"
-  }
+  },
+  "trustedDependencies": []
 }
 `;
 

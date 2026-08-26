@@ -43,6 +43,10 @@ carbon-core = { path = "../../contracts/app/rust" }
 # rather than carrying a hand-written copy of every hook's symbol and
 # signature.
 carbon-plugin-contract = { path = "../../contracts/plugin/rust" }
+# Ed25519 signature verification and the revocation-list check, run BEFORE
+# libloading opens anything. Verification only: this crate never sees a private
+# key, and nothing on the path below links `carbon_plugin_trust::keyfile`.
+carbon-plugin-trust = { path = "../../capabilities/plugin/trust/rust" }
 anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -59,6 +63,7 @@ tao = { version = "0.30", default-features = false, features = ["rwh_06"] }
 [dev-dependencies]
 carbon-core = { path = "../../contracts/app/rust" }
 carbon-plugin-contract = { path = "../../contracts/plugin/rust" }
+carbon-plugin-trust = { path = "../../capabilities/plugin/trust/rust" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { version = "0.8", default-features = false, features = ["parse"] }
