@@ -85,6 +85,9 @@ Thumbs.db
 # VS Code's "Local History" extension: timestamped snapshots of every save,
 # written outside git entirely. Machine-local, unbounded, and not source.
 .history/
+# Per-workspace VS Code settings — machine-local (font size, theme, whichever
+# extensions happen to be installed), not a project convention to enforce.
+.vscode/
 
 # ── Migration scratch ───────────────────────────────────────────────────────
 # labs/e2e holds the throwaway project `carbon init` creates when the CLI loop
