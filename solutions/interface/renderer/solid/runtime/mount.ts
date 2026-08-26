@@ -1,6 +1,6 @@
 // Mounting a component tree, and portalling part of one somewhere else.
 
-import { createRoot, onCleanup } from "solid-js";
+import { batch, createRoot, onCleanup } from "solid-js";
 
 import "../host/imports.ts";
 import type { CmNode } from "../scene/node.ts";
@@ -26,6 +26,26 @@ export function mount(component: () => any): void {
   }
   lastDispose = render(component, getRoot());
   __cm_request_paint();
+
+  // The host runtime forces a render commit after every JS-touching event
+  // (click dispatch, plugin event, HMR reload — see products/carbon's
+  // drain_and_flush_react) by calling `globalThis.__cm_flush_react`. The
+  // React renderer installs one; the Solid renderer never did, so every
+  // effect Solid schedules rather than runs synchronously (createEffect,
+  // onMount, and any insert() committed while queued behind one) was queued
+  // forever and never committed to the scene graph — signals updated
+  // correctly, JSX never visibly reflected it, with no error anywhere.
+  // `batch(() => {})` is solid-js's own public flush primitive: entering
+  // and leaving a batch (even an empty one) drains whatever the shared
+  // scheduler is currently holding, the same way a non-empty batch would
+  // flush the updates made inside it.
+  (globalThis as unknown as { __cm_flush_react?: () => void }).__cm_flush_react = () => {
+    try {
+      batch(() => {});
+    } catch {
+      /* no-op if nothing pending */
+    }
+  };
 }
 
 /** HMR: dispose the mounted owner tree. Returns once the handle is cleared. */

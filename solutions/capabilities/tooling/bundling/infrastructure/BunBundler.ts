@@ -932,6 +932,46 @@ export async function buildBundleWithBabel(
           b.onResolve({ filter: /^@carbon\/mini-solid\/image$/ }, () => {
             return { path: MINI_SOLID_IMAGE_SRC };
           });
+          // solid-js SINGLETON. @carbon/mini-solid (injected above, resolved
+          // from the workspace — see its own comment) imports "solid-js" and
+          // "solid-js/universal" from ITS location; the app imports "solid-js"
+          // from ITS OWN node_modules. Both can independently satisfy the
+          // ordinary `^1.9.0`-range dependency yet resolve to DIFFERENT
+          // physical copies the moment their two `bun install`s happened to
+          // pick different patch versions — Bun dedupes by resolved file
+          // path, not by version equality, so two copies means two separate
+          // module instances with two separate reactive-tracking globals.
+          // The result has no error anywhere: signals read fine (a plain
+          // getter), a hand-written createEffect on one instance fires fine,
+          // but any JSX-embedded reactive binding created through the OTHER
+          // instance's insert() never re-runs, because it was never
+          // registered as an observer on a signal from a different instance's
+          // dependency graph. Found by bisecting exactly this symptom in
+          // Pulse: click handlers ran and updated state correctly, but no
+          // native __cm_set_text/__cm_set_prop call ever followed.
+          //
+          // Fix: force EVERY "solid-js" / "solid-js/*" specifier in this
+          // build, regardless of which file imports it, to resolve from the
+          // renderer's own location — the same one-instance guarantee
+          // @carbon/mini-solid itself already gets by being injected rather
+          // than depended on normally.
+          if (detectedFramework === "solid") {
+            const solidJsBase = dirname(MINI_SOLID_SRC);
+            b.onResolve({ filter: /^solid-js$/ }, () => {
+              try {
+                return { path: Bun.resolveSync("solid-js", solidJsBase) };
+              } catch {
+                return undefined; // fall through to ordinary resolution
+              }
+            });
+            b.onResolve({ filter: /^solid-js\// }, (args) => {
+              try {
+                return { path: Bun.resolveSync(args.path, solidJsBase) };
+              } catch {
+                return undefined;
+              }
+            });
+          }
         },
       },
       // NOTE: xterm.js runs UNMODIFIED now — no shim. Real @xterm/xterm +
