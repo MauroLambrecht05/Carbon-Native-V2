@@ -8,6 +8,9 @@
 export interface ProcessResult {
   readonly code: number;
   readonly signal: NodeJS.Signals | null;
+  /** Only populated when `stdio: "pipe"` was requested. */
+  readonly stdout?: string;
+  readonly stderr?: string;
 }
 
 export interface ProcessOptions {

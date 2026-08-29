@@ -1224,8 +1224,15 @@ impl State {
                     self.plugin_registry.dispatch_before_bundle_eval();
                     match load_and_eval_bundle(&self.js_ctx, path) {
                         Ok(()) => {
-                            let ms = t_reload.elapsed().as_secs_f64() * 1000.0;
-                            eprintln!("[carbon-mini-hmr] reloaded in {ms:.1} ms");
+                            // Success is a timing-shaped message (the CLI's
+                            // own "rebuilt in Nms" line already covers this
+                            // for a quiet `carbon dev` run) — gated the same
+                            // as trace.rs's per-phase output. A FAILED reload
+                            // below is a real error and always prints.
+                            if std::env::var_os("CARBON_NO_TIMING").is_none() {
+                                let ms = t_reload.elapsed().as_secs_f64() * 1000.0;
+                                eprintln!("[carbon-mini-hmr] reloaded in {ms:.1} ms");
+                            }
                         }
                         Err(e) => {
                             eprintln!("[carbon-mini-hmr] reload FAILED: {e:#}");

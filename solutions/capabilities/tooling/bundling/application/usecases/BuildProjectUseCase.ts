@@ -56,7 +56,11 @@ import { backendCargoFeatures, type BackendName, type RuntimeFeatureFlags } from
  * an unconditional `bun install` (Layer 0: the build-cache-hit path is ~10 ms
  * and an in-sync bun install still costs ~45 ms plus a spawn).
  */
-export async function ensureNodeModules(projectDir: string, logger: Logger): Promise<void> {
+export async function ensureNodeModules(
+  projectDir: string,
+  logger: Logger,
+  opts: { quiet?: boolean } = {},
+): Promise<void> {
   const pkgJson = join(projectDir, "package.json");
   if (!existsSync(pkgJson)) return;  // no JS deps to install
   const key = installKey(projectDir);
@@ -74,13 +78,34 @@ export async function ensureNodeModules(projectDir: string, logger: Logger): Pro
   // Frozen mode refuses rather than silently re-resolving, so a failure here is
   // a real signal (package.json and the lockfile disagree). It throws, and the
   // message names the one command that fixes it.
-  const { code } = await spawnRun("bun", args, { cwd: projectDir });
+  //
+  // Quiet mode pipes bun's own stdout/stderr instead of letting it print
+  // straight to the terminal — its version banner + progress bar is noise on
+  // every successful install, and the only thing worth surfacing is a short
+  // summary. The full output is never lost: on failure it's dumped verbatim
+  // before throwing, so nothing is harder to debug than before.
+  const { code, stdout, stderr } = await spawnRun("bun", args, {
+    cwd: projectDir,
+    stdio: opts.quiet ? "pipe" : "inherit",
+  });
   if (code !== 0) {
+    if (opts.quiet) {
+      if (stdout) logger.raw(stdout.trimEnd());
+      if (stderr) logger.raw(stderr.trimEnd());
+    }
     throw new Error(
       `${shown} failed (exit ${code}) in ${projectDir}.` +
       (frozen
         ? ` If package.json changed on purpose, run \`bun install\` there and commit the updated bun.lock.`
         : ``),
+    );
+  }
+  if (opts.quiet) {
+    const summary = /(\d+)\s+packages?\s+installed(?:\s+\[([\d.]+m?s)\])?/i.exec(stdout ?? "");
+    logger.step(
+      summary
+        ? `installed ${summary[1]} package${summary[1] === "1" ? "" : "s"}${summary[2] ? ` in ${summary[2]}` : ""}`
+        : `dependencies installed`,
     );
   }
   // Recomputed, not reused: the unfrozen first install WRITES bun.lock, so the
@@ -95,6 +120,7 @@ export async function ensureRuntime(
   backend: BackendName,
   logger: Logger,
   flags: RuntimeFeatureFlags = {},
+  opts: { quiet?: boolean } = {},
 ): Promise<string> {
   // Search dist before release (resolveBackendBinary's order) rather than
   // hardcoding runtimeBinaryPath's "release" default — a dist-only build
@@ -104,7 +130,7 @@ export async function ensureRuntime(
   if (existing) return existing;
   const exe = runtimeBinaryPath(backend);
 
-  logger.step(`runtime binary not built — running cargo build --release for ${backend}…`);
+  logger.step(`compiling native runtime for ${backend} (first run only — this can take a few minutes)…`);
   const dir = runtimeCargoDir(backend);
   // mini and blitz are two `[[bin]]` targets in one package with no default
   // features (see carbon/runtime/Cargo.toml) — both --bin and --features
@@ -121,7 +147,12 @@ export async function ensureRuntime(
   // successfully and then fails to find what it just built.
   const cargoEnv = { ...process.env, CARGO_TARGET_DIR: TARGET_DIR };
 
-  const { code } = process.platform === "win32"
+  // Quiet mode pipes cargo's own (very verbose, per-crate) build output
+  // instead of letting it stream to the terminal — none of it is useful on a
+  // successful build. On failure the full output is dumped verbatim before
+  // throwing, so a real compile error is never harder to see than before.
+  const stdio = opts.quiet ? "pipe" : "inherit";
+  const { code, stdout, stderr } = process.platform === "win32"
     ? await spawnRun(
         "powershell",
         [
@@ -131,13 +162,20 @@ export async function ensureRuntime(
           "-Command",
           `. "${join(SCRIPTS_DIR, "automation", "bootstrap", "activate-msvc.ps1")}"; cargo ${cargoArgs.join(" ")}`,
         ],
-        { cwd: dir, env: cargoEnv },
+        { cwd: dir, env: cargoEnv, stdio },
       )
-    : await spawnRun("cargo", cargoArgs, { cwd: dir, env: cargoEnv });
-  if (code !== 0) throw new Error(`cargo build for ${backend} failed (exit ${code})`);
+    : await spawnRun("cargo", cargoArgs, { cwd: dir, env: cargoEnv, stdio });
+  if (code !== 0) {
+    if (opts.quiet) {
+      if (stdout) logger.raw(stdout.trimEnd());
+      if (stderr) logger.raw(stderr.trimEnd());
+    }
+    throw new Error(`cargo build for ${backend} failed (exit ${code})`);
+  }
   if (!existsSync(exe)) {
     throw new Error(`cargo finished but binary not at expected path: ${exe}`);
   }
+  if (opts.quiet) logger.step(`runtime binary built`);
   return exe;
 }
 

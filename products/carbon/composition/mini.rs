@@ -637,10 +637,16 @@ fn main() -> Result<()> {
                     }
                 }
             });
-            eprintln!(
-                "[carbon-mini] --dev: watching {} for changes",
-                watch_path_log.display()
-            );
+            // Startup diagnostic, not an error path — silenced by the same
+            // CARBON_NO_TIMING the CLI sets by default (see trace.rs's
+            // timing_log doc comment) so a quiet `carbon dev` run doesn't
+            // print internal watcher plumbing the user never asked about.
+            if std::env::var_os("CARBON_NO_TIMING").is_none() {
+                eprintln!(
+                    "[carbon-mini] --dev: watching {} for changes",
+                    watch_path_log.display()
+                );
+            }
         }
     }
 

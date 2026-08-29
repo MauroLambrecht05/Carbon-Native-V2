@@ -37,14 +37,26 @@ function prepareForShell(cmd: string, args: string[]): { cmd: string; args: stri
 export function run(cmd: string, args: string[], opts: SpawnOptions = {}): Promise<ProcessResult> {
   const shell = opts.shell ?? IS_WINDOWS;
   const prepared = shell && IS_WINDOWS ? prepareForShell(cmd, args) : { cmd, args };
+  // "pipe" means the caller wants the output captured (to summarize on
+  // success, dump verbatim on failure) rather than streamed straight to the
+  // terminal — see ensureNodeModules/ensureRuntime.
+  const capture = opts.stdio === "pipe";
   return new Promise((resolve, reject) => {
     const child = spawn(prepared.cmd, prepared.args, {
       stdio: "inherit",
       shell,
       ...opts,
     });
+    let stdout = "";
+    let stderr = "";
+    if (capture) {
+      child.stdout?.on("data", (d) => { stdout += d; });
+      child.stderr?.on("data", (d) => { stderr += d; });
+    }
     child.on("error", (err) => reject(err));
-    child.on("close", (code, signal) => resolve({ code: code ?? 0, signal }));
+    child.on("close", (code, signal) =>
+      resolve(capture ? { code: code ?? 0, signal, stdout, stderr } : { code: code ?? 0, signal }),
+    );
   });
 }
 

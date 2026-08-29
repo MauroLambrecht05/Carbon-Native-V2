@@ -73,14 +73,19 @@ pub(crate) fn compile_bundle(input: &str, output: &str) -> Result<()> {
         let mut compressed = (bytes.len() as u32).to_le_bytes().to_vec();
         compressed.extend_from_slice(&lz4_flex::compress(&bytes));
         std::fs::write(output, &compressed).with_context(|| format!("write {output}"))?;
-        eprintln!(
-            "[carbon-mini] compiled {} ({} B JS) -> {} ({} B .qbc.zst, {} B bytecode pre-compress)",
-            input,
-            src.len(),
-            output,
-            compressed.len(),
-            bytes.len()
-        );
+        // Build-info diagnostic, not an error path — same CARBON_NO_TIMING
+        // gate as trace.rs, so a quiet `carbon run` doesn't print internal
+        // artifact sizes the user never asked about.
+        if std::env::var_os("CARBON_NO_TIMING").is_none() {
+            eprintln!(
+                "[carbon-mini] compiled {} ({} B JS) -> {} ({} B .qbc.zst, {} B bytecode pre-compress)",
+                input,
+                src.len(),
+                output,
+                compressed.len(),
+                bytes.len()
+            );
+        }
         Ok(())
     })?;
     Ok(())

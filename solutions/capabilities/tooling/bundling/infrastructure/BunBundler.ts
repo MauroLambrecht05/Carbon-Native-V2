@@ -1256,7 +1256,7 @@ export async function buildBundleWithBabel(
               // pass already baked into static className strings.
               const tokens = getThemeTokens();
               const tokensJson = JSON.stringify(tokens);
-              console.error(`[carbon-tailwind] injecting runtime tokens into entry: ${Object.keys(tokens).length} keys, bg=${tokens.background ?? "(missing)"}, card=${tokens.card ?? "(missing)"}`);
+              log.step(`carbon-tailwind: injecting runtime tokens (${Object.keys(tokens).length} keys, bg=${tokens.background ?? "(missing)"}, card=${tokens.card ?? "(missing)"})`);
               src = `import { resolveTailwindClass as __cm_install_class_resolver, setThemeTokens as __cm_set_theme_tokens } from "@carbon/vite/tailwind/classes";\n__cm_set_theme_tokens(${tokensJson});\n(globalThis).__cm_resolve_class = __cm_install_class_resolver;\n${src}`;
             }
 

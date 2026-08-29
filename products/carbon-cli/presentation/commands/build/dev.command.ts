@@ -18,6 +18,7 @@ import type { CommandContext } from "@carbon/cli";
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { watch as fsWatch } from "node:fs";
+import { emitKeypressEvents, type Key } from "node:readline";
 import { join, resolve } from "node:path";
 import { computeCacheKey } from "@carbon/bundling";
 import { loadCarbonConfig } from "@carbon/workspace";
@@ -26,6 +27,8 @@ import { isBackend, VALID_BACKENDS } from "@carbon/contracts/app/backend";
 import { buildProject, ensureNodeModules, ensureRuntime } from "@carbon/bundling";
 import { pluginUseCases } from "@carbon/lifecycle";
 import { PRODUCTS_DIR } from "@carbon/workspace";
+import { StatusLine } from "../../ui/status-line.ts";
+import { printBanner, printReadySummary, printRebuildLine } from "../../ui/brand.ts";
 
 const SKIP_DIRS = new Set([
   "node_modules", "dist", ".carbon-cache", "target", ".git",
@@ -44,6 +47,9 @@ interface Args {
   /** Min ms between consecutive reloads (debounce noisy editors). */
   debounce: number;
   noBabelCache: boolean;
+  /** Show every internal step (install/build/runtime output, timing
+   *  breakdowns) instead of the collapsed status line + ready banner. */
+  verbose: boolean;
 }
 
 function parseArgs(rest: string[]): Args {
@@ -51,17 +57,19 @@ function parseArgs(rest: string[]): Args {
   let runtimeOverride: string | undefined;
   let debounce = 50;
   let noBabelCache = false;
+  let verbose = false;
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i];
     if (a === "--runtime" || a === "-r") runtimeOverride = rest[++i];
     else if (a.startsWith("--runtime=")) runtimeOverride = a.slice("--runtime=".length);
     else if (a === "--debounce") debounce = Number(rest[++i]);
     else if (a === "--no-babel-cache") noBabelCache = true;
+    else if (a === "--verbose" || a === "-V") verbose = true;
     // Resolve to absolute: a relative dir (`carbon dev .`) otherwise reaches
     // Bun.build plugins as a relative path, which Bun rejects.
     else if (!a.startsWith("-")) projectDir = resolve(a);
   }
-  return { projectDir, runtimeOverride, debounce, noBabelCache };
+  return { projectDir, runtimeOverride, debounce, noBabelCache, verbose };
 }
 
 /**
@@ -87,7 +95,7 @@ function watchTree(
 }
 
 export async function devCommand(rest: string[]): Promise<number> {
-  const { projectDir, runtimeOverride, debounce, noBabelCache } = parseArgs(rest);
+  const { projectDir, runtimeOverride, debounce, noBabelCache, verbose } = parseArgs(rest);
 
   const cfg = loadCarbonConfig(projectDir);
   const backend = runtimeOverride ?? cfg.runtime.backend;
@@ -96,22 +104,29 @@ export async function devCommand(rest: string[]): Promise<number> {
     return 1;
   }
 
-  log.info(
-    `${c.bold("carbon dev")} — app ${c.cyan(cfg.app.name)} on ${c.magenta(backend)} backend`,
-  );
+  // Quiet by default: the runtime's own [timing] phase trace (products/
+  // carbon/presentation/timing/trace.rs) and buildProject's internal
+  // `[timing] build.*` lines both already respect CARBON_NO_TIMING — this is
+  // what turns them off for the collapsed status-line experience. --verbose
+  // opts back into the full breakdown (and leaves any caller-set env alone).
+  if (!verbose && process.env["CARBON_NO_TIMING"] === undefined) {
+    process.env["CARBON_NO_TIMING"] = "1";
+  }
+
+  printBanner("dev server");
+
+  const status = new StatusLine(verbose);
 
   try {
     // Wall-clock timing for everything before the runtime process exists —
     // cargo (ensureRuntime), the bundler, and zig (syncLocalPlugins) are all
-    // cost the runtime's own [timing] phase trace (in
-    // products/carbon/presentation/timing/trace.rs, printed by carbon-mini
-    // itself, ending in first_paint_visible) never sees, because that trace
-    // starts counting from ITS OWN process start. Same `[timing]` prefix and
-    // column layout on purpose: read one after the other, the two traces
-    // cover the entire command-to-first-render path with no gap.
+    // cost the runtime's own [timing] phase trace never sees, because that
+    // trace starts counting from ITS OWN process start. Read together (with
+    // --verbose) the two cover the entire command-to-first-render path.
     const tPipelineStart = performance.now();
     let tStageLast = tPipelineStart;
     const stage = (name: string) => {
+      if (!verbose) return;
       const now = performance.now();
       const delta = now - tStageLast;
       const total = now - tPipelineStart;
@@ -123,7 +138,9 @@ export async function devCommand(rest: string[]): Promise<number> {
       );
     };
 
-    await ensureNodeModules(projectDir, log);
+    status.begin(`preparing ${cfg.app.name} (${backend})…`);
+
+    await ensureNodeModules(projectDir, log, { quiet: !verbose });
     stage("node_modules");
 
     const exe = await ensureRuntime(backend, log, {
@@ -133,12 +150,10 @@ export async function devCommand(rest: string[]): Promise<number> {
       image: cfg.runtime.image,
       audio: cfg.runtime.audio,
       updater: cfg.updater?.enabled,
-    });
+    }, { quiet: !verbose });
     // Huge delta here means cargo just compiled the runtime from scratch —
-    // ensureRuntime logs "runtime binary not built — running cargo build
-    // --release" right before that happens, so the two lines together say
-    // which branch this run took. A near-zero delta means the binary was
-    // already there and this stage was just an fs.existsSync check.
+    // ensureRuntime's status text says so right before that happens ("first
+    // run only"). A near-zero delta means the binary was already there.
     stage("runtime_binary");
 
     // Dev always builds plain .js (NOT bytecode), regardless of carbon.toml.
@@ -170,7 +185,7 @@ export async function devCommand(rest: string[]): Promise<number> {
 
     const launch = () => {
       const args = useHmr ? [projectDir, "--dev"] : [projectDir];
-      log.info(c.dim(useHmr ? "launching runtime (in-process HMR enabled)…" : "launching runtime…"));
+      log.step(useHmr ? "launching runtime (in-process HMR enabled)…" : "launching runtime…");
       // CARBON_ALLOW_UNSIGNED_PLUGINS: `carbon dev` builds and installs an
       // app's own plugins/<name>/ source locally (SyncLocalPluginsUseCase),
       // with no manual sign step — that flow was never meant to require
@@ -192,7 +207,7 @@ export async function devCommand(rest: string[]): Promise<number> {
       });
     };
 
-    const reload = async () => {
+    const reload = async (opts: { force?: boolean } = {}) => {
       if (reloadInFlight) {
         pendingReload = true;
         return;
@@ -206,15 +221,17 @@ export async function devCommand(rest: string[]): Promise<number> {
 
       // Cheap content-hash check: did anything that affects the build
       // actually change? If not, the watcher fired for a build artifact —
-      // skip the rebuild + respawn.
+      // skip the rebuild + respawn. Skipped entirely for the 'r' hotkey
+      // (opts.force) — pressing it is a request to rebuild regardless of
+      // whether anything on disk actually changed.
       const currentKey = computeCacheKey(projectDir, backend, DEV_BYTECODE, true);
-      if (currentKey === lastKey) {
+      if (!opts.force && currentKey === lastKey) {
         reloadInFlight = false;
         return;
       }
       lastKey = currentKey;
 
-      log.info(c.dim("source change detected — rebuilding…"));
+      status.begin("rebuilding…");
       const tBuildStart = performance.now();
       try {
         await buildProject(projectDir, backend, log, {
@@ -228,22 +245,20 @@ export async function devCommand(rest: string[]): Promise<number> {
         // rebuilds+reinstalls a local plugin whose Zig source changed.
         await syncLocalPlugins(projectDir);
       } catch (e: any) {
-        log.error(`build failed: ${e.message ?? e}`);
+        status.fail(`build failed: ${e.message ?? e}`);
         reloadInFlight = false;
         return;
       }
       const tBuildMs = performance.now() - tBuildStart;
+      status.succeed();
+      printRebuildLine(tBuildMs, { hmr: useHmr });
 
-      if (useHmr) {
-        // In-process HMR path: the runtime's own bundle-file watcher
-        // detects the new artifact and re-evals it. We don't touch `proc`.
-        // Total perceived latency = build time + ~100 ms watcher poll +
-        // ~50 ms settle + actual eval (~5-15 ms typical).
-        log.info(
-          c.dim(`rebuilt in ${tBuildMs.toFixed(0)} ms — runtime will hot-reload`),
-        );
-      } else {
-        // Legacy kill + respawn for backends without --dev.
+      // In-process HMR path: the runtime's own bundle-file watcher detects
+      // the new artifact and re-evals it — we don't touch `proc`. Total
+      // perceived latency = build time + ~100 ms watcher poll + ~50 ms
+      // settle + actual eval (~5-15 ms typical). Backends without --dev
+      // support get the legacy kill + respawn instead.
+      if (!useHmr) {
         if (proc && !proc.killed) {
           proc.kill();
           await new Promise((resolve) => {
@@ -272,15 +287,28 @@ export async function devCommand(rest: string[]): Promise<number> {
 
     launch();
     stage("spawn");
-    log.info(
-      c.dim(
-        "[timing] — carbon-mini's own [timing] phase trace continues from here (its own process start) —",
-      ),
-    );
+    if (verbose) {
+      log.info(
+        c.dim(
+          "[timing] — carbon-mini's own [timing] phase trace continues from here (its own process start) —",
+        ),
+      );
+    }
+
+    status.succeed();
+    printReadySummary({
+      appName: cfg.app.name,
+      version: cfg.app.version,
+      backend,
+      elapsedMs: performance.now() - tPipelineStart,
+      hmr: useHmr,
+      hotkeys: `${c.bold("q")} quit  ·  ${c.bold("r")} rebuild`,
+    });
 
     // Wait forever; SIGINT cleanup below.
     const onSig = () => {
       log.info(c.dim("shutting down dev server…"));
+      stopHotkeys();
       stopWatcher();
       reloadInFlight = true; // suppress the "runtime exited" auto-exit
       try { proc?.kill(); } catch {}
@@ -289,10 +317,42 @@ export async function devCommand(rest: string[]): Promise<number> {
     process.on("SIGINT", onSig);
     process.on("SIGTERM", onSig);
 
-    // Block forever; SIGINT exits via process.exit above.
+    // 'q'/'r' hotkeys — TTY only. Raw mode intercepts the terminal's own
+    // Ctrl+C→SIGINT translation, so Ctrl+C is handled right here too rather
+    // than left to the "SIGINT" listener above once this is active. Safe to
+    // run alongside the runtime child's inherited stdio: carbon-mini is a
+    // windowed GUI app that gets keyboard input from the OS window, not from
+    // console stdin, so it never reads from the stream this puts in raw mode.
+    let stopHotkeys = () => {};
+    if (process.stdin.isTTY) {
+      try {
+        emitKeypressEvents(process.stdin);
+        const wasRaw = process.stdin.isRaw;
+        process.stdin.setRawMode(true);
+        process.stdin.resume();
+        const onKeypress = (_str: string, key: Key | undefined) => {
+          if (key?.ctrl && key.name === "c") { onSig(); return; }
+          if (key?.name === "q") { onSig(); return; }
+          if (key?.name === "r") { void reload({ force: true }); return; }
+        };
+        process.stdin.on("keypress", onKeypress);
+        stopHotkeys = () => {
+          process.stdin.off("keypress", onKeypress);
+          try { process.stdin.setRawMode(wasRaw ?? false); } catch { /* not a TTY */ }
+        };
+      } catch {
+        // Raw mode unsupported on this stream — Ctrl+C still works via the
+        // SIGINT listener above, there's just no 'q'/'r' shortcut.
+      }
+    }
+
+    // Block forever; SIGINT (or 'q') exits via process.exit above.
     return await new Promise<number>(() => {});
   } catch (e: any) {
-    log.error(e.message ?? String(e));
+    // status.fail() is a no-op once succeed() has already fired (past the
+    // "block forever" point above, every error is caught locally inside
+    // reload() instead) — safe to call unconditionally here.
+    status.fail(e.message ?? String(e));
     return 1;
   }
 }
@@ -332,8 +392,9 @@ export class DevCommand extends Command {
     usage: "dev [project-dir] [options]",
     flags: [
       { name: "runtime", short: "r", placeholder: "<name>", description: "Override the carbon.toml [runtime] backend" },
+      { name: "verbose", short: "V", boolean: true, description: "Show every install/build/runtime step instead of the collapsed status line" },
     ],
-    examples: ["carbon dev", "carbon dev ./my-app"],
+    examples: ["carbon dev", "carbon dev ./my-app", "carbon dev --verbose"],
   };
 
   execute(ctx: CommandContext): Promise<ExitCode> {

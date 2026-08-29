@@ -11,12 +11,15 @@ import { start } from "@carbon/process";
 import { buildProject, ensureNodeModules, ensureRuntime } from "@carbon/bundling";
 import { NoHostAppError, pluginUseCases } from "@carbon/lifecycle";
 import { PRODUCTS_DIR } from "@carbon/workspace";
+import { StatusLine } from "../../ui/status-line.ts";
+import { printBanner, printReadySummary } from "../../ui/brand.ts";
 
 interface Args {
   projectDir: string;
   runtimeOverride?: string;
   force: boolean;
   noBabelCache: boolean;
+  verbose: boolean;
 }
 
 function parseArgs(rest: string[]): Args {
@@ -24,6 +27,7 @@ function parseArgs(rest: string[]): Args {
   let runtimeOverride: string | undefined;
   let force = false;
   let noBabelCache = false;
+  let verbose = false;
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i];
     if (a === "--runtime" || a === "-r") {
@@ -34,6 +38,8 @@ function parseArgs(rest: string[]): Args {
       force = true;
     } else if (a === "--no-babel-cache") {
       noBabelCache = true;
+    } else if (a === "--verbose" || a === "-V") {
+      verbose = true;
     } else if (!a.startsWith("-")) {
       // Resolve to an absolute path: a relative dir (e.g. `carbon run .`)
       // otherwise flows into Bun.build plugins as a relative `path`, which
@@ -41,11 +47,11 @@ function parseArgs(rest: string[]): Args {
       projectDir = resolve(a);
     }
   }
-  return { projectDir, runtimeOverride, force, noBabelCache };
+  return { projectDir, runtimeOverride, force, noBabelCache, verbose };
 }
 
 export async function runCommand(rest: string[]): Promise<number> {
-  const { projectDir, runtimeOverride, force, noBabelCache } = parseArgs(rest);
+  const { projectDir, runtimeOverride, force, noBabelCache, verbose } = parseArgs(rest);
 
   const cfg = loadCarbonConfig(projectDir);
   const backend = runtimeOverride ?? cfg.runtime.backend;
@@ -54,9 +60,14 @@ export async function runCommand(rest: string[]): Promise<number> {
     return 1;
   }
 
-  log.info(
-    `${c.bold("carbon run")} — app ${c.cyan(cfg.app.name)} v${cfg.app.version} on ${c.magenta(backend)} backend`,
-  );
+  // Quiet by default — see the matching block in dev.command.ts.
+  if (!verbose && process.env["CARBON_NO_TIMING"] === undefined) {
+    process.env["CARBON_NO_TIMING"] = "1";
+  }
+
+  printBanner("run");
+
+  const status = new StatusLine(verbose);
 
   try {
     // Wall-clock timing for everything before the runtime process exists —
@@ -67,6 +78,7 @@ export async function runCommand(rest: string[]): Promise<number> {
     const tPipelineStart = performance.now();
     let tStageLast = tPipelineStart;
     const stage = (name: string) => {
+      if (!verbose) return;
       const now = performance.now();
       const delta = now - tStageLast;
       const total = now - tPipelineStart;
@@ -78,7 +90,9 @@ export async function runCommand(rest: string[]): Promise<number> {
       );
     };
 
-    await ensureNodeModules(projectDir, log);
+    status.begin(`preparing ${cfg.app.name} (${backend})…`);
+
+    await ensureNodeModules(projectDir, log, { quiet: !verbose });
     stage("node_modules");
 
     const exe = await ensureRuntime(backend, log, {
@@ -88,10 +102,10 @@ export async function runCommand(rest: string[]): Promise<number> {
       image: cfg.runtime.image,
       audio: cfg.runtime.audio,
       updater: cfg.updater?.enabled,
-    });
+    }, { quiet: !verbose });
     // Huge delta here means cargo just compiled the runtime from scratch —
-    // ensureRuntime's own "runtime binary not built" log line right before
-    // this says so. Near-zero means the binary already existed.
+    // ensureRuntime's status text says so right before that happens ("first
+    // run only"). Near-zero means the binary already existed.
     stage("runtime_binary");
 
     await buildProject(projectDir, backend, log, {
@@ -118,9 +132,7 @@ export async function runCommand(rest: string[]): Promise<number> {
     preflightPlugins(projectDir);
     stage("preflight");
 
-    log.info(`launching runtime…`);
-    log.step(c.dim(exe));
-    log.raw("");
+    log.step(`launching runtime (${exe})…`);
 
     // mini takes the project directory and resolves dist/bundle.js itself;
     // blitz takes the bundle file directly (see carbon/runtime/blitz.rs's
@@ -135,11 +147,21 @@ export async function runCommand(rest: string[]): Promise<number> {
       : [projectDir];
     const child = start(exe, runtimeArgs);
     stage("spawn");
-    log.info(
-      c.dim(
-        "[timing] — carbon-mini's own [timing] phase trace continues from here (its own process start) —",
-      ),
-    );
+    if (verbose) {
+      log.info(
+        c.dim(
+          "[timing] — carbon-mini's own [timing] phase trace continues from here (its own process start) —",
+        ),
+      );
+    }
+
+    status.succeed();
+    printReadySummary({
+      appName: cfg.app.name,
+      version: cfg.app.version,
+      backend,
+      elapsedMs: performance.now() - tPipelineStart,
+    });
 
     // Forward Ctrl-C to the runtime so it can shut down cleanly.
     const onSig = () => {
@@ -152,7 +174,7 @@ export async function runCommand(rest: string[]): Promise<number> {
       child.on("close", (code) => resolve(code ?? 0));
     });
   } catch (e: any) {
-    log.error(e.message ?? String(e));
+    status.fail(e.message ?? String(e));
     return 1;
   }
 }
@@ -228,8 +250,9 @@ export class RunCommand extends Command {
     usage: "run [project-dir] [options]",
     flags: [
       { name: "runtime", short: "r", placeholder: "<name>", description: "Override the carbon.toml [runtime] backend" },
+      { name: "verbose", short: "V", boolean: true, description: "Show every install/build/runtime step instead of the collapsed status line" },
     ],
-    examples: ["carbon run", "carbon run --runtime mini"],
+    examples: ["carbon run", "carbon run --runtime mini", "carbon run --verbose"],
   };
 
   execute(ctx: CommandContext): Promise<ExitCode> {

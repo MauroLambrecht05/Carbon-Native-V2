@@ -9,6 +9,8 @@ import { log, c } from "@carbon/logging";
 import { runtimeBinaryPath, supportsMiniBytecode } from "@carbon/workspace";
 import { isBackend, VALID_BACKENDS } from "@carbon/contracts/app/backend";
 import { buildProject, ensureNodeModules, ensureRuntime } from "@carbon/bundling";
+import { StatusLine } from "../../ui/status-line.ts";
+import { printBanner } from "../../ui/brand.ts";
 
 export async function buildCommand(rest: string[]): Promise<number> {
   let projectDir = process.cwd();
@@ -16,6 +18,7 @@ export async function buildCommand(rest: string[]): Promise<number> {
   let force = false;
   let noBabelCache = false;
   let release = false;
+  let verbose = false;
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i];
     if (a === "--runtime" || a === "-r") runtimeOverride = rest[++i];
@@ -23,9 +26,15 @@ export async function buildCommand(rest: string[]): Promise<number> {
     else if (a === "--force" || a === "--no-cache" || a === "-f") force = true;
     else if (a === "--no-babel-cache") noBabelCache = true;
     else if (a === "--release" || a === "--prod") release = true;
+    else if (a === "--verbose" || a === "-V") verbose = true;
     // Resolve to absolute: a relative dir (`carbon build .`) otherwise reaches
     // Bun.build plugins as a relative path, which Bun rejects.
     else if (!a.startsWith("-")) projectDir = resolve(a);
+  }
+
+  // Quiet by default — see the matching block in dev.command.ts.
+  if (!verbose && process.env["CARBON_NO_TIMING"] === undefined) {
+    process.env["CARBON_NO_TIMING"] = "1";
   }
 
   // Release profile: smallest + fastest distributable. Drop console/debugger
@@ -45,12 +54,13 @@ export async function buildCommand(rest: string[]): Promise<number> {
     return 1;
   }
 
-  log.info(
-    `${c.bold("carbon build")} — app ${c.cyan(cfg.app.name)} on ${c.magenta(backend)} backend`,
-  );
+  printBanner("build");
+
+  const status = new StatusLine(verbose);
 
   try {
-    await ensureNodeModules(projectDir, log);
+    status.begin(`building ${cfg.app.name} (${backend})…`);
+    await ensureNodeModules(projectDir, log, { quiet: !verbose });
     await ensureRuntime(backend, log, {
       // The manifest decides which optional subsystems get linked — see
       // backendCargoFeatures. Without this an app declaring `image = true`
@@ -58,7 +68,7 @@ export async function buildCommand(rest: string[]): Promise<number> {
       image: cfg.runtime.image,
       audio: cfg.runtime.audio,
       updater: cfg.updater?.enabled,
-    });
+    }, { quiet: !verbose });
     await buildProject(projectDir, backend, log, {
       // Release forces bytecode regardless of carbon.toml so the shipped app
       // never pays the QuickJS source-parse at launch.
@@ -66,7 +76,8 @@ export async function buildCommand(rest: string[]): Promise<number> {
       force,
       noBabelCache,
     });
-    log.success(`build complete`);
+    status.succeed();
+    log.success(`${c.bold(cfg.app.name)} build complete`);
     log.step(`runtime: ${c.dim(runtimeBinaryPath(backend))}`);
     log.step(`bundle:  ${c.dim(`${projectDir}/dist`)}`);
     if (release && supportsMiniBytecode(backend)) {
@@ -87,7 +98,7 @@ export async function buildCommand(rest: string[]): Promise<number> {
     }
     return 0;
   } catch (e: any) {
-    log.error(e.message ?? String(e));
+    status.fail(e.message ?? String(e));
     // AggregateError (Bun's bundler throws this) — the actual errors
     // are in .errors, not .stack/.cause.
     if (Array.isArray(e?.errors)) {
@@ -118,6 +129,7 @@ export class BuildCommand extends Command {
     flags: [
       { name: "runtime", short: "r", placeholder: "<name>", description: "Override the carbon.toml [runtime] backend" },
       { name: "release", boolean: true, description: "Build with the release profile" },
+      { name: "verbose", short: "V", boolean: true, description: "Show every install/build/runtime step instead of the collapsed status line" },
     ],
     examples: ["carbon build", "carbon build ./path/to/app --runtime mini"],
   };

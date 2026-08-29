@@ -4,4 +4,4 @@
 // CI adapter emitting structured JSON would drop in beside it.
 
 export type { Logger } from "./ports/Logger.ts";
-export { log, c, MemoryLogger } from "./adapters/ConsoleLogger.ts";
+export { log, c, MemoryLogger, setLogSink, type LogKind, type LogSink } from "./adapters/ConsoleLogger.ts";
