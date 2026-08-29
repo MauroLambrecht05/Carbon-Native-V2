@@ -23,12 +23,31 @@ function nextNodeId(): number {
   return next;
 }
 
-export const nodeTexts = new Map<number, string>();
+// Cached on globalThis, not a plain module-level `new Map()` — the same
+// reason render.ts caches the reconciler container there. host-config.ts's
+// reconciler is constructed ONCE and reused across every `carbon dev`
+// reload (that's what lets React Fast Refresh keep fiber/hook state alive);
+// its createInstance/commitUpdate/etc. methods are closures captured at
+// THAT first construction, permanently bound to whatever `nodeTexts` this
+// module exported at the time. If this were a fresh Map every reload (this
+// file is part of the APP half of a split build, re-evaluated every save —
+// see render.ts's own comment on why), the cached reconciler would go on
+// writing into the FIRST reload's Map forever, while anything that reads a
+// FRESH import of `nodeTexts` after a later reload — including this file's
+// own module-level re-run — would see a permanently empty one. Reproduced
+// directly: a debug hook reading `nodeTexts` right after a reload found it
+// empty despite the window visibly showing text, because the write and the
+// read were going through two different Map instances.
+const g = globalThis as unknown as {
+  __cm_node_texts?: Map<number, string>;
+  __cm_node_registry?: Map<number, CmNode>;
+};
+export const nodeTexts = (g.__cm_node_texts ??= new Map<number, string>());
 
 // id → CmNode, so a dispatched synthetic event can carry the real node as
 // its target/currentTarget and so the dispatcher can tell a React host node
 // from a @carbon/compat-dom node (which the DOM-shim dispatcher owns).
-export const nodeRegistry = new Map<number, CmNode>();
+export const nodeRegistry = (g.__cm_node_registry ??= new Map<number, CmNode>());
 
 /**
  * Resolve a node's *scene* id. React host nodes (CmNode) carry a numeric

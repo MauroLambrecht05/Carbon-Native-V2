@@ -11,33 +11,36 @@ import type { TemplateRequest, TemplateSource } from "../application/ports/Templ
 import { manifestTemplate } from "./templates/manifest.ts";
 import { packageJsonTemplate } from "./templates/package-json.ts";
 import { appTsxTemplate } from "./templates/app-tsx.ts";
-import { GITIGNORE, TSCONFIG_JSON } from "./templates/project-files.ts";
+import { tsconfigTemplate, GITIGNORE } from "./templates/project-files.ts";
 
 function render(template: string, request: TemplateRequest): string {
+  // @@ROOT@@ is the workspace root placeholder — relative (../../..) for
+  // projects inside the workspace, absolute for standalone installs.
   return template
+    .replace(/@@ROOT@@/g, request.packagesPath)
     .replace(/@@NAME@@/g, request.name.slug)
-    .replace(/@@DISPLAY@@/g, request.name.display)
-    .replace(/@@ROOT@@/g, request.packagesPath);
+    .replace(/@@DISPLAY@@/g, request.name.display);
 }
 
 export class EmbeddedTemplateSource implements TemplateSource {
   filesFor(request: TemplateRequest): PlannedFile[] {
-    // The backend is substituted after rendering rather than being another
-    // placeholder, because every manifest template carries a real default
-    // (`backend = "mini"`) — which keeps the templates readable as valid TOML.
-    const manifest = render(manifestTemplate(request.preset.manifest), request).replace(
+    const { preset } = request;
+
+    const manifest = render(manifestTemplate(preset.manifest), request).replace(
       'backend = "mini"',
       `backend = "${request.backend}"`,
     );
 
+    const tsconfig = render(tsconfigTemplate(preset.renderer), request);
+    const { app, main } = appTsxTemplate(preset.renderer, preset.styling);
+
     return [
-      { path: "carbon.toml", contents: manifest },
-      { path: "package.json", contents: render(packageJsonTemplate(request.preset.name), request) },
-      { path: "App.tsx", contents: render(appTsxTemplate(request.preset.styling), request) },
-      // Rendered, not raw: the tsconfig carries @@ROOT@@ now, so that the
-      // editor can resolve @carbon/mini-solid from the workspace.
-      { path: "tsconfig.json", contents: render(TSCONFIG_JSON, request) },
-      { path: ".gitignore", contents: GITIGNORE },
+      { path: "carbon.toml",   contents: manifest },
+      { path: "package.json",  contents: render(packageJsonTemplate(preset.name), request) },
+      { path: "App.tsx",       contents: render(app, request) },
+      { path: "main.tsx",      contents: render(main, request) },
+      { path: "tsconfig.json", contents: tsconfig },
+      { path: ".gitignore",    contents: GITIGNORE },
     ];
   }
 }

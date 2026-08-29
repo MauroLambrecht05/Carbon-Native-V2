@@ -123,6 +123,71 @@ pub(crate) fn read_net_section(project_dir: &PathBuf) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// `[updater]` from carbon.toml — the config the background updater thread
+/// (mini.rs, `#[cfg(feature = "updater")]`) needs to know what to fetch and
+/// which key to trust. Previously that thread read raw env vars
+/// (`CARBON_MANIFEST_URL`) instead, because nothing here parsed this section
+/// at all — the same "hand-rolled, only the fields we need" convention as
+/// `read_net_section`/`read_process_enabled` above, not carbon-core's Config.
+#[derive(serde::Deserialize, Clone)]
+pub(crate) struct UpdaterSection {
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub pubkey: String,
+    /// The app's base distribution URL — `channel` (below) gets appended to
+    /// find one channel's feed: `{url}/{channel}/manifest.json`,
+    /// `{url}/{channel}/yanked.json`. Matches @carbon/publishing's own S3
+    /// layout exactly (`<bucket>/<prefix><channel>/manifest.json`), so
+    /// `url` here is that bucket+prefix and nothing about switching
+    /// channels needs a different URL, only a different `channel` value.
+    #[serde(default)]
+    pub url: String,
+    #[serde(default = "default_channel")]
+    pub channel: String,
+    #[serde(default = "default_crash_threshold")]
+    pub crash_threshold: u32,
+}
+
+fn yes() -> bool {
+    true
+}
+fn default_channel() -> String {
+    "stable".to_string()
+}
+fn default_crash_threshold() -> u32 {
+    3
+}
+
+/// Returns `None` when `[updater]` is absent, `enabled = false`, or missing
+/// either `pubkey` or `url` — there is nothing safe or useful to do with an
+/// updater that has no key to verify against or nowhere to fetch from, so
+/// the caller (mini.rs) treats `None` as "don't spawn the background thread
+/// at all" rather than spawning one that would only ever fail.
+pub(crate) fn read_updater_section(project_dir: &PathBuf) -> Option<UpdaterSection> {
+    let path = project_dir.join("carbon.toml");
+    let text = std::fs::read_to_string(&path).ok()?;
+    #[derive(serde::Deserialize, Default)]
+    struct LocalCfg {
+        #[serde(default)]
+        updater: Option<UpdaterSection>,
+    }
+    let section = match toml::from_str::<LocalCfg>(&text) {
+        Ok(c) => c.updater?,
+        Err(e) => {
+            eprintln!(
+                "[carbon-mini-updater] WARNING: failed to parse [updater] in {}: {e}",
+                path.display()
+            );
+            return None;
+        }
+    };
+    if !section.enabled || section.pubkey.is_empty() || section.url.is_empty() {
+        return None;
+    }
+    Some(section)
+}
+
 /// Read [plugins] from carbon.toml. Returns an empty map if carbon.toml is
 /// missing, has no [plugins] section, or fails to parse the section. The
 /// loader treats an empty map as a no-op.

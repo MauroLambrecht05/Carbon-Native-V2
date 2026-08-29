@@ -241,28 +241,35 @@ export interface SvgPolyProps extends SvgCommonReactProps {
   points: string;
 }
 
-// Tags exclusive to carbon-mini (not in React's HTML/SVG IntrinsicElements).
-// `input`, `textarea`, `svg`, `path`, `line`, `circle`, `rect`, `polyline`,
-// `polygon` already exist in React's types — augmenting them would conflict
-// with declaration merging. The carbon-specific style keys those tags need
-// (`backgroundHover`, `paddingX`, ...) are added via csstype-augment.d.ts.
-interface CarbonReactIntrinsics {
+// Every tag name carbon-mini's React renderer understands. `view` and `text`
+// collide with real SVG elements (SVGViewElement, SVGTextElement) — and
+// `input`/`textarea`/`svg`/`path`/`line`/`circle`/`rect`/`polyline`/`polygon`
+// collide with HTML/SVG too. Declaration-merging a same-named property into
+// React's own IntrinsicElements does NOT win against those — TypeScript
+// keeps whichever declaration it saw first (silently, since skipLibCheck
+// hides the "cannot simultaneously extend" error this would otherwise be),
+// and empirically that is always React's, never this one. Verified directly:
+// merging this into `declare global`/`declare module "react"` left `<view>`
+// typed as `SVGProps<SVGViewElement>`, with no trace of ViewProps.
+//
+// So this interface is not merged into React's namespace at all. It is
+// exported and consumed by ../runtime/jsx-runtime.ts, which re-exports it
+// as that module's OWN `JSX` namespace — the module `jsxImportSource`
+// points at. Automatic-runtime JSX resolution reads the IntrinsicElements
+// of THAT module exclusively; it does not also merge in the global one, so
+// there is no collision left to lose.
+export interface CarbonReactIntrinsics {
   view: ViewProps;
   text: TextProps;
   button: ButtonProps;
   canvas: CanvasProps;
+  input: InputElementProps;
+  textarea: TextareaElementProps;
+  svg: SvgProps;
+  path: SvgPathProps;
+  line: SvgLineProps;
+  circle: SvgCircleProps;
+  rect: SvgRectProps;
+  polyline: SvgPolyProps;
+  polygon: SvgPolyProps;
 }
-
-declare global {
-  namespace JSX {
-    interface IntrinsicElements extends CarbonReactIntrinsics {}
-  }
-}
-
-declare module "react" {
-  namespace JSX {
-    interface IntrinsicElements extends CarbonReactIntrinsics {}
-  }
-}
-
-export {};

@@ -71,6 +71,10 @@ V2/
 ├── .bazelrc                           # Compiler flags, platform profiles, caching
 ├── .bazelversion                      # Pinned Bazel release (bazelisk reads this)
 ├── README.md                          # This file
+├── ARCHITECTURE.md                    # App-agnostic version of section 3 below, and the
+│                                       # products/solutions rules from products/README.md and
+│                                       # solutions/README.md — portable to a repo that isn't
+│                                       # this one, kept here as the reference copy
 ├── .cargo/                            # Cargo's own config — it walks UP from cwd to find it
 ├── .config/                           # Configuration, and nothing that is not
 ├── .github/                           # Workflows, CONTRIBUTING, SECURITY, issue templates

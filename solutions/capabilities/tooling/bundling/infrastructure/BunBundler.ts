@@ -193,11 +193,12 @@ const PHASE1_BASE_SIG = createHash("sha256")
   .digest("hex")
   .slice(0, 16);
 
-function phase1SignatureFor(useThreeBridge: boolean, cssHash: string): string {
+function phase1SignatureFor(useThreeBridge: boolean, cssHash: string, reactRefresh: boolean): string {
   return createHash("sha256")
     .update(PHASE1_BASE_SIG)
     .update(`\nthreeBridge=${useThreeBridge ? "1" : "0"}`)
     .update(`\ncssHash=${cssHash}`)
+    .update(`\nreactRefresh=${reactRefresh ? "1" : "0"}`)
     .digest("hex")
     .slice(0, 16);
 }
@@ -257,6 +258,24 @@ export interface BunBabelBuildOptions {
    * leave this OFF and only `carbon dev` turns it ON.
    */
   wrapIife?: boolean;
+  /**
+   * This is a React dev/HMR build: activate react-refresh (babel plugin +
+   * runtime) and NODE_ENV=development. Deliberately a SEPARATE flag from
+   * wrapIife — wrapIife only turns on for dev+bytecode (see its own doc
+   * comment), but `carbon dev`'s mini backend build runs with bytecode
+   * OFF (measured: bytecode is a net loss for the HMR loop — see
+   * dev.command.ts's DEV_BYTECODE comment), so wrapIife is false for the
+   * one build this flag exists for. Reusing wrapIife as the react-refresh
+   * gate meant Fast Refresh — and the vendor/app split it depends on —
+   * never actually activated during a real `carbon dev` session: React
+   * itself stayed part of the single bundle, fully re-evaluated on every
+   * reload, so the reused `g.__cm_react_container` (see runtime/render.ts)
+   * ended up paired with a stale react-reconciler instance whose
+   * `ReactCurrentDispatcher` was a different object than the one the
+   * freshly re-evaluated component code's `useState` resolved against —
+   * reproduced directly as "TypeError: cannot read property 'useState' of
+   * null" on every dev reload. */
+  reactDev?: boolean;
   /** Vendor/app split: bare specifiers to externalize from the app bundle
    *  (resolved at runtime from the vendor registry). */
   external?: string[];
@@ -653,8 +672,19 @@ export async function buildBundleWithBabel(
 
   // Set NODE_ENV before invoking Bun.build so solid-js's `exports` condition
   // map prefers its production build (which Vite's prod build also uses).
-  // Done once globally; harmless to repeat.
-  process.env.NODE_ENV = "production";
+  // Solid keeps "production" unconditionally, as before — untouched.
+  //
+  // React's dev/HMR build (opts.reactDev) gets "development" instead:
+  // react-refresh/runtime (see runtime/refresh.ts) branches on this exact
+  // value at its own top level, and its "production" branch is a
+  // deliberate `throw new Error("React Refresh runtime should not be
+  // included in the production bundle.")` — baking NODE_ENV to
+  // "production" into a dev build would crash the app the instant that
+  // module evaluates. A real `carbon build` (reactDev unset) still gets
+  // "production" here, matching every other framework and matching
+  // production semantics.
+  process.env.NODE_ENV =
+    detectedFramework === "react" && opts.reactDev ? "development" : "production";
 
   mkdirSync(join(projectDir, "dist"), { recursive: true });
 
@@ -735,7 +765,26 @@ export async function buildBundleWithBabel(
   if (!useNativeJsx) {
     phase1Plugins.push(carbonTransformsBabel, carbonTailwindBabel);
   }
-  const phase1Sig = phase1SignatureFor(useThreeBridge, cssHash);
+  // React Fast Refresh (see solutions/interface/renderer/react/runtime/
+  // refresh.ts) needs react-refresh/babel's instrumentation — the $RefreshReg$
+  // / $RefreshSig$ calls after each component declaration that
+  // react-refresh/runtime's family registry is built from. Native-JSX mode
+  // (above) skips Babel for React entirely otherwise; this is the one
+  // exception, and it's gated tightly: dev/HMR builds only (opts.reactDev —
+  // see its doc comment), never `carbon build`, so production React apps
+  // pay none of this. Loaded dynamically, and after NODE_ENV is set to
+  // "development" further up in this function, because react-refresh/babel's
+  // own top level branches on process.env.NODE_ENV — importing it before
+  // that assignment (e.g. as a static top-of-file import) would risk
+  // resolving its production stub depending on load order, silently
+  // disabling the transform. Verified directly: import().default is the
+  // plugin function; react-refresh has no other named export shape here.
+  const reactRefreshActive = detectedFramework === "react" && !!opts.reactDev;
+  if (reactRefreshActive) {
+    const reactRefreshBabel = (await import("react-refresh/babel")).default;
+    phase1Plugins.push(reactRefreshBabel);
+  }
+  const phase1Sig = phase1SignatureFor(useThreeBridge, cssHash, reactRefreshActive);
 
   // Load Babel only if a pass will actually run: any phase-1 plugin (three
   // bridge / styles.css / Solid+React full chain), or the babel-JSX phase-2
@@ -806,8 +855,26 @@ export async function buildBundleWithBabel(
     // Dev keeps them so logs/devtools work.
     drop: process.env.CARBON_RELEASE === "1" ? ["console", "debugger"] : [],
     conditions: ["production"],
+    // This `define` bakes NODE_ENV into the OUTPUT CODE at compile time —
+    // independent of the `process.env.NODE_ENV = ...` assignment a few
+    // lines up, which only affects package.json export-condition
+    // resolution during THIS build, not what ends up in the bundle. Left
+    // hardcoded to "production" here regardless of opts.reactDev, every
+    // `if (process.env.NODE_ENV === "production")` branch inside the
+    // app-bundled react-reconciler / @carbon/mini-react source (see
+    // SPLIT_KEEP_IN_APP — both stay part of what re-evaluates on every
+    // `carbon dev` reload) permanently dead-code-eliminates to their
+    // production branch, same as a real `carbon build` would get — so a
+    // dev/HMR build's own reconciler silently ran production-mode checks
+    // throughout. Matches the same "production" value used below for
+    // `conditions`, which is deliberately left alone (affects every
+    // vendored package's exports resolution, not just React — see
+    // buildVendorBundle's own vendorNodeEnv comment for why that one stays
+    // narrow instead of flipping this).
     define: {
-      "process.env.NODE_ENV": JSON.stringify("production"),
+      "process.env.NODE_ENV": JSON.stringify(
+        detectedFramework === "react" && opts.reactDev ? "development" : "production",
+      ),
       "import.meta.env.DEV": "false",
       "import.meta.env.PROD": "true",
     },
@@ -909,6 +976,37 @@ export async function buildBundleWithBabel(
           b.onResolve({ filter: /^@carbon\/mini-react\/jsx-runtime$/ }, () => {
             return { path: MINI_REACT_JSX_RUNTIME_SRC };
           });
+          // @carbon/mini-react's own index.ts unconditionally does
+          // `import "./runtime/refresh.ts"` — deliberately, so the
+          // import-order guarantee documented there (it must run before
+          // host-config.ts's injectIntoDevTools call) never depends on
+          // anything build-specific. But react-refresh/runtime's own
+          // "production" build is a bare `throw`, and Bun's bundler
+          // refuses to bundle a production `carbon build` at all once it
+          // sees that module resolve with no exports — confirmed
+          // directly: "No matching export ... for import 'default'",
+          // a hard build failure, not a runtime one. Outside dev/HMR
+          // mode, redirect that one file to an empty stub instead, so
+          // the app-side import statement still resolves without ever
+          // touching react-refresh's code. performReactRefresh stays
+          // exported (as a no-op) because render.ts calls it
+          // unconditionally on every reload path — a stub missing that
+          // export would trade one unresolved-import build failure for
+          // another.
+          if (!reactRefreshActive) {
+            // Matches both "./runtime/refresh.ts" (index.ts's import,
+            // outside runtime/) and "./refresh.ts" (render.ts's import,
+            // already inside runtime/ — one path segment shorter). Anchored
+            // on a path separator or string start immediately before
+            // "refresh.ts" so it can't also catch an unrelated file that
+            // merely ends in those same six characters.
+            b.onResolve({ filter: /(^|[\\/])refresh\.ts$/ }, () => {
+              return { path: "carbon-refresh-stub", namespace: "carbon-refresh-stub" };
+            });
+            b.onLoad({ filter: /.*/, namespace: "carbon-refresh-stub" }, () => {
+              return { contents: "export function performReactRefresh() {}\n", loader: "js" as const };
+            });
+          }
           // @carbon/mini-solid is the moduleName babel-preset-solid compiles
           // every JSX element against, so it MUST resolve — but a scaffolded
           // project cannot depend on it the ordinary way.
@@ -1025,6 +1123,58 @@ export async function buildBundleWithBabel(
             b.onResolve({ filter: /^solid-js\// }, (args) => {
               const path = resolveSolidJsExport(args.path);
               return path ? { path } : undefined;
+            });
+          }
+          // react SINGLETON. Same bug as solid-js above, same fix: the
+          // renderer's own files (react-dom.ts, index.ts, jsx-runtime.ts) have
+          // no local node_modules, so their bare `"react"` imports resolve by
+          // walking up to the shared .config/node_modules/react. A React
+          // example app almost always has its OWN node_modules/react (its own
+          // bun.lock installed it) — nearer to App.tsx than the shared copy —
+          // so App.tsx's `import { useState } from "react"` resolves to a
+          // SECOND, physically distinct react package. Both copies report the
+          // same 18.3.x version, so nothing looks wrong until runtime: the
+          // reconciler sets the current-fiber dispatcher on copy A's shared
+          // internals; `useState` called through copy B reads copy B's own
+          // (never-set) internals object instead, and the call fails —
+          // observed as "cannot read property 'useState' of null" the first
+          // time a component actually calls a hook.
+          //
+          // Unlike solid-js's export map, react's own "." export only branches
+          // on "react-server" (RSC) vs "default" — no browser/node split to
+          // fall into — so a plain `Bun.resolveSync` (no explicit conditions)
+          // already lands on the right file; there is no server.js-style trap
+          // to repeat here.
+          // Skip entirely when "react" is one of this build's externals —
+          // the split app bundle (buildBundleSplit, format:"cjs") passes
+          // "react" in opts.external precisely so it's NOT bundled here at
+          // all, resolved instead at runtime from vendor.js's single
+          // registered copy (see SPLIT_FORCE_VENDOR's own comment on why
+          // react-refresh/runtime needs the same treatment). A plugin
+          // onResolve that returns a concrete `path` wins over Bun's own
+          // `external` matching regardless — reproduced directly: with this
+          // handler active during a split build, "react"'s full source
+          // ended up INLINED into dist/bundle.js (a second, physically
+          // separate copy from the one already inlined into dist/vendor.js)
+          // despite `external: [...]` naming it, so bundle.js re-evaluating
+          // on every `carbon dev` reload (see runtime/render.ts's own
+          // reload comment) rebuilt a fresh ReactSharedInternals object
+          // each time while the reconciler cached on globalThis (see
+          // reconciler/host-config.ts) kept calling into the PREVIOUS
+          // reload's copy — the two disagreed about which object held
+          // `ReactCurrentDispatcher.current`, surfacing as "TypeError:
+          // cannot read property 'useState' of null" on every reload.
+          const reactIsExternal = (opts.external ?? []).includes("react");
+          if (detectedFramework === "react" && !reactIsExternal) {
+            const reactBase = dirname(MINI_REACT_SRC);
+            b.onResolve({ filter: /^react$/ }, () => {
+              try { return { path: Bun.resolveSync("react", reactBase) }; } catch { return undefined; }
+            });
+            b.onResolve({ filter: /^react\/jsx-runtime$/ }, () => {
+              try { return { path: Bun.resolveSync("react/jsx-runtime", reactBase) }; } catch { return undefined; }
+            });
+            b.onResolve({ filter: /^react\/jsx-dev-runtime$/ }, () => {
+              try { return { path: Bun.resolveSync("react/jsx-dev-runtime", reactBase) }; } catch { return undefined; }
             });
           }
         },
@@ -1402,8 +1552,23 @@ const SPLIT_KEEP_IN_APP = new Set([
 // react family that MUST be vendored (single instance) — added to the vendor
 // set even if a src scan misses them (Bun's automatic JSX injects the
 // react/jsx-runtime import after our scan runs).
+//
+// react-refresh/runtime joins this list for the same reason as react
+// itself, not a new one: it keeps ITS OWN module-level state (the family
+// registry performReactRefresh() reads from register() calls to know what
+// changed). @carbon/mini-react is APP-bundled (see SPLIT_KEEP_IN_APP), so
+// it re-evaluates on every reload same as react-reconciler — if
+// react-refresh/runtime bundled alongside it, every reload would import a
+// BRAND NEW copy with an EMPTY registry, and the stable DevTools hook
+// (installed once via injectIntoGlobalHook, see runtime/refresh.ts) would
+// stay wired to the FIRST copy's registry forever, never seeing any
+// updates the later copies register. scanAppSpecifiers only walks the
+// scaffolded project's own src/, never this workspace's renderer source,
+// so it would never find this import on its own — it has to be forced,
+// same as react/jsx-runtime is forced for the same "the scan can't see
+// where this really gets imported from" reason.
 const SPLIT_FORCE_VENDOR = [
-  "react", "react/jsx-runtime", "react/jsx-dev-runtime",
+  "react", "react/jsx-runtime", "react/jsx-dev-runtime", "react-refresh/runtime",
 ];
 // scheduler is NOT force-vendored: it's a transitive dep of react-reconciler
 // (which is bundled in the app via the react-dom rewrite), so it bundles into
@@ -1477,6 +1642,18 @@ export async function buildVendorBundle(projectDir: string, specifiers: string[]
   }
   const entryPath = join(dist, ".vendor-entry.cjs");
   writeFileSync(entryPath, lines.join("\n") + "\n");
+  // react-refresh/runtime's own top level branches on process.env.NODE_ENV
+  // (see runtime/refresh.ts's own comment on this), and its "production"
+  // branch is a bare `throw`. This vendor bundle's `define` below used to
+  // hardcode "production" unconditionally, so once react-refresh joined
+  // SPLIT_FORCE_VENDOR, Bun's build couldn't statically resolve the
+  // require() for it at all — confirmed directly: it fell back to
+  // synthesizing a stub that throws "Cannot require module
+  // react-refresh/runtime" at runtime, caught by the try/catch above,
+  // silently leaving __cm_vendor_reg["react-refresh/runtime"] unset. Only
+  // that one specifier's presence flips this — every other vendored
+  // package keeps the production define exactly as before.
+  const vendorNodeEnv = specifiers.includes("react-refresh/runtime") ? "development" : "production";
   const result = await Bun.build({
     entrypoints: [entryPath],
     outdir: dist,
@@ -1484,12 +1661,38 @@ export async function buildVendorBundle(projectDir: string, specifiers: string[]
     target: "browser",
     format: "cjs",
     minify: !process.env.CARBON_DEBUG_BUILD,
+    // Left as "production" regardless of vendorNodeEnv — this affects
+    // EVERY vendored package's package.json `exports` condition
+    // resolution (radix, ai-sdk, …), not just react-refresh, and nothing
+    // about those has been verified under "development" conditions here.
+    // Only the narrower `define` below (which react-refresh/runtime's own
+    // plain `process.env.NODE_ENV` check actually reads) changes.
     conditions: ["production"],
     define: {
-      "process.env.NODE_ENV": JSON.stringify("production"),
+      "process.env.NODE_ENV": JSON.stringify(vendorNodeEnv),
       "import.meta.env.DEV": "false",
       "import.meta.env.PROD": "true",
     },
+    // The prelude line above requires "@carbon/compat-dom/install" — a
+    // workspace path alias, not a real npm package, so plain node_modules
+    // resolution can't find it. The main (non-split) build resolves it via
+    // "carbon-react-dom-shim"'s onResolve; this entrypoint is a completely
+    // separate Bun.build call with no plugins of its own, so without this
+    // it fails outright: "Could not resolve @carbon/compat-dom/install" —
+    // confirmed directly, the split path has never had this wired up.
+    plugins: [
+      {
+        name: "carbon-vendor-compat-dom",
+        setup(b) {
+          b.onResolve({ filter: /^@carbon\/compat-dom\/install$/ }, () => {
+            return { path: COMPAT_DOM_INSTALL_SRC };
+          });
+          b.onResolve({ filter: /^@carbon\/compat-dom$/ }, () => {
+            return { path: COMPAT_DOM_SRC };
+          });
+        },
+      },
+    ],
   });
   if (!result.success) {
     const errs = result.logs.filter((m: any) => m.level === "error").map((m: any) => m.message).join("; ");

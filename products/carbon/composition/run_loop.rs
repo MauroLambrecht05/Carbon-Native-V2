@@ -1188,7 +1188,26 @@ impl State {
                     // 2. Reset the Rust-side scene graph: drop every node
                     //    and the Taffy tree. The next bundle's mount() call
                     //    will recreate root + children with fresh IDs.
-                    {
+                    //
+                    //    Skipped when the bundle sets __cm_hmr_keep_scene —
+                    //    React's Fast Refresh (solutions/interface/renderer/
+                    //    react/runtime/hmr.ts) keeps its reconciler container
+                    //    alive across a reload instead of remounting, which
+                    //    only produces visible output if the scene nodes it
+                    //    diffs against still exist. Wiping them unconditionally
+                    //    reproduced directly as a fully blank window after a
+                    //    successful ("reloaded in N ms", no error) React
+                    //    reload: the reconciler's diff against its still-live
+                    //    fiber tree found nothing changed worth re-issuing
+                    //    __cm_insert_node/__cm_set_prop calls for, so nothing
+                    //    ever repopulated the scene this step had just
+                    //    cleared. Solid's own hmr hook never sets this flag,
+                    //    so its always-full-remount path is unaffected.
+                    let keep_scene = self.js_ctx.with(|ctx| {
+                        ctx.eval::<bool, _>("!!globalThis.__cm_hmr_keep_scene".as_bytes())
+                            .unwrap_or(false)
+                    });
+                    if !keep_scene {
                         let mut s = self.reload_scene.lock().unwrap_or_else(|e| e.into_inner());
                         s.reset_for_hmr();
                     }
@@ -1211,6 +1230,20 @@ impl State {
                         Err(e) => {
                             eprintln!("[carbon-mini-hmr] reload FAILED: {e:#}");
                         }
+                    }
+                    // Same debug signal mini.rs's snapshot-restore path already
+                    // prints under CARBON_MINI_TIMING — a reload that logged
+                    // "reloaded in N ms" but left the scene with 0 nodes is
+                    // exactly the blank-window failure mode this whole
+                    // keep_scene branch above exists to prevent, and unlike a
+                    // GUI screenshot this is checkable from a log.
+                    if std::env::var_os("CARBON_MINI_TIMING").is_some() {
+                        let n = self
+                            .reload_scene
+                            .lock()
+                            .map(|s| s.nodes.len())
+                            .unwrap_or(0);
+                        eprintln!("[carbon-mini-hmr-timing] keep_scene={keep_scene} scene_nodes_after_reload={n}");
                     }
 
                     // 4. Plugins re-install whatever globals the bundle's
@@ -1347,9 +1380,38 @@ impl State {
                         //     would treat a stale rect from a prior
                         //     scroll as the current damage and skip nodes
                         //     that need to repaint.
+                        //
+                        // Scoped repaint only erases dirty_rect — the bounding
+                        // box of the hover transition itself — before letting
+                        // paint_node redraw whatever overlaps it. A node with
+                        // box-shadow (semi-transparent by construction: alpha
+                        // < 1 is the only reason to use one over a solid
+                        // border) almost always paints OUTSIDE its own element
+                        // bounds — that's what a shadow is — so an ancestor's
+                        // shadow can extend well past the erased rect while
+                        // still overlapping it enough that paint_node doesn't
+                        // cull it. Every hover transition then composites that
+                        // shadow again onto pixels the erase never touched,
+                        // and premultiplied alpha compositing repeated without
+                        // a clear between passes trends toward opaque black —
+                        // "the window gets darker the longer you hover".
+                        // Confirmed by inspection: the erase-rect fix above
+                        // already exists specifically because unbounded
+                        // repaint-without-clear caused this class of bug once
+                        // before (see its own comment), just for edges inside
+                        // dirty_rect rather than decoration outside it.
+                        //
+                        // Falling back to the full clear_white() path whenever
+                        // any node currently has a box-shadow sidesteps it
+                        // without having to teach dirty-rect computation about
+                        // shadow-spread overflow. Cheap: nodes is already a
+                        // flat map, and this only runs on a scoped-repaint
+                        // decision (hover transitions), not every frame.
                         let scoped_damage = {
                             let s = self.scene.lock().unwrap_or_else(|e| e.into_inner());
-                            !s.dirty && s.dirty_rect.is_some()
+                            !s.dirty
+                                && s.dirty_rect.is_some()
+                                && !s.nodes.values().any(|n| !n.props.box_shadow.is_empty())
                         };
                         if scoped_damage {
                             // Erase only the damage rect to white. This

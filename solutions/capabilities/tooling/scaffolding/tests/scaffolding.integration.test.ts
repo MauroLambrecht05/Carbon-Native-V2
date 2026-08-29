@@ -17,7 +17,8 @@ import {
   CreateProjectUseCase,
   EmbeddedTemplateSource,
   NodeProjectFileSystem,
-  OutsideWorkspaceError,
+  presetNamed,
+  workspacePathFrom,
   workspaceRelativeTo,
   PRESET_NAMES,
   ProjectName,
@@ -83,11 +84,20 @@ describe("naming", () => {
 
 describe("every preset produces a coherent project", () => {
   for (const preset of PRESET_NAMES) {
-    test(`${preset}: writes the same five files`, () => {
+    const renderer = presetNamed(preset).renderer;
+
+    test(`${preset}: writes the same six files`, () => {
+      // App.tsx (component) + main.tsx (entrypoint that mounts it) are two
+      // files, not one — see app-tsx.ts. Neither renderer gets a local
+      // carbon.d.ts: React's own IntrinsicElements augmentation lives
+      // centrally in the renderer package (see
+      // solutions/interface/renderer/react/runtime/jsx-runtime.ts), reached
+      // through jsxImportSource — not generated per project.
       expect(planFor(preset).paths).toEqual([
         ".gitignore",
         "App.tsx",
         "carbon.toml",
+        "main.tsx",
         "package.json",
         "tsconfig.json",
       ]);
@@ -118,7 +128,7 @@ describe("every preset produces a coherent project", () => {
       expect(pkg).not.toContain("file:");
       expect(pkg).not.toContain("packages/mini-runtime");
       // Real npm dependencies are still declared normally.
-      expect(pkg).toContain("solid-js");
+      expect(pkg).toContain(renderer === "react" ? "react" : "solid-js");
     });
 
     test(`${preset}: starts with lifecycle scripts locked down`, () => {
@@ -130,12 +140,17 @@ describe("every preset produces a coherent project", () => {
       expect(pkg.trustedDependencies).toEqual([]);
     });
 
-    test(`${preset}: the editor can still resolve @carbon/mini-solid`, () => {
+    test(`${preset}: the editor can still resolve the renderer package`, () => {
       // Not installed, so without a tsconfig path the imports would be red in
       // an editor while building fine — its own kind of broken.
       const ts = planFor(preset).fileAt("tsconfig.json")!.contents;
-      expect(ts).toContain("@carbon/mini-solid");
-      expect(ts).toContain("solutions/interface/renderer/solid");
+      if (renderer === "react") {
+        expect(ts).toContain("@carbon/mini-react");
+        expect(ts).toContain("solutions/interface/renderer/react");
+      } else {
+        expect(ts).toContain("@carbon/mini-solid");
+        expect(ts).toContain("solutions/interface/renderer/solid");
+      }
     });
   }
 
@@ -144,7 +159,7 @@ describe("every preset produces a coherent project", () => {
     // package.json. `[tailwind] enabled` in the manifest is what turns it on.
     const plan = planFor("tailwind");
     expect(plan.fileAt("carbon.toml")!.contents).toContain("[tailwind]");
-    expect(plan.fileAt("App.tsx")!.contents).toContain('class="p-7');
+    expect(plan.fileAt("App.tsx")!.contents).toContain('class="bg-slate-50');
   });
 
   test("blank presets get neither — inline styles work with no plugin", () => {
@@ -202,15 +217,32 @@ describe("refusals", () => {
     );
   });
 
-  test("a target outside the workspace is refused, with the reason", () => {
+  test("a target outside the workspace scaffolds in standalone mode instead of refusing", () => {
+    // No generated file depends on the workspace being an ancestor of the
+    // project anymore (deps are injected by the build pipeline, not `file:`),
+    // so this used to refuse and now succeeds with an absolute path instead.
     const useCase = useCaseWith(new FakeFileSystem());
-    expect(() =>
-      useCase.plan({
-        name: "app",
-        cwd: process.platform === "win32" ? "D:\\elsewhere" : "/elsewhere",
-        workspaceRoot: ROOT,
-      }),
-    ).toThrow(OutsideWorkspaceError);
+    const elsewhere = process.platform === "win32" ? "D:\\elsewhere" : "/elsewhere";
+    const plan = useCase.plan({ name: "app", cwd: elsewhere, workspaceRoot: ROOT });
+
+    expect(plan.target).toBe(join(elsewhere, "app"));
+    const tsconfig = plan.fileAt("tsconfig.json")!.contents;
+    // Absolute, forward-slashed even on Windows, and not a "../.." climb.
+    expect(tsconfig).toContain(ROOT.replace(/\\/g, "/"));
+    expect(tsconfig).not.toContain("../..");
+  });
+});
+
+describe("workspacePathFrom", () => {
+  test("inside the workspace, it's the relative climb", () => {
+    const result = workspacePathFrom(join(ROOT, "apps", "demo"), ROOT);
+    expect(result).toEqual({ kind: "relative", path: "../.." });
+  });
+
+  test("outside the workspace, it's the absolute root — never throws", () => {
+    const elsewhere = process.platform === "win32" ? "D:\\elsewhere" : "/elsewhere";
+    const result = workspacePathFrom(elsewhere, ROOT);
+    expect(result).toEqual({ kind: "absolute", path: ROOT.replace(/\\/g, "/") });
   });
 });
 

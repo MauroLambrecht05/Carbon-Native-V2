@@ -14,20 +14,21 @@ export { ProjectPlan, type PlannedFile } from "./domain/entities/ProjectPlan.ts"
 export { ProjectName } from "./domain/value-objects/ProjectName.ts";
 export {
   PRESETS,
+  MENU_PRESETS,
   PRESET_NAMES,
   DEFAULT_PRESET,
   presetNamed,
   type Preset,
   type PresetName,
+  type Renderer,
   type ManifestShape,
   type Styling,
 } from "./domain/value-objects/Preset.ts";
-export { workspaceRelativeTo } from "./domain/value-objects/PackagesPath.ts";
+export { workspaceRelativeTo, workspacePathFrom, type WorkspacePath } from "./domain/value-objects/PackagesPath.ts";
 export {
   ScaffoldError,
   UnknownPresetError,
   TargetNotEmptyError,
-  OutsideWorkspaceError,
 } from "./domain/errors/ScaffoldError.ts";
 
 export type { ProjectFileSystem } from "./application/ports/ProjectFileSystem.ts";

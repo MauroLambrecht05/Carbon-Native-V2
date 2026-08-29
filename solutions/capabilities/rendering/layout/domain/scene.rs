@@ -1860,17 +1860,47 @@ impl Scene {
         }
     }
 
+    /// Removes `id` AND its whole descendant subtree.
+    ///
+    /// A host reconciler's removeChild (react-reconciler's
+    /// commitDeletionEffectsOnFiber, specifically) only calls this once, for
+    /// the topmost host node of whatever got deleted — removing every
+    /// descendant individually would be redundant once the parent is gone,
+    /// and every mainstream host config (react-dom included) is written
+    /// expecting the host to take the whole subtree with one call. This used
+    /// to remove only `id` itself, leaving every descendant behind: still in
+    /// `self.nodes`, still carrying its old `clickable` flag and cached
+    /// layout, just unreachable from `root` (hit_test/paint both walk the
+    /// tree from there, so an orphaned node stops rendering and stops being
+    /// hit-testable) — invisible, but never freed. React Fast Refresh's own
+    /// remount-on-signature-change path (see runtime/render.ts) hits this on
+    /// most edits, not a rare case: react-refresh/babel's signature hash
+    /// includes literal source text, so even changing a useState's initial
+    /// value produces a "family changed" remount. Confirmed directly:
+    /// several edits in a row left a growing set of dead node ids sitting in
+    /// `self.nodes` forever, one leaked subtree per reload.
     pub fn remove_node(&mut self, id: u32) {
+        let mut to_remove = Vec::new();
+        let mut stack = vec![id];
+        while let Some(current) = stack.pop() {
+            to_remove.push(current);
+            if let Some(n) = self.nodes.get(&current) {
+                stack.extend(n.children.iter().copied());
+            }
+        }
+
         for n in self.nodes.values_mut() {
             n.children.retain(|&c| c != id);
         }
-        self.nodes.remove(&id);
-        self.inputs.remove(&id);
-        if self.focused == Some(id) {
-            self.focused = None;
-        }
-        if self.hovered == Some(id) {
-            self.hovered = None;
+        for rid in &to_remove {
+            self.nodes.remove(rid);
+            self.inputs.remove(rid);
+            if self.focused == Some(*rid) {
+                self.focused = None;
+            }
+            if self.hovered == Some(*rid) {
+                self.hovered = None;
+            }
         }
         self.dirty = true;
         self.layout_valid = false;

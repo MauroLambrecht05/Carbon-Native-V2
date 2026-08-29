@@ -249,6 +249,50 @@ fn remove_node_detaches_from_its_parent_and_clears_interaction_state() {
 }
 
 #[test]
+fn remove_node_also_removes_every_descendant() {
+    // The exact shape a React Fast Refresh remount produces: removeChild is
+    // called once, for the topmost node of a whole detached subtree — react-
+    // reconciler's own commitDeletionEffectsOnFiber only removes the nearest
+    // host node per deletion, the same convention every host config expects
+    // to be enough. Before this test's fix, remove_node(1) here would have
+    // left 2 and 3 sitting in `self.nodes` forever: unreachable from `root`
+    // (hit_test/paint both walk the tree, so they'd stop rendering and stop
+    // being clickable) but never freed — one leaked subtree per HMR reload.
+    let mut scene = Scene::new();
+    scene.create_node(1, "view", PaintProps::default());
+    scene.create_node(2, "view", PaintProps::default());
+    scene.create_node(3, "text", PaintProps::default());
+    scene.insert_node(1, 2, None);
+    scene.insert_node(2, 3, None);
+    scene.focused = Some(3);
+    scene.hovered = Some(2);
+
+    scene.remove_node(1);
+
+    assert!(!scene.nodes.contains_key(&1));
+    assert!(!scene.nodes.contains_key(&2));
+    assert!(!scene.nodes.contains_key(&3));
+    assert_eq!(scene.focused, None);
+    assert_eq!(scene.hovered, None);
+}
+
+#[test]
+fn remove_node_leaves_unrelated_siblings_alone() {
+    let mut scene = Scene::new();
+    scene.create_node(1, "view", PaintProps::default());
+    scene.create_node(2, "view", PaintProps::default());
+    scene.create_node(3, "view", PaintProps::default());
+    scene.insert_node(1, 2, None);
+    scene.insert_node(1, 3, None);
+
+    scene.remove_node(2);
+
+    assert!(!scene.nodes.contains_key(&2));
+    assert!(scene.nodes.contains_key(&3));
+    assert_eq!(scene.nodes.get(&1).unwrap().children, vec![3]);
+}
+
+#[test]
 fn set_root_updates_root_and_marks_dirty() {
     let mut scene = Scene::new();
     scene.layout_valid = true;

@@ -12,4 +12,19 @@ export {
   BuildUpdateManifestUseCase,
   type BuildUpdateManifestRequest,
 } from "./application/usecases/BuildUpdateManifestUseCase.ts";
+export {
+  PublishReleaseUseCase,
+  type PublishReleaseRequest,
+  type PublishReleaseResult,
+} from "./application/usecases/PublishReleaseUseCase.ts";
+export {
+  RollbackReleaseUseCase,
+  type RollbackReleaseRequest,
+  type RollbackReleaseResult,
+} from "./application/usecases/RollbackReleaseUseCase.ts";
+export {
+  YankReleaseUseCase,
+  type YankReleaseRequest,
+  type YankReleaseResult,
+} from "./application/usecases/YankReleaseUseCase.ts";
 export * from "./infrastructure/S3ArtifactStore.ts";

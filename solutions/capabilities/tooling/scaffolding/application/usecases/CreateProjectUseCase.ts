@@ -13,8 +13,8 @@
 import { resolve } from "node:path";
 import type { ProcessRunner } from "@carbon/process";
 import { ProjectPlan } from "../../domain/entities/ProjectPlan.ts";
-import { TargetNotEmptyError, OutsideWorkspaceError } from "../../domain/errors/ScaffoldError.ts";
-import { workspaceRelativeTo } from "../../domain/value-objects/PackagesPath.ts";
+import { TargetNotEmptyError } from "../../domain/errors/ScaffoldError.ts";
+import { workspacePathFrom } from "../../domain/value-objects/PackagesPath.ts";
 import { presetNamed, DEFAULT_PRESET } from "../../domain/value-objects/Preset.ts";
 import { ProjectName } from "../../domain/value-objects/ProjectName.ts";
 import type { ProjectFileSystem } from "../ports/ProjectFileSystem.ts";
@@ -52,7 +52,11 @@ export class CreateProjectUseCase {
   /**
    * Decides every file, without touching the disk beyond the emptiness check.
    *
-   * @throws UnknownPresetError | TargetNotEmptyError | OutsideWorkspaceError
+   * A target outside the workspace is not refused: workspacePathFrom() falls
+   * back to an absolute path ("standalone mode") since no generated file
+   * depends on the workspace being an ancestor of the project anymore.
+   *
+   * @throws UnknownPresetError | TargetNotEmptyError
    */
   plan(request: CreateProjectRequest): ProjectPlan {
     const preset = presetNamed(request.preset ?? DEFAULT_PRESET);
@@ -63,21 +67,13 @@ export class CreateProjectUseCase {
       throw new TargetNotEmptyError(target);
     }
 
-    let packagesPath: string;
-    try {
-      packagesPath = workspaceRelativeTo(target, request.workspaceRoot);
-    } catch (e) {
-      throw new OutsideWorkspaceError(
-        target,
-        request.workspaceRoot,
-        e instanceof Error ? e.message : String(e),
-      );
-    }
+    const workspacePath = workspacePathFrom(target, request.workspaceRoot);
 
     const files = this.templates.filesFor({
       name,
       preset,
-      packagesPath,
+      packagesPath: workspacePath.path,
+      packagesPathKind: workspacePath.kind,
       backend: request.backend ?? "mini",
     });
 

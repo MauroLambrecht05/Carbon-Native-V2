@@ -40,3 +40,18 @@ toml = "0.8"
 sha2 = "0.10"
 # uuid mints the installation id the staged-rollout bucketing hashes.
 uuid = { version = "1", features = ["v4", "serde"] }
+# Verifies the manifest's own signature and each platform artifact's
+# signature — @carbon/signing (solutions/capabilities/distribution/signing)
+# signs both with this same crate family on the TS side (via @noble/curves,
+# byte-compatible with dalek — see Keypair.ts's own comment on that).
+ed25519-dalek = { workspace = true }
+# Signatures cross the wire base64-encoded (matches signBytes/signManifest's
+# own Buffer.from(...).toString("base64")), same version the rest of the
+# workspace already standardized on (products/carbon, infrastructure/os).
+base64 = "0.22"
+# Blocking client: this crate's only caller (mini.rs's background updater
+# thread) is a plain std::thread with no async runtime around it, so the
+# blocking feature (reqwest's own small internal runtime, no caller-side
+# tokio needed) is the right shape rather than pulling async through a crate
+# that is otherwise synchronous everywhere else.
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "json"] }

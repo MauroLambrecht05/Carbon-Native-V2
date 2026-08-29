@@ -42,3 +42,9 @@ declare module "@babel/preset-typescript" {
   const preset: (api: unknown, options?: Record<string, unknown>) => unknown;
   export default preset;
 }
+
+declare module "react-refresh/babel" {
+  /** A Babel plugin factory. Passed straight into `plugins: [...]`. */
+  const plugin: (api: unknown, options?: Record<string, unknown>) => unknown;
+  export default plugin;
+}

@@ -25,7 +25,7 @@ export {
   CommandRegistry, defineCommand,
   type CommandDescriptor, type CommandLoader,
 } from "./dispatch/command-registry.ts";
-export type { Io } from "./ports/io-port.ts";
+export type { Io, Wizard, SelectOption } from "./ports/io-port.ts";
 export type { HelpPresenter } from "./ports/help-presenter.ts";
 export { Dispatcher, type DispatcherOptions } from "./dispatch/dispatcher.ts";
 export { HelpRenderer, isCommandGroup } from "./adapters/help.ts";

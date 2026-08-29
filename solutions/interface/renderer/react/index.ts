@@ -24,10 +24,24 @@
 // The same shape as interface/renderer/solid, so a fix in one has an obvious
 // address in the other.
 //
-// Import order below is load-bearing. `runtime/render.ts` pulls in the
-// reconciler, which pulls in the scene, which pulls in the dispatcher traps —
-// so the traps are installed before any dispatcher is assigned. See the note
-// at the top of reconciler/flush-sync.ts.
+// Import order below is load-bearing.
+//
+// `runtime/refresh.ts` must run FIRST, before anything that pulls in the
+// reconciler: it's what calls injectIntoGlobalHook(), installing the
+// (real-or-stub) __REACT_DEVTOOLS_GLOBAL_HOOK__ that react-reconciler's
+// own injectIntoDevTools() checks for. That check happens once, at
+// host-config.ts's module-load time, and does nothing retroactively if
+// the hook shows up later — verified directly against the installed
+// react-reconciler source (injectInternals bails out immediately if
+// `__REACT_DEVTOOLS_GLOBAL_HOOK__` is undefined at the moment it's
+// called). Get the order backwards and Fast Refresh compiles, runs, and
+// silently never patches anything.
+//
+// `runtime/render.ts` pulls in the reconciler next, which pulls in the
+// scene, which pulls in the dispatcher traps — so the traps are installed
+// before any dispatcher is assigned. See the note at the top of
+// reconciler/flush-sync.ts.
+import "./runtime/refresh.ts";
 
 export { render } from "./runtime/render.ts";
 export {

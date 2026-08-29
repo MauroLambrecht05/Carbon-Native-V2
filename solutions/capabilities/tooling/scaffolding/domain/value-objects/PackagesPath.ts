@@ -48,6 +48,30 @@ export function workspaceRelativeTo(target: string, root: string): string {
 }
 
 /**
+ * Like workspaceRelativeTo, but never throws.
+ *
+ * Returns:
+ *   { kind: "relative", path: "../../.." }  — target is inside root (normal case)
+ *   { kind: "absolute", path: "/abs/path" } — target is outside root (standalone / global install)
+ *
+ * The caller decides what to do with each kind. The scaffolding layer uses
+ * "relative" for tsconfig paths (portable, survives the repo being moved) and
+ * "absolute" for standalone projects where there is no relative path that works.
+ */
+export type WorkspacePath =
+  | { kind: "relative"; path: string }
+  | { kind: "absolute"; path: string };
+
+export function workspacePathFrom(target: string, root: string): WorkspacePath {
+  try {
+    return { kind: "relative", path: workspaceRelativeTo(target, root) };
+  } catch {
+    // Normalise to forward slashes so the tsconfig path works on Windows too.
+    return { kind: "absolute", path: root.replace(/\\/g, "/") };
+  }
+}
+
+/**
  * Kept as the old name so nothing outside this capability had to change when
  * the meaning shifted from "path to packages/" to "path to the workspace root".
  *

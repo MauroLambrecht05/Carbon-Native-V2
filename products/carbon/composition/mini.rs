@@ -75,6 +75,10 @@ mod bundle;
 mod cli;
 mod features;
 mod manifest;
+// Named updater_bg (not `updater`) to stay unambiguous beside the
+// carbon_updater crate this module is the only caller of.
+#[cfg(feature = "updater")]
+mod updater_bg;
 // The file is named for the concern; the MODULE cannot be `snapshot` because
 // this binary aliases the carbon-snapshot crate to that name, and every call
 // site inside says `snapshot::`. The crate keeps the plain name.
@@ -108,6 +112,8 @@ use host::*;
 use image_host as async_image;
 use manifest::*;
 use pump::*;
+#[cfg(feature = "updater")]
+use updater_bg::*;
 use trace::*;
 use tree::*;
 
@@ -712,33 +718,57 @@ fn main() -> Result<()> {
         timing_log("window_show_scheduled", t0);
     }
 
-    // Spawn background updater stop-list poller (if updater enabled).
-    // Polls manifest server every 24h (or sooner if [updater] config specifies different interval).
-    // Non-blocking: runs on a dedicated thread, doesn't block the event loop.
+    // Spawn the background updater thread — polls the channel's manifest +
+    // stop list every `CARBON_UPDATE_CHECK_INTERVAL` seconds (default 24h),
+    // never blocking the event loop. Only spawned when [updater] is present,
+    // enabled, and has both a pubkey and a url (read_updater_section returns
+    // None otherwise — nothing useful to do without a key to verify against
+    // or somewhere to fetch from).
+    //
+    // Every step below used to be a TODO: this used to read raw
+    // CARBON_MANIFEST_URL / CARBON_INSTALL_DIR env vars (nothing set them)
+    // and never verified a signature, never checked the stop list, never
+    // downloaded anything. See carbon_updater::verify (signature
+    // verification against carbon.toml's pinned pubkey, not the manifest's
+    // own claimed key) and downloader.rs (real HTTP download, replacing the
+    // hardcoded placeholder file it used to write) for what changed.
     #[cfg(feature = "updater")]
-    {
-        std::thread::spawn(|| {
+    if let Some(updater_cfg) = read_updater_section(&project_dir) {
+        let (cfg_app_name, cfg_app_version) = read_app_metadata(&project_dir);
+        let install_dir = std::env::var("CARBON_INSTALL_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| project_dir.clone());
+
+        std::thread::spawn(move || {
             let check_interval = std::env::var("CARBON_UPDATE_CHECK_INTERVAL")
                 .ok()
                 .and_then(|s| s.parse::<u64>().ok())
                 .unwrap_or(86400); // Default 24h in seconds
+            let base_url = format!(
+                "{}/{}",
+                updater_cfg.url.trim_end_matches('/'),
+                updater_cfg.channel
+            );
+            let platform = current_platform_triple();
+            eprintln!(
+                "[carbon-updater] enabled: channel={} platform={platform} \
+                 crash_threshold={} (crash-counter rollback wiring is a separate, \
+                 not-yet-done piece — see run_loop.rs's mark_first_frame comment)",
+                updater_cfg.channel, updater_cfg.crash_threshold,
+            );
 
             loop {
-                std::thread::sleep(std::time::Duration::from_secs(check_interval));
-
-                // Check if updates are available via stop-list polling.
-                // In production, this would:
-                //   1. Fetch UpdaterManifest from configured URL
-                //   2. Verify ed25519 signature with pubkey from carbon.toml [updater]
-                //   3. Check if current version is yanked (stop-list)
-                //   4. If yanked and auto-rollback enabled, notify app to auto-update
-                //   5. If new version available and rollout % allows, notify app
-                //
-                // For now, this is a placeholder that logs to stderr.
-                if let Ok(manifest_url) = std::env::var("CARBON_MANIFEST_URL") {
-                    eprintln!("[updater-background] Checking updates from {manifest_url}");
-                    // TODO: call carbon_updater::fetch_stop_list() and verify signature
+                if let Err(e) = check_for_update_once(
+                    &base_url,
+                    &updater_cfg,
+                    &install_dir,
+                    &cfg_app_name,
+                    &cfg_app_version,
+                    platform,
+                ) {
+                    eprintln!("[carbon-updater] check failed: {e:#}");
                 }
+                std::thread::sleep(std::time::Duration::from_secs(check_interval));
             }
         });
     }

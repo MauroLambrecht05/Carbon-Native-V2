@@ -9,8 +9,23 @@ import "../host/imports.ts";
 import "../reconciler/flush-sync.ts";
 import { nodeRegistry, type CmNode } from "./node.ts";
 
-export const clickHandlers = new Map<number, (e: ClickEvent) => void>();
-export const inputHandlers = new Map<number, (e: any) => void>();
+// Cached on globalThis — see node.ts's identical comment on nodeTexts/
+// nodeRegistry for the full reasoning. Same failure mode here specifically:
+// this module reassigns __cm_dispatch_click below on every reload (a
+// module-level side effect, since events.ts is part of the APP half of a
+// split build and re-evaluates every save), so a plain `new Map()` for
+// clickHandlers would mean the dispatcher installed by THIS reload looks
+// up a Map the cached reconciler's still-first-pass-bound createInstance/
+// applyProps never writes into — every click after a reload silently finds
+// nothing, no error, the handler is just in a different Map than the one
+// __cm_dispatch_click reads.
+const g = globalThis as unknown as {
+  __cm_click_handlers?: Map<number, (e: ClickEvent) => void>;
+  __cm_input_handlers?: Map<number, (e: any) => void>;
+  __cm_event_handlers?: Map<number, Map<string, (e: any) => void>>;
+};
+export const clickHandlers = (g.__cm_click_handlers ??= new Map<number, (e: ClickEvent) => void>());
+export const inputHandlers = (g.__cm_input_handlers ??= new Map<number, (e: any) => void>());
 
 // Pointer / mouse / key / focus handlers wired from React `on*` props,
 // keyed by scene-node id → DOM event type → handler. Radix (menus, selects,
@@ -18,7 +33,7 @@ export const inputHandlers = new Map<number, (e: any) => void>();
 // never `onClick`; before this those props were silently dropped by
 // applyProps, so every dropdown was dead. The `__cm_dispatch_pointer`
 // override installed below fires these for React host nodes.
-export const eventHandlers = new Map<number, Map<string, (e: any) => void>>();
+export const eventHandlers = (g.__cm_event_handlers ??= new Map<number, Map<string, (e: any) => void>>());
 
 // React `on*` prop → DOM event type. Only the interaction events the runtime
 // actually delivers are wired; anything else (onScroll, onWheel,
@@ -86,6 +101,18 @@ export interface ClickEvent {
 {
   const g = globalThis as any;
   const prevDispatchPointer = g.__cm_dispatch_pointer;
+  // Chain to whatever was there before — EXCEPT our own previous reload's
+  // wrapper. This block re-runs every reload (module-level side effect,
+  // same as the dispatchers above), so without this guard each reload
+  // would wrap the last, and once eventHandlers stopped being a fresh Map
+  // every pass (see this file's top comment), every accumulated layer
+  // would find the SAME real handler and fire it once each — a pointerdown
+  // after three reloads would run its handler three times. The one thing
+  // still worth chaining to is @carbon/compat-dom's dispatcher for its own
+  // (non-React) nodes, which is never one of these.
+  const chainTo = typeof prevDispatchPointer === "function" && prevDispatchPointer.__cmIsPointerDispatch
+    ? undefined
+    : prevDispatchPointer;
   const makePointerEvent = (
     type: string, node: CmNode | null, x: number, y: number, button: number,
   ) => {
@@ -128,8 +155,9 @@ export interface ClickEvent {
     }
     // Chain to the DOM-shim dispatcher so its own nodes (xterm focus, portal
     // refs) still receive the press. No-ops for React ids it doesn't know.
-    if (typeof prevDispatchPointer === "function") {
-      try { prevDispatchPointer(cmId, phase, x, y, button); } catch { /* ignore */ }
+    if (typeof chainTo === "function") {
+      try { chainTo(cmId, phase, x, y, button); } catch { /* ignore */ }
     }
   };
+  g.__cm_dispatch_pointer.__cmIsPointerDispatch = true;
 }

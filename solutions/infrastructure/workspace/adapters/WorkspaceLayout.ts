@@ -22,8 +22,12 @@ import { BACKENDS, type BackendName } from "@carbon/contracts/app/backend";
  */
 const WORKSPACE_MARKERS = ["MODULE.bazel", ".config/tsconfig.base.json"];
 
-/** Nearest ancestor of `start` (inclusive) containing a workspace marker. */
-function findWorkspaceRoot(start: string): string | null {
+/**
+ * Nearest ancestor of `start` (inclusive) containing a workspace marker.
+ * Returns null when no workspace is found — safe to call from anywhere,
+ * including a globally-installed binary outside any workspace.
+ */
+export function findWorkspaceRoot(start: string): string | null {
   let dir = resolve(start);
   for (;;) {
     for (const marker of WORKSPACE_MARKERS) {
@@ -34,7 +38,6 @@ function findWorkspaceRoot(start: string): string | null {
     dir = parent;
   }
 }
-
 /**
  * Locates the workspace root, by search rather than by arithmetic.
  *

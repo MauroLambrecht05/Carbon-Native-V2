@@ -23,6 +23,7 @@ import {
   type ExitCode,
 } from "@carbon/cli";
 import type { CommandContext } from "@carbon/cli";
+import { resolvePassword } from "./resolve-password.ts";
 
 /** Where `generate` puts keys when --out is not given. */
 const DEFAULT_KEY_DIR = join(homedir(), ".carbon", "keys");
@@ -32,32 +33,6 @@ const PASSWORD_FLAG = {
   placeholder: "<pw>",
   description: "Key password; else $CARBON_SIGNER_PASSWORD, else prompt",
 } as const;
-
-/**
- * Resolves the key password.
- *
- * Order matters: an explicit --password wins, then the environment (how CI
- * supplies it), then an interactive prompt. The prompt is last because a
- * non-interactive run must fail loudly rather than block forever on a stdin
- * that will never produce anything.
- */
-async function resolvePassword(ctx: CommandContext, purpose: string): Promise<string> {
-  const explicit = ctx.flags.get("password");
-  if (explicit !== undefined) return explicit;
-
-  const fromEnv = process.env.CARBON_SIGNER_PASSWORD;
-  if (fromEnv !== undefined) return fromEnv;
-
-  if (!process.stdin.isTTY) {
-    throw new Error(
-      "no password available: pass --password, or set CARBON_SIGNER_PASSWORD, or run interactively",
-    );
-  }
-
-  process.stdout.write(`${purpose}: `);
-  for await (const line of console) return line;
-  return "";
-}
 
 class GenerateKeyCommand extends Command {
   readonly meta: CommandMeta = {

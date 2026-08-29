@@ -12,8 +12,15 @@ import type { ProjectName } from "../../domain/value-objects/ProjectName.ts";
 export interface TemplateRequest {
   readonly name: ProjectName;
   readonly preset: Preset;
-  /** Relative path from the project back to the workspace root. */
+  /**
+   * Path from the project back to the workspace root.
+   * "relative" → a ../../../ string, used when the project lives inside the
+   *               workspace (normal dev workflow).
+   * "absolute" → the absolute path to the workspace root, used when the
+   *               project is outside the workspace (global / standalone install).
+   */
   readonly packagesPath: string;
+  readonly packagesPathKind: "relative" | "absolute";
   /** Runtime backend to write into the manifest. */
   readonly backend: string;
 }

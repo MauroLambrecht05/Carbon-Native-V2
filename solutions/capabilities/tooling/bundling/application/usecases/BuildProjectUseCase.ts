@@ -12,7 +12,7 @@
 // knows that a cache was hit; whether that reads green is the caller's
 // decision, and a CI adapter emitting JSON has no answer for `c.green`.
 
-import { existsSync, mkdirSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 // vite is dynamic-imported inside `buildVite` so cache-hit `carbon build`
 // runs do not pay the ~200 ms vite + rollup module-evaluation cost.
@@ -147,10 +147,22 @@ export async function ensureRuntime(
  * babel-preset-solid universal), without Vite + Rollup's config-load and
  * graph-build overhead. See build-pipeline.ts for the gory bits.
  */
+/** Same detection BunBundler.ts does internally, needed here one step
+ *  earlier to decide whether to route through the split build at all. */
+function isReactProject(projectDir: string): boolean {
+  try {
+    const pkg = JSON.parse(readFileSync(join(projectDir, "package.json"), "utf8"));
+    const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+    return "react" in deps && !("solid-js" in deps);
+  } catch {
+    return false;
+  }
+}
+
 async function buildMiniBundle(
   projectDir: string,
   logger: Logger,
-  opts: { noBabelCache?: boolean; wrapIife?: boolean } = {},
+  opts: { noBabelCache?: boolean; wrapIife?: boolean; reactDev?: boolean } = {},
 ): Promise<void> {
   const candidates = [
     // .ctsx is carbon-mini's custom DSL extension — checked first so
@@ -172,7 +184,18 @@ async function buildMiniBundle(
   // Lazy import so non-mini cache-hit runs do not pay the ~50 ms Babel +
   // preset-solid module-evaluation cost.
   const { buildBundleWithBabel, buildBundleSplit, splitEnabled } = await import("../../infrastructure/BunBundler.ts");
-  if (splitEnabled()) {
+  // React's dev/HMR build (opts.reactDev — true whenever `carbon dev` builds
+  // a React project, independent of whether bytecode/wrapIife is on; see
+  // BunBabelBuildOptions.reactDev's doc comment for why this can't reuse
+  // wrapIife) needs the split: React Fast Refresh (see
+  // solutions/interface/renderer/react/runtime/refresh.ts) requires
+  // react/react-refresh's own module state to survive a reload, which only
+  // holds when they're NOT part of what gets re-evaluated on every save —
+  // exactly what the split's vendor.js is for. Solid and production builds
+  // are unaffected: CARBON_SPLIT=1 still opts any of them in manually, same
+  // as before.
+  const useSplit = splitEnabled() || (!!opts.reactDev && isReactProject(projectDir));
+  if (useSplit) {
     // Vendor/app split: node_modules → dist/vendor.js (once), app → bundle.js.
     logger.step(`building ${entry} → dist/{vendor,bundle}.js (split)…`);
     await buildBundleSplit({
@@ -182,6 +205,7 @@ async function buildMiniBundle(
       solid: { generate: "universal", moduleName: "@carbon/mini-solid" },
       noBabelCache: opts.noBabelCache,
       wrapIife: opts.wrapIife,
+      reactDev: opts.reactDev,
     });
     return;
   }
@@ -197,6 +221,7 @@ async function buildMiniBundle(
     solid: { generate: "universal", moduleName: "@carbon/mini-solid" },
     noBabelCache: opts.noBabelCache,
     wrapIife: opts.wrapIife,
+    reactDev: opts.reactDev,
   });
 }
 
@@ -373,6 +398,10 @@ export async function buildProject(
   // in a live context (where top-level `const` would redeclare). Production
   // (carbon run/build) leaves it off so cold-start eval stays fast.
   const wrapIife = !!opts.dev && bytecode;
+  // Separate from wrapIife on purpose — see BunBabelBuildOptions.reactDev's
+  // doc comment. `carbon dev` on the mini backend runs with bytecode OFF, so
+  // wrapIife is false for exactly the build this flag needs to stay true for.
+  const reactDev = !!opts.dev;
   const t0 = performance.now();
   const key = computeCacheKey(projectDir, backend, bytecode, !!opts.dev);
   const tHash = performance.now() - t0;
@@ -398,7 +427,7 @@ export async function buildProject(
   // ship features the new pipeline does not (HTML emission, asset handling).
   const _tb = performance.now();
   if (usesMiniBundlePipeline(backend) && process.env.CARBON_USE_VITE !== "1") {
-    await buildMiniBundle(projectDir, logger, { noBabelCache: opts.noBabelCache, wrapIife });
+    await buildMiniBundle(projectDir, logger, { noBabelCache: opts.noBabelCache, wrapIife, reactDev });
   } else if (hasVite) {
     await buildVite(projectDir, logger);
     await buildShell(projectDir, logger);

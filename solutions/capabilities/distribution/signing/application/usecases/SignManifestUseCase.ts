@@ -75,15 +75,27 @@ export function canonicalizeManifest(manifest: UpdaterManifest): string {
   });
 }
 
+/**
+ * Signs raw bytes with the secret key at `keyFile`; returns base64.
+ *
+ * Shared primitive: `signManifest` below canonicalizes a manifest to bytes
+ * first, and `PublishReleaseUseCase` (solutions/capabilities/distribution/
+ * publishing) calls this directly to sign a built installer artifact's own
+ * bytes for its manifest `platforms[...].signature` entry — same key,
+ * same raw ed25519-over-bytes-then-base64 shape, no manifest involved.
+ */
+export function signBytes(bytes: Uint8Array, keyFile: string, password: string): string {
+  const sk = readSecretKey(keyFile, password);
+  return Buffer.from(sk.sign(bytes)).toString("base64");
+}
+
 /** Signs a manifest with the secret key at `keyFile`; returns base64. */
 export function signManifest(
   manifest: UpdaterManifest,
   keyFile: string,
   password: string,
 ): string {
-  const sk = readSecretKey(keyFile, password);
-  const bytes = new TextEncoder().encode(canonicalizeManifest(manifest));
-  return Buffer.from(sk.sign(bytes)).toString("base64");
+  return signBytes(new TextEncoder().encode(canonicalizeManifest(manifest)), keyFile, password);
 }
 
 /**

@@ -99,7 +99,6 @@ const TAILWIND_PLUGINS = `{
     "solid-js": "^1.9.0"
   },
   "devDependencies": {
-
     "tailwindcss": "^3.4.0",
     "typescript": "^5.6.0"
   },
@@ -113,12 +112,60 @@ const THREE = `{
   "private": true,
   "type": "module",
   "dependencies": {
-
     "solid-js": "^1.9.0",
     "three": "^r148"
   },
   "devDependencies": {
+    "typescript": "^5.6.0"
+  },
+  "trustedDependencies": []
+}
+`;
 
+// ── React variants ────────────────────────────────────────────────────────
+
+// react-refresh is a devDependency, not a runtime one the app code ever
+// imports directly — but it MUST be installed here, into the project's own
+// node_modules, not just referenced from the workspace. React Fast Refresh
+// (see solutions/interface/renderer/react/runtime/refresh.ts) needs it
+// resolvable from a dev/HMR build's dist/.vendor-entry.cjs, which lives
+// inside THIS project's own directory tree — a standalone-mode project
+// (see PackagesPath's workspacePathFrom) has no other node_modules on its
+// resolution path up to the workspace's. Confirmed directly: without this,
+// the vendor bundle step fails to resolve it at all.
+const REACT_BLANK = `{
+  "name": "@@NAME@@",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "react-refresh": "^0.14.0",
+    "typescript": "^5.6.0"
+  },
+  "trustedDependencies": []
+}
+`;
+
+const REACT_TAILWIND = `{
+  "name": "@@NAME@@",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "react-refresh": "^0.14.0",
+    "tailwindcss": "^3.4.0",
     "typescript": "^5.6.0"
   },
   "trustedDependencies": []
@@ -126,11 +173,19 @@ const THREE = `{
 `;
 
 const BY_PRESET: Record<PresetName, string> = {
-  blank: BLANK,
-  "blank-plugins": BLANK_PLUGINS,
-  tailwind: TAILWIND,
-  "tailwind-plugins": TAILWIND_PLUGINS,
-  three: THREE
+  // New names
+  "solid-blank":            BLANK,
+  "solid-tailwind":         TAILWIND,
+  "solid-tailwind-plugins": TAILWIND_PLUGINS,
+  "react-blank":            REACT_BLANK,
+  "react-tailwind":         REACT_TAILWIND,
+  "react-tailwind-plugins": REACT_TAILWIND,
+  "three":                  THREE,
+  // Legacy aliases
+  "blank":           BLANK,
+  "blank-plugins":   BLANK_PLUGINS,
+  "tailwind":        TAILWIND,
+  "tailwind-plugins":TAILWIND_PLUGINS,
 };
 
 export function packageJsonTemplate(preset: PresetName): string {

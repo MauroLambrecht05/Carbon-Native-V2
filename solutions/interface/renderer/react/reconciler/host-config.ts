@@ -17,6 +17,30 @@ import { decorateAsDomNode } from "../scene/dom-facade.ts";
 import { reResolveSubtree } from "../styling/class-names.ts";
 import { bindReconciler } from "./flush-sync.ts";
 
+/**
+ * Clears every JS-side map entry (clickHandlers, inputHandlers, nodeTexts,
+ * eventHandlers, nodeRegistry) for `node` AND its whole descendant subtree.
+ *
+ * removeChild/removeChildFromContainer only ever get called once, for the
+ * topmost node of whatever's being deleted — react-reconciler's own
+ * commitDeletionEffectsOnFiber removes just the nearest host node per
+ * deleted subtree, the same optimization every host config (react-dom
+ * included) relies on. Recursing here is the JS-side half of the matching
+ * fix in scene.rs's remove_node: without it, a node's descendants kept
+ * their onClick/onChange registrations in these maps forever after being
+ * detached, unreachable but never freed — the same leak, on this side of
+ * the host boundary.
+ */
+function deleteSubtreeFromMaps(node: CmNode): void {
+  const id = sceneIdOf(node);
+  clickHandlers.delete(id);
+  inputHandlers.delete(id);
+  nodeTexts.delete(id);
+  eventHandlers.delete(id);
+  nodeRegistry.delete(id);
+  for (const child of node.children) deleteSubtreeFromMaps(child);
+}
+
 const hostConfig: any = {
   // Required capability flags
   supportsMutation: true,
@@ -140,11 +164,7 @@ const hostConfig: any = {
     const i = parent.children.indexOf(child);
     if (i >= 0) parent.children.splice(i, 1);
     child.parent = null;
-    clickHandlers.delete(child.id);
-    inputHandlers.delete(child.id);
-    nodeTexts.delete(child.id);
-    eventHandlers.delete(child.id);
-    nodeRegistry.delete(child.id);
+    deleteSubtreeFromMaps(child);
     __cm_remove_node(child.id);
     __cm_request_paint();
   },
@@ -155,11 +175,7 @@ const hostConfig: any = {
       if (i >= 0) (parent as any).children.splice(i, 1);
     }
     child.parent = null;
-    clickHandlers.delete(sceneIdOf(child));
-    inputHandlers.delete(sceneIdOf(child));
-    nodeTexts.delete(sceneIdOf(child));
-    eventHandlers.delete(sceneIdOf(child));
-    nodeRegistry.delete(sceneIdOf(child));
+    deleteSubtreeFromMaps(child);
     __cm_remove_node(sceneIdOf(child));
     __cm_request_paint();
   },
@@ -332,8 +348,46 @@ const hostConfig: any = {
   HostTransitionContext: { $$typeof: Symbol.for("react.context"), Provider: null, _currentValue: null, _currentValue2: null, _threadCount: 0, Consumer: null, displayName: "" },
 };
 
-export const reconciler = ReactReconciler(hostConfig);
+// Cached on globalThis, not a plain module-level const, for the same
+// reason runtime/render.ts caches its container there: this file is part
+// of the APP half of a split build and re-evaluates on every `carbon dev`
+// reload. `ReactReconciler(hostConfig)` returns a renderer instance with
+// its OWN internal fiber/scheduler state, independent of any other call
+// to the same factory — calling it again on a reload would hand back a
+// SECOND, unrelated instance that knows nothing about the tree the first
+// one is holding, exactly the state-loss this is meant to prevent.
+// Reusing the first instance keeps every closure it captured (over
+// scene/node.ts, scene/props.ts, …) pinned to that first pass too — which
+// is correct: those need to stay the ones actually holding the live
+// node registry, not get silently swapped for an empty one a later pass
+// created but nothing ever calls into.
+const g = globalThis as unknown as { __cm_reconciler?: ReturnType<typeof ReactReconciler> };
+
+export const reconciler: ReturnType<typeof ReactReconciler> = g.__cm_reconciler ?? (() => {
+  const r = ReactReconciler(hostConfig);
+  // Registers this renderer with the (real or react-refresh-stubbed, see
+  // runtime/refresh.ts) DevTools hook. react-reconciler's own fiber
+  // resolution consults that hook's family registry in dev mode — this is
+  // what makes performReactRefresh() actually able to find and patch the
+  // mounted tree; without it, react-refresh's registry exists but nothing
+  // ever reads from it. bundleType 1 = development; harmless to call in a
+  // production build (no hook installed there, so this becomes a no-op —
+  // react-reconciler checks for the hook's presence before using it).
+  // Only ever called once, on the first pass — see the caching comment
+  // above; a second call on a fresh instance would just be a second,
+  // separate, never-consulted registration.
+  (r as any).injectIntoDevTools({
+    bundleType: 1,
+    version: "18.3.1",
+    rendererPackageName: "@carbon/mini-react",
+  });
+  g.__cm_reconciler = r;
+  return r;
+})();
 
 // Hand it to the dispatcher traps, which were installed before this module
-// evaluated and have been holding a null reference until now.
+// evaluated and have been holding a null reference until now. Rebinding
+// on every pass to the same cached instance is harmless — it's what
+// makes this correct even the first time, before caching applies to
+// anything yet.
 bindReconciler(reconciler);
