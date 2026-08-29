@@ -1,0 +1,164 @@
+{
+  "_version": "1",
+  "_description": "Configuration for the Carbon Native semantic assessment pipeline.",
+
+  "output": {
+    "dir": ".architecture",
+    "raw": ".architecture/raw",
+    "semantic": ".architecture/semantic",
+    "human": ".architecture/human",
+    "prompts": ".architecture/prompts",
+    "reports": ".architecture/reports"
+  },
+
+  "analysis": {
+    "depth": "full",
+    "maxFileSizeBytes": 524288,
+    "includeTestFiles": true,
+    "includeLabFiles": false
+  },
+
+  "ignore": {
+    "directories": [
+      ".git",
+      "node_modules",
+      "target",
+      "dist",
+      "build",
+      ".build",
+      "coverage",
+      ".local/rust",
+      ".tools/orchestration/bazel/cargo/target",
+      ".tools/automation/benchmarks/results",
+      "labs"
+    ],
+    "files": [
+      ".env",
+      ".env.*",
+      "*.pem",
+      "*.key",
+      "credentials.*",
+      "secrets.*",
+      "*.lock",
+      "bun.lock",
+      "*.png",
+      "*.jpg",
+      "*.jpeg",
+      "*.gif",
+      "*.svg",
+      "*.ico",
+      "*.woff",
+      "*.woff2",
+      "*.ttf",
+      "*.otf",
+      "*.eot"
+    ],
+    "patterns": [
+      "**/__pycache__/**",
+      "**/.DS_Store",
+      "**/Thumbs.db"
+    ]
+  },
+
+  "extractors": {
+    "typescript": {
+      "enabled": true,
+      "extensions": [".ts", ".tsx", ".mts", ".cts"],
+      "extractConditions": true,
+      "extractImports": true,
+      "extractExports": true,
+      "extractErrorHandling": true,
+      "extractApiEndpoints": true,
+      "extractValidations": true
+    },
+    "rust": {
+      "enabled": true,
+      "extensions": [".rs"],
+      "extractConditions": true,
+      "extractErrorHandling": true,
+      "extractTraits": true,
+      "extractMacros": true
+    },
+    "ci": {
+      "enabled": true,
+      "patterns": [".github/workflows/*.yml", ".github/workflows/*.yaml"]
+    },
+    "bazel": {
+      "enabled": true,
+      "patterns": ["BUILD.bazel", "MODULE.bazel", "*.bzl", ".bazelrc", ".bazelversion"]
+    },
+    "toml": {
+      "enabled": true,
+      "extensions": [".toml"]
+    },
+    "json": {
+      "enabled": true,
+      "patterns": ["*.config.json", "package.json", "tsconfig*.json", "_identity.json", "build.json", "features.json", "dependencies.json"]
+    },
+    "docker": {
+      "enabled": true,
+      "patterns": ["Dockerfile*", "docker-compose*.yml"]
+    },
+    "flatbuffers": {
+      "enabled": true,
+      "extensions": [".fbs"]
+    },
+    "zig": {
+      "enabled": true,
+      "extensions": [".zig"]
+    },
+    "python": {
+      "enabled": true,
+      "extensions": [".py"]
+    },
+    "markdown": {
+      "enabled": true,
+      "extensions": [".md"],
+      "extractArchitectureDeclarations": true
+    },
+    "shell": {
+      "enabled": true,
+      "extensions": [".sh", ".ps1", ".bash"]
+    }
+  },
+
+  "semantic": {
+    "confidence": {
+      "confirmed": "directly observable in code",
+      "inferred": "reasonably derived from patterns",
+      "uncertain": "possible but unverified",
+      "unknown": "insufficient evidence"
+    },
+    "entityTypes": [
+      "SYSTEM", "PRODUCT", "SOLUTION", "MODULE", "CAPABILITY",
+      "CONTRACT", "INTERFACE", "INTEGRATION", "INFRASTRUCTURE",
+      "EXTERNAL_SYSTEM", "DATA", "CONFIGURATION", "DECISION",
+      "RULE", "CHECK", "VALIDATION", "ERROR", "FLOW", "PROCESS",
+      "BUILD", "CI_PIPELINE", "DEPLOYMENT", "ENVIRONMENT",
+      "TECHNOLOGY", "TOOLCHAIN", "FEATURE_FLAG", "BOUNDARY"
+    ],
+    "relationshipTypes": [
+      "CONTAINS", "USES", "PROVIDES", "REQUIRES", "IMPLEMENTS",
+      "REFERENCES", "CALLS", "TRIGGERS", "LEADS_TO", "DEPENDS_ON",
+      "VALIDATES", "CHECKS", "DECIDES", "PRODUCES", "CONSUMES",
+      "READS", "WRITES", "SENDS", "RECEIVES", "TRANSFORMS",
+      "DEPLOYS", "BUILDS", "TESTS", "CONFIGURES", "INTEGRATES_WITH",
+      "FALLS_BACK_TO", "FAILS_WITH", "ENFORCES", "EXTENDS", "OVERRIDES"
+    ]
+  },
+
+  "incremental": {
+    "enabled": true,
+    "hashAlgorithm": "sha256",
+    "manifestFile": ".architecture/raw/manifest.json"
+  },
+
+  "web": {
+    "port": 4040,
+    "title": "Carbon Native — Semantic Explorer",
+    "modelPath": ".architecture/semantic/architecture.json",
+    "overridesPath": ".architecture/human/overrides.json"
+  },
+
+  "schemaVersion": "1.0.0"
+}

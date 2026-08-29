@@ -1,0 +1,36 @@
+{
+  "name": "@carbon/assessment",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Semantic model generator and interactive explorer for the Carbon Native codebase.",
+  "type": "module",
+  "scripts": {
+    "assess": "bun run index.ts",
+    "assess:scan": "bun run index.ts --stage scan",
+    "assess:extract": "bun run index.ts --stage extract",
+    "assess:interpret": "bun run index.ts --stage interpret",
+    "assess:resolve": "bun run index.ts --stage resolve",
+    "assess:model": "bun run index.ts --stage model",
+    "assess:report": "bun run index.ts --stage report",
+    "assess:full": "bun run index.ts --full",
+    "assess:incremental": "bun run index.ts --incremental",
+    "explorer": "bun run index.ts --serve",
+    "explorer:dev": "cd web && bun run dev",
+    "explorer:build": "cd web && bun run build"
+  },
+  "dependencies": {
+    "@babel/parser": "^7.29.0",
+    "@babel/traverse": "^7.29.0",
+    "@babel/types": "^7.29.0",
+    "smol-toml": "^1.3.0",
+    "picocolors": "^1.1.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.0",
+    "@types/babel__traverse": "^7.20.6",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "bun": ">=1.3.0"
+  }
+}
