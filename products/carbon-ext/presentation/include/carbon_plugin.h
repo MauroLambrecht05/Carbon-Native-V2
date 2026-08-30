@@ -46,7 +46,7 @@ extern "C" {
  * ⇒ register but skip features the runtime doesn't advertise.
  */
 #define CARBON_PLUGIN_ABI_VERSION_MAJOR 1u
-#define CARBON_PLUGIN_ABI_VERSION_MINOR 4u
+#define CARBON_PLUGIN_ABI_VERSION_MINOR 5u
 
 /* --------------------------------------------------------------------------
  * Status codes returned by host-provided helpers
@@ -316,6 +316,25 @@ struct CarbonApp {
      */
     int32_t (*global_shortcut_register)(CarbonApp* app, const char* accelerator, uint32_t* out_id);
     int32_t (*global_shortcut_unregister)(CarbonApp* app, const char* accelerator);
+
+    /* --- ABI 1.5: system tray -------------------------------------------
+     * Creates the app's tray icon — backs the `tray` carbon-sdk plugin.
+     * One per process; a second call is a no-op (CARBON_OK, does nothing)
+     * rather than an error, so a plugin's re-installed globals after HMR
+     * (carbon_plugin_after_reload) can call this unconditionally.
+     *
+     * `icon_path` is a PNG file. `tooltip` may be empty for none.
+     * `menu_items_json` is a JSON array of `{"id","label"}` objects, or
+     * empty/"[]" for no context menu. Clicking the icon fires
+     * push_event("tray.click", "{}"); selecting a menu item fires
+     * push_event("tray.menu", "{\"id\":\"<id>\"}").
+     *
+     * Returns CARBON_OK on success (including the no-op second-call
+     * case), CARBON_ERR_INVALID for null required arguments,
+     * CARBON_ERR_GENERIC if the icon file couldn't be read/decoded as a
+     * PNG or the OS refused to create the tray icon.
+     */
+    int32_t (*tray_setup)(CarbonApp* app, const char* icon_path, const char* tooltip, const char* menu_items_json);
 };
 
 /* --------------------------------------------------------------------------

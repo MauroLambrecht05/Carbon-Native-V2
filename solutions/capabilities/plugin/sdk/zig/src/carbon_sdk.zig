@@ -281,6 +281,21 @@ pub const CarbonApp = struct {
         const f = self.raw.global_shortcut_unregister orelse return CARBON_ERR_GENERIC;
         return f(self.raw, accelerator);
     }
+
+    // ── ABI 1.5: system tray ────────────────────────────────────────────────
+
+    /// `icon_path`: a PNG file. `tooltip`/`menu_items_json` may be empty
+    /// strings for "none". A second call after the tray is already set up
+    /// is a no-op (still returns CARBON_OK).
+    pub fn traySetup(
+        self: CarbonApp,
+        icon_path: [*:0]const u8,
+        tooltip: [*:0]const u8,
+        menu_items_json: [*:0]const u8,
+    ) i32 {
+        const f = self.raw.tray_setup orelse return CARBON_ERR_GENERIC;
+        return f(self.raw, icon_path, tooltip, menu_items_json);
+    }
 };
 
 /// Compose a manifest JSON string at comptime.

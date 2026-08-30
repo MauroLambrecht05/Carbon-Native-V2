@@ -72,6 +72,13 @@ arboard = { version = "3", default-features = false }
 # code, mirroring the carbon-hotkey example plugin's push_event delivery
 # pattern but with a runtime-parsed accelerator instead of one compiled in.
 global-hotkey = "0.8"
+# System tray (Phase 3) — tauri-apps' tray-icon crate, same org/ecosystem
+# as global-hotkey above. Not depending on muda directly: tray-icon
+# re-exports its own pinned muda (tray_icon::menu) — adding a separate top-
+# level muda dependency risks resolving a DIFFERENT version with
+# incompatible types for TrayIconBuilder::menu().
+tray-icon = "0.24"
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 # An integration test under tests/ links the crate from outside, so it sees only
 # the public API plus what is declared here — the [dependencies] above are not

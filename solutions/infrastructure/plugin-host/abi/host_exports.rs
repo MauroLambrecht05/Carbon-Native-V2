@@ -49,11 +49,12 @@ pub const CARBON_ERR_NO_CTX: i32 = -4;
 pub const CARBON_NOT_FOUND: i32 = -5;
 
 pub const CARBON_PLUGIN_ABI_VERSION_MAJOR: u32 = 1;
-// 4, not 3: ABI 1.4 appended global_shortcut_register/unregister. (1.3
-// appended clipboard_*/dialog_*/notification_send/keychain_*; 1.2 appended
-// load_font_path/load_font_bytes; 1.1 appended set_global_string/
-// set_global_number/set_global_function/eval before that.)
-pub const CARBON_PLUGIN_ABI_VERSION_MINOR: u32 = 4;
+// 5, not 4: ABI 1.5 appended tray_setup. (1.4 appended
+// global_shortcut_register/unregister; 1.3 appended clipboard_*/dialog_*/
+// notification_send/keychain_*; 1.2 appended load_font_path/
+// load_font_bytes; 1.1 appended set_global_string/set_global_number/
+// set_global_function/eval before that.)
+pub const CARBON_PLUGIN_ABI_VERSION_MINOR: u32 = 5;
 
 // ── CarbonJSContext — opaque to plugins ───────────────────────────────────
 //
@@ -237,6 +238,17 @@ pub struct HostCarbonApp {
     >,
     pub global_shortcut_unregister:
         Option<unsafe extern "C" fn(app: *mut HostCarbonApp, accelerator: *const c_char) -> i32>,
+
+    // ABI 1.5. System tray — see the matching note in carbon_plugin.h's
+    // APPEND-ONLY ZONE.
+    pub tray_setup: Option<
+        unsafe extern "C" fn(
+            app: *mut HostCarbonApp,
+            icon_path: *const c_char,
+            tooltip: *const c_char,
+            menu_items_json: *const c_char,
+        ) -> i32,
+    >,
 }
 
 /// Owns the heap allocation backing the strings inside `HostCarbonApp` plus
@@ -714,6 +726,23 @@ unsafe extern "C" fn host_global_shortcut_unregister(_app: *mut HostCarbonApp, a
     }
 }
 
+// ── System tray (ABI 1.5) ──────────────────────────────────────────────────
+
+unsafe extern "C" fn host_tray_setup(
+    _app: *mut HostCarbonApp,
+    icon_path: *const c_char,
+    tooltip: *const c_char,
+    menu_items_json: *const c_char,
+) -> i32 {
+    let Some(icon_path) = cstr_arg(icon_path) else { return CARBON_ERR_INVALID };
+    let tooltip = cstr_arg(tooltip).unwrap_or("");
+    let menu_items_json = cstr_arg(menu_items_json).unwrap_or("");
+    match crate::tray::setup(icon_path, tooltip, menu_items_json) {
+        Ok(()) => CARBON_OK,
+        Err(_) => CARBON_ERR_GENERIC,
+    }
+}
+
 // ── Trampolines stamped into HostCarbonApp ────────────────────────────────
 
 /// `app->push_event(name, payload)` — pushes a UserEvent::PluginEvent
@@ -855,6 +884,7 @@ impl HostCarbonAppStorage {
                 keychain_delete: Some(host_keychain_delete),
                 global_shortcut_register: Some(host_global_shortcut_register),
                 global_shortcut_unregister: Some(host_global_shortcut_unregister),
+                tray_setup: Some(host_tray_setup),
             },
             _app_name: app_name_c,
             _app_version: app_version_c,

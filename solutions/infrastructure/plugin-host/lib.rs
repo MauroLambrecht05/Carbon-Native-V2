@@ -62,3 +62,5 @@ pub mod notification;
 pub mod keychain;
 #[path = "native/global_shortcuts.rs"]
 pub mod global_shortcuts;
+#[path = "native/tray.rs"]
+pub mod tray;
