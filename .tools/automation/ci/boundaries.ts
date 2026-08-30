@@ -154,18 +154,13 @@ function walk(dir: string, onFile: (abs: string, rel: string) => void) {
   const VENDOR = ".tools/vendor/";
   // Fonts are compiled into the binary and are covered by rule 4 instead.
   const FONT_ASSETS = "solutions/capabilities/text/assets/";
-  // Two spots a plugin binary regenerates into, neither meant to be
-  // committed (not nested inside a carbon/plugins/local/<name>/ SOURCE tree,
-  // which the .zig-cache / zig-out SKIP_NAMES entries already cover):
-  //   carbon/native/<os>/<arch>/<name>.<ext>       — carbon/build.zig's
-  //     staged output, what SyncPluginsUseCase (@carbon/lifecycle) produces
-  //     every `carbon run`/`carbon dev`.
-  //   carbon/plugins/vendor/<name>/<crate>.<ext>   — a fetched plugin's raw
-  //     binary before staging, written by InstallPluginUseCase /
-  //     AddStandardPluginUseCase's auto-heal, same regenerate-on-clone
-  //     posture as the staged copy.
-  const LOCAL_PLUGIN_ARTIFACT =
-    /(^|\/)carbon\/(native\/[^/]+\/[^/]+|plugins\/vendor\/[^/]+)\/[^/]+\.(dll|so|dylib)$/;
+  // A .dll/.so/.dylib under carbon/native/<os>/<arch>/ (not nested inside a
+  // carbon/plugins/local/<name>/ SOURCE tree, which the .zig-cache / zig-out
+  // SKIP_NAMES entries already cover) is what carbon/build.zig stages
+  // (local) or InstallPluginUseCase writes directly (vendor) — the only
+  // place a plugin binary ever lands now, regenerated on every `carbon run`/
+  // `carbon dev`, never meant to be committed.
+  const LOCAL_PLUGIN_ARTIFACT = /(^|\/)carbon\/native\/[^/]+\/[^/]+\/[^/]+\.(dll|so|dylib)$/;
 
   // .tools/vendor/ is the one place a prebuilt binary may live, and only when
   // its SHA-256 is recorded. That makes the exception auditable rather than

@@ -1,9 +1,15 @@
 // Installing a built plugin into a host app as a VENDOR plugin.
 //
-// Three steps that have to agree: find the artifact the build produced, copy
-// it into carbon/plugins/vendor/<slug>/, and declare it in carbon/manifest.toml
-// (source = "vendor"). The third is what makes carbon/build.zig stage it and
-// the runtime load it; the first two without it install a file nothing reads.
+// Two things land in two different places, deliberately not one:
+//   carbon/native/<os>/<arch>/<slug>.<ext> (+ .sig)   — the binary the
+//     runtime actually loads. THE only copy — carbon/build.zig never
+//     touches a vendor plugin's artifact at all, so there is nothing to
+//     duplicate it here for.
+//   carbon/plugins/vendor/<slug>/carbon-plugin.toml   — the manifest, which
+//     the bundler and `describe` read to know the plugin's exports/
+//     capabilities. Small and durable; not build output.
+// Both are keyed by carbon/manifest.toml's declaration (source = "vendor"),
+// which is what actually makes the runtime look for either.
 //
 // This never touches carbon.toml — that file only grants capabilities to a
 // name manifest.toml already declares (see CapabilityGrants.ts), it never
@@ -18,6 +24,7 @@ import {
 } from "../../domain/errors/PluginError.ts";
 import { upsertManifestEntry } from "../../domain/services/AppManifestSection.ts";
 import { LANGUAGES, type PluginLanguage } from "../../domain/value-objects/PluginLanguage.ts";
+import { hostArchName, hostExt, hostOsName } from "../../domain/value-objects/NativeTarget.ts";
 import { PluginName } from "../../domain/value-objects/PluginName.ts";
 import type { PluginTemplateSource, PluginWorkspace } from "../ports/PluginWorkspace.ts";
 import { forwardSlashes } from "./CreatePluginUseCase.ts";
@@ -89,16 +96,13 @@ export class InstallPluginUseCase {
     const host = this.workspace.findHostApp(request.from);
     if (!host) throw new NoHostAppError(request.from);
 
-    // carbon/plugins/vendor/<slug>/{<filename>, <filename>.sig,
-    // carbon-plugin.toml} — this is source-of-record for the plugin's
-    // artifact-origin, not for whether the runtime loads it: carbon/build.zig
-    // stages the binary into carbon/native/<os>/<arch>/ from here, keyed by
-    // carbon/manifest.toml's declaration below.
-    const pluginDir = join(host, "carbon", "plugins", "vendor", artifact.name.slug);
-    this.workspace.createDirectory(pluginDir);
-
-    const filename = basename(artifact.path);
-    const installedAt = join(pluginDir, filename);
+    // The binary + signature go straight into carbon/native/<os>/<arch>/,
+    // staged name (<slug>.<ext>, no crate-form/lib-prefix) — the same
+    // convention carbon/build.zig uses for a local plugin, so the loader's
+    // lookup is identical either way.
+    const nativeDir = join(host, "carbon", "native", hostOsName(), hostArchName());
+    const ext = hostExt();
+    const installedAt = join(nativeDir, `${artifact.name.slug}.${ext}`);
     this.workspace.copyFile(artifact.path, installedAt);
 
     // A signed artifact (see PluginSigner.ts — carbon-sdk plugins are
@@ -110,8 +114,10 @@ export class InstallPluginUseCase {
       this.workspace.copyFile(sigSrc, `${installedAt}.sig`);
     }
 
-    // Copy the manifest into plugins/vendor/<slug>/, bare as
-    // "carbon-plugin.toml" — matching scanPluginDirs' expected filename.
+    // The manifest is the one thing that lives in plugins/vendor/<slug>/ —
+    // not build output, just a small durable record of exports/capabilities
+    // (see this file's header comment for why it's split from the binary).
+    const pluginDir = join(host, "carbon", "plugins", "vendor", artifact.name.slug);
     const manifestSrc = join(request.directory, "carbon-plugin.toml");
     const manifestDest = join(pluginDir, "carbon-plugin.toml");
     if (manifestSrc !== manifestDest && this.workspace.exists(manifestSrc)) {

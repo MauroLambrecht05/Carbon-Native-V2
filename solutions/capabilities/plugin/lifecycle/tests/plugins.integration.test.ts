@@ -501,8 +501,10 @@ describe("installing a plugin", () => {
     return { workspace, useCase: new InstallPluginUseCase(workspace, new FakeTemplateSource()), lib };
   }
 
-  test("copies the library in and declares it in carbon/manifest.toml", () => {
-    const { workspace, useCase, lib } = built();
+  const nativeDir = `${ROOT}/app/carbon/native/${hostOsName()}/${hostArchName()}`;
+
+  test("copies the library into carbon/native/ and declares it in carbon/manifest.toml", () => {
+    const { workspace, useCase } = built();
 
     const result = useCase.execute({
       directory: `${ROOT}/app/my-thing`,
@@ -510,7 +512,10 @@ describe("installing a plugin", () => {
     });
 
     expect(result.host).toBe(`${ROOT}/app`);
-    expect(workspace.exists(`${ROOT}/app/carbon/plugins/vendor/my-thing/${lib}`)).toBe(true);
+    expect(workspace.exists(`${nativeDir}/my-thing.${hostExt()}`)).toBe(true);
+    // The vendor plugin's own directory holds ONLY the manifest — no second
+    // copy of the binary (see InstallPluginUseCase's header comment).
+    expect(workspace.exists(`${ROOT}/app/carbon/plugins/vendor/my-thing/my-thing.${hostExt()}`)).toBe(false);
 
     const manifest = readAppManifest(workspace.readFile(`${ROOT}/app/carbon/manifest.toml`));
     expect(manifest.plugins.get("my-thing")).toEqual({ source: "vendor", enabled: true, version: undefined });
@@ -526,14 +531,14 @@ describe("installing a plugin", () => {
     expect(toml).toBe(`[app]\nname = "demo"\n`);
   });
 
-  test("copies the manifest and signature alongside the binary", () => {
+  test("copies the manifest into plugins/vendor/ and the signature alongside the binary in native/", () => {
     const { workspace, useCase, lib } = built();
     workspace.put(`${ROOT}/app/my-thing/zig-out/lib/${lib}.sig`, "SIG");
 
     useCase.execute({ directory: `${ROOT}/app/my-thing`, from: `${ROOT}/app/my-thing` });
 
     expect(workspace.exists(`${ROOT}/app/carbon/plugins/vendor/my-thing/carbon-plugin.toml`)).toBe(true);
-    expect(workspace.readFile(`${ROOT}/app/carbon/plugins/vendor/my-thing/${lib}.sig`)).toBe("SIG");
+    expect(workspace.readFile(`${nativeDir}/my-thing.${hostExt()}.sig`)).toBe("SIG");
   });
 
   test("zig-out/lib is preferred over zig-out/bin when both exist", () => {
@@ -544,13 +549,13 @@ describe("installing a plugin", () => {
     workspace.put(`${ROOT}/app/my-thing/zig-out/bin/${lib}`, "OLD");
 
     useCase.execute({ directory: `${ROOT}/app/my-thing`, from: `${ROOT}/app/my-thing` });
-    expect(workspace.readFile(`${ROOT}/app/carbon/plugins/vendor/my-thing/${lib}`)).toBe("ELF");
+    expect(workspace.readFile(`${nativeDir}/my-thing.${hostExt()}`)).toBe("ELF");
   });
 
   test("a windows build, which lands in zig-out/bin, still installs", () => {
-    const { workspace, useCase, lib } = built({ where: "bin" });
+    const { workspace, useCase } = built({ where: "bin" });
     useCase.execute({ directory: `${ROOT}/app/my-thing`, from: `${ROOT}/app/my-thing` });
-    expect(workspace.exists(`${ROOT}/app/carbon/plugins/vendor/my-thing/${lib}`)).toBe(true);
+    expect(workspace.exists(`${nativeDir}/my-thing.${hostExt()}`)).toBe(true);
   });
 
   test("without a manifest, the name falls back to the directory", () => {
@@ -684,8 +689,7 @@ describe("syncing plugins", () => {
 
     await useCase.execute(`${ROOT}/app`);
 
-    const lib = PluginName.from("fonts").libraryFilename();
-    expect(workspace.exists(`${ROOT}/app/carbon/plugins/vendor/fonts/${lib}`)).toBe(true);
+    expect(workspace.exists(`${ROOT}/app/carbon/native/${hostOsName()}/${hostArchName()}/fonts.${hostExt()}`)).toBe(true);
     // Auto-heal's build call happened before the final orchestrating build.
     const cwds = runner.calls.map((c) => forwardSlashes(c.options?.cwd ?? ""));
     expect(cwds).toEqual([`${STANDARD_ROOT}/fonts`, `${ROOT}/app/carbon`]);
@@ -695,8 +699,7 @@ describe("syncing plugins", () => {
     const { workspace, runner, useCase } = withApp(
       `[plugins.fonts]\nsource = "vendor"\nenabled = true\n`,
     );
-    const lib = PluginName.from("fonts").libraryFilename();
-    workspace.put(`${ROOT}/app/carbon/plugins/vendor/fonts/${lib}`, "ALREADY THERE");
+    workspace.put(`${ROOT}/app/carbon/native/${hostOsName()}/${hostArchName()}/fonts.${hostExt()}`, "ALREADY THERE");
 
     await useCase.execute(`${ROOT}/app`);
 

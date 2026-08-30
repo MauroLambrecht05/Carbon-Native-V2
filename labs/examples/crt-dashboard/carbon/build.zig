@@ -1,14 +1,13 @@
 // carbon/build.zig — the real entry point for this app's native plugin
 // layer. `zig build` (run from here, with `--prefix .`) is the one command
-// that fully populates carbon/native/<os>/<arch>/ from manifest.toml.
-//
-// Two kinds of plugin, staged into the same output tree:
-//   local  — this app owns the source (carbon/plugins/local/<name>/, its own
-//            build.zig). Built here by shelling `zig build` in that
-//            directory as a real, cacheable step, then staged.
-//   vendor — a fetched/standard plugin (carbon/plugins/vendor/<name>/) —
-//            already built and signed by SyncPluginsUseCase's auto-heal
-//            step; staged as-is, never recompiled here.
+// that fully populates carbon/native/<os>/<arch>/ from manifest.toml — for
+// every LOCAL plugin. A vendor (fetched/standard) plugin's binary+signature
+// are written directly into carbon/native/<os>/<arch>/ by
+// SyncPluginsUseCase's auto-heal step (install/AddStandardPluginUseCase),
+// never by this file — carbon/plugins/vendor/<name>/ holds only that
+// plugin's carbon-plugin.toml, nothing this file needs to stage. This file
+// skips vendor entries entirely; they exist in the manifest purely so the
+// loader and the bundler know the name is real.
 //
 // Why local plugins are built via a SUBPROCESS rather than one in-process
 // dependency graph: Zig's package manager requires every `b.dependency()`
@@ -150,52 +149,31 @@ pub fn build(b: *std.Build) void {
     const release = b.option(bool, "release", "forward -Drelease=true to every carbon/plugins/local/* build") orelse false;
 
     for (readManifest(b, io)) |entry| {
-        if (!entry.enabled) continue;
+        if (!entry.enabled or entry.source != .local) continue;
+
         const crate = crateName(b, entry.name);
         const artifact_name = b.fmt("{s}.{s}", .{ crate, ext });
         const staged_name = b.fmt("{s}.{s}", .{ entry.name, ext });
+        const plugin_dir = b.pathJoin(&.{ "plugins", "local", entry.name });
 
-        switch (entry.source) {
-            .local => {
-                const plugin_dir = b.pathJoin(&.{ "plugins", "local", entry.name });
+        var argv = std.array_list.Managed([]const u8).init(b.allocator);
+        argv.append(zig_exe) catch @panic("OOM");
+        argv.append("build") catch @panic("OOM");
+        if (release) argv.append("-Drelease=true") catch @panic("OOM");
 
-                var argv = std.array_list.Managed([]const u8).init(b.allocator);
-                argv.append(zig_exe) catch @panic("OOM");
-                argv.append("build") catch @panic("OOM");
-                if (release) argv.append("-Drelease=true") catch @panic("OOM");
+        const built = b.addSystemCommand(argv.items);
+        built.setCwd(.{ .cwd_relative = b.pathFromRoot(plugin_dir) });
+        built.setName(b.fmt("zig build ({s})", .{entry.name}));
 
-                const built = b.addSystemCommand(argv.items);
-                built.setCwd(.{ .cwd_relative = b.pathFromRoot(plugin_dir) });
-                built.setName(b.fmt("zig build ({s})", .{entry.name}));
+        // Windows puts the .dll in zig-out/bin (beside the .lib import
+        // stub); every other OS puts the .so/.dylib in zig-out/lib — the
+        // exact default std.Build.Step.InstallArtifact already applies, so
+        // this just has to agree with it.
+        const out_subdir = if (host.os.tag == .windows) "bin" else "lib";
+        const artifact_path = b.pathJoin(&.{ plugin_dir, "zig-out", out_subdir, artifact_name });
 
-                // Windows puts the .dll in zig-out/bin (beside the .lib
-                // import stub); every other OS puts the .so/.dylib in
-                // zig-out/lib — the exact default std.Build.Step.InstallArtifact
-                // already applies, so this just has to agree with it.
-                const out_subdir = if (host.os.tag == .windows) "bin" else "lib";
-                const artifact_path = b.pathJoin(&.{ plugin_dir, "zig-out", out_subdir, artifact_name });
-
-                const staged = b.addInstallFileWithDir(b.path(artifact_path), .{ .custom = native_dir }, staged_name);
-                staged.step.dependOn(&built.step);
-                b.getInstallStep().dependOn(&staged.step);
-            },
-            .vendor => {
-                // Never rebuilt from source here — SyncPluginsUseCase's
-                // auto-heal step is what builds+signs a missing vendor
-                // artifact, before `zig build` ever runs. This is staging
-                // only.
-                const plugin_dir = b.pathJoin(&.{ "plugins", "vendor", entry.name });
-                const artifact_path = b.pathJoin(&.{ plugin_dir, artifact_name });
-                const sig_path = b.fmt("{s}.sig", .{artifact_path});
-
-                const staged = b.addInstallFileWithDir(b.path(artifact_path), .{ .custom = native_dir }, staged_name);
-                b.getInstallStep().dependOn(&staged.step);
-
-                if (b.build_root.handle.access(io, sig_path, .{})) |_| {
-                    const staged_sig = b.addInstallFileWithDir(b.path(sig_path), .{ .custom = native_dir }, b.fmt("{s}.sig", .{staged_name}));
-                    b.getInstallStep().dependOn(&staged_sig.step);
-                } else |_| {}
-            },
-        }
+        const staged = b.addInstallFileWithDir(b.path(artifact_path), .{ .custom = native_dir }, staged_name);
+        staged.step.dependOn(&built.step);
+        b.getInstallStep().dependOn(&staged.step);
     }
 }
