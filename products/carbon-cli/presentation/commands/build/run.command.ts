@@ -115,8 +115,8 @@ export async function runCommand(rest: string[]): Promise<number> {
     });
     stage("bundle");
 
-    // Any plugin whose SOURCE lives in this app's own plugins/<name>/ builds
-    // and installs itself here — no separate `carbon plugin install` step.
+    // Any plugin whose SOURCE lives in this app's own carbon/own/<name>/
+    // builds and installs itself here — no separate `carbon plugin install` step.
     // A plugin declared by a path elsewhere (or one merely dropped in as a
     // prebuilt .dll) is untouched; this only matches a directory holding a
     // language marker file.
@@ -182,7 +182,7 @@ export async function runCommand(rest: string[]): Promise<number> {
 
 /**
  * Build + install every plugin whose source lives in this app's own
- * plugins/<name>/, so the app project is the single source of truth and
+ * carbon/own/<name>/, so the app project is the single source of truth and
  * there is nothing to remember to run separately.
  *
  * A build failure here is fatal — unlike preflightPlugins below, which warns
@@ -199,7 +199,7 @@ async function syncLocalPlugins(projectDir: string): Promise<void> {
     { release: true, logger: log },
   );
   for (const plugin of synced) {
-    log.step(c.dim(`plugin ${plugin.name}: built + installed from ./plugins/${plugin.name}`));
+    log.step(c.dim(`plugin ${plugin.name}: built + installed from ./carbon/own/${plugin.name}`));
   }
 }
 

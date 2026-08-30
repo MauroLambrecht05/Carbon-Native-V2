@@ -2,17 +2,15 @@
 // a plugin built against a downloaded copy would be built against a different
 // extension-point registry than the runtime it loads into.
 .{
-    // The zig toolchain this repo targets requires .name to be an enum
-    // literal (a bare identifier), not a string — the crate form, since a
-    // plugin's slug (e.g. "my-thing") is not a legal Zig identifier.
-    .name = .carbon_idle,
-    // Real, zig-suggested value from a real `zig build` error, not guessed.
-    .fingerprint = 0xd82c023b6c3d3343,
+    .name = .carbon_crt,
+    // Identifies this package across renames — zig's own suggested value for
+    // this exact name, taken from a real `zig build` error, not guessed.
+    .fingerprint = 0x2c2039bce96e3976,
     .version = "0.1.0",
     .minimum_zig_version = "0.13.0",
     .dependencies = .{
         .@"carbon-plugin-sdk" = .{
-            .path = "../../../../../products/carbon-ext/composition",
+            .path = "../../../../../../products/carbon-ext/composition",
         },
     },
     .paths = .{

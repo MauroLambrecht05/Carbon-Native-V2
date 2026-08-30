@@ -168,8 +168,8 @@ export async function devCommand(rest: string[]): Promise<number> {
     await buildProject(projectDir, backend, log, { bytecode: DEV_BYTECODE, noBabelCache, dev: true });
     stage("bundle");
 
-    // Any plugin whose SOURCE lives in this app's own plugins/<name>/ builds
-    // and installs itself here — no separate `carbon plugin install` step.
+    // Any plugin whose SOURCE lives in this app's own carbon/own/<name>/
+    // builds and installs itself here — no separate `carbon plugin install` step.
     await syncLocalPlugins(projectDir);
     stage("plugins");
 
@@ -187,7 +187,7 @@ export async function devCommand(rest: string[]): Promise<number> {
       const args = useHmr ? [projectDir, "--dev"] : [projectDir];
       log.step(useHmr ? "launching runtime (in-process HMR enabled)…" : "launching runtime…");
       // CARBON_ALLOW_UNSIGNED_PLUGINS: `carbon dev` builds and installs an
-      // app's own plugins/<name>/ source locally (SyncLocalPluginsUseCase),
+      // app's own carbon/own/<name>/ source locally (SyncLocalPluginsUseCase),
       // with no manual sign step — that flow was never meant to require
       // Carbon's signing key, only `carbon run`'s and a distributed build's
       // ever should. See the matching comment in plugin_loader.rs's
@@ -240,9 +240,9 @@ export async function devCommand(rest: string[]): Promise<number> {
           noBabelCache,
           dev: true,
         });
-        // A source change under plugins/<name>/ hits the same watcher as any
-        // other file (SKIP_DIRS does not exclude it), so a rebuild here also
-        // rebuilds+reinstalls a local plugin whose Zig source changed.
+        // A source change under carbon/own/<name>/ hits the same watcher as
+        // any other file (SKIP_DIRS does not exclude it), so a rebuild here
+        // also rebuilds+reinstalls a local plugin whose Zig source changed.
         await syncLocalPlugins(projectDir);
       } catch (e: any) {
         status.fail(`build failed: ${e.message ?? e}`);
@@ -360,7 +360,7 @@ export async function devCommand(rest: string[]): Promise<number> {
 
 /**
  * Build + install every plugin whose source lives in this app's own
- * plugins/<name>/, so the app project is the single source of truth and
+ * carbon/own/<name>/, so the app project is the single source of truth and
  * there is nothing to remember to run separately.
  *
  * A build failure here is fatal — a plugin this app owns the source of
@@ -377,7 +377,7 @@ async function syncLocalPlugins(projectDir: string): Promise<void> {
     { logger: log },
   );
   for (const plugin of synced) {
-    log.step(c.dim(`plugin ${plugin.name}: built + installed from ./plugins/${plugin.name}`));
+    log.step(c.dim(`plugin ${plugin.name}: built + installed from ./carbon/own/${plugin.name}`));
   }
 }
 

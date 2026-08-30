@@ -92,10 +92,21 @@ class NewPluginCommand extends Command {
 
   execute(ctx: CommandContext): Promise<ExitCode> {
     return reporting(ctx, () => {
-      const { create, sdkRoot } = pluginUseCases(SDK_ROOT);
+      const { create, workspace, sdkRoot } = pluginUseCases(SDK_ROOT);
+
+      // Scaffold into <host>/carbon/own/ when run from inside an app — the
+      // app's own plugin-development area, auto-built by SyncLocalPlugins
+      // UseCase on every `carbon dev`/`run` — regardless of which
+      // subdirectory of the app the command was actually run from. Falls
+      // back to plain cwd when there's no host app above (e.g. scaffolding
+      // one of carbon-sdk's own standard plugins, which don't live inside
+      // any single app's carbon/own/).
+      const host = workspace.findHostApp(ctx.cwd);
+      const cwd = host ? join(host, "carbon", "own") : ctx.cwd;
+
       const result = create.execute({
         name: ctx.first!,
-        cwd: ctx.cwd,
+        cwd,
         sdkRoot,
       });
 

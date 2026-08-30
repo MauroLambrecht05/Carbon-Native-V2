@@ -82,14 +82,27 @@ export class InspectPluginsUseCase {
       }
     }
 
-    const sourceManifest = join(from, name, "carbon-plugin.toml");
-    if (this.workspace.exists(sourceManifest)) {
-      return {
-        name,
-        origin: "source",
-        path: sourceManifest,
-        manifest: this.workspace.readFile(sourceManifest),
-      };
+    // Two "source, not yet installed" spots: carbon/own/<name>/ for a
+    // plugin scaffolded inside a real app (before its first `carbon dev`/
+    // `run` has auto-built + installed it — SyncLocalPluginsUseCase does
+    // that automatically after that point, so this mostly matters right
+    // after `carbon plugin new`), and a bare `<from>/<name>/` for a
+    // standalone SDK-style checkout with no host app above it at all
+    // (e.g. describing one of carbon-sdk's own plugins by cwd).
+    const candidates = [
+      host ? join(host, "carbon", "own", name, "carbon-plugin.toml") : null,
+      join(from, name, "carbon-plugin.toml"),
+    ].filter((p): p is string => p !== null);
+
+    for (const sourceManifest of candidates) {
+      if (this.workspace.exists(sourceManifest)) {
+        return {
+          name,
+          origin: "source",
+          path: sourceManifest,
+          manifest: this.workspace.readFile(sourceManifest),
+        };
+      }
     }
 
     throw new PluginNotFoundError(name);

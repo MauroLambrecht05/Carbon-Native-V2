@@ -129,7 +129,7 @@ export function carbonImports(options = {}) {
     projectRoot = root ?? null;
     const wsRoot =
       workspaceRootOverride ?? (root ? findWorkspaceRoot(root) : null);
-    // Local manifests (the app's own plugins/<name>/carbon-plugin.toml,
+    // Local manifests (the app's own carbon/{own,installed}/<name>/carbon-plugin.toml,
     // per run.command.ts's syncLocalPlugins) take priority over a
     // packages/-workspace manifest of the same name — an app's own plugin
     // source is more specific than whatever a monorepo-wide package

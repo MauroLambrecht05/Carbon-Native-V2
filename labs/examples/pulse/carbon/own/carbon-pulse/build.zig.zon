@@ -12,7 +12,7 @@
     .minimum_zig_version = "0.13.0",
     .dependencies = .{
         .@"carbon-plugin-sdk" = .{
-            .path = "../../../../../products/carbon-ext/composition",
+            .path = "../../../../../../products/carbon-ext/composition",
         },
     },
     .paths = .{

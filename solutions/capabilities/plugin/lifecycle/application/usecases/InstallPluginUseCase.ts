@@ -95,15 +95,17 @@ export class InstallPluginUseCase {
     const host = this.workspace.findHostApp(request.from);
     if (!host) throw new NoHostAppError(request.from);
 
-    // One subdirectory per plugin — plugins/<slug>/{<filename>,
-    // <filename>.sig, carbon-plugin.toml} — not a flat plugins/ shared by
-    // every installed plugin's files at once. This is also the SAME shape
-    // `scanPluginDirs` (import-manifest.js) already expects for a
-    // vendored-source plugin's own plugins/<name>/carbon-plugin.toml, and
-    // what InspectPluginsUseCase.describe() already looks for beside the
-    // installed artifact — both existed before this, this just makes the
-    // artifact-install path actually produce what they were reading for.
-    const pluginDir = join(host, "plugins", artifact.name.slug);
+    // carbon/installed/<slug>/{<filename>, <filename>.sig, carbon-plugin.
+    // toml} — one subdirectory per plugin, inside the app's `carbon/`
+    // development area (see SyncLocalPluginsUseCase's header comment for
+    // the full picture: carbon/installed/ holds fetched-or-built
+    // artifacts, distinct from carbon/own/, where a developer's OWN plugin
+    // SOURCE lives). This is the SAME shape `scanPluginDirs`
+    // (import-manifest.js) already expects for a manifest — a bare
+    // carbon-plugin.toml inside a per-plugin directory — and what
+    // InspectPluginsUseCase.describe() already looks for beside the
+    // installed artifact.
+    const pluginDir = join(host, "carbon", "installed", artifact.name.slug);
     this.workspace.createDirectory(pluginDir);
 
     const filename = basename(artifact.path);
@@ -122,16 +124,16 @@ export class InstallPluginUseCase {
       this.workspace.copyFile(sigSrc, `${installedAt}.sig`);
     }
 
-    // Copy the manifest into the same per-plugin directory, bare as
-    // "carbon-plugin.toml" — matching scanPluginDirs' expected filename
-    // exactly, since it's now sitting in a directory scoped to this one
-    // plugin instead of a shared flat one. A vendored local-source plugin
-    // (SyncLocalPluginsUseCase) has `request.directory` ALREADY equal to
-    // this same pluginDir — its own carbon-plugin.toml is already sitting
-    // right there — so this only actually copies anything for a
-    // prebuilt-artifact install (`carbon plugin install` / `add`), where
-    // the manifest genuinely needs to travel from the build directory to
-    // the app.
+    // Copy the manifest into carbon/installed/<slug>/, bare as
+    // "carbon-plugin.toml" — matching scanPluginDirs' expected filename.
+    // `request.directory` is where this plugin was BUILT: for a prebuilt
+    // artifact (`carbon plugin install` / `add`) that's the SDK/source
+    // checkout; for a vendored plugin (SyncLocalPluginsUseCase) it's
+    // carbon/own/<slug>/ — a genuinely different directory from
+    // carbon/installed/<slug>/ now, so this copy is real in both cases
+    // (the `!==` guard below only protects the degenerate edge case of
+    // `directory`/`from` being passed in already equal to the install
+    // target, which normal callers never do).
     const manifestSrc = join(request.directory, "carbon-plugin.toml");
     const manifestDest = join(pluginDir, "carbon-plugin.toml");
     if (manifestSrc !== manifestDest && this.workspace.exists(manifestSrc)) {
@@ -141,7 +143,7 @@ export class InstallPluginUseCase {
     // Relative and forward-slashed: the manifest is committed and read on
     // every platform, so an absolute Windows path in it breaks the project
     // for everyone else.
-    const declaredPath = `./plugins/${artifact.name.slug}/${filename}`;
+    const declaredPath = `./carbon/installed/${artifact.name.slug}/${filename}`;
 
     if (request.declare ?? true) {
       const tomlPath = join(host, "carbon.toml");

@@ -154,13 +154,14 @@ function walk(dir: string, onFile: (abs: string, rel: string) => void) {
   const VENDOR = ".tools/vendor/";
   // Fonts are compiled into the binary and are covered by rule 4 instead.
   const FONT_ASSETS = "solutions/capabilities/text/assets/";
-  // A .dll/.so/.dylib sitting directly under a plugins/ directory (not
-  // nested inside a plugins/<name>/ source tree, which the .zig-cache /
-  // zig-out SKIP_NAMES entries already cover) is what SyncLocalPluginsUseCase
-  // (@carbon/lifecycle) writes there every `carbon run`/`carbon dev` for a
-  // plugin whose source the app owns — regenerated on every launch, never
-  // meant to be committed, same kind of output as anything under zig-out/.
-  const LOCAL_PLUGIN_ARTIFACT = /(^|\/)plugins\/[^/]+\.(dll|so|dylib)$/;
+  // A .dll/.so/.dylib sitting directly under carbon/installed/<name>/ (not
+  // nested inside a carbon/own/<name>/ source tree, which the .zig-cache /
+  // zig-out SKIP_NAMES entries already cover) is what InstallPluginUseCase /
+  // SyncLocalPluginsUseCase (@carbon/lifecycle) writes there every `carbon
+  // run`/`carbon dev` for a plugin whose source the app owns — regenerated
+  // on every launch, never meant to be committed, same kind of output as
+  // anything under zig-out/.
+  const LOCAL_PLUGIN_ARTIFACT = /(^|\/)carbon\/installed\/[^/]+\/[^/]+\.(dll|so|dylib)$/;
 
   // .tools/vendor/ is the one place a prebuilt binary may live, and only when
   // its SHA-256 is recorded. That makes the exception auditable rather than

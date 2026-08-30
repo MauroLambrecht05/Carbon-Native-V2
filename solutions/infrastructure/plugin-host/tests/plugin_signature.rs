@@ -9,7 +9,7 @@
 //! variable, and does nothing at all without one. It is a check you RUN, not a
 //! check that runs itself:
 //!
-//!   cd labs/examples/pulse/plugins/carbon-hotkey && zig build
+//!   cd labs/examples/pulse/carbon/own/carbon-hotkey && zig build
 //!   cargo run -p carbon-plugin-trust --bin carbon-plugin-sign -- \
 //!       sign zig-out/lib/carbon_hotkey.dll
 //!   CARBON_TEST_SIGNED_PLUGIN=<abs path to carbon_hotkey.dll> \

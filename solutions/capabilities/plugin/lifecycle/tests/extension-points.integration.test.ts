@@ -249,15 +249,15 @@ describe("preflighting an app", () => {
     const workspace = new MemoryWorkspace();
     workspace.put(`${ROOT}/app/carbon.toml`, options.carbonToml);
     if (options.installed !== false) {
-      workspace.put(`${ROOT}/app/plugins/${lib}`, "ELF");
+      workspace.put(`${ROOT}/app/carbon/installed/clip/${lib}`, "ELF");
     }
     if (options.manifest) {
-      workspace.put(`${ROOT}/app/plugins/carbon-plugin.toml`, options.manifest);
+      workspace.put(`${ROOT}/app/carbon/installed/clip/carbon-plugin.toml`, options.manifest);
     }
     return new PreflightPluginsUseCase(workspace);
   }
 
-  const DECLARED = `[app]\nname = "demo"\n\n[plugins]\nclip = "./plugins/${lib}"\n`;
+  const DECLARED = `[app]\nname = "demo"\n\n[plugins]\nclip = "./carbon/installed/clip/${lib}"\n`;
 
   test("an app with no plugins is fine and reports nothing", () => {
     const useCase = app({ carbonToml: `[app]\nname = "demo"\n`, installed: false });

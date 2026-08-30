@@ -2,7 +2,7 @@
 //
 // Wider than scaffolding's equivalent because these use cases read as well as
 // write, and one of them has to walk up the tree looking for a host app. Still
-// narrow enough to enumerate: this is everything plugins/ can do to a disk.
+// narrow enough to enumerate: this is everything carbon/ can do to a disk.
 
 import type { PluginLanguage } from "../../domain/value-objects/PluginLanguage.ts";
 import type { PluginName } from "../../domain/value-objects/PluginName.ts";
@@ -18,8 +18,8 @@ export interface PluginWorkspace {
   /**
    * Immediate subdirectory names of `path`, or `[]` if it does not exist.
    *
-   * What `SyncLocalPluginsUseCase` walks to find every `plugins/<name>/` an
-   * app owns the source of.
+   * What `SyncLocalPluginsUseCase` walks to find every `carbon/own/<name>/`
+   * an app owns the source of.
    */
   listDirectories(path: string): string[];
 

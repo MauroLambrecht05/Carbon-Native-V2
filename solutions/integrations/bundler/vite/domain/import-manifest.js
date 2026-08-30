@@ -7,7 +7,7 @@
 //
 // Real manifest format — this is `carbon-plugin.toml` as `carbon plugin
 // check`/`carbon plugin install` actually read it (see e.g.
-// labs/examples/pulse/plugins/carbon-pulse/carbon-plugin.toml), top-level,
+// labs/examples/pulse/carbon/own/carbon-pulse/carbon-plugin.toml), top-level,
 // no `[plugin]` wrapper section:
 //
 //   name = "carbon-audio"
@@ -23,11 +23,15 @@
 //   2. `[exports] "carbon:audio" = [...]`
 //
 // Two discovery roots, because two different things ship plugins:
-//   discoverLocalManifests(projectRoot)   an app's OWN plugins, source at
-//                                         `<projectRoot>/plugins/<name>/`
-//                                         (see run.command.ts's
-//                                         syncLocalPlugins) — the only kind
-//                                         a real app has today.
+//   discoverLocalManifests(projectRoot)   an app's own `carbon/` development
+//                                         area — `carbon/own/<name>/` (a
+//                                         plugin whose source this app owns,
+//                                         auto-built by run.command.ts's
+//                                         syncLocalPlugins) and
+//                                         `carbon/installed/<name>/` (a
+//                                         fetched-or-built artifact,
+//                                         `carbon plugin add` / `install`) —
+//                                         the only kind a real app has today.
 //   discoverManifests(workspaceRoot)      a `packages/<plugin>/` monorepo
 //                                         layout for plugins published
 //                                         independently of any one app.
@@ -83,21 +87,29 @@ function scanPluginDirs(dir) {
 }
 
 /**
- * Walk `<projectRoot>/plugins/*` — one subdirectory per plugin, each holding
- * its own `carbon-plugin.toml` — and return manifests keyed by plugin name.
+ * Walk both halves of `<projectRoot>/carbon/` — `own/<name>/` (a plugin
+ * whose Zig source this app owns) and `installed/<name>/` (a
+ * fetched-or-built artifact) — and return manifests keyed by plugin name.
  * This is the discovery root every real app actually exercises:
- * `carbon.toml [plugins]` grants a name, and `plugins/<that name>/carbon-
- * plugin.toml` is where its JS exports live, whether that directory holds
- * a vendored plugin's own Zig source or just the prebuilt artifact `carbon
- * plugin install`/`add` copied in (InstallPluginUseCase writes both shapes
- * into the same per-plugin directory now — see its own comment on why).
+ * `carbon.toml [plugins]` grants a name, and `carbon/{own,installed}/<that
+ * name>/carbon-plugin.toml` is where its JS exports live.
+ *
+ * `own` wins on a name collision: source a developer is actively editing
+ * should shadow whatever `installed/` currently holds for the same plugin
+ * (SyncLocalPluginsUseCase rebuilds installed/ from own/ on every `carbon
+ * dev`/`run` anyway — this only matters for the brief window before that
+ * has run, or if the two have drifted).
  *
  * @param {string} projectRoot Absolute path to the app (carbon.toml's directory).
  * @returns {Map<string, ParsedManifest>}
  */
 export function discoverLocalManifests(projectRoot) {
   if (!projectRoot) return new Map();
-  return scanPluginDirs(join(projectRoot, "plugins"));
+  const carbonDir = join(projectRoot, "carbon");
+  const fromInstalled = scanPluginDirs(join(carbonDir, "installed"));
+  const fromOwn = scanPluginDirs(join(carbonDir, "own"));
+  for (const [name, m] of fromOwn) fromInstalled.set(name, m);
+  return fromInstalled;
 }
 
 /**

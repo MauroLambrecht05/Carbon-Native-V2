@@ -2,7 +2,7 @@
 // backing the `global_shortcut_*` ABI trampolines in abi/host_exports.rs
 // (ABI 1.4). Cross-platform (Windows/macOS/Linux-X11) rather than the
 // hand-rolled Win32-only RegisterHotKey approach the earlier
-// `labs/examples/pulse/plugins/carbon-hotkey` prototype used — this backs
+// `labs/examples/pulse/carbon/own/carbon-hotkey` prototype used — this backs
 // a real `products/carbon-sdk/global-shortcuts` plugin, so it needs to
 // accept an arbitrary, runtime-parsed accelerator string ("Ctrl+Alt+P"),
 // not one hotkey compiled in.

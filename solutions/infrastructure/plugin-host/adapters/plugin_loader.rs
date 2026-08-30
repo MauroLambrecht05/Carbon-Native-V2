@@ -11,7 +11,7 @@
 //
 //   carbon.toml [plugins]   →  PluginEntry
 //        ↓
-//   resolve path             →  <project_dir>/plugins/<name>.dll  (or override)
+//   resolve path             →  <project_dir>/carbon/installed/<name>/<name>.dll  (or override)
 //        ↓
 //   SIGNATURE + REVOCATION   →  Ed25519-verify <path>.sig against Carbon's
 //                                hardcoded public key, then check the artifact's
@@ -587,7 +587,7 @@ fn optional_sym<F: Copy>(library: &Library, name: &[u8]) -> Option<F> {
 
 /// Resolve `[plugins].<name> = <entry>` to an absolute filesystem path.
 ///
-///   Bool(true)             → <project_dir>/plugins/<name>.<DLL_EXT>
+///   Bool(true)             → <project_dir>/carbon/installed/<name>/<name>.<DLL_EXT>
 ///   Path("relative.dll")   → <project_dir>/relative.dll
 ///   Path("C:/abs/x.dll")   → C:/abs/x.dll  (absolute paths pass through)
 ///   Full { path: Some, .. }→ same as Path(...)
@@ -617,7 +617,14 @@ fn resolve_plugin_path(name: &str, entry: &PluginEntry, project_dir: &Path) -> R
     } else {
         &["so"]
     };
-    let dir = project_dir.join("plugins");
+    // carbon/installed/<name>/ — one subdirectory per plugin (see
+    // InstallPluginUseCase.ts), the canonical location for a BUILT,
+    // ready-to-load artifact regardless of whether its source was fetched
+    // (carbon plugin add) or vendored (carbon/own/, auto-built and
+    // installed here by SyncLocalPluginsUseCase before the runtime ever
+    // gets this far) — this fallback never needs to look in carbon/own/
+    // itself for that reason.
+    let dir = project_dir.join("carbon").join("installed");
     for ext in exts {
         // Plugin authors often use hyphens in names (`carbon-audio`) but a Zig
         // shared library keeps the name it was given in build.zig, which may
@@ -627,18 +634,19 @@ fn resolve_plugin_path(name: &str, entry: &PluginEntry, project_dir: &Path) -> R
             name.replace('-', "_"),
             name.replace('_', "-"),
         ] {
-            let p = dir.join(format!("{variant}.{ext}"));
+            let plugin_dir = dir.join(&variant);
+            let p = plugin_dir.join(format!("{variant}.{ext}"));
             if p.exists() {
                 return Ok(p);
             }
-            let p = dir.join(format!("lib{variant}.{ext}"));
+            let p = plugin_dir.join(format!("lib{variant}.{ext}"));
             if p.exists() {
                 return Ok(p);
             }
         }
     }
     Err(anyhow!(
-        "could not auto-resolve plugin `{name}` — looked for {:?} in {}",
+        "could not auto-resolve plugin `{name}` — looked for {:?} under {}",
         exts,
         dir.display()
     ))

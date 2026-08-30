@@ -421,12 +421,12 @@ describe("installing a plugin", () => {
     });
 
     expect(result.host).toBe(`${ROOT}/app`);
-    expect(workspace.exists(`${ROOT}/app/plugins/my-thing/${lib}`)).toBe(true);
-    expect(result.declaredPath).toBe(`./plugins/my-thing/${lib}`);
+    expect(workspace.exists(`${ROOT}/app/carbon/installed/my-thing/${lib}`)).toBe(true);
+    expect(result.declaredPath).toBe(`./carbon/installed/my-thing/${lib}`);
 
     const toml = workspace.readFile(`${ROOT}/app/carbon.toml`);
     expect(readPluginEntries(toml)).toEqual([
-      { name: "my-thing", path: `./plugins/my-thing/${lib}` },
+      { name: "my-thing", path: `./carbon/installed/my-thing/${lib}` },
     ]);
     // The app section survives the edit.
     expect(toml).toContain(`name = "demo"`);
@@ -451,13 +451,13 @@ describe("installing a plugin", () => {
     workspace.put(`${ROOT}/app/my-thing/zig-out/bin/${lib}`, "OLD");
 
     useCase.execute({ directory: `${ROOT}/app/my-thing`, from: `${ROOT}/app/my-thing` });
-    expect(workspace.readFile(`${ROOT}/app/plugins/my-thing/${lib}`)).toBe("ELF");
+    expect(workspace.readFile(`${ROOT}/app/carbon/installed/my-thing/${lib}`)).toBe("ELF");
   });
 
   test("a windows build, which lands in zig-out/bin, still installs", () => {
     const { workspace, useCase, lib } = built({ where: "bin" });
     useCase.execute({ directory: `${ROOT}/app/my-thing`, from: `${ROOT}/app/my-thing` });
-    expect(workspace.exists(`${ROOT}/app/plugins/my-thing/${lib}`)).toBe(true);
+    expect(workspace.exists(`${ROOT}/app/carbon/installed/my-thing/${lib}`)).toBe(true);
   });
 
   test("without a manifest, the name falls back to the directory", () => {
@@ -498,13 +498,13 @@ describe("installing a plugin", () => {
 });
 
 describe("syncing local plugins", () => {
-  /** A host app with one plugin's SOURCE (not yet built) under plugins/<name>/. */
+  /** A host app with one plugin's SOURCE (not yet built) under carbon/own/<name>/. */
   function withLocalSource(name = "my-thing") {
     const workspace = new MemoryWorkspace();
     workspace.put(`${ROOT}/app/carbon.toml`, `[app]\nname = "demo"\n`);
-    workspace.put(`${ROOT}/app/plugins/${name}/build.zig`);
+    workspace.put(`${ROOT}/app/carbon/own/${name}/build.zig`);
     workspace.put(
-      `${ROOT}/app/plugins/${name}/carbon-plugin.toml`,
+      `${ROOT}/app/carbon/own/${name}/carbon-plugin.toml`,
       `name = "${name}"\nlanguage = "zig"\n`,
     );
     const runner = new FakeProcessRunner();
@@ -513,27 +513,29 @@ describe("syncing local plugins", () => {
     // InstallPluginUseCase (run right after, by SyncLocalPluginsUseCase) has
     // something to find.
     const lib = PluginName.from(name).libraryFilename();
-    workspace.put(`${ROOT}/app/plugins/${name}/zig-out/lib/${lib}`, "ELF");
+    workspace.put(`${ROOT}/app/carbon/own/${name}/zig-out/lib/${lib}`, "ELF");
 
     const build = new BuildPluginUseCase(workspace, runner, resolveBareCommand);
     const install = new InstallPluginUseCase(workspace);
     return { workspace, runner, lib, useCase: new SyncLocalPluginsUseCase(workspace, build, install) };
   }
 
-  test("builds and installs a plugin found under plugins/<name>/", async () => {
+  test("builds and installs a plugin found under carbon/own/<name>/", async () => {
     const { workspace, runner, lib, useCase } = withLocalSource();
 
     const result = await useCase.execute(`${ROOT}/app`);
 
-    expect(result.synced).toEqual([{ name: "my-thing", directory: `${ROOT}/app/plugins/my-thing` }]);
+    expect(result.synced).toEqual([
+      { name: "my-thing", directory: `${ROOT}/app/carbon/own/my-thing` },
+    ]);
     // Debug by default (no `release` option) — this runs on every `carbon
     // dev` rebuild, including every hot-reload, so wall-clock compile time
     // matters more than the plugin binary's own runtime speed. A ReleaseSafe
     // rebuild on every keystroke was the original, uncaught version of this.
     expect(runner.calls[0].args).toEqual(["build"]);
-    expect(workspace.exists(`${ROOT}/app/plugins/my-thing/${lib}`)).toBe(true);
+    expect(workspace.exists(`${ROOT}/app/carbon/installed/my-thing/${lib}`)).toBe(true);
     expect(readPluginEntries(workspace.readFile(`${ROOT}/app/carbon.toml`))).toEqual([
-      { name: "my-thing", path: `./plugins/my-thing/${lib}` },
+      { name: "my-thing", path: `./carbon/installed/my-thing/${lib}` },
     ]);
   });
 
@@ -549,9 +551,9 @@ describe("syncing local plugins", () => {
     const workspace = new MemoryWorkspace();
     workspace.put(`${ROOT}/app/carbon.toml`, "");
     for (const name of ["one", "two"]) {
-      workspace.put(`${ROOT}/app/plugins/${name}/build.zig`);
+      workspace.put(`${ROOT}/app/carbon/own/${name}/build.zig`);
       const lib = PluginName.from(name).libraryFilename();
-      workspace.put(`${ROOT}/app/plugins/${name}/zig-out/lib/${lib}`, "ELF");
+      workspace.put(`${ROOT}/app/carbon/own/${name}/zig-out/lib/${lib}`, "ELF");
     }
     const build = new BuildPluginUseCase(workspace, new FakeProcessRunner(), resolveBareCommand);
     const install = new InstallPluginUseCase(workspace);
@@ -563,10 +565,10 @@ describe("syncing local plugins", () => {
     expect(result.synced.map((p) => p.name).sort()).toEqual(["one", "two"]);
   });
 
-  test("a plugins/ subdirectory with no language marker is not a plugin, and is skipped", async () => {
+  test("a carbon/own/ subdirectory with no language marker is not a plugin, and is skipped", async () => {
     const workspace = new MemoryWorkspace();
     workspace.put(`${ROOT}/app/carbon.toml`, "");
-    workspace.put(`${ROOT}/app/plugins/README.md`, "not a plugin");
+    workspace.put(`${ROOT}/app/carbon/own/README.md`, "not a plugin");
     const build = new BuildPluginUseCase(workspace, new FakeProcessRunner(), resolveBareCommand);
     const install = new InstallPluginUseCase(workspace);
 
@@ -577,7 +579,7 @@ describe("syncing local plugins", () => {
     expect(result.synced).toEqual([]);
   });
 
-  test("no plugins/ directory at all is not an error", async () => {
+  test("no carbon/own/ directory at all is not an error", async () => {
     const workspace = new MemoryWorkspace();
     workspace.put(`${ROOT}/app/carbon.toml`, "");
     const build = new BuildPluginUseCase(workspace, new FakeProcessRunner(), resolveBareCommand);
@@ -618,14 +620,14 @@ describe("syncing local plugins", () => {
     await useCase.execute(`${ROOT}/app`);
 
     expect(readPluginEntries(workspace.readFile(`${ROOT}/app/carbon.toml`))).toEqual([
-      { name: "my-thing", path: `./plugins/my-thing/${lib}` },
+      { name: "my-thing", path: `./carbon/installed/my-thing/${lib}` },
     ]);
   });
 
   test("a build failure names the plugin and stops before install", async () => {
     const workspace = new MemoryWorkspace();
     workspace.put(`${ROOT}/app/carbon.toml`, "");
-    workspace.put(`${ROOT}/app/plugins/broken/build.zig`);
+    workspace.put(`${ROOT}/app/carbon/own/broken/build.zig`);
     const build = new BuildPluginUseCase(workspace, new FakeProcessRunner(1), resolveBareCommand);
     const install = new InstallPluginUseCase(workspace);
 
@@ -643,9 +645,9 @@ describe("listing and describing", () => {
     const workspace = new MemoryWorkspace();
     workspace.put(
       `${ROOT}/app/carbon.toml`,
-      `[app]\nname = "demo"\n\n[plugins]\naudio = "./plugins/libaudio.so"\ngone = "./plugins/libgone.so"\n`,
+      `[app]\nname = "demo"\n\n[plugins]\naudio = "./carbon/installed/audio/libaudio.so"\ngone = "./carbon/installed/gone/libgone.so"\n`,
     );
-    workspace.put(`${ROOT}/app/plugins/libaudio.so`, "ELF");
+    workspace.put(`${ROOT}/app/carbon/installed/audio/libaudio.so`, "ELF");
     return { workspace, useCase: new InspectPluginsUseCase(workspace) };
   }
 
@@ -674,7 +676,7 @@ describe("listing and describing", () => {
 
   test("describe prefers the installed copy", () => {
     const { workspace, useCase } = app();
-    workspace.put(`${ROOT}/app/plugins/carbon-plugin.toml`, `name = "audio"\n`);
+    workspace.put(`${ROOT}/app/carbon/installed/audio/carbon-plugin.toml`, `name = "audio"\n`);
 
     const details = useCase.describe("audio", `${ROOT}/app`);
     expect(details.origin).toBe("installed");

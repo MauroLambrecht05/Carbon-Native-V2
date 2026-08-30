@@ -197,7 +197,7 @@ impl PluginsSection {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum PluginEntry {
-    /// `name = true` — auto-resolve `<project_dir>/plugins/<name>.<dll|so|dylib>`.
+    /// `name = true` — auto-resolve `<project_dir>/carbon/installed/<name>/<name>.<dll|so|dylib>`.
     /// `name = false` — disabled, ignored entirely.
     Bool(bool),
     /// `name = "path/to/plugin.dll"` — explicit path resolved relative to

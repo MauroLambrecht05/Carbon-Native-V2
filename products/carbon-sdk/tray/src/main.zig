@@ -20,7 +20,7 @@
 // works identically everywhere).
 //
 // Event delivery reuses the push_event + JS-shim pattern from
-// labs/examples/pulse/plugins/carbon-hotkey, generalized the same way
+// labs/examples/pulse/carbon/own/carbon-hotkey, generalized the same way
 // global-shortcuts' shim is (adds `carbon.off`).
 //
 //   zig build              build it

@@ -1,13 +1,33 @@
 // Auto-build + install every plugin whose SOURCE lives inside the app's own
-// plugins/ directory, so `carbon run`/`carbon dev` need no separate
+// carbon/own/ directory, so `carbon run`/`carbon dev` need no separate
 // `carbon plugin install` step — the plugin is part of the app project, and
 // building the app builds it.
 //
-// Convention, not configuration: any `<projectDir>/plugins/<name>/` holding
-// a language marker file (build.zig for Zig) is a plugin the app owns the
-// source of, distinct from a plugin some OTHER registered path merely points
-// at. A plain `<projectDir>/plugins/<name>.dll` some other tool dropped in is
-// untouched — it has no directory of that name to match.
+// ── carbon/ — an app's native development area ─────────────────────────────
+// Not a flat dumping ground for compiled plugin output — a real place to
+// develop plugins in, split the way a dependency is distinct from your own
+// code in any package manager:
+//
+//   carbon/own/<name>/       a plugin whose SOURCE this app owns: build.zig,
+//                            src/, carbon-plugin.toml — a full, editable
+//                            plugin project, scaffolded here by `carbon
+//                            plugin new` when run inside an app. This use
+//                            case builds and installs every one of these on
+//                            every `carbon dev`/`carbon run`.
+//   carbon/installed/<name>/ a fetched-or-built ARTIFACT: <name>.dll,
+//                            <name>.dll.sig, carbon-plugin.toml — what
+//                            `carbon plugin add` (standard plugins) writes,
+//                            and where THIS use case installs the result of
+//                            building a carbon/own/ plugin too. Never
+//                            hand-edited; always safe to delete and
+//                            regenerate from carbon/own/ + `carbon.toml
+//                            [plugins]`.
+//
+// Convention, not configuration: any `<projectDir>/carbon/own/<name>/`
+// holding a language marker file (build.zig for Zig) is a plugin the app
+// owns the source of. A plain `<projectDir>/carbon/installed/<name>/` some
+// other tool populated is untouched here — it has no source to build, only
+// carbon/own/ does.
 
 import { join } from "node:path";
 import type { Logger } from "@carbon/logging";
@@ -48,18 +68,18 @@ export class SyncLocalPluginsUseCase {
     options?: { readonly release?: boolean; readonly logger?: Logger },
   ): Promise<SyncLocalPluginsResult> {
     const release = options?.release ?? false;
-    const pluginsDir = join(projectDir, "plugins");
+    const ownDir = join(projectDir, "carbon", "own");
     const synced: SyncedLocalPlugin[] = [];
 
-    for (const entry of this.workspace.listDirectories(pluginsDir)) {
-      const directory = join(pluginsDir, entry);
+    for (const entry of this.workspace.listDirectories(ownDir)) {
+      const directory = join(ownDir, entry);
       const isSource = LANGUAGES.some((l) => this.workspace.exists(join(directory, l.marker)));
       if (!isSource) continue;
 
       const result = await this.build.execute({ directory, release, logger: options?.logger });
       if (result.exitCode !== 0) {
         throw new Error(
-          `local plugin "${entry}" (${join("plugins", entry)}) failed to build — ` +
+          `local plugin "${entry}" (${join("carbon", "own", entry)}) failed to build — ` +
             `exit code ${result.exitCode}. See the compiler output above.`,
         );
       }
