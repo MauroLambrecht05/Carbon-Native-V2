@@ -101,8 +101,10 @@ export fn carbon_plugin_after_reload(app_raw: *sdk.RawApp) callconv(.c) void {
 }
 
 fn installGlobals(app: sdk.CarbonApp) void {
-    _ = app.setGlobalFunction("register", jsRegister);
-    _ = app.setGlobalFunction("unregister", jsUnregister);
+    // Prefixed, not bare "register"/"unregister" — see carbon-plugin.toml's
+    // note on the collision this avoids with the deep-link plugin.
+    _ = app.setGlobalFunction("globalShortcutRegister", jsRegister);
+    _ = app.setGlobalFunction("globalShortcutUnregister", jsUnregister);
 }
 
 fn writeResult(buf: [*c]u8, cap: usize, json: []const u8) void {

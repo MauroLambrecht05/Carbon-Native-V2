@@ -79,6 +79,14 @@ global-hotkey = "0.8"
 # incompatible types for TrayIconBuilder::menu().
 tray-icon = "0.24"
 image = { version = "0.25", default-features = false, features = ["png"] }
+# Deep-linking (Phase 4) — self-registers a custom URL scheme at runtime
+# (Windows: user-scope registry; Linux: ~/.local/share/applications
+# .desktop + xdg-mime) and forwards a second launch's URL to the first
+# instance over a loopback TCP socket (std::net — no IPC crate needed;
+# see native/deeplink.rs for why this isn't a named-pipe/Unix-socket
+# crate instead).
+[target.'cfg(windows)'.dependencies]
+winreg = "0.56"
 
 # An integration test under tests/ links the crate from outside, so it sees only
 # the public API plus what is declared here — the [dependencies] above are not

@@ -46,7 +46,7 @@ extern "C" {
  * ⇒ register but skip features the runtime doesn't advertise.
  */
 #define CARBON_PLUGIN_ABI_VERSION_MAJOR 1u
-#define CARBON_PLUGIN_ABI_VERSION_MINOR 5u
+#define CARBON_PLUGIN_ABI_VERSION_MINOR 6u
 
 /* --------------------------------------------------------------------------
  * Status codes returned by host-provided helpers
@@ -335,6 +335,33 @@ struct CarbonApp {
      * PNG or the OS refused to create the tray icon.
      */
     int32_t (*tray_setup)(CarbonApp* app, const char* icon_path, const char* tooltip, const char* menu_items_json);
+
+    /* --- ABI 1.6: deep linking (custom URL schemes) ----------------------
+     * Self-registers this app for `<scheme>://...` URLs and, if this
+     * launch's argv carried one, either forwards it to an already-running
+     * instance (and the calling process exits — do not assume this
+     * function returns) or delivers it via
+     * push_event("deeplink.url", "{\"url\":\"<scheme>://...\"}") once
+     * this instance becomes the listener. Idempotent — safe to call from
+     * both carbon_plugin_register and carbon_plugin_after_reload.
+     *
+     * macOS: NOT runtime-registerable — CFBundleURLTypes must be declared
+     * in Info.plist at package time instead. Returns CARBON_ERR_GENERIC
+     * there.
+     *
+     * Single-instance detection uses a loopback TCP listener, not a
+     * platform IPC primitive with real access control — see the note on
+     * this in products/carbon-sdk/deep-link's native implementation. A
+     * second launch's window may flash briefly before this call detects
+     * the first instance and exits — no lifecycle hook exists early
+     * enough for a plugin to prevent that entirely (window creation
+     * happens before any plugin loads).
+     *
+     * Returns CARBON_OK on success, CARBON_ERR_INVALID for a null
+     * `scheme`, CARBON_ERR_GENERIC on registration failure (including
+     * "not supported on this platform").
+     */
+    int32_t (*deeplink_register)(CarbonApp* app, const char* scheme);
 };
 
 /* --------------------------------------------------------------------------

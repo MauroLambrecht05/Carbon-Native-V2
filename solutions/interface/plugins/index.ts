@@ -11,3 +11,4 @@ export * from "./notification.ts";
 export * from "./keychain.ts";
 export * from "./global-shortcuts.ts";
 export * from "./tray.ts";
+export * from "./deep-link.ts";

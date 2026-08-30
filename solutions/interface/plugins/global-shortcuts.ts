@@ -28,7 +28,7 @@ export interface UseGlobalShortcutResult {
 }
 
 function pluginReady(): boolean {
-  return typeof (globalThis as unknown as { register?: unknown }).register === "function";
+  return typeof (globalThis as unknown as { globalShortcutRegister?: unknown }).globalShortcutRegister === "function";
 }
 
 export function useGlobalShortcut(accelerator: string, callback: () => void): UseGlobalShortcutResult {

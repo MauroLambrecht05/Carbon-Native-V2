@@ -11,9 +11,49 @@ import { CarbonConfig } from "@carbon/contracts/app";
  * exist. `CFBundleExecutable` must match the binary's name inside
  * `Contents/MacOS/` exactly, or macOS refuses to launch the bundle.
  */
+/**
+ * Deep-linking's macOS half: unlike Windows (registry) and Linux (a
+ * .desktop file), macOS cannot register a URL scheme at runtime — it MUST
+ * be declared here, in the bundle's Info.plist, at package time. See
+ * solutions/infrastructure/plugin-host/native/deeplink.rs for the other
+ * two platforms' runtime self-registration and why macOS is different.
+ *
+ * Reads the scheme from `[plugins.deep-link] config = { scheme = "..." }`
+ * in carbon.toml — via `config.raw`, not a typed `CarbonConfig` field,
+ * following the same precedent the rest of `[plugins]` already uses
+ * (schema-typed but not promoted into CarbonConfig's TS interface; see
+ * PluginEntryFull's `config: Option<toml::Value>` on the Rust side for the
+ * free-form shape this reads).  Returns `undefined` if not declared —
+ * apps that don't use the deep-link plugin get no CFBundleURLTypes block.
+ */
+function readDeepLinkScheme(config: CarbonConfig): string | undefined {
+  const plugins = (config.raw as { plugins?: Record<string, unknown> } | undefined)?.plugins;
+  const entry = plugins?.["deep-link"];
+  if (!entry || typeof entry !== "object") return undefined;
+  const pluginConfig = (entry as { config?: unknown }).config;
+  if (!pluginConfig || typeof pluginConfig !== "object") return undefined;
+  const scheme = (pluginConfig as { scheme?: unknown }).scheme;
+  return typeof scheme === "string" && scheme.length > 0 ? scheme : undefined;
+}
+
 export function generateInfoPlist(config: CarbonConfig, executableName: string): string {
   const appName = config.app.display_name || config.app.name;
   const identifier = `com.carbon.${config.app.name}`;
+  const scheme = readDeepLinkScheme(config);
+  const urlTypesBlock = scheme
+    ? `	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>${identifier}</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>${scheme}</string>
+			</array>
+		</dict>
+	</array>
+`
+    : "";
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -36,7 +76,7 @@ export function generateInfoPlist(config: CarbonConfig, executableName: string):
 	<string>6.0</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
-</dict>
+${urlTypesBlock}</dict>
 </plist>
 `;
 }

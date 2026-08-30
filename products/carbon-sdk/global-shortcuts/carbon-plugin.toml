@@ -28,8 +28,19 @@ modules = ["carbon:global-shortcuts"]
 # `export const` snapshots — see fonts' carbon-plugin.toml for why
 # (register runs after the bundle evaluates, so an eager snapshot would
 # permanently capture `undefined`).
+#
+# `globals`: the installed globalThis property names are prefixed
+# (globalShortcutRegister/Unregister), NOT the bare "register"/
+# "unregister" the app-facing export names use — bare names collided with
+# the deep-link plugin's own "register" export when both are loaded in
+# the same app (whichever plugin's carbon_plugin_register ran last would
+# silently overwrite the other's global). The export name apps import
+# stays "register"/"unregister"; only the underlying global differs.
 [exports."carbon:global-shortcuts"]
 names = ["register", "unregister"]
+[exports."carbon:global-shortcuts".globals]
+register = "globalShortcutRegister"
+unregister = "globalShortcutUnregister"
 
 [abi]
 major = 1

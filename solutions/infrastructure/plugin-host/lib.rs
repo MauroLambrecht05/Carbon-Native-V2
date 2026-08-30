@@ -64,3 +64,5 @@ pub mod keychain;
 pub mod global_shortcuts;
 #[path = "native/tray.rs"]
 pub mod tray;
+#[path = "native/deeplink.rs"]
+pub mod deeplink;

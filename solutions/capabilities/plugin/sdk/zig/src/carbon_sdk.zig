@@ -296,6 +296,15 @@ pub const CarbonApp = struct {
         const f = self.raw.tray_setup orelse return CARBON_ERR_GENERIC;
         return f(self.raw, icon_path, tooltip, menu_items_json);
     }
+
+    // ── ABI 1.6: deep linking ────────────────────────────────────────────
+
+    /// May not return at all — a forwarded launch exits the process
+    /// directly (see carbon_plugin.h's note on this field).
+    pub fn deeplinkRegister(self: CarbonApp, scheme: [*:0]const u8) i32 {
+        const f = self.raw.deeplink_register orelse return CARBON_ERR_GENERIC;
+        return f(self.raw, scheme);
+    }
 };
 
 /// Compose a manifest JSON string at comptime.

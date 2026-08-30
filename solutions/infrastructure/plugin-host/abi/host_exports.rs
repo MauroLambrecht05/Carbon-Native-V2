@@ -49,12 +49,12 @@ pub const CARBON_ERR_NO_CTX: i32 = -4;
 pub const CARBON_NOT_FOUND: i32 = -5;
 
 pub const CARBON_PLUGIN_ABI_VERSION_MAJOR: u32 = 1;
-// 5, not 4: ABI 1.5 appended tray_setup. (1.4 appended
-// global_shortcut_register/unregister; 1.3 appended clipboard_*/dialog_*/
-// notification_send/keychain_*; 1.2 appended load_font_path/
-// load_font_bytes; 1.1 appended set_global_string/set_global_number/
-// set_global_function/eval before that.)
-pub const CARBON_PLUGIN_ABI_VERSION_MINOR: u32 = 5;
+// 6, not 5: ABI 1.6 appended deeplink_register. (1.5 appended tray_setup;
+// 1.4 appended global_shortcut_register/unregister; 1.3 appended
+// clipboard_*/dialog_*/notification_send/keychain_*; 1.2 appended
+// load_font_path/load_font_bytes; 1.1 appended set_global_string/
+// set_global_number/set_global_function/eval before that.)
+pub const CARBON_PLUGIN_ABI_VERSION_MINOR: u32 = 6;
 
 // ── CarbonJSContext — opaque to plugins ───────────────────────────────────
 //
@@ -249,6 +249,10 @@ pub struct HostCarbonApp {
             menu_items_json: *const c_char,
         ) -> i32,
     >,
+
+    // ABI 1.6. Deep linking — see the matching note in carbon_plugin.h's
+    // APPEND-ONLY ZONE.
+    pub deeplink_register: Option<unsafe extern "C" fn(app: *mut HostCarbonApp, scheme: *const c_char) -> i32>,
 }
 
 /// Owns the heap allocation backing the strings inside `HostCarbonApp` plus
@@ -743,6 +747,21 @@ unsafe extern "C" fn host_tray_setup(
     }
 }
 
+// ── Deep linking (ABI 1.6) ──────────────────────────────────────────────
+
+unsafe extern "C" fn host_deeplink_register(app: *mut HostCarbonApp, scheme: *const c_char) -> i32 {
+    let Some(scheme) = cstr_arg(scheme) else { return CARBON_ERR_INVALID };
+    let app_name = if app.is_null() {
+        ""
+    } else {
+        cstr_arg((*app).app_name).unwrap_or("")
+    };
+    match crate::deeplink::register(app_name, scheme) {
+        Ok(()) => CARBON_OK,
+        Err(_) => CARBON_ERR_GENERIC,
+    }
+}
+
 // ── Trampolines stamped into HostCarbonApp ────────────────────────────────
 
 /// `app->push_event(name, payload)` — pushes a UserEvent::PluginEvent
@@ -885,6 +904,7 @@ impl HostCarbonAppStorage {
                 global_shortcut_register: Some(host_global_shortcut_register),
                 global_shortcut_unregister: Some(host_global_shortcut_unregister),
                 tray_setup: Some(host_tray_setup),
+                deeplink_register: Some(host_deeplink_register),
             },
             _app_name: app_name_c,
             _app_version: app_version_c,

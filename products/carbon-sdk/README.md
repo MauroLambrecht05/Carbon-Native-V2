@@ -45,6 +45,7 @@ for the existing plan that "publish standard plugins" would plug into.
 | [`keychain`](./keychain) | OS credential storage (Credential Manager / Keychain Services / Secret Service), keyed by (service, account). |
 | [`global-shortcuts`](./global-shortcuts) | System-wide keyboard shortcuts that fire even when the app is unfocused or minimized (Windows/macOS/Linux-X11). |
 | [`tray`](./tray) | A system tray icon with an optional context menu (Windows/macOS/Linux-gtk). |
+| [`deep-link`](./deep-link) | Custom URL scheme handling (`myapp://...`). Runtime self-registration on Windows/Linux; macOS needs a packaging-time Info.plist declaration instead (see the dmg generator). |
 
 Clipboard/dialog/notification/keychain used to be always-on ambient globals
 in the core runtime (`@carbon/runtime-bindings`) — moved here so they follow

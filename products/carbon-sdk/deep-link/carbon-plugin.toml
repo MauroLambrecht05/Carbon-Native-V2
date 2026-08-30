@@ -1,0 +1,45 @@
+# deep-link — what this plugin tells the toolchain about itself.
+#
+# `carbon plugin add deep-link` (and `carbon plugin install`/`list`) read
+# this. The RUNTIME reads the manifest returned by `carbon_plugin_manifest()`
+# in src/main.zig instead, because by then this file is not shipped — so the
+# two must agree, and `carbon plugin check` is what verifies they do.
+#
+# name = "deep-link": `carbon.toml [plugins]`'s grant key must match the
+# plugin name the JS import resolver derives from the specifier
+# (`carbon:deep-link` -> "deep-link", stripping the "carbon:" prefix).
+name = "deep-link"
+version = "0.1.0"
+language = "zig"
+
+# Extension points this plugin implements. Every id must exist in
+# solutions/contracts/plugin/registry/extension-points.zig — run
+# `carbon ext list` to see them, or `carbon plugin check` to verify these.
+#
+# Must stay above [abi]: see carbon-hotkey's carbon-plugin.toml for why real
+# TOML makes anything after a [section] header belong to that section.
+extension-points = ["lifecycle.register", "lifecycle.after_reload"]
+modules = ["carbon:deep-link"]
+
+# What `carbon:deep-link` exports to app code — read by @carbon/vite/imports
+# at BUILD time. LAZY function wrapper, not an eager `export const`
+# snapshot — see fonts' carbon-plugin.toml for why (register runs after the
+# bundle evaluates, so an eager snapshot would permanently capture
+# `undefined`).
+#
+# `globals`: installs as "deepLinkRegister", not the bare "register" the
+# export name uses — "register" is generic enough that another plugin
+# (global-shortcuts) already needed the same treatment; see its
+# carbon-plugin.toml for the collision this avoids.
+[exports."carbon:deep-link"]
+names = ["register"]
+[exports."carbon:deep-link".globals]
+register = "deepLinkRegister"
+
+[abi]
+major = 1
+minor = 6
+
+[capabilities]
+required = []
+optional = []
