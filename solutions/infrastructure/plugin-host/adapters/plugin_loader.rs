@@ -220,12 +220,14 @@ impl PluginRegistry {
             }
             match load_one(name, entry, project_dir, &mut exclusive_claims) {
                 Ok(p) => {
-                    let points: Vec<&str> = p.points().map(PointId::as_str).collect();
-                    eprintln!(
-                        "[carbon-plugin] loaded {} — implements [{}]",
-                        p.name,
-                        points.join(", ")
-                    );
+                    if std::env::var_os("CARBON_MINI_DEBUG").is_some() {
+                        let points: Vec<&str> = p.points().map(PointId::as_str).collect();
+                        eprintln!(
+                            "[carbon-plugin] loaded {} — implements [{}]",
+                            p.name,
+                            points.join(", ")
+                        );
+                    }
                     registry.plugins.push(p);
                 }
                 Err(e) => {
@@ -368,7 +370,10 @@ fn load_one(
     exclusive_claims: &mut BTreeMap<PointId, String>,
 ) -> Result<LoadedPlugin> {
     let path = resolve_plugin_path(name, entry, project_dir)?;
-    eprintln!("[carbon-plugin] loading `{name}` from {}", path.display());
+    let debug = std::env::var_os("CARBON_MINI_DEBUG").is_some();
+    if debug {
+        eprintln!("[carbon-plugin] loading `{name}` from {}", path.display());
+    }
 
     // 0. TRUST GATE — before anything opens this file.
     //
@@ -402,9 +407,15 @@ fn load_one(
         match carbon_plugin_trust::verify_artifact(&path, &CARBON_PLUGIN_PUBLIC_KEY) {
             Ok(content_hash) => {
                 carbon_plugin_trust::ensure_not_revoked(&content_hash)?;
-                eprintln!("[carbon-plugin] `{name}` signature OK — {content_hash}");
+                if debug {
+                    eprintln!("[carbon-plugin] `{name}` signature OK — {content_hash}");
+                }
             }
             Err(e) => {
+                // Never gated behind CARBON_MINI_DEBUG — an unsigned plugin
+                // loading is a real security-relevant fact, not routine
+                // startup noise, and this must stay loud however quiet
+                // everything else gets.
                 eprintln!(
                     "[carbon-plugin] WARNING: `{name}` has no valid Carbon signature ({e}) — \
                      loading anyway because CARBON_ALLOW_UNSIGNED_PLUGINS is set. This must \
@@ -415,7 +426,9 @@ fn load_one(
     } else {
         let content_hash = carbon_plugin_trust::verify_artifact(&path, &CARBON_PLUGIN_PUBLIC_KEY)?;
         carbon_plugin_trust::ensure_not_revoked(&content_hash)?;
-        eprintln!("[carbon-plugin] `{name}` signature OK — {content_hash}");
+        if debug {
+            eprintln!("[carbon-plugin] `{name}` signature OK — {content_hash}");
+        }
     }
 
     // SAFETY: libloading::Library::new is unsafe because loading arbitrary
