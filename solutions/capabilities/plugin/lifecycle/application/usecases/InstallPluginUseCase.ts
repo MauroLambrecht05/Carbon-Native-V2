@@ -102,6 +102,18 @@ export class InstallPluginUseCase {
     const installedAt = join(pluginsDir, filename);
     this.workspace.copyFile(artifact.path, installedAt);
 
+    // A signed artifact (see PluginSigner.ts — carbon-sdk plugins are
+    // signed as part of `carbon plugin add`) has a detached `<name>.sig`
+    // beside it; carry it along, or the loader's signature check has
+    // nothing to verify against once installed and refuses the plugin.
+    // Optional: a locally-built, unsigned third-party plugin (`carbon
+    // plugin install`) has no .sig at all, which is fine outside `carbon
+    // dev` — that's the documented, unconditional-refusal case, not a bug.
+    const sigSrc = `${artifact.path}.sig`;
+    if (this.workspace.exists(sigSrc)) {
+      this.workspace.copyFile(sigSrc, `${installedAt}.sig`);
+    }
+
     // Copy the manifest alongside the artifact, flat as `<slug>.carbon-
     // plugin.toml` — NOT nested in a `plugins/<name>/` subdirectory the way
     // a local-source plugin's own manifest lives. Without this, a plugin

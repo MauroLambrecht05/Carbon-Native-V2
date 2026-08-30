@@ -91,6 +91,7 @@ export {
 
 export { NodePluginWorkspace } from "./infrastructure/NodePluginWorkspace.ts";
 export { SdkTemplateSource } from "./infrastructure/SdkTemplateSource.ts";
+export { signStandardPluginArtifact, MissingSigningKeyError } from "./infrastructure/PluginSigner.ts";
 
 import { nodeProcessRunner } from "@carbon/process";
 import { BuildPluginUseCase } from "./application/usecases/BuildPluginUseCase.ts";

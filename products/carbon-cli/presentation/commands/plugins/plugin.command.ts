@@ -17,7 +17,13 @@ import {
   type CommandMeta,
   type ExitCode,
 } from "@carbon/cli";
-import { forwardSlashes, PluginError, pluginUseCases } from "@carbon/lifecycle";
+import {
+  forwardSlashes,
+  MissingSigningKeyError,
+  PluginError,
+  pluginUseCases,
+  signStandardPluginArtifact,
+} from "@carbon/lifecycle";
 import { PRODUCTS_DIR } from "@carbon/workspace";
 import { existsSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -61,7 +67,7 @@ async function reporting(
   try {
     return await body();
   } catch (e) {
-    if (e instanceof PluginError) {
+    if (e instanceof PluginError || e instanceof MissingSigningKeyError) {
       ctx.io.error(e.message);
       return EXIT_FAILURE;
     }
@@ -203,6 +209,16 @@ class AddPluginCommand extends Command {
       const { build, install } = pluginUseCases(SDK_ROOT);
       const built = await build.execute({ directory, release: true, logger: ctx.io });
       if (built.exitCode !== 0) return built.exitCode;
+
+      // Standard (carbon-sdk) plugins are official Carbon plugins, not a
+      // developer's own third-party build — they get signed with Carbon's
+      // real key here, unconditionally, rather than relying on any
+      // unsigned-plugin bypass. See PluginSigner.ts for the full reasoning
+      // and why a missing key fails loudly instead of silently installing
+      // an unsigned artifact.
+      const artifact = install.locateArtifact(directory);
+      ctx.io.step(`signing ${artifact.name.slug}…`);
+      await signStandardPluginArtifact(artifact.path, ctx.io);
 
       const result = install.execute({ directory, from: targetApp });
       ctx.io.success(
