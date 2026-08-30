@@ -1,54 +1,25 @@
-# global-shortcuts — what this plugin tells the toolchain about itself.
-#
-# `carbon plugin add global-shortcuts` (and `carbon plugin install`/`list`)
-# read this. The RUNTIME reads the manifest returned by
-# `carbon_plugin_manifest()` in src/main.zig instead, because by then this
-# file is not shipped — so the two must agree, and `carbon plugin check` is
-# what verifies they do.
-#
-# name = "global-shortcuts": `carbon.toml [plugins]`'s grant key must match
-# the plugin name the JS import resolver derives from the specifier
-# (`carbon:global-shortcuts` -> "global-shortcuts", stripping the
-# "carbon:" prefix).
+# GENERATED — do not hand-edit. Source of truth is the `CFG`
+# config in src/main.zig; run `zig build gen-manifest` after
+# changing it. See manifest.zig's `toToml` doc comment for why
+# this file exists at all alongside that config.
 name = "global-shortcuts"
 version = "0.1.0"
 language = "zig"
 
-# Extension points this plugin implements. Every id must exist in
-# solutions/contracts/plugin/registry/extension-points.zig — run
-# `carbon ext list` to see them, or `carbon plugin check` to verify these.
-#
-# Must stay above [abi]: see carbon-hotkey's carbon-plugin.toml for why real
-# TOML makes anything after a [section] header belong to that section.
-extension-points = ["lifecycle.register", "lifecycle.after_reload"]
+extension-points = ["lifecycle.register","lifecycle.after_reload"]
 modules = ["carbon:global-shortcuts"]
 
-# What `carbon:global-shortcuts` exports to app code — read by
-# @carbon/vite/imports at BUILD time. LAZY function wrappers, not eager
-# `export const` snapshots — see fonts' carbon-plugin.toml for why
-# (register runs after the bundle evaluates, so an eager snapshot would
-# permanently capture `undefined`).
-#
-# `globals`: the installed globalThis property names are prefixed
-# (globalShortcutRegister/Unregister), NOT the bare "register"/
-# "unregister" the app-facing export names use — bare names collided with
-# the deep-link plugin's own "register" export when both are loaded in
-# the same app (whichever plugin's carbon_plugin_register ran last would
-# silently overwrite the other's global). The export name apps import
-# stays "register"/"unregister"; only the underlying global differs.
 [exports."carbon:global-shortcuts"]
-names = ["register", "unregister"]
+names = ["register","unregister"]
 [exports."carbon:global-shortcuts".globals]
 register = "globalShortcutRegister"
 unregister = "globalShortcutUnregister"
 
+
 [abi]
 major = 1
-minor = 4
+minor = 6
 
-# No capability required: registering a global hotkey observes keystrokes
-# matching this app's own accelerator, nothing more — same reasoning as
-# carbon-hotkey's manifest.
 [capabilities]
 required = []
 optional = []

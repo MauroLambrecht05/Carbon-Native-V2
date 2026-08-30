@@ -23,12 +23,25 @@ const sdk = @import("carbon_sdk");
 
 // ── Manifest ────────────────────────────────────────────────────────────────
 
-const MANIFEST = sdk.manifest.build(.{
+pub const CFG = sdk.manifest.Config{
     .name = "keychain",
     .version = "0.1.0",
     .points = &.{ "lifecycle.register", "lifecycle.after_reload" },
     .modules = &.{"carbon:keychain"},
-});
+    // "remove", not "delete" — delete is a reserved word and can't be a
+    // function declaration name (see @carbon/vite/imports' codegen:
+    // `export function ${name}(...)`). The underlying global this plugin
+    // installs is still literally "delete" (see installGlobals below).
+    .exports = &.{
+        .{ .name = "set" },
+        .{ .name = "get" },
+        .{ .name = "remove", .global = "delete" },
+    },
+    .abi_version_major = sdk.ABI_VERSION_MAJOR,
+    .abi_version_minor = sdk.ABI_VERSION_MINOR,
+};
+
+const MANIFEST = sdk.manifest.build(CFG);
 
 export fn carbon_plugin_manifest() callconv(.c) [*:0]const u8 {
     return MANIFEST;

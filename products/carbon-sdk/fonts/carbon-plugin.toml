@@ -1,48 +1,20 @@
-# fonts — what this plugin tells the toolchain about itself.
-#
-# `carbon plugin add fonts` (and `carbon plugin install`/`list`) read this.
-# The RUNTIME reads the manifest returned by `carbon_plugin_manifest()` in
-# src/main.zig instead, because by then this file is not shipped — so the
-# two must agree, and `carbon plugin check` is what verifies they do.
-#
-# name = "fonts", not "carbon-fonts": `carbon.toml [plugins]`'s grant key
-# must match the plugin name the JS import resolver derives from the
-# specifier (`carbon:fonts` → "fonts", stripping the "carbon:" prefix — see
-# pluginNameOf() in solutions/integrations/bundler/vite/domain/module-
-# graph.js). InstallPluginUseCase writes the [plugins] key from THIS field,
-# so the two have to agree or `import { loadFont } from "carbon:fonts"`
-# fails capability-check as "not declared in carbon.toml [plugins]" even
-# when it plainly is.
+# GENERATED — do not hand-edit. Source of truth is the `CFG`
+# config in src/main.zig; run `zig build gen-manifest` after
+# changing it. See manifest.zig's `toToml` doc comment for why
+# this file exists at all alongside that config.
 name = "fonts"
 version = "0.1.0"
 language = "zig"
 
-# Extension points this plugin implements. Every id must exist in
-# solutions/contracts/plugin/registry/extension-points.zig — run
-# `carbon ext list` to see them, or `carbon plugin check` to verify these.
-#
-# Must stay above [abi]: see carbon-hotkey's carbon-plugin.toml for why real
-# TOML makes anything after a [section] header belong to that section.
-extension-points = ["lifecycle.register", "lifecycle.after_reload"]
+extension-points = ["lifecycle.register","lifecycle.after_reload"]
 modules = ["carbon:fonts"]
 
-# What `carbon:fonts` exports to app code — read by @carbon/vite/imports at
-# BUILD time (see import-manifest.js). Because this comes from a plugin
-# manifest (not the hardcoded BUILTIN_MODULES table), the codegen emits a
-# LAZY function wrapper — `export function loadFont(...args) { return
-# globalThis.loadFont(...args); }` — that reads globalThis fresh on every
-# call, rather than a frozen `export const` snapshot taken at import time.
-# That distinction matters here specifically: this plugin's `loadFont`
-# global is installed by carbon_plugin_register, which the runtime runs
-# AFTER the bundle evaluates, so an eager snapshot would permanently capture
-# `undefined`. `globals` is omitted — the export name already matches the
-# global name 1:1, the default this table falls back to.
 [exports."carbon:fonts"]
 names = ["loadFont"]
 
 [abi]
 major = 1
-minor = 2
+minor = 6
 
 [capabilities]
 required = []

@@ -1,36 +1,20 @@
-# clipboard — what this plugin tells the toolchain about itself.
-#
-# `carbon plugin add clipboard` (and `carbon plugin install`/`list`) read
-# this. The RUNTIME reads the manifest returned by `carbon_plugin_manifest()`
-# in src/main.zig instead, because by then this file is not shipped — so the
-# two must agree, and `carbon plugin check` is what verifies they do.
-#
-# name = "clipboard": `carbon.toml [plugins]`'s grant key must match the
-# plugin name the JS import resolver derives from the specifier
-# (`carbon:clipboard` -> "clipboard", stripping the "carbon:" prefix).
+# GENERATED — do not hand-edit. Source of truth is the `CFG`
+# config in src/main.zig; run `zig build gen-manifest` after
+# changing it. See manifest.zig's `toToml` doc comment for why
+# this file exists at all alongside that config.
 name = "clipboard"
 version = "0.1.0"
 language = "zig"
 
-# Extension points this plugin implements. Every id must exist in
-# solutions/contracts/plugin/registry/extension-points.zig — run
-# `carbon ext list` to see them, or `carbon plugin check` to verify these.
-#
-# Must stay above [abi]: see carbon-hotkey's carbon-plugin.toml for why real
-# TOML makes anything after a [section] header belong to that section.
-extension-points = ["lifecycle.register", "lifecycle.after_reload"]
+extension-points = ["lifecycle.register","lifecycle.after_reload"]
 modules = ["carbon:clipboard"]
 
-# What `carbon:clipboard` exports to app code — read by @carbon/vite/imports
-# at BUILD time. LAZY function wrappers, not eager `export const` snapshots
-# — see fonts' carbon-plugin.toml for why (register runs after the bundle
-# evaluates, so an eager snapshot would permanently capture `undefined`).
 [exports."carbon:clipboard"]
-names = ["readText", "writeText", "clear"]
+names = ["readText","writeText","clear"]
 
 [abi]
 major = 1
-minor = 3
+minor = 6
 
 [capabilities]
 required = []

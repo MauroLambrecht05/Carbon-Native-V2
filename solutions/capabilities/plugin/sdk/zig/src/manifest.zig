@@ -18,6 +18,18 @@
 const std = @import("std");
 const ext = @import("extension_points.zig");
 
+/// One JS-facing function a plugin's module (e.g. `carbon:clipboard`)
+/// exports. `name` is what app code imports (`import { X } from
+/// "carbon:thing"`); `global` is the globalThis property it reads at
+/// call time, if different from `name` — needed when `name` collides
+/// with a reserved word (`delete`) or with another plugin's own export
+/// of the same common name (`register`), since every plugin's globals
+/// live in the SAME globalThis namespace at runtime.
+pub const Export = struct {
+    name: []const u8,
+    global: ?[]const u8 = null,
+};
+
 pub const Config = struct {
     name: []const u8,
     version: []const u8,
@@ -33,8 +45,19 @@ pub const Config = struct {
     optional: []const []const u8 = &.{},
 
     /// JS module names the plugin installs, e.g. `carbon:audio`. Advisory:
-    /// used by `carbon plugin info`, not enforced.
+    /// used by `carbon plugin info`, not enforced. `exports` (below) is
+    /// keyed to `modules[0]` — every carbon-sdk plugin so far has exactly
+    /// one module, so this stays a single list rather than a per-module map
+    /// until a real multi-module plugin needs otherwise.
     modules: []const []const u8 = &.{},
+
+    /// What `modules[0]` exports to app code. This is the ONE piece of a
+    /// plugin's manifest the runtime's embedded JSON never carries (a JS
+    /// bundler needs it to generate lazy wrappers at BUILD time, without
+    /// loading any native code — see toToml's doc comment) — declaring it
+    /// here, alongside everything else, is what lets carbon-plugin.toml be
+    /// generated instead of hand-duplicated.
+    exports: []const Export = &.{},
 
     abi_version_major: u32 = 1,
     abi_version_minor: u32 = ext.REGISTRY_MINOR,
@@ -76,6 +99,86 @@ pub fn build(comptime cfg: Config) [*:0]const u8 {
     }
 }
 
+/// carbon-plugin.toml's content, generated from the SAME `Config` that
+/// produces the runtime manifest via `build()` above — the two can no
+/// longer drift, because there is only one authored source between them.
+///
+/// `carbon plugin add <name>` (and `carbon plugin install`/`list`) read
+/// the FILE this produces, not the compiled plugin, because they need to
+/// know a plugin's exports (for the JS bundler's lazy-wrapper codegen —
+/// see @carbon/vite/imports) without loading native code, which a bundler
+/// running on an app that merely IMPORTS a plugin's module cannot do. The
+/// runtime's own `carbon_plugin_manifest()` (built by `build()`, above)
+/// is the loader's actual source of truth once a plugin is really
+/// loaded; this file is a static projection of the same config for
+/// tooling that runs before or without that.
+///
+/// Each plugin exposes this via `zig build gen-manifest` (see
+/// clipboard's build.zig/src/genmanifest.zig for the pattern: a tiny
+/// helper executable prints this, a Run step captures its output, and
+/// `b.addUpdateSourceFiles` writes it back to carbon-plugin.toml) — run
+/// that after changing a plugin's `CFG` instead of hand-editing the TOML.
+/// (An automatic `zig build test`-time drift check was the first design
+/// here; dropped after `@embedFile`/anonymous-import of a non-.zig file
+/// outside a module's own src/ didn't resolve cleanly under Zig 0.16's
+/// module sandboxing — regeneration-on-demand was the reliable fallback.)
+pub fn toToml(comptime cfg: Config) []const u8 {
+    comptime {
+        @setEvalBranchQuota(200_000);
+
+        var out: []const u8 = std.fmt.comptimePrint(
+            \\# GENERATED — do not hand-edit. Source of truth is the `CFG`
+            \\# config in src/main.zig; run `zig build gen-manifest` after
+            \\# changing it. See manifest.zig's `toToml` doc comment for why
+            \\# this file exists at all alongside that config.
+            \\name = "{s}"
+            \\version = "{s}"
+            \\language = "zig"
+            \\
+            \\extension-points = {s}
+            \\modules = {s}
+            \\
+        , .{ cfg.name, cfg.version, jsonArray(cfg.points), jsonArray(cfg.modules) });
+
+        if (cfg.exports.len > 0) {
+            const module = if (cfg.modules.len > 0) cfg.modules[0] else cfg.name;
+            out = out ++ std.fmt.comptimePrint(
+                \\
+                \\[exports."{s}"]
+                \\names = {s}
+                \\
+            , .{ module, jsonArray(exportNames(cfg.exports)) });
+            const globals = exportGlobalsToml(cfg.exports);
+            if (globals.len > 0) {
+                out = out ++ std.fmt.comptimePrint(
+                    \\[exports."{s}".globals]
+                    \\{s}
+                    \\
+                , .{ module, globals });
+            }
+        }
+
+        out = out ++ std.fmt.comptimePrint(
+            \\
+            \\[abi]
+            \\major = {d}
+            \\minor = {d}
+            \\
+            \\[capabilities]
+            \\required = {s}
+            \\optional = {s}
+            \\
+        , .{
+            cfg.abi_version_major,
+            cfg.abi_version_minor,
+            jsonArray(requiredCapabilities(cfg)),
+            jsonArray(cfg.optional),
+        });
+
+        return out;
+    }
+}
+
 /// What the author asked for, plus what their points imply, deduplicated.
 fn requiredCapabilities(comptime cfg: Config) []const []const u8 {
     comptime {
@@ -95,6 +198,25 @@ fn contains(comptime haystack: []const []const u8, comptime needle: []const u8) 
             if (std.mem.eql(u8, item, needle)) return true;
         }
         return false;
+    }
+}
+
+fn exportNames(comptime exports: []const Export) []const []const u8 {
+    comptime {
+        var out: []const []const u8 = &.{};
+        for (exports) |exp| out = out ++ &[_][]const u8{exp.name};
+        return out;
+    }
+}
+
+fn exportGlobalsToml(comptime exports: []const Export) []const u8 {
+    comptime {
+        var out: []const u8 = "";
+        for (exports) |exp| {
+            const g = exp.global orelse continue;
+            out = out ++ std.fmt.comptimePrint("{s} = \"{s}\"\n", .{ exp.name, g });
+        }
+        return out;
     }
 }
 

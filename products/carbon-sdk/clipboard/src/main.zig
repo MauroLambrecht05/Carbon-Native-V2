@@ -24,12 +24,22 @@ const sdk = @import("carbon_sdk");
 
 // ── Manifest ────────────────────────────────────────────────────────────────
 
-const MANIFEST = sdk.manifest.build(.{
+pub const CFG = sdk.manifest.Config{
     .name = "clipboard",
     .version = "0.1.0",
     .points = &.{ "lifecycle.register", "lifecycle.after_reload" },
     .modules = &.{"carbon:clipboard"},
-});
+    .exports = &.{ .{ .name = "readText" }, .{ .name = "writeText" }, .{ .name = "clear" } },
+    // Config's own default (ext.REGISTRY_MINOR) tracks the extension-point
+    // registry's highest `since_minor`, NOT carbon_plugin.h's CarbonApp
+    // struct ABI — a different axis that happened to read "1" here despite
+    // this plugin genuinely needing ABI 1.3 (clipboard_read_text etc.).
+    // sdk.ABI_VERSION_MAJOR/MINOR are the real header-derived constants.
+    .abi_version_major = sdk.ABI_VERSION_MAJOR,
+    .abi_version_minor = sdk.ABI_VERSION_MINOR,
+};
+
+const MANIFEST = sdk.manifest.build(CFG);
 
 export fn carbon_plugin_manifest() callconv(.c) [*:0]const u8 {
     return MANIFEST;
@@ -195,6 +205,11 @@ fn jsClear(
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
+
+test "toToml produces a non-empty manifest" {
+    const generated = comptime sdk.manifest.toToml(CFG);
+    try std.testing.expect(generated.len > 0);
+}
 
 test "the manifest declares both points and no stray capability" {
     const json = std.mem.span(MANIFEST);

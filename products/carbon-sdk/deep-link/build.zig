@@ -60,4 +60,22 @@ pub fn build(b: *std.Build) void {
 
     const test_step = b.step("test", "Check the plugin against the extension-point registry");
     test_step.dependOn(&b.addRunArtifact(tests).step);
+
+    // `zig build gen-manifest` regenerates carbon-plugin.toml from
+    // src/main.zig's own CFG — see genmanifest.zig and manifest.zig's
+    // `toToml` doc comment for why that file exists at all once main.zig
+    // already declares the same config.
+    const genmanifest_mod = b.createModule(.{
+        .root_source_file = b.path("src/genmanifest.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    genmanifest_mod.addImport("carbon_sdk", sdk.module("carbon_sdk"));
+    const genmanifest_exe = b.addExecutable(.{ .name = "genmanifest", .root_module = genmanifest_mod });
+    const run_genmanifest = b.addRunArtifact(genmanifest_exe);
+    const toml_output = run_genmanifest.captureStdErr(.{});
+    const update = b.addUpdateSourceFiles();
+    update.addCopyFileToSource(toml_output, "carbon-plugin.toml");
+    const gen_step = b.step("gen-manifest", "Regenerate carbon-plugin.toml from src/main.zig's manifest config");
+    gen_step.dependOn(&update.step);
 }

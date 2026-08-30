@@ -32,12 +32,17 @@ const sdk = @import("carbon_sdk");
 
 // ── Manifest ────────────────────────────────────────────────────────────────
 
-const MANIFEST = sdk.manifest.build(.{
+pub const CFG = sdk.manifest.Config{
     .name = "tray",
     .version = "0.1.0",
     .points = &.{ "lifecycle.register", "lifecycle.after_reload" },
     .modules = &.{"carbon:tray"},
-});
+    .exports = &.{.{ .name = "setup" }},
+    .abi_version_major = sdk.ABI_VERSION_MAJOR,
+    .abi_version_minor = sdk.ABI_VERSION_MINOR,
+};
+
+const MANIFEST = sdk.manifest.build(CFG);
 
 export fn carbon_plugin_manifest() callconv(.c) [*:0]const u8 {
     return MANIFEST;
