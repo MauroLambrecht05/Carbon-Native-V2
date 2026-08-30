@@ -1,0 +1,19 @@
+{
+  "name": "@carbon/plugins",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Framework-facing wrappers around carbon-sdk's standard plugins — the ergonomic hook/function surface app code imports, as opposed to a plugin's raw carbon:* bridge.",
+  "type": "module",
+  "main": "./index.ts",
+  "types": "./index.ts",
+  "exports": {
+    ".": "./index.ts",
+    "./fonts": "./fonts.ts"
+  },
+  "carbon": {
+    "kind": "presentation"
+  },
+  "peerDependencies": {
+    "react": ">=18.3.0"
+  }
+}

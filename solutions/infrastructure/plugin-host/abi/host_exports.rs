@@ -46,10 +46,11 @@ pub const CARBON_ERR_QUEUE_FULL: i32 = -3;
 pub const CARBON_ERR_NO_CTX: i32 = -4;
 
 pub const CARBON_PLUGIN_ABI_VERSION_MAJOR: u32 = 1;
-// 1, not 0: ABI 1.1 appended set_global_string/set_global_number/
-// set_global_function/eval to HostCarbonApp — see the note on those fields
-// below and carbon_plugin.h's APPEND-ONLY ZONE.
-pub const CARBON_PLUGIN_ABI_VERSION_MINOR: u32 = 1;
+// 2, not 1: ABI 1.2 appended load_font_path/load_font_bytes to
+// HostCarbonApp — see the note on those fields below and carbon_plugin.h's
+// APPEND-ONLY ZONE. (1.1 appended set_global_string/set_global_number/
+// set_global_function/eval before that.)
+pub const CARBON_PLUGIN_ABI_VERSION_MINOR: u32 = 2;
 
 // ── CarbonJSContext — opaque to plugins ───────────────────────────────────
 //
@@ -132,6 +133,29 @@ pub struct HostCarbonApp {
         ) -> i32,
     >,
     pub eval: Option<unsafe extern "C" fn(ctx: *mut CarbonJSContext, source: *const c_char) -> i32>,
+
+    // ABI 1.2. Load a font into the text engine, optionally under a family
+    // name for later font-family-based selection — see the note on these
+    // two fields in carbon_plugin.h for the full contract. Installed by
+    // `install_text_engine`/`install_on_font_loaded` (called once from
+    // mini.rs at startup, before any plugin loads).
+    pub load_font_path: Option<
+        unsafe extern "C" fn(
+            app: *mut HostCarbonApp,
+            path: *const c_char,
+            family_name: *const c_char,
+            weight: u32,
+        ) -> i32,
+    >,
+    pub load_font_bytes: Option<
+        unsafe extern "C" fn(
+            app: *mut HostCarbonApp,
+            bytes: *const u8,
+            len: usize,
+            family_name: *const c_char,
+            weight: u32,
+        ) -> i32,
+    >,
 }
 
 /// Owns the heap allocation backing the strings inside `HostCarbonApp` plus
@@ -165,6 +189,145 @@ static PROXY: Mutex<Option<EventLoopProxy<UserEvent>>> = Mutex::new(None);
 
 pub fn install_event_loop_proxy(proxy: EventLoopProxy<UserEvent>) {
     *PROXY.lock().unwrap_or_else(|e| e.into_inner()) = Some(proxy);
+}
+
+// ── Font loading (ABI 1.2) ─────────────────────────────────────────────────
+//
+// `load_font_path`/`load_font_bytes` run synchronously ON THE JS THREAD: a
+// plugin's `set_global_function` callback (where a font-loading call
+// originates — see the fonts plugin) is invoked by QuickJS from wherever
+// `carbon_plugin_register` installed it, and that install only ever happens
+// on the JS thread (mirroring `carbon_js_set_global_function`'s own
+// `on_js_thread()` guard). That's what makes it safe to reach `TextEngine`
+// here directly (an `Rc<RefCell<…>>`, not `Send` — thread_local, not a
+// Mutex<…> like PROXY, is what a JS-thread-only value wants) and return a
+// REAL success/failure rather than push_event's "accepted, ask later" shape.
+//
+// `Scene` invalidation (so a newly-loaded font's metrics actually get
+// re-measured) is a plain closure instead of a second typed thread_local —
+// this crate has no reason to depend on the `layout` capability crate just
+// to know Scene's shape, when "mark it dirty and repaint" is the only thing
+// ever needed here.
+thread_local! {
+    static TEXT_ENGINE: std::cell::RefCell<Option<std::rc::Rc<std::cell::RefCell<carbon_text_renderer::TextEngine>>>> =
+        const { std::cell::RefCell::new(None) };
+    static ON_FONT_LOADED: std::cell::RefCell<Option<Box<dyn Fn()>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Installs the TextEngine `load_font_*` reaches into. Called once from
+/// mini.rs at startup, before any plugin loads (same ordering requirement as
+/// `install_event_loop_proxy`).
+pub fn install_text_engine(te: std::rc::Rc<std::cell::RefCell<carbon_text_renderer::TextEngine>>) {
+    TEXT_ENGINE.with(|cell| *cell.borrow_mut() = Some(te));
+}
+
+/// Installs the callback run after a successful font load — mini.rs's copy
+/// closes over the real `Scene` + `EventLoopProxy` to mark layout dirty and
+/// request a repaint, without this crate needing to know either type.
+pub fn install_on_font_loaded(cb: impl Fn() + 'static) {
+    ON_FONT_LOADED.with(|cell| *cell.borrow_mut() = Some(Box::new(cb)));
+}
+
+fn notify_font_loaded() {
+    ON_FONT_LOADED.with(|cell| {
+        if let Some(f) = cell.borrow().as_ref() {
+            f();
+        }
+    });
+}
+
+/// `weight == 0` means "unspecified" (the header says so) — TextEngine's
+/// own `Option<u16>` default (400) applies. Otherwise clamp into the u16
+/// range `load_font_bytes_named` expects (it clamps to 1-1000 itself).
+fn weight_arg(weight: u32) -> Option<u16> {
+    if weight == 0 {
+        None
+    } else {
+        Some(weight.min(u16::MAX as u32) as u16)
+    }
+}
+
+/// `app->load_font_path(path, family_name, weight)`.
+unsafe extern "C" fn host_load_font_path(
+    _app: *mut HostCarbonApp,
+    path: *const c_char,
+    family_name: *const c_char,
+    weight: u32,
+) -> i32 {
+    if path.is_null() {
+        return CARBON_ERR_INVALID;
+    }
+    if !on_js_thread() {
+        return CARBON_ERR_NO_CTX;
+    }
+    let path = match CStr::from_ptr(path).to_str() {
+        Ok(s) => s,
+        Err(_) => return CARBON_ERR_INVALID,
+    };
+    let family = if family_name.is_null() {
+        None
+    } else {
+        match CStr::from_ptr(family_name).to_str() {
+            Ok(s) => Some(s.to_string()),
+            Err(_) => return CARBON_ERR_INVALID,
+        }
+    };
+    let ok = TEXT_ENGINE.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .map(|te| {
+                te.borrow_mut().load_font_path_named(
+                    std::path::Path::new(path),
+                    family,
+                    weight_arg(weight),
+                )
+            })
+            .unwrap_or(false)
+    });
+    if ok {
+        notify_font_loaded();
+        CARBON_OK
+    } else {
+        CARBON_ERR_GENERIC
+    }
+}
+
+/// `app->load_font_bytes(bytes, len, family_name, weight)`.
+unsafe extern "C" fn host_load_font_bytes(
+    _app: *mut HostCarbonApp,
+    bytes: *const u8,
+    len: usize,
+    family_name: *const c_char,
+    weight: u32,
+) -> i32 {
+    if bytes.is_null() {
+        return CARBON_ERR_INVALID;
+    }
+    if !on_js_thread() {
+        return CARBON_ERR_NO_CTX;
+    }
+    let owned = std::slice::from_raw_parts(bytes, len).to_vec();
+    let family = if family_name.is_null() {
+        None
+    } else {
+        match CStr::from_ptr(family_name).to_str() {
+            Ok(s) => Some(s.to_string()),
+            Err(_) => return CARBON_ERR_INVALID,
+        }
+    };
+    let ok = TEXT_ENGINE.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .map(|te| te.borrow_mut().load_font_bytes_named(owned, family, weight_arg(weight)))
+            .unwrap_or(false)
+    });
+    if ok {
+        notify_font_loaded();
+        CARBON_OK
+    } else {
+        CARBON_ERR_GENERIC
+    }
 }
 
 // ── Trampolines stamped into HostCarbonApp ────────────────────────────────
@@ -289,6 +452,8 @@ impl HostCarbonAppStorage {
                 set_global_number: Some(carbon_js_set_global_number),
                 set_global_function: Some(carbon_js_set_global_function),
                 eval: Some(carbon_js_eval),
+                load_font_path: Some(host_load_font_path),
+                load_font_bytes: Some(host_load_font_bytes),
             },
             _app_name: app_name_c,
             _app_version: app_version_c,

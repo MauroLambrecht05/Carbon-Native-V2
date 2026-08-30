@@ -196,7 +196,7 @@ export async function runCommand(rest: string[]): Promise<number> {
 async function syncLocalPlugins(projectDir: string): Promise<void> {
   const { synced } = await pluginUseCases(join(PRODUCTS_DIR, "carbon-ext")).syncLocal.execute(
     projectDir,
-    { release: true },
+    { release: true, logger: log },
   );
   for (const plugin of synced) {
     log.step(c.dim(`plugin ${plugin.name}: built + installed from ./plugins/${plugin.name}`));

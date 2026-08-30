@@ -102,6 +102,22 @@ export class InstallPluginUseCase {
     const installedAt = join(pluginsDir, filename);
     this.workspace.copyFile(artifact.path, installedAt);
 
+    // Copy the manifest alongside the artifact, flat as `<slug>.carbon-
+    // plugin.toml` — NOT nested in a `plugins/<name>/` subdirectory the way
+    // a local-source plugin's own manifest lives. Without this, a plugin
+    // installed as a prebuilt artifact (carbon plugin install / add) has no
+    // way to tell the bundler's `carbon:*` import resolver what it exports:
+    // discoverLocalManifests only used to look for plugins/<name>/carbon-
+    // plugin.toml, so `import { loadFont } from "carbon:fonts"` fell through
+    // to "unknown virtual module" for every app that installed a plugin this
+    // way instead of vendoring its Zig source. See import-manifest.js's
+    // scanFlatManifests for the matching read side.
+    const manifestSrc = join(request.directory, "carbon-plugin.toml");
+    if (this.workspace.exists(manifestSrc)) {
+      const manifestDest = join(pluginsDir, `${artifact.name.slug}.carbon-plugin.toml`);
+      this.workspace.copyFile(manifestSrc, manifestDest);
+    }
+
     // Relative and forward-slashed: the manifest is committed and read on
     // every platform, so an absolute Windows path in it breaks the project
     // for everyone else.

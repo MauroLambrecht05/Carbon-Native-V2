@@ -121,6 +121,27 @@ pub const CarbonApp = struct {
         const f = self.raw.eval orelse return CARBON_ERR_GENERIC;
         return f(ctx, source);
     }
+
+    /// ABI 1.2. Load a TTF/OTF font from a filesystem path into the text
+    /// engine, optionally registered under `family` so `font-family:
+    /// "<family>"` in CSS/JSX selects this exact face afterward. Pass
+    /// `null` for `family` to load anonymously (coverage-fallback only).
+    /// `weight` is the CSS font-weight scale (1-1000; 0 = default 400) —
+    /// load the same family at multiple weights for real bold/semibold
+    /// instead of a fallback substitution. Runs synchronously — the return
+    /// value is the real result, not a "queued" placeholder.
+    pub fn loadFontPath(self: CarbonApp, path: [*:0]const u8, family: ?[*:0]const u8, weight: u32) i32 {
+        const f = self.raw.load_font_path orelse return CARBON_ERR_GENERIC;
+        return f(self.raw, path, family orelse null, weight);
+    }
+
+    /// Same as `loadFontPath`, from raw bytes already in memory (e.g. an
+    /// app-bundled asset read by the plugin itself rather than resolved
+    /// from a path on disk).
+    pub fn loadFontBytes(self: CarbonApp, bytes: []const u8, family: ?[*:0]const u8, weight: u32) i32 {
+        const f = self.raw.load_font_bytes orelse return CARBON_ERR_GENERIC;
+        return f(self.raw, bytes.ptr, bytes.len, family orelse null, weight);
+    }
 };
 
 /// Compose a manifest JSON string at comptime.

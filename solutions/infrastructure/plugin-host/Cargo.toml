@@ -47,6 +47,10 @@ carbon-plugin-contract = { path = "../../contracts/plugin/rust" }
 # libloading opens anything. Verification only: this crate never sees a private
 # key, and nothing on the path below links `carbon_plugin_trust::keyfile`.
 carbon-plugin-trust = { path = "../../capabilities/plugin/trust/rust" }
+# The fonts plugin's load_font_path/load_font_bytes ABI trampolines (below)
+# need the actual TextEngine type to load into — installed via a thread-local
+# by the composition root (mini.rs), which already owns one.
+carbon-text-renderer = { path = "../../capabilities/rendering/text" }
 anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

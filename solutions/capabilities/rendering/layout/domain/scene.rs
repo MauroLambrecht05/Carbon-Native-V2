@@ -478,6 +478,12 @@ pub struct NodeCtx {
     /// (font-mono, inherited). Must match the paint side so the layout box
     /// fits what gets rendered.
     pub prefer_mono: bool,
+    /// The font-family STRING (own value, else inherited), set on the text
+    /// engine before measuring so a plugin-loaded named font's real glyph
+    /// widths are what layout sizes against — must match the paint side
+    /// (painting/lib.rs's `effective_family`) or the measured box won't
+    /// match what gets rendered.
+    pub family: Option<String>,
 }
 
 pub struct Scene {
@@ -989,6 +995,10 @@ impl Scene {
         } else {
             0.0
         };
+        // Own value only, matching `fs` above (n.props.font_size.unwrap_or)
+        // — this hit-test helper doesn't walk the ancestor chain either;
+        // real inheritance is the paint/layout passes' job.
+        te.cur_family = n.props.font_family.clone();
         let visual_lines = self.editor_visual_lines(&text, fs, max_width, te);
         let local_x = (x - pad_left).max(0.0);
         let local_y = (y - pad_top).max(0.0);
@@ -1222,7 +1232,7 @@ impl Scene {
         max_width: f32,
         te: &mut crate::text::TextEngine,
     ) {
-        let (text, fs) = {
+        let (text, fs, family) = {
             let n = match self.nodes.get(&id) {
                 Some(n) => n,
                 None => return,
@@ -1230,8 +1240,10 @@ impl Scene {
             (
                 n.props.text.clone().unwrap_or_default(),
                 n.props.font_size.unwrap_or(14.0),
+                n.props.font_family.clone(),
             )
         };
+        te.cur_family = family;
         let visual_lines = self.editor_visual_lines(&text, fs, max_width, te);
         let caret = self.input_state(id).map(|s| s.caret).unwrap_or(0);
         let (vidx, col) = Self::caret_to_visual_line_col(&visual_lines, caret);
@@ -2056,6 +2068,11 @@ impl Scene {
                         }
                     };
                     let pm = ctx.prefer_mono;
+                    // Must match the paint side (painting/lib.rs sets the
+                    // same field from the same effective font-family) or a
+                    // named font's real glyph widths would size the box
+                    // wrong relative to what actually gets painted into it.
+                    te.cur_family = ctx.family.clone();
                     // Honor a pinned width before anything else.
                     if let Some(pw) = known_dims.width {
                         let (_, mh) = te.measure_wrapped_pm(text, *fs, pw, pm);
@@ -2123,14 +2140,16 @@ impl Scene {
         // Inherited-font-size root: 14px is the CSS default. Overridden
         // as we recurse into children that set their own font-size.
         // The root node itself is not a root-child.
-        self.build_taffy_inherited(id, 14.0, false, te, false)
+        self.build_taffy_inherited(id, 14.0, false, None, te, false)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn build_taffy_inherited(
         &mut self,
         id: u32,
         inherited_font_size: f32,
         inherited_mono: bool,
+        inherited_family: Option<String>,
         te: &mut crate::text::TextEngine,
         is_root_child: bool,
     ) -> Option<TaffyNodeId> {
@@ -2152,7 +2171,7 @@ impl Scene {
                 return None;
             }
         }
-        let (children_ids, style, ctx, child_font_size, user_width, is_svg, child_mono) = {
+        let (children_ids, style, ctx, child_font_size, user_width, is_svg, child_mono, child_family) = {
             let n = self.nodes.get(&id)?;
             let is_text = matches!(n.kind, NodeKind::Text);
             let is_svg = matches!(n.kind, NodeKind::Svg);
@@ -2172,6 +2191,10 @@ impl Scene {
                 .as_deref()
                 .map(crate::text::TextEngine::family_is_mono)
                 .unwrap_or(inherited_mono);
+            // The font-family STRING itself, same inheritance rule. See
+            // NodeCtx::family's doc comment for why this has to match the
+            // paint side exactly.
+            let effective_family = n.props.font_family.clone().or_else(|| inherited_family.clone());
             // Text nodes with content carry their text + effective
             // font-size into the measure callback. Wrapper elements with
             // a child text node don't have own .text — they go through
@@ -2182,6 +2205,7 @@ impl Scene {
                     NodeCtx {
                         text: Some((t.clone(), effective_fs)),
                         prefer_mono: effective_mono,
+                        family: effective_family.clone(),
                     }
                 } else {
                     NodeCtx::default()
@@ -2194,6 +2218,13 @@ impl Scene {
             // algorithm shrinks text in row containers down to longest-word
             // width, producing the broken metadata row where each `<text>`
             // wrapped at every space even with abundant horizontal space.
+            // cur_family is a field on TextEngine (mirroring cur_weight),
+            // not a parameter — set it once here so every measurement below
+            // for this node (props_to_style_with_inherited's own
+            // measure_mono call, and editor_visual_lines further down) picks
+            // up the right face without threading a new parameter through
+            // both.
+            te.cur_family = effective_family.clone();
             let mut style =
                 props_to_style_with_inherited(&n.props, is_text, te, effective_fs, effective_mono);
             // Document-root children behave like a browser <body>'s block
@@ -2263,6 +2294,7 @@ impl Scene {
                 user_width,
                 is_svg,
                 effective_mono,
+                effective_family,
             )
         };
 
@@ -2284,6 +2316,7 @@ impl Scene {
                 *cid,
                 child_font_size,
                 child_mono,
+                child_family.clone(),
                 te,
                 children_are_root_children,
             ) {

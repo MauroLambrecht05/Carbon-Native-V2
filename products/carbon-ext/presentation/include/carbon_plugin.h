@@ -46,7 +46,7 @@ extern "C" {
  * ⇒ register but skip features the runtime doesn't advertise.
  */
 #define CARBON_PLUGIN_ABI_VERSION_MAJOR 1u
-#define CARBON_PLUGIN_ABI_VERSION_MINOR 1u
+#define CARBON_PLUGIN_ABI_VERSION_MINOR 2u
 
 /* --------------------------------------------------------------------------
  * Status codes returned by host-provided helpers
@@ -206,6 +206,48 @@ struct CarbonApp {
                                    const char*      name,
                                    CarbonJSCallback fn);
     int32_t (*eval)(CarbonJSContext* ctx, const char* source);
+
+    /* load_font_path / load_font_bytes:
+     * ABI 1.2. Load a TTF/OTF font into the runtime's text engine,
+     * optionally registered under `family_name` so CSS/JSX
+     * `font-family: "<family_name>"` selects this exact face afterward
+     * (see solutions/capabilities/rendering/text/lib.rs's
+     * `font_for_char_named`) instead of only being picked by glyph
+     * coverage. Pass NULL for `family_name` to load anonymously (the
+     * face still joins the coverage-fallback stack, just not selectable
+     * by name).
+     *
+     * `weight` is the CSS font-weight scale (1-1000; 400 = Regular, 700 =
+     * Bold). Pass 0 to default to 400. Loading the SAME family_name
+     * multiple times at different weights (e.g. "Poppins" at 400 and
+     * again at 700) registers real weight variants — `font-bold` text in
+     * that family then selects the true bold face instead of silently
+     * falling back to a different family's matching weight.
+     *
+     * This is the ABI the fonts plugin (products/carbon-sdk/fonts) builds
+     * its `loadFont(path, family, weight)` JS hook on top of — a plugin
+     * author calls THIS from inside their own `set_global_function`
+     * callback, synchronously, on the JS thread (the only thread a
+     * JS-invoked callback ever runs on), so the return value here is
+     * real, not a "queued, ask later" placeholder like `push_event`.
+     *
+     * Triggers a repaint + layout invalidation on success — text using a
+     * newly-registered family re-measures and re-renders on the next
+     * frame with no other action needed from the plugin.
+     *
+     * Returns CARBON_OK on success, CARBON_ERR_GENERIC if the file
+     * couldn't be read / parsed as a font, CARBON_ERR_INVALID for null
+     * required arguments.
+     */
+    int32_t (*load_font_path)(CarbonApp*  app,
+                              const char* path,
+                              const char* family_name,
+                              uint32_t    weight);
+    int32_t (*load_font_bytes)(CarbonApp*    app,
+                               const uint8_t* bytes,
+                               size_t         len,
+                               const char*    family_name,
+                               uint32_t       weight);
 };
 
 /* --------------------------------------------------------------------------

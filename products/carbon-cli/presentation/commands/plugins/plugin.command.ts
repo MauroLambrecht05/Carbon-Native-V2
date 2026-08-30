@@ -19,6 +19,7 @@ import {
 } from "@carbon/cli";
 import { forwardSlashes, PluginError, pluginUseCases } from "@carbon/lifecycle";
 import { PRODUCTS_DIR } from "@carbon/workspace";
+import { existsSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 /**
@@ -31,6 +32,21 @@ import { join, resolve } from "node:path";
  * product. So this product, which knows where its siblings are, hands it over.
  */
 const SDK_ROOT = join(PRODUCTS_DIR, "carbon-ext");
+
+/**
+ * Where the STANDARD plugins live — one subdirectory per plugin, each a
+ * normal buildable+installable plugin like any other (see `fonts/`). This is
+ * a separate product from `carbon-ext` on purpose: carbon-ext is the SDK
+ * (what a plugin AUTHOR builds against), carbon-sdk is the curated
+ * collection `carbon plugin add <name>` resolves names against — a user
+ * never sees carbon-ext's path at all.
+ *
+ * Resolved locally within this workspace for now (no remote registry yet) —
+ * `carbon plugin add <name>` is `carbon-sdk/<name>` built + installed in one
+ * step, the same two operations `carbon plugin build` + `carbon plugin
+ * install` already do separately for a plugin a user wrote themselves.
+ */
+const STANDARD_PLUGINS_ROOT = join(PRODUCTS_DIR, "carbon-sdk");
 
 /**
  * Runs `body`, turning the capability's own refusals into a usage error.
@@ -104,6 +120,7 @@ class BuildPluginCommand extends Command {
       const result = await pluginUseCases(SDK_ROOT).build.execute({
         directory: ctx.cwd,
         release: ctx.flags.bool("release"),
+        logger: ctx.io,
       });
 
       if (result.exitCode === 0) {
@@ -135,6 +152,61 @@ class InstallPluginCommand extends Command {
 
       ctx.io.success(
         `${ctx.io.c.bold(result.name.slug)} installed → ${ctx.io.c.dim(forwardSlashes(result.installedAt))}`,
+      );
+      ctx.io.info(
+        `${ctx.io.c.dim("·")} added [plugins] ${result.name.slug} = "${result.declaredPath}" ` +
+          `to ${forwardSlashes(result.host)}/carbon.toml`,
+      );
+      return EXIT_OK;
+    });
+  }
+}
+
+class AddPluginCommand extends Command {
+  readonly meta: CommandMeta = {
+    name: "add",
+    summary: "Build + install a standard plugin from carbon-sdk into this app",
+    usage: "plugin add <name> [project-dir]",
+    examples: ["carbon plugin add fonts", "carbon plugin add fonts ./my-app"],
+  };
+
+  validate(ctx: CommandContext): string | null {
+    return ctx.first ? null : "plugin add requires a name. Try: carbon plugin add fonts";
+  }
+
+  execute(ctx: CommandContext): Promise<ExitCode> {
+    return reporting(ctx, async () => {
+      const name = ctx.first!;
+      // Second positional, like `carbon dev [project-dir]` — which app to
+      // install into. Defaults to cwd (run `carbon plugin add fonts` from
+      // inside the app, same as `plugin install`).
+      const targetApp = ctx.args[1] ? resolve(ctx.cwd, ctx.args[1]) : ctx.cwd;
+      const directory = join(STANDARD_PLUGINS_ROOT, name);
+      if (!existsSync(directory)) {
+        const available = existsSync(STANDARD_PLUGINS_ROOT)
+          ? readdirSync(STANDARD_PLUGINS_ROOT, { withFileTypes: true })
+              .filter((e) => e.isDirectory())
+              .map((e) => e.name)
+          : [];
+        ctx.io.error(`no standard plugin named "${name}"`);
+        if (available.length) {
+          ctx.io.info(`available: ${available.join(", ")}`);
+        }
+        return EXIT_FAILURE;
+      }
+
+      // Always release, unlike `plugin build`'s opt-in --release: a standard
+      // plugin someone is fetching to use, not actively developing, should
+      // behave the way installing any other dependency does — a fast/debug
+      // build is only useful to the plugin's OWN author, iterating on it
+      // via `plugin build` + `plugin install` directly.
+      const { build, install } = pluginUseCases(SDK_ROOT);
+      const built = await build.execute({ directory, release: true, logger: ctx.io });
+      if (built.exitCode !== 0) return built.exitCode;
+
+      const result = install.execute({ directory, from: targetApp });
+      ctx.io.success(
+        `${ctx.io.c.bold(result.name.slug)} added → ${ctx.io.c.dim(forwardSlashes(result.installedAt))}`,
       );
       ctx.io.info(
         `${ctx.io.c.dim("·")} added [plugins] ${result.name.slug} = "${result.declaredPath}" ` +
@@ -243,13 +315,14 @@ class InfoPluginCommand extends Command {
 export class PluginCommand extends CommandGroup {
   readonly meta: CommandMeta = {
     name: "plugin",
-    summary: "Manage native plugins (new / build / check / install / list / info)",
+    summary: "Manage native plugins (new / add / build / check / install / list / info)",
     usage: "plugin <subcommand> [options]",
-    examples: ["carbon plugin new my-plugin", "carbon plugin list"],
+    examples: ["carbon plugin add fonts", "carbon plugin new my-plugin", "carbon plugin list"],
   };
 
   readonly subcommands = [
     new NewPluginCommand(),
+    new AddPluginCommand(),
     new BuildPluginCommand(),
     new CheckPluginCommand(),
     new InstallPluginCommand(),

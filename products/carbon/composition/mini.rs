@@ -383,6 +383,26 @@ fn main() -> Result<()> {
     //      live runtime.
     host_exports::mark_current_thread_as_js();
     host_exports::install_event_loop_proxy(proxy.clone());
+    // ABI 1.2 font loading (app->load_font_path/load_font_bytes) — the
+    // fonts plugin's loadFont() hook reaches these. See host_exports.rs's
+    // "Font loading" section for why this is a thread-local + a plain
+    // invalidation closure rather than threading TextEngine/Scene through
+    // the plugin-host crate directly.
+    host_exports::install_text_engine(text_engine.clone());
+    host_exports::install_on_font_loaded({
+        let scene = scene.clone();
+        let proxy = proxy.clone();
+        move || {
+            // Same invalidation the __cm_load_font JS global already does
+            // (see scene.rs) — a newly-loaded font can change measured
+            // glyph widths for already-laid-out nodes.
+            let mut s = scene.lock().unwrap_or_else(|e| e.into_inner());
+            s.dirty = true;
+            s.layout_valid = false;
+            drop(s);
+            let _ = proxy.send_event(UserEvent::RequestPaint);
+        }
+    });
 
     // Test-only hook, matching CARBON_TEST_EXIT_MS's pattern (cli.rs): after
     // CARBON_TEST_EVAL_AFTER_MS milliseconds, eval CARBON_TEST_EVAL_SCRIPT

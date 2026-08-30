@@ -10,6 +10,7 @@
 // untouched — it has no directory of that name to match.
 
 import { join } from "node:path";
+import type { Logger } from "@carbon/logging";
 import { LANGUAGES } from "../../domain/value-objects/PluginLanguage.ts";
 import { readPluginEntries } from "../../domain/services/PluginsSection.ts";
 import type { PluginWorkspace } from "../ports/PluginWorkspace.ts";
@@ -44,7 +45,7 @@ export class SyncLocalPluginsUseCase {
    */
   async execute(
     projectDir: string,
-    options?: { readonly release?: boolean },
+    options?: { readonly release?: boolean; readonly logger?: Logger },
   ): Promise<SyncLocalPluginsResult> {
     const release = options?.release ?? false;
     const pluginsDir = join(projectDir, "plugins");
@@ -55,7 +56,7 @@ export class SyncLocalPluginsUseCase {
       const isSource = LANGUAGES.some((l) => this.workspace.exists(join(directory, l.marker)));
       if (!isSource) continue;
 
-      const result = await this.build.execute({ directory, release });
+      const result = await this.build.execute({ directory, release, logger: options?.logger });
       if (result.exitCode !== 0) {
         throw new Error(
           `local plugin "${entry}" (${join("plugins", entry)}) failed to build — ` +

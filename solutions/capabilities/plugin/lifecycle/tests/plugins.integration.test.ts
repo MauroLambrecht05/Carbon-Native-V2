@@ -115,6 +115,19 @@ class FakeProcessRunner implements ProcessRunner {
   }
 }
 
+/**
+ * Stands in for BuildPluginUseCase's real toolchain resolution
+ * (ZigToolchain.ts's ensureZig, by default) — hands back `language.
+ * buildCommand` verbatim instead. Without this every test with a build.zig
+ * marker would spawn a real `zig version` probe (and, on a machine with no
+ * Zig, attempt a real network download) just to build a fake plugin against
+ * a FakeProcessRunner that never actually runs anything. What these tests
+ * verify — language detection, --release becoming the right flag, the
+ * spawned args — has nothing to do with how the command string was
+ * resolved, so this keeps that concern out of them entirely.
+ */
+const resolveBareCommand = async (language: { buildCommand: string }) => language.buildCommand;
+
 /** Stands in for the SDK templates, which are not present in V2. */
 class FakeTemplateSource implements PluginTemplateSource {
   filesFor(request: PluginTemplateRequest): PluginTemplateFile[] {
@@ -329,7 +342,7 @@ describe("building a plugin", () => {
     workspace.put(`${ROOT}/p/build.zig`);
     const runner = new FakeProcessRunner();
 
-    const result = await new BuildPluginUseCase(workspace, runner).execute({
+    const result = await new BuildPluginUseCase(workspace, runner, resolveBareCommand).execute({
       directory: `${ROOT}/p`,
       release: true,
     });
@@ -345,7 +358,7 @@ describe("building a plugin", () => {
     workspace.put(`${ROOT}/p/build.zig`);
     const runner = new FakeProcessRunner();
 
-    await new BuildPluginUseCase(workspace, runner).execute({ directory: `${ROOT}/p` });
+    await new BuildPluginUseCase(workspace, runner, resolveBareCommand).execute({ directory: `${ROOT}/p` });
     expect(runner.calls[0].args).toEqual(["build"]);
   });
 
@@ -356,7 +369,7 @@ describe("building a plugin", () => {
     workspace.put(`${ROOT}/old/Cargo.toml`);
 
     await expect(
-      new BuildPluginUseCase(workspace, new FakeProcessRunner()).execute({
+      new BuildPluginUseCase(workspace, new FakeProcessRunner(), resolveBareCommand).execute({
         directory: `${ROOT}/old`,
       }),
     ).rejects.toThrow(NotAPluginDirectoryError);
@@ -366,7 +379,7 @@ describe("building a plugin", () => {
     const workspace = new MemoryWorkspace();
     workspace.put(`${ROOT}/p/build.zig`);
 
-    const result = await new BuildPluginUseCase(workspace, new FakeProcessRunner(101)).execute({
+    const result = await new BuildPluginUseCase(workspace, new FakeProcessRunner(101), resolveBareCommand).execute({
       directory: `${ROOT}/p`,
     });
     expect(result.exitCode).toBe(101);
@@ -377,7 +390,7 @@ describe("building a plugin", () => {
     workspace.put(`${ROOT}/empty/README.md`);
 
     await expect(
-      new BuildPluginUseCase(workspace, new FakeProcessRunner()).execute({
+      new BuildPluginUseCase(workspace, new FakeProcessRunner(), resolveBareCommand).execute({
         directory: `${ROOT}/empty`,
       }),
     ).rejects.toThrow(NotAPluginDirectoryError);
@@ -500,7 +513,7 @@ describe("syncing local plugins", () => {
     const lib = PluginName.from(name).libraryFilename();
     workspace.put(`${ROOT}/app/plugins/${name}/zig-out/lib/${lib}`, "ELF");
 
-    const build = new BuildPluginUseCase(workspace, runner);
+    const build = new BuildPluginUseCase(workspace, runner, resolveBareCommand);
     const install = new InstallPluginUseCase(workspace);
     return { workspace, runner, lib, useCase: new SyncLocalPluginsUseCase(workspace, build, install) };
   }
@@ -538,7 +551,7 @@ describe("syncing local plugins", () => {
       const lib = PluginName.from(name).libraryFilename();
       workspace.put(`${ROOT}/app/plugins/${name}/zig-out/lib/${lib}`, "ELF");
     }
-    const build = new BuildPluginUseCase(workspace, new FakeProcessRunner());
+    const build = new BuildPluginUseCase(workspace, new FakeProcessRunner(), resolveBareCommand);
     const install = new InstallPluginUseCase(workspace);
 
     const result = await new SyncLocalPluginsUseCase(workspace, build, install).execute(
@@ -552,7 +565,7 @@ describe("syncing local plugins", () => {
     const workspace = new MemoryWorkspace();
     workspace.put(`${ROOT}/app/carbon.toml`, "");
     workspace.put(`${ROOT}/app/plugins/README.md`, "not a plugin");
-    const build = new BuildPluginUseCase(workspace, new FakeProcessRunner());
+    const build = new BuildPluginUseCase(workspace, new FakeProcessRunner(), resolveBareCommand);
     const install = new InstallPluginUseCase(workspace);
 
     const result = await new SyncLocalPluginsUseCase(workspace, build, install).execute(
@@ -565,7 +578,7 @@ describe("syncing local plugins", () => {
   test("no plugins/ directory at all is not an error", async () => {
     const workspace = new MemoryWorkspace();
     workspace.put(`${ROOT}/app/carbon.toml`, "");
-    const build = new BuildPluginUseCase(workspace, new FakeProcessRunner());
+    const build = new BuildPluginUseCase(workspace, new FakeProcessRunner(), resolveBareCommand);
     const install = new InstallPluginUseCase(workspace);
 
     const result = await new SyncLocalPluginsUseCase(workspace, build, install).execute(
@@ -611,7 +624,7 @@ describe("syncing local plugins", () => {
     const workspace = new MemoryWorkspace();
     workspace.put(`${ROOT}/app/carbon.toml`, "");
     workspace.put(`${ROOT}/app/plugins/broken/build.zig`);
-    const build = new BuildPluginUseCase(workspace, new FakeProcessRunner(1));
+    const build = new BuildPluginUseCase(workspace, new FakeProcessRunner(1), resolveBareCommand);
     const install = new InstallPluginUseCase(workspace);
 
     await expect(

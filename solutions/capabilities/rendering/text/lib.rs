@@ -53,6 +53,14 @@ pub struct TextEngine {
     /// intent (sans vs mono) instead of blindly using the first font in the
     /// stack. Rebuilt whenever `fonts` changes (len mismatch).
     mono_flags: Vec<bool>,
+    /// Parallel to `fonts`: the family name this face was registered under,
+    /// if any (via `load_font_bytes_named`/`load_font_path_named` — what the
+    /// fonts plugin's `loadFont(path, family)` JS hook calls into through the
+    /// plugin ABI). `None` for the embedded defaults and anything loaded
+    /// through the older, anonymous `load_font_bytes`/`load_font_path`.
+    /// This is what lets `font-family: "Poppins"` in CSS/JSX actually select
+    /// a specific loaded face by name — see `font_for_char_named`.
+    family_names: Vec<Option<String>>,
     /// glyph cache: (codepoint, px, font_idx) -> (metrics, alpha bitmap)
     cache: HashMap<(u32, u32, u32), CachedGlyph>,
     /// Horizontal clip band (LOGICAL px) applied to glyph blits. Set by the
@@ -66,6 +74,15 @@ pub struct TextEngine {
     /// `draw_text_*` selects the matching face. Measurement ignores this
     /// (always weight-400 metrics) so layout stays weight-stable.
     pub cur_weight: u16,
+    /// Requested font-family (the raw CSS value, e.g. `"Poppins", sans-serif`)
+    /// for the NEXT draw/measure call. Mirrors `cur_weight`, but — unlike
+    /// it — measurement does NOT ignore this: a named font can have
+    /// different glyph metrics than the fallback stack, so layout and paint
+    /// must agree on which face they're using or the measured box won't
+    /// match what gets rendered. `None` means "no family requested", which
+    /// falls straight through to the existing weight/mono/coverage search
+    /// in `font_for_char`.
+    pub cur_family: Option<String>,
     /// Device-pixel scale (HiDPI). Layout + measurement run in LOGICAL px;
     /// the paint loop sets this to the monitor scale factor so the single
     /// glyph-blit leaf (`draw_text_styled_mono`) rasterizes and positions
@@ -96,9 +113,11 @@ impl TextEngine {
             pending_user_bytes: Vec::new(),
             default_loaded: false,
             mono_flags: Vec::new(),
+            family_names: Vec::new(),
             cache: HashMap::new(),
             x_clip: (f32::NEG_INFINITY, f32::INFINITY),
             cur_weight: 400,
+            cur_family: None,
             scale: 1.0,
         }
     }
@@ -124,8 +143,29 @@ impl TextEngine {
     /// Load a font from raw TTF/OTF bytes and APPEND to the stack.
     /// Returns true on success. Subsequent glyph lookups consider this
     /// font BEFORE the embedded default (but after any previously-added
-    /// fonts).
+    /// fonts). Anonymous — not selectable by font-family name. Kept for the
+    /// existing `__cm_load_font`/`__cm_load_font_bytes` JS globals; new
+    /// callers (the fonts plugin) should use `load_font_bytes_named`.
     pub fn load_font_bytes(&mut self, bytes: Vec<u8>) -> bool {
+        self.load_font_bytes_named(bytes, None, None)
+    }
+
+    /// Load a font from a file path and append to the stack. Returns
+    /// true on success. Anonymous — see `load_font_bytes`.
+    pub fn load_font_path(&mut self, path: &Path) -> bool {
+        self.load_font_path_named(path, None, None)
+    }
+
+    /// Load a font from raw TTF/OTF bytes and APPEND to the stack, optionally
+    /// registered under `family` so `font-family: "<family>"` can select it
+    /// by name (see `font_for_char_named`) instead of only by weight/mono/
+    /// coverage, and tagged with `weight` (1-1000, CSS font-weight scale;
+    /// `None` defaults to 400 — Regular) so `font-bold`/`font-semibold` text
+    /// in that family picks THIS face instead of silently falling back to
+    /// Inter's matching weight. This is what the fonts plugin's
+    /// `loadFont(path, family, weight)` JS hook calls into, through the
+    /// plugin ABI's `load_font_bytes` field.
+    pub fn load_font_bytes_named(&mut self, bytes: Vec<u8>, family: Option<String>, weight: Option<u16>) -> bool {
         // Make sure the embedded defaults are in first, then append. Face
         // selection filters by (mono-class, weight, coverage), so position
         // no longer matters — a runtime-loaded monospace font is still
@@ -134,7 +174,8 @@ impl TextEngine {
         match Font::from_bytes(bytes.as_slice(), FontSettings::default()) {
             Ok(font) => {
                 self.fonts.push(font);
-                self.weights.push(400);
+                self.weights.push(weight.unwrap_or(400).clamp(1, 1000));
+                self.family_names.push(family);
                 self.mono_flags.clear(); // force rebuild on next op
                 true
             }
@@ -142,11 +183,11 @@ impl TextEngine {
         }
     }
 
-    /// Load a font from a file path and append to the stack. Returns
-    /// true on success.
-    pub fn load_font_path(&mut self, path: &Path) -> bool {
+    /// Load a font from a file path and append to the stack, optionally
+    /// named/weighted — see `load_font_bytes_named`.
+    pub fn load_font_path_named(&mut self, path: &Path, family: Option<String>, weight: Option<u16>) -> bool {
         match std::fs::read(path) {
-            Ok(bytes) => self.load_font_bytes(bytes),
+            Ok(bytes) => self.load_font_bytes_named(bytes, family, weight),
             Err(_) => false,
         }
     }
@@ -162,6 +203,7 @@ impl TextEngine {
             if let Ok(font) = Font::from_bytes(bytes.as_slice(), FontSettings::default()) {
                 self.fonts.push(font);
                 self.weights.push(400);
+                self.family_names.push(None);
             }
         }
         // 2. Append the embedded Inter weight stack + Roboto backstop once.
@@ -176,16 +218,20 @@ impl TextEngine {
                 if let Ok(font) = Font::from_bytes(bytes, FontSettings::default()) {
                     self.fonts.push(font);
                     self.weights.push(weight);
+                    self.family_names.push(None);
                 }
             }
             self.default_loaded = true;
         }
-        // 3. Keep the parallel metadata in sync. `weights` is pushed
-        //    alongside every font above; pad defensively in case a path
-        //    added a font without a weight. mono_flags rebuilds on len
+        // 3. Keep the parallel metadata in sync. `weights`/`family_names`
+        //    are pushed alongside every font above; pad defensively in case
+        //    a path added a font without them. mono_flags rebuilds on len
         //    change — off the hot per-glyph path.
         while self.weights.len() < self.fonts.len() {
             self.weights.push(400);
+        }
+        while self.family_names.len() < self.fonts.len() {
+            self.family_names.push(None);
         }
         if self.mono_flags.len() != self.fonts.len() {
             self.mono_flags = self
@@ -223,6 +269,18 @@ impl TextEngine {
         if self.fonts.is_empty() {
             return None;
         }
+        // Family-name-aware pass: if the caller requested a specific family
+        // (`cur_family`, set by the paint/layout call sites from the node's
+        // CSS font-family) and a loaded font was registered under a
+        // matching name, prefer it over the generic coverage/weight search
+        // below — this is what makes `font-family: "Poppins"` actually
+        // select Poppins instead of being reduced to a mono/proportional
+        // guess. Falls through to the general search below when the named
+        // font doesn't cover `ch` (or nothing matched), so a custom font
+        // missing e.g. an emoji still falls back gracefully.
+        if let Some(idx) = self.font_for_char_named(ch, weight) {
+            return Some((&self.fonts[idx], idx as u32));
+        }
         // Pick, among the faces that actually have the glyph, the one whose
         // nominal weight is closest to `weight` — preferring the requested
         // class (mono vs proportional). Ties keep the earlier (higher-
@@ -246,6 +304,61 @@ impl TextEngine {
         }
         let idx = best_class.or(best_any).map(|(_, i)| i).unwrap_or(0);
         Some((&self.fonts[idx], idx as u32))
+    }
+
+    /// Among fonts registered under a name matching `self.cur_family` (a raw
+    /// CSS font-family value — possibly a comma-separated fallback chain,
+    /// e.g. `"Poppins", sans-serif`), return the index of the one closest to
+    /// `weight` that actually covers `ch`. `None` if no family was
+    /// requested, nothing was registered under a matching name, or none of
+    /// the matches cover this glyph — any of which falls through to the
+    /// ordinary coverage/weight/mono search in `font_for_char`.
+    ///
+    /// Tries each family in the requested chain in order and stops at the
+    /// first one with ANY registered face (matching CSS's own fallback
+    /// semantics: `"Poppins", sans-serif` means "Poppins, and only if
+    /// Poppins isn't available at all, fall back"), then picks the
+    /// weight-closest face among that family's variants (so a plugin that
+    /// loaded both "Poppins" 400 and "Poppins" 700 gets real bold, not a
+    /// synthetic one).
+    fn font_for_char_named(&self, ch: char, weight: u16) -> Option<usize> {
+        let requested = self.cur_family.as_deref()?;
+        for fam in requested.split(',') {
+            let fam = normalize_family(fam);
+            if fam.is_empty() {
+                continue;
+            }
+            let mut best: Option<(u16, usize)> = None;
+            for (i, name) in self.family_names.iter().enumerate() {
+                let Some(name) = name else { continue };
+                if normalize_family(name) != fam {
+                    continue;
+                }
+                if self.fonts[i].lookup_glyph_index(ch) == 0 {
+                    continue;
+                }
+                let fw = self.weights.get(i).copied().unwrap_or(400) as i32;
+                let dist = (fw - weight as i32).unsigned_abs() as u16;
+                if best.map(|(bd, _)| dist < bd).unwrap_or(true) {
+                    best = Some((dist, i));
+                }
+            }
+            if best.is_some() {
+                return best.map(|(_, i)| i);
+            }
+            // Nothing under this family name covers `ch` — but if the name
+            // itself is registered at all (just missing this glyph), stop
+            // here rather than trying the next fallback in the chain, same
+            // as the doc comment's CSS-semantics rationale above.
+            if self
+                .family_names
+                .iter()
+                .any(|n| n.as_deref().map(normalize_family).as_deref() == Some(fam.as_str()))
+            {
+                return None;
+            }
+        }
+        None
     }
 
     /// Preload (so the cost is paid before first paint).
@@ -828,6 +941,83 @@ impl TextEngine {
             || lower.contains("fira code")
             || lower.contains("source code")
             || lower.contains("ubuntu mono")
+    }
+}
+
+/// Normalizes one CSS font-family entry for name comparison: trims
+/// surrounding whitespace and the quotes CSS allows around a family name
+/// (`"Poppins"` / `'Poppins'` / `Poppins` all mean the same family), then
+/// lowercases. Used by `font_for_char_named` to match a requested family
+/// against `family_names`, which is populated the same way (whatever string
+/// the fonts plugin's `loadFont(path, family)` call was given).
+fn normalize_family(s: &str) -> String {
+    s.trim()
+        .trim_matches(|c| c == '"' || c == '\'')
+        .to_ascii_lowercase()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_family_strips_quotes_whitespace_and_case() {
+        assert_eq!(normalize_family("\"Poppins\""), "poppins");
+        assert_eq!(normalize_family(" 'Poppins' "), "poppins");
+        assert_eq!(normalize_family("POPPINS"), "poppins");
+        assert_eq!(normalize_family("  sans-serif "), "sans-serif");
+    }
+
+    // Real font bytes (the embedded Roboto backstop), not synthetic data —
+    // used as a stand-in "custom" font distinct from Inter so the test can
+    // tell the two apart by which one actually got selected.
+
+    #[test]
+    fn a_named_font_is_selected_over_the_default_stack_when_family_matches() {
+        let mut te = TextEngine::new();
+        assert!(te.load_font_bytes_named(FALLBACK_FONT_BYTES.to_vec(), Some("MyCustomFont".to_string()), None));
+        let named_idx = te.fonts.len() - 1;
+        assert_eq!(te.family_names[named_idx].as_deref(), Some("MyCustomFont"));
+
+        // CSS-shaped chain with quotes + a generic fallback — normalize_family
+        // must see through both.
+        te.cur_family = Some("\"MyCustomFont\", sans-serif".to_string());
+        let (_, idx) = te.font_for_char('A', false, 400).expect("should resolve a font");
+        assert_eq!(idx as usize, named_idx, "expected the named font, not the default Inter face");
+    }
+
+    #[test]
+    fn no_cur_family_uses_the_ordinary_coverage_search() {
+        let mut te = TextEngine::new();
+        te.preload(); // embeds Inter/Roboto; Inter-Regular lands at index 0
+        assert!(te.cur_family.is_none());
+        let (_, idx) = te.font_for_char('A', false, 400).expect("should resolve a font");
+        assert_eq!(idx, 0, "no family requested — should use the primary (Inter-Regular)");
+    }
+
+    #[test]
+    fn an_unmatched_family_falls_back_to_the_default_search_instead_of_returning_nothing() {
+        let mut te = TextEngine::new();
+        te.preload();
+        te.cur_family = Some("NoSuchFontAnywhere".to_string());
+        let (_, idx) = te.font_for_char('A', false, 400).expect("should still resolve via fallback");
+        assert_eq!(idx, 0, "no matching family — should fall back to Inter-Regular, not None");
+    }
+
+    #[test]
+    fn among_multiple_weights_of_the_same_family_the_closest_weight_wins() {
+        let mut te = TextEngine::new();
+        assert!(te.load_font_bytes_named(FALLBACK_FONT_BYTES.to_vec(), Some("Multi".to_string()), Some(400)));
+        let regular_idx = te.fonts.len() - 1;
+        assert!(te.load_font_bytes_named(INTER_BOLD.to_vec(), Some("Multi".to_string()), Some(700)));
+        let bold_idx = te.fonts.len() - 1;
+
+        te.cur_family = Some("Multi".to_string());
+        let (_, idx) = te.font_for_char('A', false, 700).expect("should resolve a font");
+        assert_eq!(idx as usize, bold_idx, "weight 700 should pick the bold variant of the named family");
+
+        let (_, idx) = te.font_for_char('A', false, 400).expect("should resolve a font");
+        assert_eq!(idx as usize, regular_idx, "weight 400 should pick the regular variant of the named family");
     }
 }
 

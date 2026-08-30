@@ -286,6 +286,7 @@ pub fn paint_scene(scene: &Scene, pixmap: &mut Pixmap, scale: f32, text_engine: 
             0xFF_000000,
             14.0,
             false, // root inherits proportional (sans) intent
+            None,  // root has no font-family override
             400,   // root inherits normal font-weight
             0.0,
             pix_h / scale,
@@ -370,6 +371,7 @@ fn paint_node(
     inherited_color: u32,
     inherited_font_size: f32,
     inherited_mono: bool,
+    inherited_family: Option<String>,
     inherited_weight: u16,
     clip_top: f32,
     clip_bottom: f32,
@@ -410,6 +412,7 @@ fn paint_node(
                     inherited_color,
                     inherited_font_size,
                     inherited_mono,
+                    inherited_family.clone(),
                     inherited_weight,
                     clip_top,
                     clip_bottom,
@@ -581,6 +584,11 @@ fn paint_node(
         .as_deref()
         .map(crate::text::TextEngine::family_is_mono)
         .unwrap_or(inherited_mono);
+    // The font-family STRING itself (own value wins, else inherit) — set on
+    // the text engine right before each measure/draw call below so named
+    // fonts loaded via the fonts plugin's loadFont() hook actually get
+    // selected (see TextEngine::cur_family / font_for_char_named).
+    let effective_family = node.props.font_family.clone().or_else(|| inherited_family.clone());
 
     // Box-shadow — outset shadows painted FIRST (behind everything
     // for this node), one per entry in declaration order so the
@@ -1076,6 +1084,10 @@ fn paint_node(
             let letter_spacing = node.props.letter_spacing.unwrap_or(0.0);
             let is_mono = effective_mono;
             let line_h = text_engine.resolve_line_height(effective_font_size, lh_prop);
+            // Spans don't carry their own font-family (only per-span
+            // weight) — constant for the whole loop below, so set once here
+            // rather than per-span, and before the width measurement too.
+            text_engine.cur_family = effective_family.clone();
             // Skip the whole node if its single-line band is out
             // of the scroll clip. (Spans are single-line per the
             // contract above.)
@@ -1155,6 +1167,12 @@ fn paint_node(
             let lh_prop = node.props.line_height;
             let letter_spacing = node.props.letter_spacing.unwrap_or(0.0);
             let is_mono = effective_mono;
+            // Real weight/family via the Inter face stack (Regular → Bold)
+            // or a plugin-loaded named font. Set before the alignment
+            // measurement below too, so a named font's real glyph widths
+            // (not the fallback stack's) decide the centered/right offset.
+            text_engine.cur_weight = effective_weight;
+            text_engine.cur_family = effective_family.clone();
             let mut x_off = 0.0_f32;
             if align != "left" && w > 0.0 {
                 let (tw, _th) = text_engine.measure_styled_mono(
@@ -1171,8 +1189,6 @@ fn paint_node(
                     };
                 }
             }
-            // Real weight via the Inter face stack (Regular → Bold).
-            text_engine.cur_weight = effective_weight;
             text_engine.draw_text_wrapped_clipped_styled_mono(
                 pixmap,
                 text,
@@ -1228,6 +1244,11 @@ fn paint_node(
     // soft-wrap, paint, caret, and click hit-test all see the same
     // visual layout.
     if matches!(node.kind, NodeKind::Input | NodeKind::Textarea) {
+        // Set once, before the first measurement below (selection/caret
+        // math measures text too) — everything in this branch shares one
+        // weight/family for the whole field.
+        text_engine.cur_weight = effective_weight;
+        text_engine.cur_family = effective_family.clone();
         let pad_left = node
             .props
             .padding_left
@@ -1340,7 +1361,7 @@ fn paint_node(
         // ourselves — any further wrapping in the engine would
         // double-up and overlap rows.
         if !display_text.is_empty() {
-            text_engine.cur_weight = effective_weight;
+            // cur_weight/cur_family already set at the top of this branch.
             for (i, (s, e)) in visual_lines.iter().enumerate() {
                 let line_text = &display_text[*s..*e];
                 if line_text.is_empty() {
@@ -1493,6 +1514,7 @@ fn paint_node(
             effective_color,
             effective_font_size,
             effective_mono,
+            effective_family.clone(),
             effective_weight,
             child_clip_top,
             child_clip_bottom,

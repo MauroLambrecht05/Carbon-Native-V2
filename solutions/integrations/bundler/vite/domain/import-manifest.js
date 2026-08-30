@@ -83,17 +83,79 @@ function scanPluginDirs(dir) {
 }
 
 /**
- * Walk `<projectRoot>/plugins/*` — an app's own local plugin sources — and
- * return manifests keyed by plugin name. This is the discovery root every
- * real app actually exercises: `carbon.toml [plugins]` grants a name, and
- * `plugins/<that name>/carbon-plugin.toml` is where its JS exports live.
+ * Walk `<projectRoot>/plugins/*.carbon-plugin.toml` — manifests
+ * `InstallPluginUseCase` copies FLAT next to a prebuilt artifact
+ * (`carbon plugin install` / `carbon plugin add <name>`), as opposed to
+ * `scanPluginDirs`'s `plugins/<name>/carbon-plugin.toml`, which is where a
+ * LOCAL-SOURCE plugin's own manifest lives beside its `src/`. Both shapes
+ * are real: an app that vendors a plugin's Zig source gets the subdirectory
+ * form; an app that fetched a prebuilt one via `carbon plugin add` gets
+ * this flat one. Without this, `carbon:*` imports for anything installed
+ * the second way fell through to "unknown virtual module" — the JS side
+ * never learned what the plugin exports.
+ *
+ * @param {string} pluginsDir Absolute path to the app's `plugins/` directory.
+ * @returns {Map<string, ParsedManifest>}
+ */
+function scanFlatManifests(pluginsDir) {
+  const out = new Map();
+  if (!pluginsDir || !existsSync(pluginsDir)) return out;
+
+  let entries;
+  try {
+    entries = readdirSync(pluginsDir);
+  } catch {
+    return out;
+  }
+
+  for (const entry of entries) {
+    if (!entry.endsWith(".carbon-plugin.toml")) continue;
+    const tomlPath = join(pluginsDir, entry);
+    let s;
+    try {
+      s = statSync(tomlPath);
+    } catch {
+      continue;
+    }
+    if (!s.isFile()) continue;
+
+    let parsed;
+    try {
+      parsed = parseToml(readFileSync(tomlPath, "utf8"));
+    } catch {
+      continue; // malformed manifest — same tolerance as scanPluginDirs
+    }
+
+    const m = normalizeManifest(parsed);
+    if (m === null) continue;
+    out.set(m.name, m);
+  }
+
+  return out;
+}
+
+/**
+ * Walk `<projectRoot>/plugins/*` — an app's own local plugin sources AND any
+ * prebuilt artifacts `carbon plugin install`/`add` copied in — and return
+ * manifests keyed by plugin name. This is the discovery root every real app
+ * actually exercises: `carbon.toml [plugins]` grants a name, and either
+ * `plugins/<that name>/carbon-plugin.toml` (vendored source) or
+ * `plugins/<that name>.carbon-plugin.toml` (installed artifact) is where its
+ * JS exports live. The flat form wins on a name collision — vendored source
+ * a developer is actively editing should shadow a stale installed copy of
+ * the same plugin, matching scanPluginDirs' own subdirectory-wins framing
+ * one layer up in discoverManifests vs discoverLocalManifests.
  *
  * @param {string} projectRoot Absolute path to the app (carbon.toml's directory).
  * @returns {Map<string, ParsedManifest>}
  */
 export function discoverLocalManifests(projectRoot) {
   if (!projectRoot) return new Map();
-  return scanPluginDirs(join(projectRoot, "plugins"));
+  const pluginsDir = join(projectRoot, "plugins");
+  const fromDirs = scanPluginDirs(pluginsDir);
+  const fromFlat = scanFlatManifests(pluginsDir);
+  for (const [name, m] of fromFlat) fromDirs.set(name, m);
+  return fromDirs;
 }
 
 /**

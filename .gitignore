@@ -23,6 +23,9 @@ node_modules/
 /labs/gpu-canvas/target/
 # Generated FlatBuffers bindings, beside the generator that writes them.
 /.tools/generators/out/
+# ZigToolchain.ts's auto-downloaded compiler (@carbon/lifecycle) — a cache,
+# never committed, same reasoning as Cargo's target/ above.
+/.tools/orchestration/toolchains/
 dist/
 # Per-app build cache the CLI pipeline writes next to a project's dist/.
 .carbon-cache/

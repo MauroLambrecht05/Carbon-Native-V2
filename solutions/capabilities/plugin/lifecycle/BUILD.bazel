@@ -26,5 +26,7 @@ bun_test(
         ":srcs",
         ":tests",
         "//solutions/infrastructure/process:srcs",
+        "//solutions/infrastructure/logging:srcs",
+        "//solutions/infrastructure/workspace:srcs",
     ],
 )
