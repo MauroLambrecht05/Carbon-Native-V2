@@ -49,7 +49,7 @@ code, and nothing else.
 | `run` | Build whatever needs building, then launch |
 | `build` | Build UI + shell + runtime, don't launch |
 | `dev` | Watch sources, rebuild and relaunch on save |
-| `plugin` | Manage native plugins (new / build / install / list / info) |
+| `plugin` | Manage native plugins (new / add / build / check / install / enable / disable / list / info) |
 | `signer` | Ed25519 signing and key management |
 | `bundle` | Create OS-specific installers |
 | `publish` | Manage releases and delta updates |

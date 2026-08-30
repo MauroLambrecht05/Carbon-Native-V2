@@ -44,6 +44,11 @@ export class NodePluginWorkspace implements PluginWorkspace {
     return readdirSync(path).filter((entry) => statSync(join(path, entry)).isDirectory());
   }
 
+  listFiles(path: string): string[] {
+    if (!existsSync(path)) return [];
+    return readdirSync(path).filter((entry) => statSync(join(path, entry)).isFile());
+  }
+
   copyFile(from: string, to: string): void {
     mkdirSync(dirname(to), { recursive: true });
     copyFileSync(from, to);

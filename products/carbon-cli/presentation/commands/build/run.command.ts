@@ -108,20 +108,28 @@ export async function runCommand(rest: string[]): Promise<number> {
     // run only"). Near-zero means the binary already existed.
     stage("runtime_binary");
 
+    // Every plugin carbon/manifest.toml declares is brought up to date here:
+    // a missing vendor artifact is auto-fetched + signed, then `zig build`
+    // runs once inside carbon/ — building every local plugin and staging
+    // everything into carbon/native/<os>/<arch>/. No separate `carbon plugin
+    // install`/`add` step, on this machine or any other.
+    //
+    // Before buildProject, not after: the bundler's discoverLocalManifests
+    // (solutions/integrations/bundler/vite) reads each plugin's own
+    // carbon-plugin.toml to resolve `import ... from "carbon:*"` — on a
+    // fresh clone (manifest.toml committed, the vendor artifact/manifest
+    // gitignored and not yet fetched) that file does not exist until THIS
+    // step's auto-heal writes it. Bundling first would fail to resolve the
+    // import on exactly the machine auto-heal exists for.
+    await syncPlugins(projectDir);
+    stage("plugins");
+
     await buildProject(projectDir, backend, log, {
       bytecode: cfg.runtime.bytecode,
       force,
       noBabelCache,
     });
     stage("bundle");
-
-    // Any plugin whose SOURCE lives in this app's own carbon/own/<name>/
-    // builds and installs itself here — no separate `carbon plugin install` step.
-    // A plugin declared by a path elsewhere (or one merely dropped in as a
-    // prebuilt .dll) is untouched; this only matches a directory holding a
-    // language marker file.
-    await syncLocalPlugins(projectDir);
-    stage("plugins");
 
     // Plugins, before the window rather than after. Everything reported here
     // the runtime would also report — as `[carbon-plugin] FAILED to load ...`
@@ -181,25 +189,26 @@ export async function runCommand(rest: string[]): Promise<number> {
 
 
 /**
- * Build + install every plugin whose source lives in this app's own
- * carbon/own/<name>/, so the app project is the single source of truth and
- * there is nothing to remember to run separately.
+ * Bring carbon/native/<os>/<arch>/ up to date with what carbon/manifest.toml
+ * declares — auto-fetching any missing vendor plugin, then building every
+ * local one — so the app project is the single source of truth and there is
+ * nothing to remember to run separately, on this machine or a teammate's.
  *
- * A build failure here is fatal — unlike preflightPlugins below, which warns
- * and lets a load-time failure be the runtime's problem, a plugin this app
- * owns the source of failing to compile is this app's own build breaking,
- * not a missing optional feature.
+ * A failure here is fatal — unlike preflightPlugins below, which warns and
+ * lets a load-time failure be the runtime's problem, a plugin this app's
+ * manifest declares failing to build is this app's own build breaking, not
+ * a missing optional feature.
  *
  * `release: true` — this is the artifact that ships, unlike `carbon dev`'s
  * fast Debug builds.
  */
-async function syncLocalPlugins(projectDir: string): Promise<void> {
-  const { synced } = await pluginUseCases(join(PRODUCTS_DIR, "carbon-ext")).syncLocal.execute(
-    projectDir,
-    { release: true, logger: log },
-  );
-  for (const plugin of synced) {
-    log.step(c.dim(`plugin ${plugin.name}: built + installed from ./carbon/own/${plugin.name}`));
+async function syncPlugins(projectDir: string): Promise<void> {
+  const { staged } = await pluginUseCases(
+    join(PRODUCTS_DIR, "carbon-ext"),
+    join(PRODUCTS_DIR, "carbon-sdk"),
+  ).sync.execute(projectDir, { release: true, logger: log });
+  for (const file of staged) {
+    log.step(c.dim(`plugin: staged ./carbon/native/.../${file}`));
   }
 }
 

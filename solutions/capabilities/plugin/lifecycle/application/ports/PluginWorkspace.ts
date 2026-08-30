@@ -17,11 +17,15 @@ export interface PluginWorkspace {
 
   /**
    * Immediate subdirectory names of `path`, or `[]` if it does not exist.
-   *
-   * What `SyncLocalPluginsUseCase` walks to find every `carbon/own/<name>/`
-   * an app owns the source of.
    */
   listDirectories(path: string): string[];
+
+  /**
+   * Immediate file names (not subdirectories) of `path`, or `[]` if it does
+   * not exist. What `SyncPluginsUseCase` lists to report what `carbon/
+   * build.zig` actually staged into `carbon/native/<os>/<arch>/`.
+   */
+  listFiles(path: string): string[];
 
   /**
    * Nearest ancestor of `from` (inclusive) containing a carbon.toml.
@@ -51,4 +55,12 @@ export interface PluginTemplateFile {
 /** Where a plugin's starting files come from. */
 export interface PluginTemplateSource {
   filesFor(request: PluginTemplateRequest): PluginTemplateFile[];
+
+  /**
+   * The fixed files an app's carbon/ directory needs before it can hold any
+   * plugin: build.zig, build.zig.zon, manifest.toml. No per-request
+   * placeholders — identical for every app, scaffolded lazily by
+   * CreatePluginUseCase the first time a host app gets its first plugin.
+   */
+  appCarbonDirFiles(): PluginTemplateFile[];
 }

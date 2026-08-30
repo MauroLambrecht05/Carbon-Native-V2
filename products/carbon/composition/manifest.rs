@@ -188,12 +188,41 @@ pub(crate) fn read_updater_section(project_dir: &PathBuf) -> Option<UpdaterSecti
     Some(section)
 }
 
-/// Read [plugins] from carbon.toml. Returns an empty map if carbon.toml is
-/// missing, has no [plugins] section, or fails to parse the section. The
-/// loader treats an empty map as a no-op.
+/// Read `carbon/manifest.toml` — the real source of truth for which plugins
+/// compose this app (both locally-authored and fetched/vendor), maintained by
+/// `carbon plugin new`/`add`/`enable`/`disable`, never hand-edited. Missing or
+/// unparseable ⇒ empty (no plugins to load), matching every other section's
+/// "no file is fine" posture in this module.
+///
+/// carbon.toml's `[plugins]` table (see `read_plugins_section` below) only
+/// grants capabilities to names that appear here — it never says a plugin
+/// exists.
+pub(crate) fn read_app_manifest(project_dir: &PathBuf) -> carbon_core::config::AppManifest {
+    let path = project_dir.join("carbon").join("manifest.toml");
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(_) => return Default::default(),
+    };
+    match toml::from_str(&text) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!(
+                "[carbon-mini-plugin] WARNING: failed to parse {}: {e}",
+                path.display()
+            );
+            Default::default()
+        }
+    }
+}
+
+/// Read [plugins] from carbon.toml — capability GRANTS only, keyed by plugin
+/// name (see `carbon_core::config::CapabilityGrant`). Returns an empty map if
+/// carbon.toml is missing, has no [plugins] section, or fails to parse it.
+/// The loader treats an absent entry as "declared in the manifest, zero
+/// capabilities granted" — not as "does not exist".
 pub(crate) fn read_plugins_section(
     project_dir: &PathBuf,
-) -> std::collections::BTreeMap<String, carbon_core::config::PluginEntry> {
+) -> std::collections::BTreeMap<String, carbon_core::config::CapabilityGrant> {
     let path = project_dir.join("carbon.toml");
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,
@@ -204,7 +233,7 @@ pub(crate) fn read_plugins_section(
     #[derive(serde::Deserialize, Default)]
     struct LocalCfg {
         #[serde(default)]
-        plugins: std::collections::BTreeMap<String, carbon_core::config::PluginEntry>,
+        plugins: std::collections::BTreeMap<String, carbon_core::config::CapabilityGrant>,
     }
     match toml::from_str::<LocalCfg>(&text) {
         Ok(c) => c.plugins,

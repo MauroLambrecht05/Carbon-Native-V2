@@ -9,12 +9,15 @@ pub struct Config {
     pub app: AppSection,
     #[serde(default)]
     pub runtime: RuntimeSection,
-    /// Native plugin grants. Keys are plugin names, values describe
-    /// either a simple boolean grant, an explicit path, or a full record
-    /// with capability grants. See [`PluginEntry`] for the accepted forms.
+    /// Native plugin CAPABILITY GRANTS, keyed by plugin name. This is not a
+    /// plugin registry — which plugins exist and where their binary lives is
+    /// entirely governed by `carbon/manifest.toml` + `carbon/native/<os>/
+    /// <arch>/`. This section only grants capabilities; a plugin needing
+    /// none needs no entry here. See [`CapabilityGrant`].
     ///
-    /// Plugin loading is driven by `carbon/api/plugin_loader.rs`.
-    /// If this section is missing or empty the loader is a no-op.
+    /// Plugin loading is driven by `solutions/infrastructure/plugin-host`'s
+    /// `plugin_loader.rs`. If this section is missing or empty, every
+    /// manifest-declared plugin still loads — just with zero capabilities.
     #[serde(default)]
     pub plugins: PluginsSection,
 }
@@ -166,53 +169,39 @@ impl Config {
 
 // ─── Plugins section ────────────────────────────────────────────────────
 //
-// Three accepted forms in carbon.toml:
+// carbon.toml's [plugins] table grants capabilities ONLY — it is not where
+// a plugin is declared to exist. That's carbon/manifest.toml's job (see
+// products/carbon/composition/manifest.rs's AppManifest), which
+// plugin_loader.rs reads to get the actual set of plugins to load, resolving
+// each to carbon/native/<os>/<arch>/<name>.<dll|so|dylib> by convention —
+// no path ever appears in either file.
 //
 //     [plugins]
-//     audio  = true                                    # bool — auto-resolve path
-//     image  = "plugins/carbon-image.dll"              # explicit path (relative to project_dir)
-//     canvas = { path = "...", capabilities = ["gpu"] } # full form
+//     carbon-pulse = { capabilities = ["paint.pixmap"] }
 //
-// Note this section is ADDITIVE — the existing `[runtime] audio = true /
-// image = true` flags continue to drive the bake-in path. Once Agent 4
-// migrates the bake-in implementations into plugins, those flags can be
-// removed and this section becomes the canonical source of truth.
+// A plugin needing no capability needs no entry here at all — absence means
+// zero grants, not "disabled" (disabling is a manifest.toml concern, an
+// `enabled` field on the plugin's own entry there).
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(transparent)]
-pub struct PluginsSection(pub std::collections::BTreeMap<String, PluginEntry>);
+pub struct PluginsSection(pub std::collections::BTreeMap<String, CapabilityGrant>);
 
 impl PluginsSection {
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&String, &PluginEntry)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &CapabilityGrant)> {
         self.0.iter()
     }
 }
 
-/// Per-plugin entry in `[plugins]`. The TOML deserializer uses untagged
-/// variants — try Bool, then Path (string), then the full table form.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
-pub enum PluginEntry {
-    /// `name = true` — auto-resolve `<project_dir>/carbon/installed/<name>/<name>.<dll|so|dylib>`.
-    /// `name = false` — disabled, ignored entirely.
-    Bool(bool),
-    /// `name = "path/to/plugin.dll"` — explicit path resolved relative to
-    /// the project_dir. Absolute paths are also accepted.
-    Path(String),
-    /// `name = { path = "...", capabilities = [...] }` — full form.
-    Full(PluginEntryFull),
-}
-
+/// One plugin's capability grant. `[plugins.<name>] capabilities = [...]` —
+/// no untagged-enum shorthand forms anymore, since there's nothing left to
+/// shorthand: no path, no bool, just the one field a human ever hand-writes.
 #[derive(Debug, Clone, Default, Deserialize)]
-pub struct PluginEntryFull {
-    /// Override the auto-resolved path. None ⇒ use the auto-resolution
-    /// rule (same as `name = true`).
-    #[serde(default)]
-    pub path: Option<String>,
+pub struct CapabilityGrant {
     /// Granted capability identifiers (e.g. `"audio.output"`, `"fs.read"`).
     /// The plugin's manifest declares its required capabilities; if any of
     /// those are NOT in this list the loader refuses to load the plugin.
@@ -224,32 +213,39 @@ pub struct PluginEntryFull {
     pub config: Option<toml::Value>,
 }
 
-impl PluginEntry {
-    /// Whether this entry indicates the plugin should actually be loaded.
-    /// `false` for `name = false`, true otherwise.
-    pub fn enabled(&self) -> bool {
-        match self {
-            PluginEntry::Bool(b) => *b,
-            PluginEntry::Path(_) => true,
-            PluginEntry::Full(_) => true,
-        }
-    }
+// ─── App manifest (carbon/manifest.toml) ───────────────────────────────────
+//
+// The real source of truth for which plugins compose an app — NOT
+// carbon.toml, which only grants capabilities (above) to names this
+// declares. Generated/maintained by `carbon plugin new`/`add`/`enable`/
+// `disable`; a human does not hand-edit it in normal use. Defined here
+// (not beside its reader in products/carbon/composition/manifest.rs)
+// because solutions/infrastructure/plugin-host's plugin_loader.rs needs it
+// directly too, and a solution may not depend on a product.
+#[derive(Debug, Default, Deserialize)]
+pub struct AppManifest {
+    #[serde(default)]
+    pub plugins: std::collections::BTreeMap<String, AppManifestEntry>,
+}
 
-    /// User-supplied path override, if any.
-    pub fn path(&self) -> Option<&str> {
-        match self {
-            PluginEntry::Bool(_) => None,
-            PluginEntry::Path(p) => Some(p.as_str()),
-            PluginEntry::Full(f) => f.path.as_deref(),
-        }
-    }
+#[derive(Debug, Clone, Deserialize)]
+pub struct AppManifestEntry {
+    pub source: PluginSource,
+    /// Skipped entirely by both `carbon/build.zig` (nothing built/staged)
+    /// and the loader (nothing loaded) when false — the surviving disable
+    /// toggle, flipped by `carbon plugin enable`/`disable` without touching
+    /// the plugin's directory or this entry's other fields.
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    /// Vendor only, informational — nothing resolves against it.
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub version: Option<String>,
+}
 
-    /// Granted capabilities for this plugin (empty for short-form variants).
-    pub fn capabilities(&self) -> &[String] {
-        match self {
-            PluginEntry::Bool(_) => &[],
-            PluginEntry::Path(_) => &[],
-            PluginEntry::Full(f) => &f.capabilities,
-        }
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PluginSource {
+    Local,
+    Vendor,
 }

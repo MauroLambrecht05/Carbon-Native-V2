@@ -10,7 +10,7 @@
 // crate on the host side (solutions/infrastructure/plugin-host/native/
 // global_shortcuts.rs) — this plugin is a thin bridge, same shape as
 // clipboard/dialog/notification/keychain, plus the event-delivery pattern
-// already prototyped in labs/examples/pulse/carbon/own/carbon-hotkey (a
+// already prototyped in labs/examples/pulse/carbon/plugins/local/carbon-hotkey (a
 // background thread pushing events via `app.pushEvent`, and a JS-side
 // pub/sub shim installed via `app.eval` since nothing in the runtime
 // automatically wires push_event payloads to a JS listener).
@@ -54,7 +54,7 @@ var g_app: ?sdk.CarbonApp = null;
 // automatically turns that into a listenable event — each plugin using
 // pushEvent brings its own shim, guarded so a second plugin doing the same
 // thing is a no-op. Adds `carbon.off` on top of the shim
-// labs/examples/pulse/carbon/own/carbon-hotkey prototyped, since this plugin
+// labs/examples/pulse/carbon/plugins/local/carbon-hotkey prototyped, since this plugin
 // supports registering (and un-registering) many different accelerators
 // over a component's lifetime, unlike that single-fixed-hotkey example.
 const EVENT_SHIM =

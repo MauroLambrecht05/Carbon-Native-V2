@@ -2,6 +2,7 @@
 
 import { join, relative } from "node:path";
 import { TargetNotEmptyError, UnknownLanguageError } from "../../domain/errors/PluginError.ts";
+import { upsertManifestEntry } from "../../domain/services/AppManifestSection.ts";
 import {
   DEFAULT_LANGUAGE,
   languageNamed,
@@ -13,6 +14,7 @@ import type {
   PluginTemplateSource,
   PluginWorkspace,
 } from "../ports/PluginWorkspace.ts";
+import { ensureAppCarbonDir } from "./EnsureAppCarbonDir.ts";
 
 export interface CreatePluginRequest {
   readonly name: string;
@@ -20,6 +22,15 @@ export interface CreatePluginRequest {
   readonly cwd: string;
   /** Absolute path to the plugin SDK the generated project depends on. */
   readonly sdkRoot: string;
+  /**
+   * The host app this plugin is being scaffolded inside, if any (a bare SDK-
+   * style checkout with no host app above it has none). When set, this use
+   * case also ensures the app's carbon/build.zig + build.zig.zon +
+   * manifest.toml exist (scaffolding them from the same template source on
+   * first use) and declares this plugin in manifest.toml as
+   * `source = "local"`.
+   */
+  readonly host?: string;
 }
 
 export interface CreatePluginResult {
@@ -81,8 +92,28 @@ export class CreatePluginUseCase {
       this.workspace.writeFile(join(target, file.path), file.contents);
     }
 
-    const nextStep = `cd ${name.slug} && carbon plugin build --release && carbon plugin install`;
+    if (request.host) {
+      ensureAppCarbonDir(this.workspace, this.templates, request.host);
+      this.declareLocal(request.host, name.slug);
+    }
+
+    // No manual build/install step for a local plugin: `carbon dev`/`carbon
+    // run` build + stage it automatically via carbon/build.zig, the moment
+    // it's declared in manifest.toml. `carbon plugin check` is the one thing
+    // actually worth running by hand right after scaffolding.
+    const nextStep = request.host
+      ? `cd ${name.slug} && carbon plugin check`
+      : `cd ${name.slug} && carbon plugin build --release && carbon plugin install`;
 
     return { name, target, language: language.id, files, nextStep };
+  }
+
+  private declareLocal(host: string, slug: string): void {
+    const manifestPath = join(host, "carbon", "manifest.toml");
+    const existing = this.workspace.exists(manifestPath) ? this.workspace.readFile(manifestPath) : "";
+    this.workspace.writeFile(
+      manifestPath,
+      upsertManifestEntry(existing, slug, { source: "local", enabled: true }),
+    );
   }
 }

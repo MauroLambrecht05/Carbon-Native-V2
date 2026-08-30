@@ -15,9 +15,15 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { ProcessOptions, ProcessResult, ProcessRunner } from "@carbon/process";
 import {
+  AddStandardPluginUseCase,
   ArtifactNotFoundError,
   BuildPluginUseCase,
   CreatePluginUseCase,
+  forwardSlashes,
+  grantedCapabilities,
+  hostArchName,
+  hostExt,
+  hostOsName,
   InspectPluginsUseCase,
   InstallPluginUseCase,
   NodePluginWorkspace,
@@ -26,11 +32,13 @@ import {
   PluginManifest,
   PluginName,
   PluginNotFoundError,
-  readPluginEntries,
-  SyncLocalPluginsUseCase,
+  readAppManifest,
+  setManifestEnabled,
+  SyncPluginsUseCase,
   TargetNotEmptyError,
   UnknownLanguageError,
-  upsertPluginEntry,
+  UnknownStandardPluginError,
+  upsertManifestEntry,
   type PluginTemplateFile,
   type PluginTemplateRequest,
   type PluginTemplateSource,
@@ -95,6 +103,17 @@ class MemoryWorkspace implements PluginWorkspace {
     return [...names];
   }
 
+  listFiles(path: string): string[] {
+    const prefix = `${this.key(path)}/`;
+    const names: string[] = [];
+    for (const f of this.files.keys()) {
+      if (!f.startsWith(prefix)) continue;
+      const rest = f.slice(prefix.length);
+      if (!rest.includes("/")) names.push(rest);
+    }
+    return names;
+  }
+
   findHostApp(from: string): string | null {
     let current = this.key(from);
     while (true) {
@@ -136,6 +155,14 @@ class FakeTemplateSource implements PluginTemplateSource {
       { path: "carbon-plugin.toml", contents: `name = "${request.name.slug}"\nlanguage = "${request.language.id}"\n` },
       { path: source, contents: `// crate ${request.name.crate}\n` },
       { path: request.language.marker, contents: `sdk = "${request.sdkPath}"\n` },
+    ];
+  }
+
+  appCarbonDirFiles(): PluginTemplateFile[] {
+    return [
+      { path: "build.zig", contents: "// app orchestrator\n" },
+      { path: "build.zig.zon", contents: ".{ .name = .carbon_app }\n" },
+      { path: "manifest.toml", contents: "schema = 1\n" },
     ];
   }
 }
@@ -193,71 +220,78 @@ language = "zig"
   });
 });
 
-describe("the [plugins] table", () => {
-  test("reads the entries and nothing else", () => {
+describe("capability grants (carbon.toml [plugins])", () => {
+  test("reads a grant and nothing else", () => {
     const toml = `
 [app]
 name = "demo"
 
-[plugins]
-audio = "./plugins/libaudio.so"
-canvas = "./plugins/libcanvas.so"
+[plugins.audio]
+capabilities = ["audio.output"]
 
 [window]
 title = "Demo"
 `;
-    expect(readPluginEntries(toml)).toEqual([
-      { name: "audio", path: "./plugins/libaudio.so" },
-      { name: "canvas", path: "./plugins/libcanvas.so" },
-    ]);
+    const granted = grantedCapabilities(toml);
+    expect(granted("audio")).toEqual(["audio.output"]);
   });
 
-  test("a document with no section has no entries", () => {
-    expect(readPluginEntries(`[app]\nname = "demo"\n`)).toEqual([]);
+  test("an undeclared plugin grants nothing, not undefined", () => {
+    expect(grantedCapabilities(`[app]\nname = "demo"\n`)("anything")).toEqual([]);
   });
 
-  test("adding to an existing section leaves every other line byte-identical", () => {
-    const before = `[app]
-name = "demo"   # keep this comment
+  test("multiple plugins each keep their own grants", () => {
+    const toml = `
+[plugins.a]
+capabilities = ["x"]
 
-[plugins]
-audio = "./plugins/libaudio.so"
-
-[window]
-title = "Demo"
+[plugins.b]
+capabilities = ["y", "z"]
 `;
-    const after = upsertPluginEntry(before, { name: "canvas", path: "./plugins/libcanvas.so" });
+    const granted = grantedCapabilities(toml);
+    expect(granted("a")).toEqual(["x"]);
+    expect(granted("b")).toEqual(["y", "z"]);
+  });
+});
 
-    expect(after).toContain("# keep this comment");
-    expect(after).toContain(`audio = "./plugins/libaudio.so"`);
-    expect(after).toContain(`canvas = "./plugins/libcanvas.so"`);
-    // The new entry belongs to [plugins], not to [window].
-    expect(after.indexOf("canvas =")).toBeLessThan(after.indexOf("[window]"));
-    expect(after).toContain(`title = "Demo"`);
+describe("the app manifest (carbon/manifest.toml)", () => {
+  test("reads declared plugins", () => {
+    const toml = `schema = 1\n\n[plugins.audio]\nsource = "local"\nenabled = true\n`;
+    const manifest = readAppManifest(toml);
+    expect(manifest.plugins.get("audio")).toEqual({ source: "local", enabled: true, version: undefined });
   });
 
-  test("reinstalling replaces the entry instead of duplicating the key", () => {
-    const before = `[plugins]\naudio = "./plugins/old.so"\n`;
-    const after = upsertPluginEntry(before, { name: "audio", path: "./plugins/new.so" });
-
-    // A duplicate key is a TOML parse error, i.e. a project that will not load.
-    expect(after.match(/audio =/g)).toHaveLength(1);
-    expect(after).toContain("./plugins/new.so");
-    expect(after).not.toContain("old.so");
+  test("a missing document has no plugins", () => {
+    expect(readAppManifest("").plugins.size).toBe(0);
   });
 
-  test("a document with no section gets one appended", () => {
-    const after = upsertPluginEntry(`[app]\nname = "demo"\n`, {
-      name: "audio",
-      path: "./plugins/libaudio.so",
-    });
-    expect(after).toContain("[plugins]");
-    expect(readPluginEntries(after)).toEqual([{ name: "audio", path: "./plugins/libaudio.so" }]);
+  test("upserting adds an entry without disturbing another", () => {
+    const before = upsertManifestEntry("schema = 1\n", "audio", { source: "local", enabled: true });
+    const after = upsertManifestEntry(before, "video", { source: "vendor", enabled: true, version: "1.0" });
+
+    const manifest = readAppManifest(after);
+    expect(manifest.plugins.get("audio")).toEqual({ source: "local", enabled: true, version: undefined });
+    expect(manifest.plugins.get("video")).toEqual({ source: "vendor", enabled: true, version: "1.0" });
   });
 
-  test("an empty document is handled without a leading blank line problem", () => {
-    const after = upsertPluginEntry("", { name: "audio", path: "./a.so" });
-    expect(readPluginEntries(after)).toEqual([{ name: "audio", path: "./a.so" }]);
+  test("upserting the same name replaces it, not duplicates it", () => {
+    const before = upsertManifestEntry("schema = 1\n", "audio", { source: "local", enabled: true });
+    const after = upsertManifestEntry(before, "audio", { source: "local", enabled: false });
+
+    const manifest = readAppManifest(after);
+    expect(manifest.plugins.size).toBe(1);
+    expect(manifest.plugins.get("audio")?.enabled).toBe(false);
+  });
+
+  test("setManifestEnabled flips an existing entry", () => {
+    const before = upsertManifestEntry("schema = 1\n", "audio", { source: "local", enabled: true });
+    const after = setManifestEnabled(before, "audio", false);
+    expect(readAppManifest(after).plugins.get("audio")?.enabled).toBe(false);
+  });
+
+  test("setManifestEnabled on an undeclared name is a no-op", () => {
+    const before = "schema = 1\n";
+    expect(setManifestEnabled(before, "nope", false)).toBe(before);
   });
 });
 
@@ -334,6 +368,61 @@ describe("creating a plugin", () => {
       TargetNotEmptyError,
     );
   });
+
+  test("with a host app, scaffolds carbon/build.zig + build.zig.zon + manifest.toml on first use", () => {
+    const workspace = new MemoryWorkspace();
+    workspace.put(`${ROOT}/app/carbon.toml`, `[app]\nname = "demo"\n`);
+    const useCase = new CreatePluginUseCase(workspace, new FakeTemplateSource());
+
+    useCase.execute({
+      name: "my-thing",
+      cwd: `${ROOT}/app/carbon/plugins/local`,
+      sdkRoot: `${ROOT}/sdk`,
+      host: `${ROOT}/app`,
+    });
+
+    expect(workspace.exists(`${ROOT}/app/carbon/build.zig`)).toBe(true);
+    expect(workspace.exists(`${ROOT}/app/carbon/build.zig.zon`)).toBe(true);
+    expect(workspace.exists(`${ROOT}/app/carbon/manifest.toml`)).toBe(true);
+  });
+
+  test("with a host app, declares the plugin in manifest.toml as local", () => {
+    const workspace = new MemoryWorkspace();
+    workspace.put(`${ROOT}/app/carbon.toml`, `[app]\nname = "demo"\n`);
+    const useCase = new CreatePluginUseCase(workspace, new FakeTemplateSource());
+
+    useCase.execute({
+      name: "my-thing",
+      cwd: `${ROOT}/app/carbon/plugins/local`,
+      sdkRoot: `${ROOT}/sdk`,
+      host: `${ROOT}/app`,
+    });
+
+    const manifest = readAppManifest(workspace.readFile(`${ROOT}/app/carbon/manifest.toml`));
+    expect(manifest.plugins.get("my-thing")).toEqual({ source: "local", enabled: true, version: undefined });
+  });
+
+  test("an existing carbon/build.zig is left untouched — no re-scaffold", () => {
+    const workspace = new MemoryWorkspace();
+    workspace.put(`${ROOT}/app/carbon.toml`, `[app]\nname = "demo"\n`);
+    workspace.put(`${ROOT}/app/carbon/build.zig`, "// hand-edited");
+    const useCase = new CreatePluginUseCase(workspace, new FakeTemplateSource());
+
+    useCase.execute({
+      name: "my-thing",
+      cwd: `${ROOT}/app/carbon/plugins/local`,
+      sdkRoot: `${ROOT}/sdk`,
+      host: `${ROOT}/app`,
+    });
+
+    expect(workspace.readFile(`${ROOT}/app/carbon/build.zig`)).toBe("// hand-edited");
+  });
+
+  test("with no host app, scaffolds only the plugin — no carbon/ machinery", () => {
+    const { workspace, useCase } = create();
+    useCase.execute({ name: "my-thing", cwd: ROOT, sdkRoot: `${ROOT}/sdk` });
+    expect(workspace.exists(`${ROOT}/carbon/build.zig`)).toBe(false);
+  });
 });
 
 describe("building a plugin", () => {
@@ -409,10 +498,10 @@ describe("installing a plugin", () => {
     const where = options.where ?? "lib";
     const lib = PluginName.from("my-thing").libraryFilename();
     workspace.put(`${ROOT}/app/my-thing/zig-out/${where}/${lib}`, "ELF");
-    return { workspace, useCase: new InstallPluginUseCase(workspace), lib };
+    return { workspace, useCase: new InstallPluginUseCase(workspace, new FakeTemplateSource()), lib };
   }
 
-  test("copies the library in and declares it in carbon.toml", () => {
+  test("copies the library in and declares it in carbon/manifest.toml", () => {
     const { workspace, useCase, lib } = built();
 
     const result = useCase.execute({
@@ -421,26 +510,30 @@ describe("installing a plugin", () => {
     });
 
     expect(result.host).toBe(`${ROOT}/app`);
-    expect(workspace.exists(`${ROOT}/app/carbon/installed/my-thing/${lib}`)).toBe(true);
-    expect(result.declaredPath).toBe(`./carbon/installed/my-thing/${lib}`);
+    expect(workspace.exists(`${ROOT}/app/carbon/plugins/vendor/my-thing/${lib}`)).toBe(true);
 
+    const manifest = readAppManifest(workspace.readFile(`${ROOT}/app/carbon/manifest.toml`));
+    expect(manifest.plugins.get("my-thing")).toEqual({ source: "vendor", enabled: true, version: undefined });
+
+    // Scaffolds carbon/build.zig too — an app whose ONLY plugin interaction
+    // is `carbon plugin add`/`install` (never `carbon plugin new`) still
+    // needs the orchestrator, or SyncPluginsUseCase would silently never
+    // stage anything.
+    expect(workspace.exists(`${ROOT}/app/carbon/build.zig`)).toBe(true);
+
+    // carbon.toml (capability grants) is never touched by install.
     const toml = workspace.readFile(`${ROOT}/app/carbon.toml`);
-    expect(readPluginEntries(toml)).toEqual([
-      { name: "my-thing", path: `./carbon/installed/my-thing/${lib}` },
-    ]);
-    // The app section survives the edit.
-    expect(toml).toContain(`name = "demo"`);
+    expect(toml).toBe(`[app]\nname = "demo"\n`);
   });
 
-  test("the declared path is relative, so the project stays portable", () => {
-    const { useCase } = built();
-    const result = useCase.execute({
-      directory: `${ROOT}/app/my-thing`,
-      from: `${ROOT}/app/my-thing`,
-    });
+  test("copies the manifest and signature alongside the binary", () => {
+    const { workspace, useCase, lib } = built();
+    workspace.put(`${ROOT}/app/my-thing/zig-out/lib/${lib}.sig`, "SIG");
 
-    expect(result.declaredPath.startsWith("./")).toBe(true);
-    expect(result.declaredPath).not.toContain(ROOT);
+    useCase.execute({ directory: `${ROOT}/app/my-thing`, from: `${ROOT}/app/my-thing` });
+
+    expect(workspace.exists(`${ROOT}/app/carbon/plugins/vendor/my-thing/carbon-plugin.toml`)).toBe(true);
+    expect(workspace.readFile(`${ROOT}/app/carbon/plugins/vendor/my-thing/${lib}.sig`)).toBe("SIG");
   });
 
   test("zig-out/lib is preferred over zig-out/bin when both exist", () => {
@@ -451,13 +544,13 @@ describe("installing a plugin", () => {
     workspace.put(`${ROOT}/app/my-thing/zig-out/bin/${lib}`, "OLD");
 
     useCase.execute({ directory: `${ROOT}/app/my-thing`, from: `${ROOT}/app/my-thing` });
-    expect(workspace.readFile(`${ROOT}/app/carbon/installed/my-thing/${lib}`)).toBe("ELF");
+    expect(workspace.readFile(`${ROOT}/app/carbon/plugins/vendor/my-thing/${lib}`)).toBe("ELF");
   });
 
   test("a windows build, which lands in zig-out/bin, still installs", () => {
     const { workspace, useCase, lib } = built({ where: "bin" });
     useCase.execute({ directory: `${ROOT}/app/my-thing`, from: `${ROOT}/app/my-thing` });
-    expect(workspace.exists(`${ROOT}/app/carbon/installed/my-thing/${lib}`)).toBe(true);
+    expect(workspace.exists(`${ROOT}/app/carbon/plugins/vendor/my-thing/${lib}`)).toBe(true);
   });
 
   test("without a manifest, the name falls back to the directory", () => {
@@ -475,7 +568,7 @@ describe("installing a plugin", () => {
     workspace.put(`${ROOT}/app/p/build.zig`);
 
     expect(() =>
-      new InstallPluginUseCase(workspace).execute({
+      new InstallPluginUseCase(workspace, new FakeTemplateSource()).execute({
         directory: `${ROOT}/app/p`,
         from: `${ROOT}/app/p`,
       }),
@@ -489,7 +582,7 @@ describe("installing a plugin", () => {
     workspace.put(`${ROOT}/loose/zig-out/lib/${lib}`, "ELF");
 
     expect(() =>
-      new InstallPluginUseCase(workspace).execute({
+      new InstallPluginUseCase(workspace, new FakeTemplateSource()).execute({
         directory: `${ROOT}/loose`,
         from: `${ROOT}/loose`,
       }),
@@ -497,161 +590,172 @@ describe("installing a plugin", () => {
   });
 });
 
-describe("syncing local plugins", () => {
-  /** A host app with one plugin's SOURCE (not yet built) under carbon/own/<name>/. */
-  function withLocalSource(name = "my-thing") {
+describe("syncing plugins", () => {
+  const STANDARD_ROOT = `${ROOT}/standard`;
+
+  /** A host app with carbon/manifest.toml + carbon/build.zig already scaffolded. */
+  function withApp(manifestBody = "") {
     const workspace = new MemoryWorkspace();
     workspace.put(`${ROOT}/app/carbon.toml`, `[app]\nname = "demo"\n`);
-    workspace.put(`${ROOT}/app/carbon/own/${name}/build.zig`);
-    workspace.put(
-      `${ROOT}/app/carbon/own/${name}/carbon-plugin.toml`,
-      `name = "${name}"\nlanguage = "zig"\n`,
-    );
-    const runner = new FakeProcessRunner();
-    // BuildPluginUseCase only runs `zig build`; it does not itself write the
-    // artifact zig would have — a real build's side effect, faked here so
-    // InstallPluginUseCase (run right after, by SyncLocalPluginsUseCase) has
-    // something to find.
-    const lib = PluginName.from(name).libraryFilename();
-    workspace.put(`${ROOT}/app/carbon/own/${name}/zig-out/lib/${lib}`, "ELF");
+    workspace.put(`${ROOT}/app/carbon/manifest.toml`, `schema = 1\n\n${manifestBody}`);
+    workspace.put(`${ROOT}/app/carbon/build.zig`, "// orchestrator");
 
+    const runner = new FakeProcessRunner();
     const build = new BuildPluginUseCase(workspace, runner, resolveBareCommand);
-    const install = new InstallPluginUseCase(workspace);
-    return { workspace, runner, lib, useCase: new SyncLocalPluginsUseCase(workspace, build, install) };
+    const install = new InstallPluginUseCase(workspace, new FakeTemplateSource());
+    const fakeSign = async () => {};
+    const addStandard = new AddStandardPluginUseCase(workspace, build, install, STANDARD_ROOT, fakeSign);
+    const resolveZig = async () => "zig";
+    const useCase = new SyncPluginsUseCase(workspace, runner, addStandard, resolveZig);
+
+    return { workspace, runner, useCase };
   }
 
-  test("builds and installs a plugin found under carbon/own/<name>/", async () => {
-    const { workspace, runner, lib, useCase } = withLocalSource();
+  /** Seeds STANDARD_ROOT/<name>/ with a buildable source + fake build output,
+   *  the same fixture shape `withLocalSource` used before this rewrite. */
+  function seedStandardPlugin(workspace: MemoryWorkspace, name: string) {
+    workspace.put(`${STANDARD_ROOT}/${name}/build.zig`);
+    workspace.put(`${STANDARD_ROOT}/${name}/carbon-plugin.toml`, `name = "${name}"\nlanguage = "zig"\n`);
+    const lib = PluginName.from(name).libraryFilename();
+    workspace.put(`${STANDARD_ROOT}/${name}/zig-out/lib/${lib}`, "ELF");
+  }
+
+  test("no carbon/manifest.toml at all is not an error", async () => {
+    const workspace = new MemoryWorkspace();
+    workspace.put(`${ROOT}/app/carbon.toml`, "");
+    const runner = new FakeProcessRunner();
+    const build = new BuildPluginUseCase(workspace, runner, resolveBareCommand);
+    const install = new InstallPluginUseCase(workspace, new FakeTemplateSource());
+    const addStandard = new AddStandardPluginUseCase(workspace, build, install, STANDARD_ROOT);
+    const useCase = new SyncPluginsUseCase(workspace, runner, addStandard, async () => "zig");
 
     const result = await useCase.execute(`${ROOT}/app`);
-
-    expect(result.synced).toEqual([
-      { name: "my-thing", directory: `${ROOT}/app/carbon/own/my-thing` },
-    ]);
-    // Debug by default (no `release` option) — this runs on every `carbon
-    // dev` rebuild, including every hot-reload, so wall-clock compile time
-    // matters more than the plugin binary's own runtime speed. A ReleaseSafe
-    // rebuild on every keystroke was the original, uncaught version of this.
-    expect(runner.calls[0].args).toEqual(["build"]);
-    expect(workspace.exists(`${ROOT}/app/carbon/installed/my-thing/${lib}`)).toBe(true);
-    expect(readPluginEntries(workspace.readFile(`${ROOT}/app/carbon.toml`))).toEqual([
-      { name: "my-thing", path: `./carbon/installed/my-thing/${lib}` },
-    ]);
+    expect(result.staged).toEqual([]);
+    expect(runner.calls).toEqual([]);
   });
 
-  test("release: true builds what a shipped app would actually use — carbon run's mode", async () => {
-    const { runner, useCase } = withLocalSource();
+  test("shells `zig build --prefix .` inside carbon/", async () => {
+    const { runner, useCase } = withApp();
+    await useCase.execute(`${ROOT}/app`);
 
+    expect(runner.calls).toHaveLength(1);
+    expect(runner.calls[0].command).toBe("zig");
+    expect(runner.calls[0].args).toEqual(["build", "--prefix", "."]);
+    expect(forwardSlashes(runner.calls[0].options?.cwd ?? "")).toBe(`${ROOT}/app/carbon`);
+  });
+
+  test("release: true forwards -Drelease=true — carbon run's mode", async () => {
+    const { runner, useCase } = withApp();
     await useCase.execute(`${ROOT}/app`, { release: true });
-
-    expect(runner.calls[0].args).toEqual(["build", "-Drelease=true"]);
+    expect(runner.calls[0].args).toEqual(["build", "--prefix", ".", "-Drelease=true"]);
   });
 
-  test("syncs every local plugin, not just the first", async () => {
+  test("no carbon/build.zig means nothing to shell, even with a manifest present", async () => {
     const workspace = new MemoryWorkspace();
     workspace.put(`${ROOT}/app/carbon.toml`, "");
-    for (const name of ["one", "two"]) {
-      workspace.put(`${ROOT}/app/carbon/own/${name}/build.zig`);
-      const lib = PluginName.from(name).libraryFilename();
-      workspace.put(`${ROOT}/app/carbon/own/${name}/zig-out/lib/${lib}`, "ELF");
-    }
-    const build = new BuildPluginUseCase(workspace, new FakeProcessRunner(), resolveBareCommand);
-    const install = new InstallPluginUseCase(workspace);
+    workspace.put(`${ROOT}/app/carbon/manifest.toml`, "schema = 1\n");
+    const runner = new FakeProcessRunner();
+    const build = new BuildPluginUseCase(workspace, runner, resolveBareCommand);
+    const install = new InstallPluginUseCase(workspace, new FakeTemplateSource());
+    const addStandard = new AddStandardPluginUseCase(workspace, build, install, STANDARD_ROOT);
+    const useCase = new SyncPluginsUseCase(workspace, runner, addStandard, async () => "zig");
 
-    const result = await new SyncLocalPluginsUseCase(workspace, build, install).execute(
-      `${ROOT}/app`,
-    );
-
-    expect(result.synced.map((p) => p.name).sort()).toEqual(["one", "two"]);
+    const result = await useCase.execute(`${ROOT}/app`);
+    expect(result.staged).toEqual([]);
+    expect(runner.calls).toEqual([]);
   });
 
-  test("a carbon/own/ subdirectory with no language marker is not a plugin, and is skipped", async () => {
-    const workspace = new MemoryWorkspace();
-    workspace.put(`${ROOT}/app/carbon.toml`, "");
-    workspace.put(`${ROOT}/app/carbon/own/README.md`, "not a plugin");
-    const build = new BuildPluginUseCase(workspace, new FakeProcessRunner(), resolveBareCommand);
-    const install = new InstallPluginUseCase(workspace);
+  test("reports what landed in carbon/native/<os>/<arch>/ after the build", async () => {
+    const { workspace, useCase } = withApp();
+    // Standing in for what a real `zig build` would have staged — the fake
+    // runner doesn't touch the filesystem, so this simulates its effect.
+    const nativeDir = `${ROOT}/app/carbon/native/${hostOsName()}/${hostArchName()}`;
+    workspace.put(`${nativeDir}/carbon-pulse.${hostExt()}`, "ELF");
 
-    const result = await new SyncLocalPluginsUseCase(workspace, build, install).execute(
-      `${ROOT}/app`,
-    );
-
-    expect(result.synced).toEqual([]);
+    const result = await useCase.execute(`${ROOT}/app`);
+    expect(result.staged).toEqual([`carbon-pulse.${hostExt()}`]);
   });
 
-  test("no carbon/own/ directory at all is not an error", async () => {
-    const workspace = new MemoryWorkspace();
-    workspace.put(`${ROOT}/app/carbon.toml`, "");
-    const build = new BuildPluginUseCase(workspace, new FakeProcessRunner(), resolveBareCommand);
-    const install = new InstallPluginUseCase(workspace);
-
-    const result = await new SyncLocalPluginsUseCase(workspace, build, install).execute(
-      `${ROOT}/app`,
+  test("auto-heals a missing vendor plugin before shelling zig build", async () => {
+    const { workspace, runner, useCase } = withApp(
+      `[plugins.fonts]\nsource = "vendor"\nenabled = true\n`,
     );
-
-    expect(result.synced).toEqual([]);
-  });
-
-  test("a capability grant in [plugins.<name>] survives a re-sync", async () => {
-    // The exact scenario this exists for: an author upgraded the bare entry
-    // install first wrote into the [plugins.<name>] table form to grant a
-    // capability. Re-running sync (every `carbon run`/`carbon dev`) must
-    // refresh the built artifact without touching that declaration — not
-    // clobber it back to a bare path, and not add a second, conflicting one.
-    const { workspace, useCase } = withLocalSource();
-    workspace.put(
-      `${ROOT}/app/carbon.toml`,
-      `[app]\nname = "demo"\n\n[plugins.my-thing]\npath = "./plugins/x"\ncapabilities = ["paint.pixmap"]\n`,
-    );
+    seedStandardPlugin(workspace, "fonts");
 
     await useCase.execute(`${ROOT}/app`);
 
-    const toml = workspace.readFile(`${ROOT}/app/carbon.toml`);
-    expect(toml).toContain(`capabilities = ["paint.pixmap"]`);
-    expect(toml).not.toContain(`[plugins]\n`);
+    const lib = PluginName.from("fonts").libraryFilename();
+    expect(workspace.exists(`${ROOT}/app/carbon/plugins/vendor/fonts/${lib}`)).toBe(true);
+    // Auto-heal's build call happened before the final orchestrating build.
+    const cwds = runner.calls.map((c) => forwardSlashes(c.options?.cwd ?? ""));
+    expect(cwds).toEqual([`${STANDARD_ROOT}/fonts`, `${ROOT}/app/carbon`]);
   });
 
-  test("a bare entry install itself wrote is still refreshed on the next sync", async () => {
-    // The common case: no capability grant, nothing to preserve — sync
-    // should behave exactly like a first install every time.
-    const { workspace, lib, useCase } = withLocalSource();
+  test("an already-present vendor artifact is not re-fetched", async () => {
+    const { workspace, runner, useCase } = withApp(
+      `[plugins.fonts]\nsource = "vendor"\nenabled = true\n`,
+    );
+    const lib = PluginName.from("fonts").libraryFilename();
+    workspace.put(`${ROOT}/app/carbon/plugins/vendor/fonts/${lib}`, "ALREADY THERE");
 
     await useCase.execute(`${ROOT}/app`);
-    await useCase.execute(`${ROOT}/app`);
 
-    expect(readPluginEntries(workspace.readFile(`${ROOT}/app/carbon.toml`))).toEqual([
-      { name: "my-thing", path: `./carbon/installed/my-thing/${lib}` },
-    ]);
+    // Only the final orchestrating build ran — no auto-heal build call.
+    expect(runner.calls).toHaveLength(1);
+    expect(forwardSlashes(runner.calls[0].options?.cwd ?? "")).toBe(`${ROOT}/app/carbon`);
   });
 
-  test("a build failure names the plugin and stops before install", async () => {
+  test("a disabled vendor entry is never auto-healed", async () => {
+    const { runner, useCase } = withApp(
+      `[plugins.fonts]\nsource = "vendor"\nenabled = false\n`,
+    );
+    await useCase.execute(`${ROOT}/app`);
+    expect(runner.calls).toHaveLength(1); // only the orchestrating build
+  });
+
+  test("a local entry is never auto-healed — it's built by the orchestrator, not fetched", async () => {
+    const { runner, useCase } = withApp(`[plugins.my-thing]\nsource = "local"\nenabled = true\n`);
+    await useCase.execute(`${ROOT}/app`);
+    expect(runner.calls).toHaveLength(1);
+    expect(forwardSlashes(runner.calls[0].options?.cwd ?? "")).toBe(`${ROOT}/app/carbon`);
+  });
+
+  test("an unknown vendor plugin's auto-heal failure is reported, not swallowed", async () => {
+    const { useCase } = withApp(`[plugins.nope]\nsource = "vendor"\nenabled = true\n`);
+    // STANDARD_ROOT/nope/ was never seeded — nothing to build.
+    await expect(useCase.execute(`${ROOT}/app`)).rejects.toThrow(UnknownStandardPluginError);
+  });
+
+  test("carbon/build.zig failing to build is reported, not swallowed", async () => {
     const workspace = new MemoryWorkspace();
     workspace.put(`${ROOT}/app/carbon.toml`, "");
-    workspace.put(`${ROOT}/app/carbon/own/broken/build.zig`);
-    const build = new BuildPluginUseCase(workspace, new FakeProcessRunner(1), resolveBareCommand);
-    const install = new InstallPluginUseCase(workspace);
+    workspace.put(`${ROOT}/app/carbon/manifest.toml`, "schema = 1\n");
+    workspace.put(`${ROOT}/app/carbon/build.zig`, "// orchestrator");
+    const runner = new FakeProcessRunner(1);
+    const build = new BuildPluginUseCase(workspace, runner, resolveBareCommand);
+    const install = new InstallPluginUseCase(workspace, new FakeTemplateSource());
+    const addStandard = new AddStandardPluginUseCase(workspace, build, install, STANDARD_ROOT);
+    const useCase = new SyncPluginsUseCase(workspace, runner, addStandard, async () => "zig");
 
-    await expect(
-      new SyncLocalPluginsUseCase(workspace, build, install).execute(`${ROOT}/app`),
-    ).rejects.toThrow(/broken/);
-    // No artifact was ever produced, so install (had it run) would have had
-    // nothing to find — this just confirms the failure is reported instead
-    // of silently swallowed and moved past.
+    await expect(useCase.execute(`${ROOT}/app`)).rejects.toThrow(/carbon\/build\.zig/);
   });
 });
 
 describe("listing and describing", () => {
   function app() {
     const workspace = new MemoryWorkspace();
+    workspace.put(`${ROOT}/app/carbon.toml`, `[app]\nname = "demo"\n\n[plugins.audio]\ncapabilities = ["audio.output"]\n`);
     workspace.put(
-      `${ROOT}/app/carbon.toml`,
-      `[app]\nname = "demo"\n\n[plugins]\naudio = "./carbon/installed/audio/libaudio.so"\ngone = "./carbon/installed/gone/libgone.so"\n`,
+      `${ROOT}/app/carbon/manifest.toml`,
+      `schema = 1\n\n[plugins.audio]\nsource = "vendor"\nenabled = true\n\n[plugins.gone]\nsource = "vendor"\nenabled = true\n`,
     );
-    workspace.put(`${ROOT}/app/carbon/installed/audio/libaudio.so`, "ELF");
+    const nativeDir = `${ROOT}/app/carbon/native/${hostOsName()}/${hostArchName()}`;
+    workspace.put(`${nativeDir}/audio.${hostExt()}`, "ELF");
+    // "gone" is declared but never staged.
     return { workspace, useCase: new InspectPluginsUseCase(workspace) };
   }
 
-  test("lists what carbon.toml declares, flagging what is missing", () => {
+  test("lists what manifest.toml declares, flagging what is missing", () => {
     const { useCase } = app();
     const { host, plugins } = useCase.list(`${ROOT}/app/deep/nested`);
 
@@ -660,6 +764,15 @@ describe("listing and describing", () => {
       ["audio", true],
       ["gone", false],
     ]);
+  });
+
+  test("surfaces source, enabled and granted capabilities", () => {
+    const { useCase } = app();
+    const { plugins } = useCase.list(`${ROOT}/app`);
+    const audio = plugins.find((p) => p.name === "audio")!;
+    expect(audio.source).toBe("vendor");
+    expect(audio.enabled).toBe(true);
+    expect(audio.capabilities).toEqual(["audio.output"]);
   });
 
   test("an app with no plugins lists nothing rather than failing", () => {
@@ -674,9 +787,9 @@ describe("listing and describing", () => {
     );
   });
 
-  test("describe prefers the installed copy", () => {
+  test("describe prefers the manifest-declared copy", () => {
     const { workspace, useCase } = app();
-    workspace.put(`${ROOT}/app/carbon/installed/audio/carbon-plugin.toml`, `name = "audio"\n`);
+    workspace.put(`${ROOT}/app/carbon/plugins/vendor/audio/carbon-plugin.toml`, `name = "audio"\n`);
 
     const details = useCase.describe("audio", `${ROOT}/app`);
     expect(details.origin).toBe("installed");

@@ -5,14 +5,14 @@
     // The zig toolchain this repo targets requires .name to be an enum
     // literal (a bare identifier), not a string — the crate form, since a
     // plugin's slug (e.g. "my-thing") is not a legal Zig identifier.
-    .name = .carbon_hotkey,
+    .name = .carbon_pulse,
     // Real, zig-suggested value from a real `zig build` error, not guessed.
-    .fingerprint = 0x8189a2730e2945d7,
+    .fingerprint = 0xc7c4cfa25db8365f,
     .version = "0.1.0",
     .minimum_zig_version = "0.13.0",
     .dependencies = .{
         .@"carbon-plugin-sdk" = .{
-            .path = "../../../../../../products/carbon-ext/composition",
+            .path = "../../../../../../../products/carbon-ext/composition",
         },
     },
     .paths = .{

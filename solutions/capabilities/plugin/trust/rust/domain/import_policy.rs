@@ -244,8 +244,8 @@ const CRT_SCAFFOLDING: &[(&str, &str)] = &[
 ///
 /// DERIVED, NOT GUESSED. This list is what `carbon-import-check --list`
 /// actually printed for real artifacts built with zig 0.16.0 on this machine —
-/// `tests/fixtures/zig/allowed-plugin`, and `labs/examples/pulse/carbon/own/
-/// carbon-pulse` cross-built for `x86_64-windows-msvc`. Anything a future zig
+/// `tests/fixtures/zig/allowed-plugin`, and `labs/examples/pulse/carbon/
+/// plugins/local/carbon-pulse` cross-built for `x86_64-windows-msvc`. Anything a future zig
 /// release adds shows up as `UnknownModule` with the module named, which is
 /// the right failure: a human decides whether it belongs here.
 ///

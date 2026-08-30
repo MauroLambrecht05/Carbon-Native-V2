@@ -1,0 +1,23 @@
+// carbon/build.zig.zon — deliberately near-empty. No `.dependencies`: this
+// package never declares any. Zig's package manager requires every
+// `b.dependency()` target pre-declared here at compile time, and build.zig
+// discovers carbon/plugins/local/* at build-config time instead — a
+// directory that can't be known ahead of time can't be a static dependency
+// entry, so it's built by a subprocess `zig build` step instead (see
+// build.zig's own header comment for the full reasoning).
+//
+// .fingerprint below is fixed and real, not a placeholder: this package is
+// scaffolded identically for every app (name never varies), so the value
+// `zig build` would print as "suggested" for `.name = .carbon_app` is
+// computed once, here, rather than requiring a human run `zig build` by
+// hand on first use the way an app-authored plugin's build.zig.zon does.
+.{
+    .name = .carbon_app,
+    .fingerprint = 0x1aff4b493ce84796,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.13.0",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+    },
+}

@@ -46,6 +46,13 @@ const LAYOUT: Record<string, Array<{ template: string; output: string }>> = {
   ],
 };
 
+/** An app's carbon/ directory — fixed, no per-plugin language axis. */
+const APP_CARBON_DIR_LAYOUT: Array<{ template: string; output: string }> = [
+  { template: "presentation/templates/app-carbon-dir/build.zig.tmpl", output: "build.zig" },
+  { template: "presentation/templates/app-carbon-dir/build.zig.zon.tmpl", output: "build.zig.zon" },
+  { template: "presentation/templates/app-carbon-dir/manifest.toml.tmpl", output: "manifest.toml" },
+];
+
 export class SdkTemplateSource implements PluginTemplateSource {
   constructor(
     private readonly workspace: PluginWorkspace,
@@ -59,6 +66,13 @@ export class SdkTemplateSource implements PluginTemplateSource {
       const raw = this.workspace.readFile(join(this.sdkRoot, template));
       return { path: output, contents: render(raw, output, request) };
     });
+  }
+
+  appCarbonDirFiles(): PluginTemplateFile[] {
+    return APP_CARBON_DIR_LAYOUT.map(({ template, output }) => ({
+      path: output,
+      contents: this.workspace.readFile(join(this.sdkRoot, template)),
+    }));
   }
 }
 

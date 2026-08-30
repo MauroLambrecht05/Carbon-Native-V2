@@ -30,10 +30,23 @@ export {
   type PluginDeclaration,
 } from "./domain/entities/PluginDeclaration.ts";
 export {
-  readPluginEntries,
-  upsertPluginEntry,
-  type PluginEntry,
-} from "./domain/services/PluginsSection.ts";
+  readCapabilityGrants,
+  grantedCapabilities,
+} from "./domain/services/CapabilityGrants.ts";
+export {
+  readAppManifest,
+  upsertManifestEntry,
+  setManifestEnabled,
+  type AppManifest,
+  type AppManifestEntry,
+  type PluginSource,
+} from "./domain/services/AppManifestSection.ts";
+export {
+  hostOsName,
+  hostArchName,
+  hostExt,
+  type NativeOs,
+} from "./domain/value-objects/NativeTarget.ts";
 export {
   PluginError,
   UnknownLanguageError,
@@ -42,6 +55,7 @@ export {
   ArtifactNotFoundError,
   NoHostAppError,
   PluginNotFoundError,
+  UnknownStandardPluginError,
 } from "./domain/errors/PluginError.ts";
 
 export type {
@@ -68,6 +82,11 @@ export {
   type LocatedArtifact,
 } from "./application/usecases/InstallPluginUseCase.ts";
 export {
+  AddStandardPluginUseCase,
+  type AddStandardPluginRequest,
+  type AddStandardPluginResult,
+} from "./application/usecases/AddStandardPluginUseCase.ts";
+export {
   InspectPluginsUseCase,
   type InstalledPlugin,
   type PluginDetails,
@@ -84,23 +103,25 @@ export {
   type PreflightResult,
 } from "./application/usecases/PreflightPluginsUseCase.ts";
 export {
-  SyncLocalPluginsUseCase,
-  type SyncedLocalPlugin,
-  type SyncLocalPluginsResult,
-} from "./application/usecases/SyncLocalPluginsUseCase.ts";
+  SyncPluginsUseCase,
+  type SyncPluginsOptions,
+  type SyncPluginsResult,
+  type ResolveZig,
+} from "./application/usecases/SyncPluginsUseCase.ts";
 
 export { NodePluginWorkspace } from "./infrastructure/NodePluginWorkspace.ts";
 export { SdkTemplateSource } from "./infrastructure/SdkTemplateSource.ts";
 export { signStandardPluginArtifact, MissingSigningKeyError } from "./infrastructure/PluginSigner.ts";
 
 import { nodeProcessRunner } from "@carbon/process";
+import { AddStandardPluginUseCase } from "./application/usecases/AddStandardPluginUseCase.ts";
 import { BuildPluginUseCase } from "./application/usecases/BuildPluginUseCase.ts";
 import { CheckPluginUseCase } from "./application/usecases/CheckPluginUseCase.ts";
 import { PreflightPluginsUseCase } from "./application/usecases/PreflightPluginsUseCase.ts";
 import { CreatePluginUseCase } from "./application/usecases/CreatePluginUseCase.ts";
 import { InspectPluginsUseCase } from "./application/usecases/InspectPluginsUseCase.ts";
 import { InstallPluginUseCase } from "./application/usecases/InstallPluginUseCase.ts";
-import { SyncLocalPluginsUseCase } from "./application/usecases/SyncLocalPluginsUseCase.ts";
+import { SyncPluginsUseCase } from "./application/usecases/SyncPluginsUseCase.ts";
 import { NodePluginWorkspace } from "./infrastructure/NodePluginWorkspace.ts";
 import { SdkTemplateSource } from "./infrastructure/SdkTemplateSource.ts";
 
@@ -110,25 +131,32 @@ import { SdkTemplateSource } from "./infrastructure/SdkTemplateSource.ts";
  * One factory rather than four, because a caller doing plugin work generally
  * needs more than one of them and they must share a workspace adapter.
  *
- * `sdkRoot` is a parameter rather than something this derives: the SDK is
- * `products/carbon-ext`, and a solution may not name a path inside a product.
- * The caller — carbon-cli — knows where its own products are.
+ * `sdkRoot`/`standardPluginsRoot` are parameters rather than something this
+ * derives: the SDK is `products/carbon-ext` and the standard-plugin
+ * collection is `products/carbon-sdk`, and a solution may not name a path
+ * inside a product. The caller — carbon-cli — knows where its own products
+ * are. `standardPluginsRoot` defaults to `sdkRoot` only as a degenerate
+ * fallback for callers that never touch `add`/auto-heal; real callers always
+ * pass both.
  */
-export function pluginUseCases(sdkRoot: string) {
+export function pluginUseCases(sdkRoot: string, standardPluginsRoot: string = sdkRoot) {
   const workspace = new NodePluginWorkspace();
+  const templates = new SdkTemplateSource(workspace, sdkRoot);
 
   const build = new BuildPluginUseCase(workspace, nodeProcessRunner);
-  const install = new InstallPluginUseCase(workspace);
+  const install = new InstallPluginUseCase(workspace, templates);
+  const addStandard = new AddStandardPluginUseCase(workspace, build, install, standardPluginsRoot);
 
   return {
     workspace,
     sdkRoot,
-    create: new CreatePluginUseCase(workspace, new SdkTemplateSource(workspace, sdkRoot)),
+    create: new CreatePluginUseCase(workspace, templates),
     build,
     install,
+    addStandard,
     inspect: new InspectPluginsUseCase(workspace),
     check: new CheckPluginUseCase(workspace),
     preflight: new PreflightPluginsUseCase(workspace),
-    syncLocal: new SyncLocalPluginsUseCase(workspace, build, install),
+    sync: new SyncPluginsUseCase(workspace, nodeProcessRunner, addStandard),
   };
 }

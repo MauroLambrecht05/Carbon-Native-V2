@@ -484,13 +484,18 @@ fn main() -> Result<()> {
     timing_log("carbon_dispatcher_installed", t0);
 
     let app_ptr = host_app.raw();
-    let plugin_entries = read_plugins_section(&project_dir);
-    let mut plugin_registry =
-        plugin_loader::PluginRegistry::load_from_config(&plugin_entries, &project_dir, app_ptr)
-            .unwrap_or_else(|e| {
-                eprintln!("[carbon-mini-plugin] registry init failed: {e:#}");
-                plugin_loader::PluginRegistry::new(app_ptr)
-            });
+    let app_manifest = read_app_manifest(&project_dir);
+    let capability_grants = read_plugins_section(&project_dir);
+    let mut plugin_registry = plugin_loader::PluginRegistry::load_from_config(
+        &app_manifest,
+        &capability_grants,
+        &project_dir,
+        app_ptr,
+    )
+    .unwrap_or_else(|e| {
+        eprintln!("[carbon-mini-plugin] registry init failed: {e:#}");
+        plugin_loader::PluginRegistry::new(app_ptr)
+    });
     timing_log("plugins_loaded", t0);
 
     maybe_register_image(&js_ctx, &project_dir)?;

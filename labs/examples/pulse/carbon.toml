@@ -7,20 +7,13 @@ display_name = "Pulse"
 backend = "mini"
 bytecode = true
 
-# All three plugins' source lives in carbon/own/ — `carbon run`/`carbon dev`
-# build and install them automatically into carbon/installed/, no `carbon
-# plugin install` step. carbon-pulse writes to the framebuffer
-# (paint.before), which is capability-gated: this grant has to be written by
-# hand once, same as crt-dashboard's. carbon-hotkey and carbon-idle need no
-# capability — their points don't gate on one — so their bare entries below
-# are what `carbon dev`'s first sync would have written anyway; spelled out
-# here for the reader.
-[plugins.carbon-hotkey]
-path = "./carbon/installed/carbon-hotkey/carbon_hotkey.dll"
-
-[plugins.carbon-idle]
-path = "./carbon/installed/carbon-idle/carbon_idle.dll"
-
+# All three plugins are declared in carbon/manifest.toml (source = "local"
+# each — their source lives in carbon/plugins/local/); `carbon run`/`carbon
+# dev` build and stage them automatically, no `carbon plugin install` step.
+# This table only grants capabilities — carbon-pulse writes to the
+# framebuffer (paint.before), which is capability-gated: this grant has to
+# be written by hand once, same as crt-dashboard's. carbon-hotkey and
+# carbon-idle need no capability — their points don't gate on one — so they
+# need zero lines here at all.
 [plugins.carbon-pulse]
-path = "./carbon/installed/carbon-pulse/carbon_pulse.dll"
 capabilities = ["paint.pixmap"]

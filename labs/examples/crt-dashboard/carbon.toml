@@ -7,11 +7,11 @@ display_name = "Crt Dashboard"
 backend = "mini"
 bytecode = true
 
-# carbon-crt's source lives in carbon/own/carbon-crt/ — `carbon run`/`carbon
-# dev` build and install it automatically into carbon/installed/, no `carbon
-# plugin install` step. This grant has to be written by hand once:
-# paint.before is capability-gated (it can write the framebuffer), and a
-# plugin requesting a capability is never enough on its own to receive it.
+# carbon-crt is declared in carbon/manifest.toml (source = "local" — its
+# source lives in carbon/plugins/local/carbon-crt/); `carbon run`/`carbon
+# dev` build and stage it automatically, no `carbon plugin install` step.
+# This grant has to be written by hand once: paint.before is
+# capability-gated (it can write the framebuffer), and a plugin requesting a
+# capability is never enough on its own to receive it.
 [plugins.carbon-crt]
-path = "./carbon/installed/carbon-crt/carbon_crt.dll"
 capabilities = ["paint.pixmap"]

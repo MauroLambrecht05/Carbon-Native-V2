@@ -246,12 +246,12 @@ describe("carbonImports plugin", () => {
     });
   });
 
-  describe("local plugin manifests (carbon/installed/<name>/carbon-plugin.toml)", () => {
+  describe("local plugin manifests (carbon/plugins/vendor/<name>/carbon-plugin.toml)", () => {
     // Regression test for a real bug: labs/examples/pulse's App.tsx imported
     // `setActive` from `carbon:carbon-pulse`, and the CI "build examples" job
     // failed with "No matching export" — the manifest declared the export
     // correctly, but discoverLocalManifests (a) never looked in the app's own
-    // `carbon/installed/<name>/` directory at all (only a `packages/`
+    // `carbon/plugins/vendor/<name>/` directory at all (only a `packages/`
     // workspace root that nothing in this tree uses), and (b)
     // normalizeManifest expected a `[plugin]` wrapper section no real
     // carbon-plugin.toml has ever used. This writes a manifest in the SAME
@@ -259,7 +259,7 @@ describe("carbonImports plugin", () => {
     // [exports."carbon:x"]) so a regression on either bug fails here before
     // it reaches a real app's build.
     function writePlugin(projectDir, name, tomlBody) {
-      const dir = join(projectDir, "carbon", "installed", name);
+      const dir = join(projectDir, "carbon", "plugins", "vendor", name);
       mkdirSync(dir, { recursive: true });
       writeFileSync(join(dir, "carbon-plugin.toml"), tomlBody);
     }

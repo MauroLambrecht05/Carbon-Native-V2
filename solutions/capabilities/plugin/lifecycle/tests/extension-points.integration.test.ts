@@ -9,13 +9,15 @@ import { describe, expect, test } from "bun:test";
 
 import {
   CheckPluginUseCase,
+  hostArchName,
+  hostExt,
+  hostOsName,
   NoHostAppError,
   NotAPluginDirectoryError,
   parsePluginDeclaration,
   PreflightPluginsUseCase,
   type PluginWorkspace,
 } from "../index.ts";
-import { PluginName } from "../domain/value-objects/PluginName.ts";
 
 // A minimal in-memory PluginWorkspace: the use cases under test only read.
 //
@@ -59,6 +61,16 @@ class MemoryWorkspace implements PluginWorkspace {
       if (slash > 0) names.add(rest.slice(0, slash));
     }
     return [...names];
+  }
+  listFiles(path: string): string[] {
+    const prefix = `${this.key(path)}/`;
+    const names: string[] = [];
+    for (const f of this.files.keys()) {
+      if (!f.startsWith(prefix)) continue;
+      const rest = f.slice(prefix.length);
+      if (!rest.includes("/")) names.push(rest);
+    }
+    return names;
   }
   isEmptyDirectory(path: string): boolean {
     return !this.exists(path);
@@ -243,24 +255,32 @@ required = ["clipboard.read"]
 });
 
 describe("preflighting an app", () => {
-  const lib = PluginName.from("clip").libraryFilename();
+  const GRANTED_NONE = `[app]\nname = "demo"\n`;
+  const GRANTED_PIXMAP = `[app]\nname = "demo"\n\n[plugins.clip]\ncapabilities = ["paint.pixmap"]\n`;
 
-  function app(options: { carbonToml: string; installed?: boolean; manifest?: string }) {
+  function app(
+    options: { granted?: string; declared?: boolean; installed?: boolean; manifest?: string } = {},
+  ) {
     const workspace = new MemoryWorkspace();
-    workspace.put(`${ROOT}/app/carbon.toml`, options.carbonToml);
+    workspace.put(`${ROOT}/app/carbon.toml`, options.granted ?? GRANTED_NONE);
+    if (options.declared !== false) {
+      workspace.put(
+        `${ROOT}/app/carbon/manifest.toml`,
+        `schema = 1\n\n[plugins.clip]\nsource = "vendor"\nenabled = true\n`,
+      );
+    }
     if (options.installed !== false) {
-      workspace.put(`${ROOT}/app/carbon/installed/clip/${lib}`, "ELF");
+      const nativeDir = `${ROOT}/app/carbon/native/${hostOsName()}/${hostArchName()}`;
+      workspace.put(`${nativeDir}/clip.${hostExt()}`, "ELF");
     }
     if (options.manifest) {
-      workspace.put(`${ROOT}/app/carbon/installed/clip/carbon-plugin.toml`, options.manifest);
+      workspace.put(`${ROOT}/app/carbon/plugins/vendor/clip/carbon-plugin.toml`, options.manifest);
     }
     return new PreflightPluginsUseCase(workspace);
   }
 
-  const DECLARED = `[app]\nname = "demo"\n\n[plugins]\nclip = "./carbon/installed/clip/${lib}"\n`;
-
   test("an app with no plugins is fine and reports nothing", () => {
-    const useCase = app({ carbonToml: `[app]\nname = "demo"\n`, installed: false });
+    const useCase = app({ declared: false, installed: false });
     const result = useCase.execute(`${ROOT}/app`);
 
     expect(result.ok).toBe(true);
@@ -269,17 +289,17 @@ describe("preflighting an app", () => {
   });
 
   test("a declared plugin whose library is missing is an error with the build command", () => {
-    const useCase = app({ carbonToml: DECLARED, installed: false });
+    const useCase = app({ installed: false });
     const result = useCase.execute(`${ROOT}/app`);
 
     expect(result.ok).toBe(false);
     expect(result.problems[0].plugin).toBe("clip");
     expect(result.problems[0].message).toContain("does not exist");
-    expect(result.problems[0].fix).toContain("carbon plugin build");
+    expect(result.problems[0].fix).toContain("carbon dev");
   });
 
   test("a plugin present with no manifest beside it passes — only the library ships", () => {
-    const useCase = app({ carbonToml: DECLARED });
+    const useCase = app();
     const result = useCase.execute(`${ROOT}/app`);
 
     expect(result.ok).toBe(true);
@@ -288,7 +308,6 @@ describe("preflighting an app", () => {
 
   test("an ungranted point capability is an error carrying the carbon.toml to paste", () => {
     const useCase = app({
-      carbonToml: DECLARED,
       manifest: `name = "clip"\nextension-points = ["paint.before"]\n`,
     });
 
@@ -300,7 +319,7 @@ describe("preflighting an app", () => {
 
   test("granting it in carbon.toml clears the error", () => {
     const useCase = app({
-      carbonToml: `${DECLARED}\n[plugins.clip]\ncapabilities = ["paint.pixmap"]\n`,
+      granted: GRANTED_PIXMAP,
       manifest: `name = "clip"\nextension-points = ["paint.before"]\n`,
     });
 
@@ -309,7 +328,6 @@ describe("preflighting an app", () => {
 
   test("a point this runtime does not have warns, because the plugin is newer", () => {
     const useCase = app({
-      carbonToml: DECLARED,
       manifest: `name = "clip"\nextension-points = ["future.point"]\n`,
     });
 

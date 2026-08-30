@@ -9,7 +9,7 @@
 //! variable, and does nothing at all without one. It is a check you RUN, not a
 //! check that runs itself:
 //!
-//!   cd labs/examples/pulse/carbon/own/carbon-hotkey && zig build
+//!   cd labs/examples/pulse/carbon/plugins/local/carbon-hotkey && zig build
 //!   cargo run -p carbon-plugin-trust --bin carbon-plugin-sign -- \
 //!       sign zig-out/lib/carbon_hotkey.dll
 //!   CARBON_TEST_SIGNED_PLUGIN=<abs path to carbon_hotkey.dll> \
@@ -32,7 +32,7 @@
 //! Each of (2)–(4) runs against a COPY in a temp directory, so the real
 //! artifact is never damaged.
 
-use carbon_core::config::{PluginEntry, PluginsSection};
+use carbon_core::config::{AppManifest, AppManifestEntry, CapabilityGrant, PluginSource};
 use carbon_plugin_host::host_exports::{HostCarbonApp, HostCarbonAppStorage};
 use carbon_plugin_host::plugin_loader::PluginRegistry;
 use std::collections::BTreeMap;
@@ -51,39 +51,76 @@ fn signed_plugin() -> Option<PathBuf> {
     Some(path)
 }
 
-/// Load exactly one plugin by absolute path and report how many made it in.
+// Mirrors plugin_loader.rs's own (private) native_os_name/native_arch_name/
+// native_ext — duplicated rather than exposed, since this test only ever
+// runs against the host it's compiled for anyway.
+fn native_ext() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "dll"
+    } else if cfg!(target_os = "macos") {
+        "dylib"
+    } else {
+        "so"
+    }
+}
+
+fn native_dir_suffix() -> PathBuf {
+    let os = if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else {
+        "linux"
+    };
+    let arch = if cfg!(target_arch = "aarch64") {
+        if cfg!(target_os = "macos") {
+            "arm64"
+        } else {
+            "aarch64"
+        }
+    } else {
+        "x86_64"
+    };
+    Path::new("carbon").join("native").join(os).join(arch)
+}
+
+/// Load exactly one plugin, staged the way `carbon/build.zig` would, and
+/// report how many made it in.
 ///
 /// Goes through `load_from_config` — the same call the runtime makes — so the
 /// gate under test is the one that actually ships, ordering included.
-fn load_count(dll: &Path) -> usize {
-    let mut entries: BTreeMap<String, PluginEntry> = BTreeMap::new();
-    let toml_text = format!(
-        "[plugins.carbon-hotkey]\npath = {:?}\ncapabilities = []\n",
-        dll.to_string_lossy()
+fn load_count(project_dir: &Path) -> usize {
+    let mut plugins = BTreeMap::new();
+    plugins.insert(
+        "carbon-hotkey".to_string(),
+        AppManifestEntry {
+            source: PluginSource::Local,
+            enabled: true,
+            version: None,
+        },
     );
-    #[derive(serde::Deserialize)]
-    struct Wrap {
-        plugins: PluginsSection,
-    }
-    let parsed: Wrap = toml::from_str(&toml_text).expect("test toml parses");
-    entries.extend(parsed.plugins.0);
+    let manifest = AppManifest { plugins };
+    let grants: BTreeMap<String, CapabilityGrant> = BTreeMap::new();
 
     let mut storage = HostCarbonAppStorage::new("sig-test", "0.0.1", ".", 100, 100);
     let app: *mut HostCarbonApp = storage.raw();
-    let registry = PluginRegistry::load_from_config(&entries, Path::new("."), app)
+    let registry = PluginRegistry::load_from_config(&manifest, &grants, project_dir, app)
         .expect("load_from_config never fails as a whole; it skips");
     registry.plugin_count()
 }
 
-/// Copy `<dll>` and `<dll>.sig` into a fresh temp directory, so a tampering
-/// test can mutate them without touching the artifact the developer built.
+/// Stage `<dll>` and `<dll>.sig` into a fresh temp directory shaped like
+/// `<dir>/carbon/native/<os>/<arch>/carbon-hotkey.<ext>` — exactly what
+/// `carbon/build.zig` would have produced — so a tampering test can mutate
+/// the copy without touching the artifact the developer built. Returns the
+/// PROJECT dir (what `load_count` takes), not the staged file itself.
 fn stage_copy(dll: &Path, tag: &str) -> (PathBuf, PathBuf, PathBuf) {
     let dir = std::env::temp_dir().join(format!("carbon-sig-{}-{tag}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).expect("temp dir");
+    let native_dir = dir.join(native_dir_suffix());
+    fs::create_dir_all(&native_dir).expect("temp dir");
 
-    let name = dll.file_name().expect("plugin has a filename");
-    let copy = dir.join(name);
+    let copy = native_dir.join(format!("carbon-hotkey.{}", native_ext()));
     fs::copy(dll, &copy).expect("copy dll");
 
     let src_sig = PathBuf::from(format!("{}.sig", dll.display()));
@@ -99,11 +136,13 @@ fn a_correctly_signed_plugin_loads() {
         eprintln!("skipped: set CARBON_TEST_SIGNED_PLUGIN to run this");
         return;
     };
+    let (dir, _, _) = stage_copy(&dll, "ok");
     assert_eq!(
-        load_count(&dll),
+        load_count(&dir),
         1,
         "a plugin signed with Carbon's key should load"
     );
+    let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -123,7 +162,7 @@ fn a_tampered_dll_is_refused() {
     fs::write(&copy, &bytes).expect("write tampered copy");
 
     assert_eq!(
-        load_count(&copy),
+        load_count(&dir),
         0,
         "a plugin with one flipped byte must not load"
     );
@@ -136,13 +175,13 @@ fn a_tampered_signature_is_refused() {
         eprintln!("skipped: set CARBON_TEST_SIGNED_PLUGIN to run this");
         return;
     };
-    let (dir, copy, sig) = stage_copy(&dll, "sig");
+    let (dir, _copy, sig) = stage_copy(&dll, "sig");
 
     let mut bytes = fs::read(&sig).expect("read sig");
     bytes[0] ^= 0x01;
     fs::write(&sig, &bytes).expect("write tampered sig");
 
-    assert_eq!(load_count(&copy), 0, "a forged signature must not load");
+    assert_eq!(load_count(&dir), 0, "a forged signature must not load");
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -152,11 +191,11 @@ fn an_unsigned_plugin_is_refused() {
         eprintln!("skipped: set CARBON_TEST_SIGNED_PLUGIN to run this");
         return;
     };
-    let (dir, copy, sig) = stage_copy(&dll, "unsigned");
+    let (dir, _copy, sig) = stage_copy(&dll, "unsigned");
     fs::remove_file(&sig).expect("remove sig");
 
     assert_eq!(
-        load_count(&copy),
+        load_count(&dir),
         0,
         "a plugin with no signature at all must not load"
     );

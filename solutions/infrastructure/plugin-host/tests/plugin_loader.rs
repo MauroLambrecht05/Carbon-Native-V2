@@ -18,8 +18,9 @@
 //! actually ships rather than to a copy that could drift from them.
 //!
 //! ── WHAT THIS GUARANTEES ────────────────────────────────────────────────────
-//!   1. `carbon_core::config::PluginEntry` parses the three accepted
-//!      carbon.toml forms (Bool, Path, Full).
+//!   1. `carbon_core::config::CapabilityGrant` parses `[plugins.<name>]`'s
+//!      one field — capability grants, nothing about a plugin's existence
+//!      or path (that's carbon/manifest.toml's job now).
 //!   2. `plugin_loader::Manifest` accepts the JSON shape
 //!      `carbon-plugin-sdk::Manifest::to_json()` produces.
 //!   3. `HostCarbonApp`'s byte layout stays within the range carbon_abi.h's
@@ -31,7 +32,7 @@
 //! covers the assembled runtime, and the SDK's `abi_compat_test.rs` covers that
 //! the macros emit correctly named symbols.
 
-use carbon_core::config::{PluginEntry, PluginsSection};
+use carbon_core::config::PluginsSection;
 use carbon_plugin_host::{host_exports, plugin_loader};
 
 /// Every carbon.toml fragment below is a `[plugins]` table, so they all
@@ -47,49 +48,30 @@ fn parse(toml_text: &str) -> PluginsSection {
 }
 
 #[test]
-fn plugins_section_parses_bool_form() {
-    let plugins = parse(
-        r#"
-        [plugins]
-        audio = true
-        image = false
-    "#,
-    );
-    let map = &plugins.0;
-    assert!(matches!(map.get("audio"), Some(PluginEntry::Bool(true))));
-    assert!(matches!(map.get("image"), Some(PluginEntry::Bool(false))));
-    assert!(map.get("audio").unwrap().enabled());
-    assert!(!map.get("image").unwrap().enabled());
-}
-
-#[test]
-fn plugins_section_parses_path_form() {
-    let plugins = parse(
-        r#"
-        [plugins]
-        my_plugin = "plugins/my_plugin.dll"
-    "#,
-    );
-    let entry = plugins.0.get("my_plugin").expect("entry present");
-    assert_eq!(entry.path(), Some("plugins/my_plugin.dll"));
-    assert!(entry.enabled());
-    assert_eq!(entry.capabilities(), &[] as &[String]);
-}
-
-#[test]
-fn plugins_section_parses_full_form() {
+fn plugins_section_parses_capability_grant() {
     let plugins = parse(
         r#"
         [plugins.my_plugin]
-        path = "plugins/x.dll"
         capabilities = ["fs.read", "audio.output"]
     "#,
     );
     let entry = plugins.0.get("my_plugin").expect("entry present");
-    assert_eq!(entry.path(), Some("plugins/x.dll"));
-    let caps = entry.capabilities();
-    assert!(caps.contains(&"fs.read".to_string()));
-    assert!(caps.contains(&"audio.output".to_string()));
+    assert!(entry.capabilities.contains(&"fs.read".to_string()));
+    assert!(entry.capabilities.contains(&"audio.output".to_string()));
+}
+
+#[test]
+fn plugins_section_entry_with_no_capabilities_grants_none() {
+    // `[plugins.my_plugin]` with nothing under it — legal (a plugin
+    // manifest.toml declares that needs no capability still gets an entry
+    // if a human wants to leave a comment there, say) and grants nothing.
+    let plugins = parse(
+        r#"
+        [plugins.my_plugin]
+    "#,
+    );
+    let entry = plugins.0.get("my_plugin").expect("entry present");
+    assert!(entry.capabilities.is_empty());
 }
 
 #[test]
@@ -180,12 +162,11 @@ fn capability_check_rejects_missing() {
     let plugins = parse(
         r#"
         [plugins.my_plugin]
-        path = "plugins/x.dll"
         capabilities = ["fs.read"]
     "#,
     );
     let entry = plugins.0.get("my_plugin").unwrap();
-    let granted = entry.capabilities();
+    let granted = &entry.capabilities;
     let required = ["audio.output".to_string(), "fs.read".to_string()];
     let missing: Vec<_> = required
         .iter()

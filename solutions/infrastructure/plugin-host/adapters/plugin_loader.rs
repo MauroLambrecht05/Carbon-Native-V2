@@ -9,9 +9,10 @@
 //
 // Pipeline per plugin:
 //
-//   carbon.toml [plugins]   →  PluginEntry
+//   carbon/manifest.toml     →  AppManifestEntry (name, source, enabled) —
+//                                the ONLY place plugin existence is declared.
 //        ↓
-//   resolve path             →  <project_dir>/carbon/installed/<name>/<name>.dll  (or override)
+//   resolve path              →  <project_dir>/carbon/native/<os>/<arch>/<name>.<ext>
 //        ↓
 //   SIGNATURE + REVOCATION   →  Ed25519-verify <path>.sig against Carbon's
 //                                hardcoded public key, then check the artifact's
@@ -61,7 +62,7 @@
 
 use crate::host_exports::{HostCarbonApp, CARBON_PLUGIN_ABI_VERSION_MAJOR};
 use anyhow::{anyhow, Result};
-use carbon_core::config::PluginEntry;
+use carbon_core::config::{AppManifest, CapabilityGrant};
 use carbon_plugin_contract::{self as contract, Arity, CarbonApp, PointId, Stability, POINTS};
 use libloading::{Library, Symbol};
 use serde::Deserialize;
@@ -195,17 +196,19 @@ impl PluginRegistry {
         self.app.cast()
     }
 
-    /// Build a registry from carbon.toml [plugins] entries. Plugins that
-    /// fail to load (file missing, unsigned or wrongly-signed, revoked,
+    /// Build a registry from carbon/manifest.toml's declared plugins,
+    /// cross-referenced against carbon.toml's capability grants. Plugins
+    /// that fail to load (file missing, unsigned or wrongly-signed, revoked,
     /// manifest parse error, ABI mismatch, capability shortfall) are SKIPPED
     /// with a stderr log — they don't abort the runtime.
     ///
     /// Skipping is the right answer for a signature failure too: refusing to
     /// start the whole app because one plugin was tampered with hands an
-    /// attacker who can write one file in `plugins/` a way to take the app down
-    /// entirely. The app runs, without that plugin, and says why.
+    /// attacker who can write one file in `carbon/native/` a way to take the
+    /// app down entirely. The app runs, without that plugin, and says why.
     pub fn load_from_config(
-        entries: &BTreeMap<String, PluginEntry>,
+        manifest: &AppManifest,
+        grants: &BTreeMap<String, CapabilityGrant>,
         project_dir: &Path,
         app: *mut HostCarbonApp,
     ) -> Result<Self> {
@@ -213,12 +216,14 @@ impl PluginRegistry {
         // Which plugin claimed each exclusive point, so the second claimant can
         // be refused BY NAME rather than losing to load order.
         let mut exclusive_claims: BTreeMap<PointId, String> = BTreeMap::new();
+        let no_grant = CapabilityGrant::default();
 
-        for (name, entry) in entries {
-            if !entry.enabled() {
+        for (name, entry) in &manifest.plugins {
+            if !entry.enabled {
                 continue;
             }
-            match load_one(name, entry, project_dir, &mut exclusive_claims) {
+            let granted = grants.get(name).unwrap_or(&no_grant);
+            match load_one(name, granted, project_dir, &mut exclusive_claims) {
                 Ok(p) => {
                     if std::env::var_os("CARBON_MINI_DEBUG").is_some() {
                         let points: Vec<&str> = p.points().map(PointId::as_str).collect();
@@ -233,7 +238,8 @@ impl PluginRegistry {
                 Err(e) => {
                     eprintln!(
                         "[carbon-plugin] FAILED to load `{name}`: {e:#}\n  \
-                         hint: check carbon.toml [plugins.{name}] capabilities and the dll path."
+                         hint: check carbon.toml [plugins.{name}] capabilities and that \
+                         `carbon dev`/`carbon run` has staged it."
                     );
                 }
             }
@@ -365,11 +371,11 @@ impl PluginRegistry {
 
 fn load_one(
     name: &str,
-    entry: &PluginEntry,
+    granted_entry: &CapabilityGrant,
     project_dir: &Path,
     exclusive_claims: &mut BTreeMap<PointId, String>,
 ) -> Result<LoadedPlugin> {
-    let path = resolve_plugin_path(name, entry, project_dir)?;
+    let path = resolve_plugin_path(name, project_dir)?;
     let debug = std::env::var_os("CARBON_MINI_DEBUG").is_some();
     if debug {
         eprintln!("[carbon-plugin] loading `{name}` from {}", path.display());
@@ -391,18 +397,17 @@ fn load_one(
     // CARBON_ALLOW_UNSIGNED_PLUGINS is the deliberate first-party escape
     // hatch this gate was always meant to have — see .local/notes/roadmap/
     // 04-security-and-capabilities/README.md, "Escape hatch, deliberately
-    // preserved": a developer's own local-source plugin (built and
-    // auto-installed by SyncLocalPluginsUseCase on every `carbon dev`/`carbon
-    // run`, with no manual sign step) is not going through Carbon's public
-    // trust channel at all. Only `carbon dev` sets this env var (see
-    // dev.command.ts) — that command builds fast unsigned Debug plugins for
-    // the local edit/reload loop. `carbon run` deliberately never sets it:
-    // it builds `release: true` plugins (see run.command.ts's
-    // syncLocalPlugins), the same artifact a distributed build ships, and
-    // that artifact must carry a real signature like any other. This is an
-    // explicit opt-in a human's own CLI invocation makes, never a flag baked
-    // into a shipped binary, and it still prints loudly rather than silently
-    // accepting the plugin.
+    // preserved": a developer's own local-source plugin (built and staged by
+    // SyncPluginsUseCase on every `carbon dev`/`carbon run`, with no manual
+    // sign step) is not going through Carbon's public trust channel at all.
+    // Only `carbon dev` sets this env var (see dev.command.ts) — that
+    // command builds fast unsigned Debug plugins for the local edit/reload
+    // loop. `carbon run` deliberately never sets it: it builds
+    // `release: true` plugins (see run.command.ts's syncPlugins), the same
+    // artifact a distributed build ships, and that artifact must carry a
+    // real signature like any other. This is an explicit opt-in a human's
+    // own CLI invocation makes, never a flag baked into a shipped binary,
+    // and it still prints loudly rather than silently accepting the plugin.
     if std::env::var_os("CARBON_ALLOW_UNSIGNED_PLUGINS").is_some() {
         match carbon_plugin_trust::verify_artifact(&path, &CARBON_PLUGIN_PUBLIC_KEY) {
             Ok(content_hash) => {
@@ -453,7 +458,7 @@ fn load_one(
 
     // 2. Whole-plugin capability check — every capability the manifest calls
     //    required must be granted, whatever the points say.
-    let granted = entry.capabilities();
+    let granted = granted_entry.capabilities.as_slice();
     let missing: Vec<&str> = manifest
         .capabilities
         .required
@@ -585,71 +590,69 @@ fn optional_sym<F: Copy>(library: &Library, name: &[u8]) -> Option<F> {
     sym.ok().map(|s| *s)
 }
 
-/// Resolve `[plugins].<name> = <entry>` to an absolute filesystem path.
-///
-///   Bool(true)             → <project_dir>/carbon/installed/<name>/<name>.<DLL_EXT>
-///   Path("relative.dll")   → <project_dir>/relative.dll
-///   Path("C:/abs/x.dll")   → C:/abs/x.dll  (absolute paths pass through)
-///   Full { path: Some, .. }→ same as Path(...)
-///   Full { path: None, .. }→ same as Bool(true)
-fn resolve_plugin_path(name: &str, entry: &PluginEntry, project_dir: &Path) -> Result<PathBuf> {
-    if let Some(p) = entry.path() {
-        let pp = Path::new(p);
-        let abs = if pp.is_absolute() {
-            pp.to_path_buf()
-        } else {
-            project_dir.join(pp)
-        };
-        if !abs.exists() {
-            return Err(anyhow!(
-                "explicit plugin path does not exist: {}",
-                abs.display()
-            ));
-        }
-        return Ok(abs);
-    }
-
-    // Auto-resolve. Try platform-native dynamic library extensions in order.
-    let exts: &[&str] = if cfg!(target_os = "windows") {
-        &["dll"]
+// Native target directory names — canonical table, quoted verbatim from
+// solutions/contracts/plugin/README.md ("Native target directory names").
+// carbon/build.zig's own copy and the TS lifecycle use cases' must agree
+// with this exactly.
+fn native_os_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_os = "linux") {
+        "linux"
     } else if cfg!(target_os = "macos") {
-        &["dylib", "so"]
+        "macos"
     } else {
-        &["so"]
-    };
-    // carbon/installed/<name>/ — one subdirectory per plugin (see
-    // InstallPluginUseCase.ts), the canonical location for a BUILT,
-    // ready-to-load artifact regardless of whether its source was fetched
-    // (carbon plugin add) or vendored (carbon/own/, auto-built and
-    // installed here by SyncLocalPluginsUseCase before the runtime ever
-    // gets this far) — this fallback never needs to look in carbon/own/
-    // itself for that reason.
-    let dir = project_dir.join("carbon").join("installed");
-    for ext in exts {
-        // Plugin authors often use hyphens in names (`carbon-audio`) but a Zig
-        // shared library keeps the name it was given in build.zig, which may
-        // use either. Try both, plus the `lib` prefix Unix linkers add.
-        for variant in [
-            name.to_string(),
-            name.replace('-', "_"),
-            name.replace('_', "-"),
-        ] {
-            let plugin_dir = dir.join(&variant);
-            let p = plugin_dir.join(format!("{variant}.{ext}"));
-            if p.exists() {
-                return Ok(p);
-            }
-            let p = plugin_dir.join(format!("lib{variant}.{ext}"));
-            if p.exists() {
-                return Ok(p);
-            }
-        }
+        panic!("carbon: unsupported host OS for plugin staging")
     }
-    Err(anyhow!(
-        "could not auto-resolve plugin `{name}` — looked for {:?} under {}",
-        exts,
-        dir.display()
-    ))
+}
+
+fn native_arch_name() -> &'static str {
+    if cfg!(target_arch = "x86_64") {
+        "x86_64"
+    } else if cfg!(target_arch = "aarch64") {
+        // Zig's own identifier is aarch64 on every OS; ours matches Apple's
+        // convention on macOS specifically (see the README table).
+        if cfg!(target_os = "macos") {
+            "arm64"
+        } else {
+            "aarch64"
+        }
+    } else {
+        panic!("carbon: unsupported host architecture for plugin staging")
+    }
+}
+
+fn native_ext() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "dll"
+    } else if cfg!(target_os = "macos") {
+        "dylib"
+    } else {
+        "so"
+    }
+}
+
+/// Resolve a manifest-declared plugin name to its staged artifact:
+/// `<project_dir>/carbon/native/<os>/<arch>/<name>.<ext>` — the ONE place
+/// `carbon/build.zig` ever stages a binary to, so this is a single
+/// exact-match lookup, not a search. No explicit-path override exists
+/// anymore: carbon.toml never carries a path (see CapabilityGrant), so
+/// there is nothing left to escape to.
+fn resolve_plugin_path(name: &str, project_dir: &Path) -> Result<PathBuf> {
+    let path = project_dir
+        .join("carbon")
+        .join("native")
+        .join(native_os_name())
+        .join(native_arch_name())
+        .join(format!("{name}.{}", native_ext()));
+    if !path.exists() {
+        return Err(anyhow!(
+            "plugin `{name}` is declared in carbon/manifest.toml but not staged at {} — \
+             run `carbon dev` or `carbon run` to build/fetch it.",
+            path.display()
+        ));
+    }
+    Ok(path)
 }
 
 // Suppress unused-import warnings under cfgs that don't need c_void.

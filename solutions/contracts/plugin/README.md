@@ -87,6 +87,26 @@ Per plugin, at load, before `lifecycle.register` runs:
 the toolchain, before the app launches, where the message can name a file to
 edit rather than scrolling past in stderr.
 
+## Native target directory names
+
+`carbon/native/<os>/<arch>/` (the staged-plugin output tree — see
+`solutions/capabilities/plugin/lifecycle`'s manifest-driven design) needs the
+same directory name strings agreed on by three languages: `carbon/build.zig`
+(staging), `plugin_loader.rs` (resolving), and the TS lifecycle use cases
+(existence checks, `carbon plugin list`). Small enough that a generated
+rendering (like the extension-point table above) would be pure overhead — this
+is the one canonical table, quoted verbatim by each implementation, with a
+comment pointing back here:
+
+| `os` | `arch` |
+|---|---|
+| `windows` | `x86_64` |
+| `linux` | `x86_64`, `aarch64` |
+| `macos` | `x86_64`, `arm64` |
+
+Extension (per `os`): `windows` → `dll`, `linux` → `so`, `macos` → `dylib` —
+unrelated to `arch`.
+
 ## Known compromise
 
 `host.resolve_asset` is declared and **not yet dispatched**. The loader binds

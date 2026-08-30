@@ -56,3 +56,15 @@ export class PluginNotFoundError extends PluginError {
     super(`no plugin named ${name} found`);
   }
 }
+
+/** `carbon plugin add <name>` (or an auto-heal of a vendor entry) asked for
+ *  a name carbon-sdk does not have. */
+export class UnknownStandardPluginError extends PluginError {
+  readonly kind = "unknown-standard-plugin";
+  constructor(readonly name: string, readonly available: readonly string[]) {
+    super(
+      `no standard plugin named "${name}"` +
+        (available.length ? ` — available: ${available.join(", ")}` : ""),
+    );
+  }
+}

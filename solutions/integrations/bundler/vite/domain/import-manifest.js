@@ -7,8 +7,8 @@
 //
 // Real manifest format — this is `carbon-plugin.toml` as `carbon plugin
 // check`/`carbon plugin install` actually read it (see e.g.
-// labs/examples/pulse/carbon/own/carbon-pulse/carbon-plugin.toml), top-level,
-// no `[plugin]` wrapper section:
+// labs/examples/pulse/carbon/plugins/local/carbon-pulse/carbon-plugin.toml),
+// top-level, no `[plugin]` wrapper section:
 //
 //   name = "carbon-audio"
 //   modules = ["carbon:audio"]
@@ -24,14 +24,13 @@
 //
 // Two discovery roots, because two different things ship plugins:
 //   discoverLocalManifests(projectRoot)   an app's own `carbon/` development
-//                                         area — `carbon/own/<name>/` (a
-//                                         plugin whose source this app owns,
-//                                         auto-built by run.command.ts's
-//                                         syncLocalPlugins) and
-//                                         `carbon/installed/<name>/` (a
-//                                         fetched-or-built artifact,
-//                                         `carbon plugin add` / `install`) —
-//                                         the only kind a real app has today.
+//                                         area — `carbon/plugins/local/<name>/`
+//                                         (source this app owns, auto-built
+//                                         by run.command.ts's syncPlugins)
+//                                         and `carbon/plugins/vendor/<name>/`
+//                                         (a fetched plugin, `carbon plugin
+//                                         add` / `install`) — the only kind
+//                                         a real app has today.
 //   discoverManifests(workspaceRoot)      a `packages/<plugin>/` monorepo
 //                                         layout for plugins published
 //                                         independently of any one app.
@@ -87,29 +86,30 @@ function scanPluginDirs(dir) {
 }
 
 /**
- * Walk both halves of `<projectRoot>/carbon/` — `own/<name>/` (a plugin
- * whose Zig source this app owns) and `installed/<name>/` (a
- * fetched-or-built artifact) — and return manifests keyed by plugin name.
- * This is the discovery root every real app actually exercises:
- * `carbon.toml [plugins]` grants a name, and `carbon/{own,installed}/<that
- * name>/carbon-plugin.toml` is where its JS exports live.
+ * Walk both halves of `<projectRoot>/carbon/plugins/` — `local/<name>/` (a
+ * plugin whose Zig source this app owns) and `vendor/<name>/` (a fetched
+ * plugin) — and return manifests keyed by plugin name. This is the
+ * discovery root every real app actually exercises: `carbon/manifest.toml`
+ * declares a name, and `carbon/plugins/{local,vendor}/<that name>/
+ * carbon-plugin.toml` is where its JS exports live — independent of where
+ * `carbon/build.zig` stages its compiled binary (`carbon/native/<os>/
+ * <arch>/`), since that tree never holds a copy of the manifest.
  *
- * `own` wins on a name collision: source a developer is actively editing
- * should shadow whatever `installed/` currently holds for the same plugin
- * (SyncLocalPluginsUseCase rebuilds installed/ from own/ on every `carbon
- * dev`/`run` anyway — this only matters for the brief window before that
- * has run, or if the two have drifted).
+ * `local` wins on a name collision: source a developer is actively editing
+ * should shadow whatever `vendor/` currently holds for the same plugin (this
+ * only matters if the two somehow share a name, which manifest.toml's
+ * `source` field already treats as one-or-the-other, not both).
  *
  * @param {string} projectRoot Absolute path to the app (carbon.toml's directory).
  * @returns {Map<string, ParsedManifest>}
  */
 export function discoverLocalManifests(projectRoot) {
   if (!projectRoot) return new Map();
-  const carbonDir = join(projectRoot, "carbon");
-  const fromInstalled = scanPluginDirs(join(carbonDir, "installed"));
-  const fromOwn = scanPluginDirs(join(carbonDir, "own"));
-  for (const [name, m] of fromOwn) fromInstalled.set(name, m);
-  return fromInstalled;
+  const pluginsDir = join(projectRoot, "carbon", "plugins");
+  const fromVendor = scanPluginDirs(join(pluginsDir, "vendor"));
+  const fromLocal = scanPluginDirs(join(pluginsDir, "local"));
+  for (const [name, m] of fromLocal) fromVendor.set(name, m);
+  return fromVendor;
 }
 
 /**

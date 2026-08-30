@@ -22,10 +22,9 @@ import {
   MissingSigningKeyError,
   PluginError,
   pluginUseCases,
-  signStandardPluginArtifact,
+  setManifestEnabled,
 } from "@carbon/lifecycle";
 import { PRODUCTS_DIR } from "@carbon/workspace";
-import { existsSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 /**
@@ -44,13 +43,8 @@ const SDK_ROOT = join(PRODUCTS_DIR, "carbon-ext");
  * normal buildable+installable plugin like any other (see `fonts/`). This is
  * a separate product from `carbon-ext` on purpose: carbon-ext is the SDK
  * (what a plugin AUTHOR builds against), carbon-sdk is the curated
- * collection `carbon plugin add <name>` resolves names against — a user
- * never sees carbon-ext's path at all.
- *
- * Resolved locally within this workspace for now (no remote registry yet) —
- * `carbon plugin add <name>` is `carbon-sdk/<name>` built + installed in one
- * step, the same two operations `carbon plugin build` + `carbon plugin
- * install` already do separately for a plugin a user wrote themselves.
+ * collection `carbon plugin add <name>` (and SyncPluginsUseCase's auto-heal)
+ * resolves names against — a user never sees carbon-ext's path at all.
  */
 const STANDARD_PLUGINS_ROOT = join(PRODUCTS_DIR, "carbon-sdk");
 
@@ -92,22 +86,23 @@ class NewPluginCommand extends Command {
 
   execute(ctx: CommandContext): Promise<ExitCode> {
     return reporting(ctx, () => {
-      const { create, workspace, sdkRoot } = pluginUseCases(SDK_ROOT);
+      const { create, workspace, sdkRoot } = pluginUseCases(SDK_ROOT, STANDARD_PLUGINS_ROOT);
 
-      // Scaffold into <host>/carbon/own/ when run from inside an app — the
-      // app's own plugin-development area, auto-built by SyncLocalPlugins
-      // UseCase on every `carbon dev`/`run` — regardless of which
+      // Scaffold into <host>/carbon/plugins/local/ when run from inside an
+      // app — the app's own plugin-development area, auto-built by
+      // SyncPluginsUseCase on every `carbon dev`/`run` — regardless of which
       // subdirectory of the app the command was actually run from. Falls
       // back to plain cwd when there's no host app above (e.g. scaffolding
       // one of carbon-sdk's own standard plugins, which don't live inside
-      // any single app's carbon/own/).
+      // any single app's carbon/plugins/local/).
       const host = workspace.findHostApp(ctx.cwd);
-      const cwd = host ? join(host, "carbon", "own") : ctx.cwd;
+      const cwd = host ? join(host, "carbon", "plugins", "local") : ctx.cwd;
 
       const result = create.execute({
         name: ctx.first!,
         cwd,
         sdkRoot,
+        host: host ?? undefined,
       });
 
       ctx.io.success(
@@ -153,7 +148,7 @@ class BuildPluginCommand extends Command {
 class InstallPluginCommand extends Command {
   readonly meta: CommandMeta = {
     name: "install",
-    summary: "Copy a built plugin into the host app and declare it",
+    summary: "Copy a built plugin into the host app as a vendor plugin",
     usage: "plugin install [dir]",
     examples: ["carbon plugin install", "carbon plugin install ./my-thing"],
   };
@@ -171,8 +166,8 @@ class InstallPluginCommand extends Command {
         `${ctx.io.c.bold(result.name.slug)} installed → ${ctx.io.c.dim(forwardSlashes(result.installedAt))}`,
       );
       ctx.io.info(
-        `${ctx.io.c.dim("·")} added [plugins] ${result.name.slug} = "${result.declaredPath}" ` +
-          `to ${forwardSlashes(result.host)}/carbon.toml`,
+        `${ctx.io.c.dim("·")} declared ${result.name.slug} (source = "vendor") ` +
+          `in ${forwardSlashes(result.host)}/carbon/manifest.toml`,
       );
       return EXIT_OK;
     });
@@ -182,7 +177,7 @@ class InstallPluginCommand extends Command {
 class AddPluginCommand extends Command {
   readonly meta: CommandMeta = {
     name: "add",
-    summary: "Build + install a standard plugin from carbon-sdk into this app",
+    summary: "Build + sign + install a standard plugin from carbon-sdk into this app",
     usage: "plugin add <name> [project-dir]",
     examples: ["carbon plugin add fonts", "carbon plugin add fonts ./my-app"],
   };
@@ -198,49 +193,78 @@ class AddPluginCommand extends Command {
       // install into. Defaults to cwd (run `carbon plugin add fonts` from
       // inside the app, same as `plugin install`).
       const targetApp = ctx.args[1] ? resolve(ctx.cwd, ctx.args[1]) : ctx.cwd;
-      const directory = join(STANDARD_PLUGINS_ROOT, name);
-      if (!existsSync(directory)) {
-        const available = existsSync(STANDARD_PLUGINS_ROOT)
-          ? readdirSync(STANDARD_PLUGINS_ROOT, { withFileTypes: true })
-              .filter((e) => e.isDirectory())
-              .map((e) => e.name)
-          : [];
-        ctx.io.error(`no standard plugin named "${name}"`);
-        if (available.length) {
-          ctx.io.info(`available: ${available.join(", ")}`);
-        }
-        return EXIT_FAILURE;
-      }
 
-      // Always release, unlike `plugin build`'s opt-in --release: a standard
-      // plugin someone is fetching to use, not actively developing, should
-      // behave the way installing any other dependency does — a fast/debug
-      // build is only useful to the plugin's OWN author, iterating on it
-      // via `plugin build` + `plugin install` directly.
-      const { build, install } = pluginUseCases(SDK_ROOT);
-      const built = await build.execute({ directory, release: true, logger: ctx.io });
-      if (built.exitCode !== 0) return built.exitCode;
+      const { addStandard } = pluginUseCases(SDK_ROOT, STANDARD_PLUGINS_ROOT);
+      const result = await addStandard.execute({ name, targetApp, logger: ctx.io });
 
-      // Standard (carbon-sdk) plugins are official Carbon plugins, not a
-      // developer's own third-party build — they get signed with Carbon's
-      // real key here, unconditionally, rather than relying on any
-      // unsigned-plugin bypass. See PluginSigner.ts for the full reasoning
-      // and why a missing key fails loudly instead of silently installing
-      // an unsigned artifact.
-      const artifact = install.locateArtifact(directory);
-      ctx.io.step(`signing ${artifact.name.slug}…`);
-      await signStandardPluginArtifact(artifact.path, ctx.io);
-
-      const result = install.execute({ directory, from: targetApp });
       ctx.io.success(
         `${ctx.io.c.bold(result.name.slug)} added → ${ctx.io.c.dim(forwardSlashes(result.installedAt))}`,
       );
       ctx.io.info(
-        `${ctx.io.c.dim("·")} added [plugins] ${result.name.slug} = "${result.declaredPath}" ` +
-          `to ${forwardSlashes(result.host)}/carbon.toml`,
+        `${ctx.io.c.dim("·")} declared ${result.name.slug} (source = "vendor") ` +
+          `in ${forwardSlashes(result.host)}/carbon/manifest.toml`,
       );
       return EXIT_OK;
     });
+  }
+}
+
+/** Shared body for enable/disable: flip carbon/manifest.toml's `enabled`. */
+function toggle(ctx: CommandContext, name: string, enabled: boolean): ExitCode {
+  const { workspace } = pluginUseCases(SDK_ROOT);
+  const host = workspace.findHostApp(ctx.cwd);
+  if (!host) {
+    ctx.io.error("no carbon.toml found — run this from inside an app");
+    return EXIT_FAILURE;
+  }
+  const manifestPath = join(host, "carbon", "manifest.toml");
+  if (!workspace.exists(manifestPath)) {
+    ctx.io.error(`no carbon/manifest.toml at ${forwardSlashes(host)} — this app has no plugins yet`);
+    return EXIT_FAILURE;
+  }
+
+  const before = workspace.readFile(manifestPath);
+  const after = setManifestEnabled(before, name, enabled);
+  if (before === after) {
+    ctx.io.error(`no plugin named "${name}" declared in carbon/manifest.toml`);
+    return EXIT_FAILURE;
+  }
+  workspace.writeFile(manifestPath, after);
+  ctx.io.success(`${ctx.io.c.bold(name)} ${enabled ? "enabled" : "disabled"}`);
+  return EXIT_OK;
+}
+
+class EnablePluginCommand extends Command {
+  readonly meta: CommandMeta = {
+    name: "enable",
+    summary: "Re-enable a plugin declared in carbon/manifest.toml",
+    usage: "plugin enable <name>",
+    examples: ["carbon plugin enable fonts"],
+  };
+
+  validate(ctx: CommandContext): string | null {
+    return ctx.first ? null : "plugin enable requires a name";
+  }
+
+  execute(ctx: CommandContext): Promise<ExitCode> {
+    return reporting(ctx, () => toggle(ctx, ctx.first!, true));
+  }
+}
+
+class DisablePluginCommand extends Command {
+  readonly meta: CommandMeta = {
+    name: "disable",
+    summary: "Stop building/loading a plugin without removing its directory",
+    usage: "plugin disable <name>",
+    examples: ["carbon plugin disable fonts"],
+  };
+
+  validate(ctx: CommandContext): string | null {
+    return ctx.first ? null : "plugin disable requires a name";
+  }
+
+  execute(ctx: CommandContext): Promise<ExitCode> {
+    return reporting(ctx, () => toggle(ctx, ctx.first!, false));
   }
 }
 
@@ -287,7 +311,7 @@ class CheckPluginCommand extends Command {
 class ListPluginsCommand extends Command {
   readonly meta: CommandMeta = {
     name: "list",
-    summary: "List the plugins installed in this app",
+    summary: "List the plugins declared for this app",
     usage: "plugin list",
   };
 
@@ -296,16 +320,17 @@ class ListPluginsCommand extends Command {
       const { host, plugins } = pluginUseCases(SDK_ROOT).inspect.list(ctx.cwd);
 
       if (plugins.length === 0) {
-        ctx.io.info(`no plugins installed in ${forwardSlashes(host)}`);
+        ctx.io.info(`no plugins declared in ${forwardSlashes(host)}/carbon/manifest.toml`);
         return EXIT_OK;
       }
 
       ctx.io.info(`plugins for ${forwardSlashes(host)}:`);
       for (const plugin of plugins) {
-        // A declared-but-absent plugin is normal after a clean, and worth
-        // flagging rather than hiding — it is why the app fails to start.
-        const marker = plugin.present ? "" : ctx.io.c.dim(" (missing)");
-        ctx.io.raw(`  ${plugin.name} -> ${plugin.path}${marker}`);
+        const tags: string[] = [plugin.source];
+        if (!plugin.enabled) tags.push("disabled");
+        if (!plugin.present) tags.push("missing");
+        if (plugin.capabilities.length) tags.push(plugin.capabilities.join(","));
+        ctx.io.raw(`  ${plugin.name} ${ctx.io.c.dim(`(${tags.join(" · ")})`)}`);
       }
       return EXIT_OK;
     });
@@ -342,7 +367,7 @@ class InfoPluginCommand extends Command {
 export class PluginCommand extends CommandGroup {
   readonly meta: CommandMeta = {
     name: "plugin",
-    summary: "Manage native plugins (new / add / build / check / install / list / info)",
+    summary: "Manage native plugins (new / add / build / check / install / enable / disable / list / info)",
     usage: "plugin <subcommand> [options]",
     examples: ["carbon plugin add fonts", "carbon plugin new my-plugin", "carbon plugin list"],
   };
@@ -353,6 +378,8 @@ export class PluginCommand extends CommandGroup {
     new BuildPluginCommand(),
     new CheckPluginCommand(),
     new InstallPluginCommand(),
+    new EnablePluginCommand(),
+    new DisablePluginCommand(),
     new ListPluginsCommand(),
     new InfoPluginCommand(),
   ];
