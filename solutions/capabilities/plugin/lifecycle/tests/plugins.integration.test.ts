@@ -501,9 +501,9 @@ describe("installing a plugin", () => {
     return { workspace, useCase: new InstallPluginUseCase(workspace, new FakeTemplateSource()), lib };
   }
 
-  const nativeDir = `${ROOT}/app/carbon/native/${hostOsName()}/${hostArchName()}`;
+  const binDir = `${ROOT}/app/carbon/bin/${hostOsName()}/${hostArchName()}`;
 
-  test("copies the library into carbon/native/ and declares it in carbon/manifest.toml", () => {
+  test("copies the library into carbon/bin/ and declares it in carbon/manifest.toml", () => {
     const { workspace, useCase } = built();
 
     const result = useCase.execute({
@@ -512,7 +512,7 @@ describe("installing a plugin", () => {
     });
 
     expect(result.host).toBe(`${ROOT}/app`);
-    expect(workspace.exists(`${nativeDir}/my-thing.${hostExt()}`)).toBe(true);
+    expect(workspace.exists(`${binDir}/my-thing.${hostExt()}`)).toBe(true);
     // The vendor plugin's own directory holds ONLY the manifest — no second
     // copy of the binary (see InstallPluginUseCase's header comment).
     expect(workspace.exists(`${ROOT}/app/carbon/plugins/vendor/my-thing/my-thing.${hostExt()}`)).toBe(false);
@@ -538,7 +538,7 @@ describe("installing a plugin", () => {
     useCase.execute({ directory: `${ROOT}/app/my-thing`, from: `${ROOT}/app/my-thing` });
 
     expect(workspace.exists(`${ROOT}/app/carbon/plugins/vendor/my-thing/carbon-plugin.toml`)).toBe(true);
-    expect(workspace.readFile(`${nativeDir}/my-thing.${hostExt()}.sig`)).toBe("SIG");
+    expect(workspace.readFile(`${binDir}/my-thing.${hostExt()}.sig`)).toBe("SIG");
   });
 
   test("zig-out/lib is preferred over zig-out/bin when both exist", () => {
@@ -549,13 +549,13 @@ describe("installing a plugin", () => {
     workspace.put(`${ROOT}/app/my-thing/zig-out/bin/${lib}`, "OLD");
 
     useCase.execute({ directory: `${ROOT}/app/my-thing`, from: `${ROOT}/app/my-thing` });
-    expect(workspace.readFile(`${nativeDir}/my-thing.${hostExt()}`)).toBe("ELF");
+    expect(workspace.readFile(`${binDir}/my-thing.${hostExt()}`)).toBe("ELF");
   });
 
   test("a windows build, which lands in zig-out/bin, still installs", () => {
     const { workspace, useCase } = built({ where: "bin" });
     useCase.execute({ directory: `${ROOT}/app/my-thing`, from: `${ROOT}/app/my-thing` });
-    expect(workspace.exists(`${nativeDir}/my-thing.${hostExt()}`)).toBe(true);
+    expect(workspace.exists(`${binDir}/my-thing.${hostExt()}`)).toBe(true);
   });
 
   test("without a manifest, the name falls back to the directory", () => {
@@ -670,12 +670,12 @@ describe("syncing plugins", () => {
     expect(runner.calls).toEqual([]);
   });
 
-  test("reports what landed in carbon/native/<os>/<arch>/ after the build", async () => {
+  test("reports what landed in carbon/bin/<os>/<arch>/ after the build", async () => {
     const { workspace, useCase } = withApp();
     // Standing in for what a real `zig build` would have staged — the fake
     // runner doesn't touch the filesystem, so this simulates its effect.
-    const nativeDir = `${ROOT}/app/carbon/native/${hostOsName()}/${hostArchName()}`;
-    workspace.put(`${nativeDir}/carbon-pulse.${hostExt()}`, "ELF");
+    const binDir = `${ROOT}/app/carbon/bin/${hostOsName()}/${hostArchName()}`;
+    workspace.put(`${binDir}/carbon-pulse.${hostExt()}`, "ELF");
 
     const result = await useCase.execute(`${ROOT}/app`);
     expect(result.staged).toEqual([`carbon-pulse.${hostExt()}`]);
@@ -689,7 +689,7 @@ describe("syncing plugins", () => {
 
     await useCase.execute(`${ROOT}/app`);
 
-    expect(workspace.exists(`${ROOT}/app/carbon/native/${hostOsName()}/${hostArchName()}/fonts.${hostExt()}`)).toBe(true);
+    expect(workspace.exists(`${ROOT}/app/carbon/bin/${hostOsName()}/${hostArchName()}/fonts.${hostExt()}`)).toBe(true);
     // Auto-heal's build call happened before the final orchestrating build.
     const cwds = runner.calls.map((c) => forwardSlashes(c.options?.cwd ?? ""));
     expect(cwds).toEqual([`${STANDARD_ROOT}/fonts`, `${ROOT}/app/carbon`]);
@@ -699,7 +699,7 @@ describe("syncing plugins", () => {
     const { workspace, runner, useCase } = withApp(
       `[plugins.fonts]\nsource = "vendor"\nenabled = true\n`,
     );
-    workspace.put(`${ROOT}/app/carbon/native/${hostOsName()}/${hostArchName()}/fonts.${hostExt()}`, "ALREADY THERE");
+    workspace.put(`${ROOT}/app/carbon/bin/${hostOsName()}/${hostArchName()}/fonts.${hostExt()}`, "ALREADY THERE");
 
     await useCase.execute(`${ROOT}/app`);
 
@@ -752,8 +752,8 @@ describe("listing and describing", () => {
       `${ROOT}/app/carbon/manifest.toml`,
       `schema = 1\n\n[plugins.audio]\nsource = "vendor"\nenabled = true\n\n[plugins.gone]\nsource = "vendor"\nenabled = true\n`,
     );
-    const nativeDir = `${ROOT}/app/carbon/native/${hostOsName()}/${hostArchName()}`;
-    workspace.put(`${nativeDir}/audio.${hostExt()}`, "ELF");
+    const binDir = `${ROOT}/app/carbon/bin/${hostOsName()}/${hostArchName()}`;
+    workspace.put(`${binDir}/audio.${hostExt()}`, "ELF");
     // "gone" is declared but never staged.
     return { workspace, useCase: new InspectPluginsUseCase(workspace) };
   }

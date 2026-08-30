@@ -89,7 +89,7 @@ edit rather than scrolling past in stderr.
 
 ## Native target directory names
 
-`carbon/native/<os>/<arch>/` (the staged-plugin output tree — see
+`carbon/bin/<os>/<arch>/` (the staged-plugin output tree — see
 `solutions/capabilities/plugin/lifecycle`'s manifest-driven design) needs the
 same directory name strings agreed on by three languages: `carbon/build.zig`
 (staging), `plugin_loader.rs` (resolving), and the TS lifecycle use cases

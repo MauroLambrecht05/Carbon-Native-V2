@@ -1,7 +1,7 @@
 // Installing a built plugin into a host app as a VENDOR plugin.
 //
 // Two things land in two different places, deliberately not one:
-//   carbon/native/<os>/<arch>/<slug>.<ext> (+ .sig)   — the binary the
+//   carbon/bin/<os>/<arch>/<slug>.<ext> (+ .sig)   — the binary the
 //     runtime actually loads. THE only copy — carbon/build.zig never
 //     touches a vendor plugin's artifact at all, so there is nothing to
 //     duplicate it here for.
@@ -96,13 +96,13 @@ export class InstallPluginUseCase {
     const host = this.workspace.findHostApp(request.from);
     if (!host) throw new NoHostAppError(request.from);
 
-    // The binary + signature go straight into carbon/native/<os>/<arch>/,
+    // The binary + signature go straight into carbon/bin/<os>/<arch>/,
     // staged name (<slug>.<ext>, no crate-form/lib-prefix) — the same
     // convention carbon/build.zig uses for a local plugin, so the loader's
     // lookup is identical either way.
-    const nativeDir = join(host, "carbon", "native", hostOsName(), hostArchName());
+    const binDir = join(host, "carbon", "bin", hostOsName(), hostArchName());
     const ext = hostExt();
-    const installedAt = join(nativeDir, `${artifact.name.slug}.${ext}`);
+    const installedAt = join(binDir, `${artifact.name.slug}.${ext}`);
     this.workspace.copyFile(artifact.path, installedAt);
 
     // A signed artifact (see PluginSigner.ts — carbon-sdk plugins are

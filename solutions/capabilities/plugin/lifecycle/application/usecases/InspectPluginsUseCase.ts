@@ -18,7 +18,7 @@ export interface InstalledPlugin {
   readonly name: string;
   readonly source: PluginSource;
   readonly enabled: boolean;
-  /** carbon/native/<os>/<arch>/<name>.<ext> — where the runtime looks. */
+  /** carbon/bin/<os>/<arch>/<name>.<ext> — where the runtime looks. */
   readonly absolutePath: string;
   /**
    * False when carbon/manifest.toml declares it but `carbon/build.zig` has
@@ -58,10 +58,10 @@ export class InspectPluginsUseCase {
     const granted = grantedCapabilities(toml);
 
     const ext = hostExt();
-    const nativeDir = join(host, "carbon", "native", hostOsName(), hostArchName());
+    const binDir = join(host, "carbon", "bin", hostOsName(), hostArchName());
 
     const plugins = [...manifest.plugins].map(([name, entry]) => {
-      const absolutePath = join(nativeDir, `${name}.${ext}`);
+      const absolutePath = join(binDir, `${name}.${ext}`);
       return {
         name,
         source: entry.source,
@@ -93,7 +93,7 @@ export class InspectPluginsUseCase {
       const entry = manifest.plugins.get(name);
 
       if (entry) {
-        const absolutePath = join(host, "carbon", "native", hostOsName(), hostArchName(), `${name}.${hostExt()}`);
+        const absolutePath = join(host, "carbon", "bin", hostOsName(), hostArchName(), `${name}.${hostExt()}`);
         const sourceManifest = join(host, "carbon", "plugins", entry.source, name, "carbon-plugin.toml");
         return {
           name,

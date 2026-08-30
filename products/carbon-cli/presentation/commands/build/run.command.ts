@@ -111,7 +111,7 @@ export async function runCommand(rest: string[]): Promise<number> {
     // Every plugin carbon/manifest.toml declares is brought up to date here:
     // a missing vendor artifact is auto-fetched + signed, then `zig build`
     // runs once inside carbon/ — building every local plugin and staging
-    // everything into carbon/native/<os>/<arch>/. No separate `carbon plugin
+    // everything into carbon/bin/<os>/<arch>/. No separate `carbon plugin
     // install`/`add` step, on this machine or any other.
     //
     // Before buildProject, not after: the bundler's discoverLocalManifests
@@ -189,7 +189,7 @@ export async function runCommand(rest: string[]): Promise<number> {
 
 
 /**
- * Bring carbon/native/<os>/<arch>/ up to date with what carbon/manifest.toml
+ * Bring carbon/bin/<os>/<arch>/ up to date with what carbon/manifest.toml
  * declares — auto-fetching any missing vendor plugin, then building every
  * local one — so the app project is the single source of truth and there is
  * nothing to remember to run separately, on this machine or a teammate's.
@@ -208,7 +208,7 @@ async function syncPlugins(projectDir: string): Promise<void> {
     join(PRODUCTS_DIR, "carbon-sdk"),
   ).sync.execute(projectDir, { release: true, logger: log });
   for (const file of staged) {
-    log.step(c.dim(`plugin: staged ./carbon/native/.../${file}`));
+    log.step(c.dim(`plugin: staged ./carbon/bin/.../${file}`));
   }
 }
 

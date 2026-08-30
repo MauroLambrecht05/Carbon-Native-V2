@@ -1,7 +1,7 @@
 // Native target directory names — canonical table, quoted verbatim from
 // solutions/contracts/plugin/README.md ("Native target directory names").
 // carbon/build.zig's own copy and plugin_loader.rs's must agree with this
-// exactly; all three resolve carbon/native/<os>/<arch>/<name>.<ext>.
+// exactly; all three resolve carbon/bin/<os>/<arch>/<name>.<ext>.
 
 export type NativeOs = "windows" | "linux" | "macos";
 

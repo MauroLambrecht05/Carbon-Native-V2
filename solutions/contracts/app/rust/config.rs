@@ -11,7 +11,7 @@ pub struct Config {
     pub runtime: RuntimeSection,
     /// Native plugin CAPABILITY GRANTS, keyed by plugin name. This is not a
     /// plugin registry — which plugins exist and where their binary lives is
-    /// entirely governed by `carbon/manifest.toml` + `carbon/native/<os>/
+    /// entirely governed by `carbon/manifest.toml` + `carbon/bin/<os>/
     /// <arch>/`. This section only grants capabilities; a plugin needing
     /// none needs no entry here. See [`CapabilityGrant`].
     ///
@@ -173,7 +173,7 @@ impl Config {
 // a plugin is declared to exist. That's carbon/manifest.toml's job (see
 // products/carbon/composition/manifest.rs's AppManifest), which
 // plugin_loader.rs reads to get the actual set of plugins to load, resolving
-// each to carbon/native/<os>/<arch>/<name>.<dll|so|dylib> by convention —
+// each to carbon/bin/<os>/<arch>/<name>.<dll|so|dylib> by convention —
 // no path ever appears in either file.
 //
 //     [plugins]

@@ -364,7 +364,7 @@ export async function devCommand(rest: string[]): Promise<number> {
 
 
 /**
- * Bring carbon/native/<os>/<arch>/ up to date with what carbon/manifest.toml
+ * Bring carbon/bin/<os>/<arch>/ up to date with what carbon/manifest.toml
  * declares — auto-fetching any missing vendor plugin, then building every
  * local one — so the app project is the single source of truth and there is
  * nothing to remember to run separately.
@@ -382,7 +382,7 @@ async function syncPlugins(projectDir: string): Promise<void> {
     join(PRODUCTS_DIR, "carbon-sdk"),
   ).sync.execute(projectDir, { logger: log });
   for (const file of staged) {
-    log.step(c.dim(`plugin: staged ./carbon/native/.../${file}`));
+    log.step(c.dim(`plugin: staged ./carbon/bin/.../${file}`));
   }
 }
 

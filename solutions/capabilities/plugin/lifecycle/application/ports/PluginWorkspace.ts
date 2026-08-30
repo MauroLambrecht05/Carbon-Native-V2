@@ -23,7 +23,7 @@ export interface PluginWorkspace {
   /**
    * Immediate file names (not subdirectories) of `path`, or `[]` if it does
    * not exist. What `SyncPluginsUseCase` lists to report what `carbon/
-   * build.zig` actually staged into `carbon/native/<os>/<arch>/`.
+   * build.zig` actually staged into `carbon/bin/<os>/<arch>/`.
    */
   listFiles(path: string): string[];
 

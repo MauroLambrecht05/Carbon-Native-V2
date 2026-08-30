@@ -64,7 +64,7 @@ fn native_ext() -> &'static str {
     }
 }
 
-fn native_dir_suffix() -> PathBuf {
+fn bin_dir_suffix() -> PathBuf {
     let os = if cfg!(target_os = "windows") {
         "windows"
     } else if cfg!(target_os = "macos") {
@@ -81,7 +81,7 @@ fn native_dir_suffix() -> PathBuf {
     } else {
         "x86_64"
     };
-    Path::new("carbon").join("native").join(os).join(arch)
+    Path::new("carbon").join("bin").join(os).join(arch)
 }
 
 /// Load exactly one plugin, staged the way `carbon/build.zig` would, and
@@ -110,17 +110,17 @@ fn load_count(project_dir: &Path) -> usize {
 }
 
 /// Stage `<dll>` and `<dll>.sig` into a fresh temp directory shaped like
-/// `<dir>/carbon/native/<os>/<arch>/carbon-hotkey.<ext>` — exactly what
+/// `<dir>/carbon/bin/<os>/<arch>/carbon-hotkey.<ext>` — exactly what
 /// `carbon/build.zig` would have produced — so a tampering test can mutate
 /// the copy without touching the artifact the developer built. Returns the
 /// PROJECT dir (what `load_count` takes), not the staged file itself.
 fn stage_copy(dll: &Path, tag: &str) -> (PathBuf, PathBuf, PathBuf) {
     let dir = std::env::temp_dir().join(format!("carbon-sig-{}-{tag}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
-    let native_dir = dir.join(native_dir_suffix());
-    fs::create_dir_all(&native_dir).expect("temp dir");
+    let bin_dir = dir.join(bin_dir_suffix());
+    fs::create_dir_all(&bin_dir).expect("temp dir");
 
-    let copy = native_dir.join(format!("carbon-hotkey.{}", native_ext()));
+    let copy = bin_dir.join(format!("carbon-hotkey.{}", native_ext()));
     fs::copy(dll, &copy).expect("copy dll");
 
     let src_sig = PathBuf::from(format!("{}.sig", dll.display()));

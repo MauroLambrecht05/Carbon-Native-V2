@@ -270,8 +270,8 @@ describe("preflighting an app", () => {
       );
     }
     if (options.installed !== false) {
-      const nativeDir = `${ROOT}/app/carbon/native/${hostOsName()}/${hostArchName()}`;
-      workspace.put(`${nativeDir}/clip.${hostExt()}`, "ELF");
+      const binDir = `${ROOT}/app/carbon/bin/${hostOsName()}/${hostArchName()}`;
+      workspace.put(`${binDir}/clip.${hostExt()}`, "ELF");
     }
     if (options.manifest) {
       workspace.put(`${ROOT}/app/carbon/plugins/vendor/clip/carbon-plugin.toml`, options.manifest);

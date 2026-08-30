@@ -1,13 +1,13 @@
 // carbon/build.zig — the real entry point for this app's native plugin
 // layer. `zig build` (run from here, with `--prefix .`) is the one command
-// that fully populates carbon/native/<os>/<arch>/ from manifest.toml — for
+// that fully populates carbon/bin/<os>/<arch>/ from manifest.toml — for
 // every LOCAL plugin. A vendor (fetched/standard) plugin's binary+signature
-// are written directly into carbon/native/<os>/<arch>/ by
-// SyncPluginsUseCase's auto-heal step (install/AddStandardPluginUseCase),
-// never by this file — carbon/plugins/vendor/<name>/ holds only that
-// plugin's carbon-plugin.toml, nothing this file needs to stage. This file
-// skips vendor entries entirely; they exist in the manifest purely so the
-// loader and the bundler know the name is real.
+// are written directly into carbon/bin/<os>/<arch>/ by SyncPluginsUseCase's
+// auto-heal step (install/AddStandardPluginUseCase), never by this file —
+// carbon/plugins/vendor/<name>/ holds only that plugin's carbon-plugin.toml,
+// nothing this file needs to stage. This file skips vendor entries
+// entirely; they exist in the manifest purely so the loader and the
+// bundler know the name is real.
 //
 // Why local plugins are built via a SUBPROCESS rather than one in-process
 // dependency graph: Zig's package manager requires every `b.dependency()`
@@ -140,7 +140,7 @@ pub fn build(b: *std.Build) void {
     const os_name = nativeOsName(host.os.tag);
     const arch_name = nativeArchName(host.os.tag, host.cpu.arch);
     const ext = nativeExt(host.os.tag);
-    const native_dir = b.fmt("native/{s}/{s}", .{ os_name, arch_name });
+    const bin_dir = b.fmt("bin/{s}/{s}", .{ os_name, arch_name });
 
     // `-Drelease` on THIS invocation forwards to every locally-built
     // plugin's own `zig build` — matches `carbon dev` (debug, fast rebuild)
@@ -172,7 +172,7 @@ pub fn build(b: *std.Build) void {
         const out_subdir = if (host.os.tag == .windows) "bin" else "lib";
         const artifact_path = b.pathJoin(&.{ plugin_dir, "zig-out", out_subdir, artifact_name });
 
-        const staged = b.addInstallFileWithDir(b.path(artifact_path), .{ .custom = native_dir }, staged_name);
+        const staged = b.addInstallFileWithDir(b.path(artifact_path), .{ .custom = bin_dir }, staged_name);
         staged.step.dependOn(&built.step);
         b.getInstallStep().dependOn(&staged.step);
     }

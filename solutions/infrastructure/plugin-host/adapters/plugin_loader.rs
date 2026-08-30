@@ -12,7 +12,7 @@
 //   carbon/manifest.toml     →  AppManifestEntry (name, source, enabled) —
 //                                the ONLY place plugin existence is declared.
 //        ↓
-//   resolve path              →  <project_dir>/carbon/native/<os>/<arch>/<name>.<ext>
+//   resolve path              →  <project_dir>/carbon/bin/<os>/<arch>/<name>.<ext>
 //        ↓
 //   SIGNATURE + REVOCATION   →  Ed25519-verify <path>.sig against Carbon's
 //                                hardcoded public key, then check the artifact's
@@ -204,7 +204,7 @@ impl PluginRegistry {
     ///
     /// Skipping is the right answer for a signature failure too: refusing to
     /// start the whole app because one plugin was tampered with hands an
-    /// attacker who can write one file in `carbon/native/` a way to take the
+    /// attacker who can write one file in `carbon/bin/` a way to take the
     /// app down entirely. The app runs, without that plugin, and says why.
     pub fn load_from_config(
         manifest: &AppManifest,
@@ -633,7 +633,7 @@ fn native_ext() -> &'static str {
 }
 
 /// Resolve a manifest-declared plugin name to its staged artifact:
-/// `<project_dir>/carbon/native/<os>/<arch>/<name>.<ext>` — the ONE place
+/// `<project_dir>/carbon/bin/<os>/<arch>/<name>.<ext>` — the ONE place
 /// `carbon/build.zig` ever stages a binary to, so this is a single
 /// exact-match lookup, not a search. No explicit-path override exists
 /// anymore: carbon.toml never carries a path (see CapabilityGrant), so
@@ -641,7 +641,7 @@ fn native_ext() -> &'static str {
 fn resolve_plugin_path(name: &str, project_dir: &Path) -> Result<PathBuf> {
     let path = project_dir
         .join("carbon")
-        .join("native")
+        .join("bin")
         .join(native_os_name())
         .join(native_arch_name())
         .join(format!("{name}.{}", native_ext()));

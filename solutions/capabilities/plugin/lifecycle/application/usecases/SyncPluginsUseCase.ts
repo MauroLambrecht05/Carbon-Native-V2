@@ -1,4 +1,4 @@
-// Bring an app's carbon/native/<os>/<arch>/ tree up to date with what
+// Bring an app's carbon/bin/<os>/<arch>/ tree up to date with what
 // carbon/manifest.toml declares. Run by `carbon dev`/`carbon run` before
 // every launch — no separate `carbon plugin install` step, and no separate
 // `carbon plugin add` re-run on a teammate's machine or in CI either.
@@ -6,7 +6,7 @@
 // Two responsibilities, in order:
 //
 //   1. AUTO-HEAL vendor plugins. carbon/manifest.toml is committed;
-//      carbon/native/<os>/<arch>/<name>.<ext> — the ONLY place a vendor
+//      carbon/bin/<os>/<arch>/<name>.<ext> — the ONLY place a vendor
 //      plugin's binary lives, InstallPluginUseCase writes it straight there
 //      — is gitignored. A fresh clone declares a vendor plugin it has never
 //      fetched — this notices and builds + signs it right then, the exact
@@ -14,10 +14,10 @@
 //      the one place that logic lives, shared by both callers).
 //   2. Shell `zig build --prefix .` once inside carbon/. That single command
 //      builds every carbon/plugins/local/<name> and stages its artifact
-//      into carbon/native/<os>/<arch>/ (carbon/build.zig's own subprocess
+//      into carbon/bin/<os>/<arch>/ (carbon/build.zig's own subprocess
 //      orchestration — see its header comment for why a TypeScript-side
 //      per-plugin build loop was replaced by this). A vendor plugin's
-//      artifact is already sitting in carbon/native/ by this point — step 1
+//      artifact is already sitting in carbon/bin/ by this point — step 1
 //      put it there directly — so build.zig has nothing to do for it and
 //      skips it entirely.
 //
@@ -43,7 +43,7 @@ export interface SyncPluginsOptions {
 }
 
 export interface SyncPluginsResult {
-  /** Filenames that landed in carbon/native/<host-os>/<host-arch>/ after
+  /** Filenames that landed in carbon/bin/<host-os>/<host-arch>/ after
    *  this run — empty when carbon/ doesn't exist yet, i.e. nothing to do. */
   readonly staged: readonly string[];
 }
@@ -65,12 +65,12 @@ export class SyncPluginsUseCase {
 
     const logger = opts?.logger ?? new MemoryLogger();
     const manifest = readAppManifest(this.workspace.readFile(manifestPath));
-    const nativeDir = join(carbonDir, "native", hostOsName(), hostArchName());
+    const binDir = join(carbonDir, "bin", hostOsName(), hostArchName());
     const ext = hostExt();
 
     for (const [name, entry] of manifest.plugins) {
       if (!entry.enabled || entry.source !== "vendor") continue;
-      const artifactPath = join(nativeDir, `${name}.${ext}`);
+      const artifactPath = join(binDir, `${name}.${ext}`);
       if (this.workspace.exists(artifactPath)) continue;
 
       logger.step(`fetching vendor plugin "${name}" (declared in manifest.toml, not yet on disk)…`);
@@ -88,6 +88,6 @@ export class SyncPluginsUseCase {
       throw new Error(`carbon/build.zig failed to build — exit code ${code}. See the compiler output above.`);
     }
 
-    return { staged: this.workspace.listFiles(nativeDir) };
+    return { staged: this.workspace.listFiles(binDir) };
   }
 }

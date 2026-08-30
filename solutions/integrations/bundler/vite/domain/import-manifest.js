@@ -92,7 +92,7 @@ function scanPluginDirs(dir) {
  * discovery root every real app actually exercises: `carbon/manifest.toml`
  * declares a name, and `carbon/plugins/{local,vendor}/<that name>/
  * carbon-plugin.toml` is where its JS exports live — independent of where
- * `carbon/build.zig` stages its compiled binary (`carbon/native/<os>/
+ * `carbon/build.zig` stages its compiled binary (`carbon/bin/<os>/
  * <arch>/`), since that tree never holds a copy of the manifest.
  *
  * `local` wins on a name collision: source a developer is actively editing

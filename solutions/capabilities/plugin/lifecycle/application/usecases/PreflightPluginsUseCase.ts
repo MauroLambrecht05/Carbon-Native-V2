@@ -55,14 +55,14 @@ export class PreflightPluginsUseCase {
     const granted = grantedCapabilities(toml);
 
     const ext = hostExt();
-    const nativeDir = join(host, "carbon", "native", hostOsName(), hostArchName());
+    const binDir = join(host, "carbon", "bin", hostOsName(), hostArchName());
 
     const problems: PluginProblem[] = [];
     const entries = [...manifest.plugins];
 
     for (const [name, entry] of entries) {
       if (!entry.enabled) continue;
-      const absolutePath = join(nativeDir, `${name}.${ext}`);
+      const absolutePath = join(binDir, `${name}.${ext}`);
 
       // The commonest one by a wide margin: a plugin manifest.toml declares
       // that `carbon/build.zig` has never staged (or was cleaned away).
@@ -77,7 +77,7 @@ export class PreflightPluginsUseCase {
       }
 
       // The plugin's own manifest, read from its SOURCE location (own or
-      // vendor) — native/ only ever holds the binary + signature, never a
+      // vendor) — bin/ only ever holds the binary + signature, never a
       // copy of carbon-plugin.toml. Absent is not a problem — only the
       // built library ships — so anything below this point is best-effort.
       const sourceManifestPath = join(host, "carbon", "plugins", entry.source, name, "carbon-plugin.toml");
