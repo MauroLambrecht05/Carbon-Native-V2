@@ -13,6 +13,7 @@
 
 import { useEffect, useRef } from "react";
 import { setup as rawSetup } from "carbon:tray";
+import { awaitPluginReady, pluginGlobalReady } from "./_awaitPluginReady.ts";
 
 export interface TrayMenuItem {
   id: string;
@@ -36,7 +37,7 @@ export interface UseTrayResult {
 }
 
 function pluginReady(): boolean {
-  return typeof (globalThis as unknown as { setup?: unknown }).setup === "function";
+  return pluginGlobalReady("setup");
 }
 
 export function useTray(options: TrayOptions, callbacks: TrayCallbacks = {}): UseTrayResult {
@@ -50,27 +51,28 @@ export function useTray(options: TrayOptions, callbacks: TrayCallbacks = {}): Us
   callbacksRef.current = callbacks;
 
   useEffect(() => {
-    if (!pluginReady()) return;
-    rawSetup({ icon, tooltip, menu });
+    return awaitPluginReady(pluginReady, () => {
+      rawSetup({ icon, tooltip, menu });
 
-    const carbon = (globalThis as unknown as { carbon?: { on: Function; off: Function } }).carbon;
-    if (!carbon) return;
+      const carbon = (globalThis as unknown as { carbon?: { on: Function; off: Function } }).carbon;
+      if (!carbon) return;
 
-    const clickListener = () => callbacksRef.current.onClick?.();
-    const menuListener = (payload: { id: string } | null) => {
-      if (payload?.id) callbacksRef.current.onMenuSelect?.(payload.id);
-    };
-    carbon.on("tray.click", clickListener);
-    carbon.on("tray.menu", menuListener);
+      const clickListener = () => callbacksRef.current.onClick?.();
+      const menuListener = (payload: { id: string } | null) => {
+        if (payload?.id) callbacksRef.current.onMenuSelect?.(payload.id);
+      };
+      carbon.on("tray.click", clickListener);
+      carbon.on("tray.menu", menuListener);
 
-    return () => {
-      carbon.off("tray.click", clickListener);
-      carbon.off("tray.menu", menuListener);
-      // No teardown call to the native side — a process has at most one
-      // tray icon, and tray_setup is a deliberate no-op on a second call
-      // (see solutions/infrastructure/plugin-host/native/tray.rs), so
-      // there is nothing meaningful to unregister here.
-    };
+      return () => {
+        carbon.off("tray.click", clickListener);
+        carbon.off("tray.menu", menuListener);
+        // No teardown call to the native side — a process has at most one
+        // tray icon, and tray_setup is a deliberate no-op on a second call
+        // (see solutions/infrastructure/plugin-host/native/tray.rs), so
+        // there is nothing meaningful to unregister here.
+      };
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [icon, tooltip, JSON.stringify(menu)]);
 

@@ -23,13 +23,14 @@
 
 import { useEffect, useRef } from "react";
 import { register as rawRegister } from "carbon:deep-link";
+import { awaitPluginReady, pluginGlobalReady } from "./_awaitPluginReady.ts";
 
 export interface UseDeepLinkResult {
   ready: boolean;
 }
 
 function pluginReady(): boolean {
-  return typeof (globalThis as unknown as { deepLinkRegister?: unknown }).deepLinkRegister === "function";
+  return pluginGlobalReady("deepLinkRegister");
 }
 
 export function useDeepLink(scheme: string, onUrl: (url: string) => void): UseDeepLinkResult {
@@ -39,24 +40,24 @@ export function useDeepLink(scheme: string, onUrl: (url: string) => void): UseDe
   onUrlRef.current = onUrl;
 
   useEffect(() => {
-    if (!pluginReady()) return;
+    return awaitPluginReady(pluginReady, () => {
+      const carbon = (globalThis as unknown as { carbon?: { on: Function; off: Function } }).carbon;
+      if (!carbon) return;
 
-    const carbon = (globalThis as unknown as { carbon?: { on: Function; off: Function } }).carbon;
-    if (!carbon) return;
+      const listener = (payload: { url: string } | null) => {
+        if (payload?.url) onUrlRef.current(payload.url);
+      };
+      carbon.on("deeplink.url", listener);
 
-    const listener = (payload: { url: string } | null) => {
-      if (payload?.url) onUrlRef.current(payload.url);
-    };
-    carbon.on("deeplink.url", listener);
+      // Registration itself may forward this launch's URL to an
+      // already-running instance and exit the process — nothing after
+      // this call is guaranteed to run in that case.
+      rawRegister(scheme);
 
-    // Registration itself may forward this launch's URL to an
-    // already-running instance and exit the process — nothing after this
-    // call is guaranteed to run in that case.
-    rawRegister(scheme);
-
-    return () => {
-      carbon.off("deeplink.url", listener);
-    };
+      return () => {
+        carbon.off("deeplink.url", listener);
+      };
+    });
   }, [scheme]);
 
   return { ready: pluginReady() };

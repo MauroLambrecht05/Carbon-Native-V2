@@ -17,18 +17,22 @@
 // that one avoided a SECOND, setState-chained effect used only to defer a
 // value-fetch past first render (proven unreliable in this runtime); a
 // single, ordinary mount/cleanup effect with a stable dependency array
-// does not have that problem — first-mount effects are confirmed to run
-// synchronously and reliably here.
+// does not have that problem in general — but see _awaitPluginReady.ts
+// for a case where it still does: this plugin's own globals are not
+// guaranteed to exist yet on a cold launch, despite what the paragraph
+// above assumed (confirmed via a live tray reproduction, same underlying
+// runtime-ordering fact — the code below now accounts for it).
 
 import { useEffect, useRef } from "react";
 import { register as rawRegister, unregister as rawUnregister } from "carbon:global-shortcuts";
+import { awaitPluginReady, pluginGlobalReady } from "./_awaitPluginReady.ts";
 
 export interface UseGlobalShortcutResult {
   ready: boolean;
 }
 
 function pluginReady(): boolean {
-  return typeof (globalThis as unknown as { globalShortcutRegister?: unknown }).globalShortcutRegister === "function";
+  return pluginGlobalReady("globalShortcutRegister");
 }
 
 export function useGlobalShortcut(accelerator: string, callback: () => void): UseGlobalShortcutResult {
@@ -40,22 +44,23 @@ export function useGlobalShortcut(accelerator: string, callback: () => void): Us
   callbackRef.current = callback;
 
   useEffect(() => {
-    if (!pluginReady()) return;
-    const id = rawRegister(accelerator);
-    if (id == null) return;
+    return awaitPluginReady(pluginReady, () => {
+      const id = rawRegister(accelerator);
+      if (id == null) return;
 
-    const carbon = (globalThis as unknown as { carbon?: { on: Function; off: Function } }).carbon;
-    if (!carbon) return;
+      const carbon = (globalThis as unknown as { carbon?: { on: Function; off: Function } }).carbon;
+      if (!carbon) return;
 
-    const listener = (payload: { id: number } | null) => {
-      if (payload?.id === id) callbackRef.current();
-    };
-    carbon.on("global-shortcut.fired", listener);
+      const listener = (payload: { id: number } | null) => {
+        if (payload?.id === id) callbackRef.current();
+      };
+      carbon.on("global-shortcut.fired", listener);
 
-    return () => {
-      carbon.off("global-shortcut.fired", listener);
-      rawUnregister(accelerator);
-    };
+      return () => {
+        carbon.off("global-shortcut.fired", listener);
+        rawUnregister(accelerator);
+      };
+    });
   }, [accelerator]);
 
   return { ready: pluginReady() };
