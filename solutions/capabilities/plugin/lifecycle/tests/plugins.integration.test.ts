@@ -421,11 +421,13 @@ describe("installing a plugin", () => {
     });
 
     expect(result.host).toBe(`${ROOT}/app`);
-    expect(workspace.exists(`${ROOT}/app/plugins/${lib}`)).toBe(true);
-    expect(result.declaredPath).toBe(`./plugins/${lib}`);
+    expect(workspace.exists(`${ROOT}/app/plugins/my-thing/${lib}`)).toBe(true);
+    expect(result.declaredPath).toBe(`./plugins/my-thing/${lib}`);
 
     const toml = workspace.readFile(`${ROOT}/app/carbon.toml`);
-    expect(readPluginEntries(toml)).toEqual([{ name: "my-thing", path: `./plugins/${lib}` }]);
+    expect(readPluginEntries(toml)).toEqual([
+      { name: "my-thing", path: `./plugins/my-thing/${lib}` },
+    ]);
     // The app section survives the edit.
     expect(toml).toContain(`name = "demo"`);
   });
@@ -449,13 +451,13 @@ describe("installing a plugin", () => {
     workspace.put(`${ROOT}/app/my-thing/zig-out/bin/${lib}`, "OLD");
 
     useCase.execute({ directory: `${ROOT}/app/my-thing`, from: `${ROOT}/app/my-thing` });
-    expect(workspace.readFile(`${ROOT}/app/plugins/${lib}`)).toBe("ELF");
+    expect(workspace.readFile(`${ROOT}/app/plugins/my-thing/${lib}`)).toBe("ELF");
   });
 
   test("a windows build, which lands in zig-out/bin, still installs", () => {
     const { workspace, useCase, lib } = built({ where: "bin" });
     useCase.execute({ directory: `${ROOT}/app/my-thing`, from: `${ROOT}/app/my-thing` });
-    expect(workspace.exists(`${ROOT}/app/plugins/${lib}`)).toBe(true);
+    expect(workspace.exists(`${ROOT}/app/plugins/my-thing/${lib}`)).toBe(true);
   });
 
   test("without a manifest, the name falls back to the directory", () => {
@@ -529,9 +531,9 @@ describe("syncing local plugins", () => {
     // matters more than the plugin binary's own runtime speed. A ReleaseSafe
     // rebuild on every keystroke was the original, uncaught version of this.
     expect(runner.calls[0].args).toEqual(["build"]);
-    expect(workspace.exists(`${ROOT}/app/plugins/${lib}`)).toBe(true);
+    expect(workspace.exists(`${ROOT}/app/plugins/my-thing/${lib}`)).toBe(true);
     expect(readPluginEntries(workspace.readFile(`${ROOT}/app/carbon.toml`))).toEqual([
-      { name: "my-thing", path: `./plugins/${lib}` },
+      { name: "my-thing", path: `./plugins/my-thing/${lib}` },
     ]);
   });
 
@@ -616,7 +618,7 @@ describe("syncing local plugins", () => {
     await useCase.execute(`${ROOT}/app`);
 
     expect(readPluginEntries(workspace.readFile(`${ROOT}/app/carbon.toml`))).toEqual([
-      { name: "my-thing", path: `./plugins/${lib}` },
+      { name: "my-thing", path: `./plugins/my-thing/${lib}` },
     ]);
   });
 
