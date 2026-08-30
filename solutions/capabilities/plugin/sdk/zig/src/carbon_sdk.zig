@@ -142,6 +142,131 @@ pub const CarbonApp = struct {
         const f = self.raw.load_font_bytes orelse return CARBON_ERR_GENERIC;
         return f(self.raw, bytes.ptr, bytes.len, family orelse null, weight);
     }
+
+    // ── ABI 1.3: clipboard / dialog / notification / keychain ─────────────
+    //
+    // String-returning calls here return the raw, possibly-null C pointer
+    // (`[*c]u8`) exactly as the ABI hands it back — non-null means it was
+    // allocated via `app->alloc` and the CALLER (this plugin) owns it: read
+    // it with `std.mem.span(ptr)`, then free it with `self.freeString(ptr)`
+    // once done. `out_status` follows carbon_plugin.h's contract: CARBON_OK
+    // means the call succeeded and the pointer is authoritative as-is (null
+    // there is a real "cancelled"/"empty", not a failure).
+
+    /// Free a string previously returned by one of the calls below.
+    /// No-op if `ptr` is null.
+    pub fn freeString(self: CarbonApp, ptr: [*c]u8) void {
+        if (ptr == null) return;
+        if (self.raw.free) |f| f(ptr);
+    }
+
+    pub fn clipboardReadText(self: CarbonApp, out_status: *i32) [*c]u8 {
+        const f = self.raw.clipboard_read_text orelse {
+            out_status.* = CARBON_ERR_GENERIC;
+            return null;
+        };
+        return f(self.raw, out_status);
+    }
+
+    pub fn clipboardWriteText(self: CarbonApp, text: [*:0]const u8) i32 {
+        const f = self.raw.clipboard_write_text orelse return CARBON_ERR_GENERIC;
+        return f(self.raw, text);
+    }
+
+    pub fn clipboardClear(self: CarbonApp) i32 {
+        const f = self.raw.clipboard_clear orelse return CARBON_ERR_GENERIC;
+        return f(self.raw);
+    }
+
+    /// `opts_json`: `{"title"?, "defaultPath"?, "filters"?: [{"name",
+    /// "extensions":[...]}]}` — same shape for every dialog_* call below.
+    pub fn dialogOpenFile(self: CarbonApp, opts_json: [*:0]const u8, out_status: *i32) [*c]u8 {
+        const f = self.raw.dialog_open_file orelse {
+            out_status.* = CARBON_ERR_GENERIC;
+            return null;
+        };
+        return f(self.raw, opts_json, out_status);
+    }
+
+    /// Returned string, if non-null, is a JSON array of paths.
+    pub fn dialogOpenFiles(self: CarbonApp, opts_json: [*:0]const u8, out_status: *i32) [*c]u8 {
+        const f = self.raw.dialog_open_files orelse {
+            out_status.* = CARBON_ERR_GENERIC;
+            return null;
+        };
+        return f(self.raw, opts_json, out_status);
+    }
+
+    pub fn dialogOpenDir(self: CarbonApp, opts_json: [*:0]const u8, out_status: *i32) [*c]u8 {
+        const f = self.raw.dialog_open_dir orelse {
+            out_status.* = CARBON_ERR_GENERIC;
+            return null;
+        };
+        return f(self.raw, opts_json, out_status);
+    }
+
+    pub fn dialogSaveFile(self: CarbonApp, opts_json: [*:0]const u8, out_status: *i32) [*c]u8 {
+        const f = self.raw.dialog_save_file orelse {
+            out_status.* = CARBON_ERR_GENERIC;
+            return null;
+        };
+        return f(self.raw, opts_json, out_status);
+    }
+
+    /// Shows the picker and returns the chosen file's CONTENT, not its
+    /// path — see carbon_plugin.h's note on why: no raw filesystem path
+    /// the user picked ever has to reach JS.
+    pub fn dialogOpenFileText(self: CarbonApp, opts_json: [*:0]const u8, out_status: *i32) [*c]u8 {
+        const f = self.raw.dialog_open_file_text orelse {
+            out_status.* = CARBON_ERR_GENERIC;
+            return null;
+        };
+        return f(self.raw, opts_json, out_status);
+    }
+
+    /// Returns 1 if written, 0 if the user cancelled, negative on error.
+    pub fn dialogSaveFileText(self: CarbonApp, opts_json: [*:0]const u8, content: [*:0]const u8) i32 {
+        const f = self.raw.dialog_save_file_text orelse return CARBON_ERR_GENERIC;
+        return f(self.raw, opts_json, content);
+    }
+
+    /// `level`: "info" | "warning" | "error".
+    pub fn dialogMessage(self: CarbonApp, title: [*:0]const u8, body: [*:0]const u8, level: [*:0]const u8) i32 {
+        const f = self.raw.dialog_message orelse return CARBON_ERR_GENERIC;
+        return f(self.raw, title, body, level);
+    }
+
+    /// Returns 1 if the user picked Yes, 0 for No, negative on error.
+    pub fn dialogConfirm(self: CarbonApp, title: [*:0]const u8, body: [*:0]const u8) i32 {
+        const f = self.raw.dialog_confirm orelse return CARBON_ERR_GENERIC;
+        return f(self.raw, title, body);
+    }
+
+    /// `icon_path` may be an empty string for the system default icon.
+    pub fn notificationSend(self: CarbonApp, title: [*:0]const u8, body: [*:0]const u8, icon_path: [*:0]const u8) i32 {
+        const f = self.raw.notification_send orelse return CARBON_ERR_GENERIC;
+        return f(self.raw, title, body, icon_path);
+    }
+
+    pub fn keychainSet(self: CarbonApp, service: [*:0]const u8, account: [*:0]const u8, password: [*:0]const u8) i32 {
+        const f = self.raw.keychain_set orelse return CARBON_ERR_GENERIC;
+        return f(self.raw, service, account, password);
+    }
+
+    /// `out_status` distinguishes CARBON_OK (found), CARBON_NOT_FOUND (no
+    /// entry — not an error) and CARBON_ERR_GENERIC (a real failure).
+    pub fn keychainGet(self: CarbonApp, service: [*:0]const u8, account: [*:0]const u8, out_status: *i32) [*c]u8 {
+        const f = self.raw.keychain_get orelse {
+            out_status.* = CARBON_ERR_GENERIC;
+            return null;
+        };
+        return f(self.raw, service, account, out_status);
+    }
+
+    pub fn keychainDelete(self: CarbonApp, service: [*:0]const u8, account: [*:0]const u8) i32 {
+        const f = self.raw.keychain_delete orelse return CARBON_ERR_GENERIC;
+        return f(self.raw, service, account);
+    }
 };
 
 /// Compose a manifest JSON string at comptime.

@@ -35,24 +35,16 @@ use carbon_runtime_contract::UserEvent;
 pub mod app;
 #[path = "adapters/system/autostart.rs"]
 pub mod autostart;
-#[path = "adapters/desktop/clipboard.rs"]
-pub mod clipboard;
-#[path = "adapters/desktop/dialog.rs"]
-pub mod dialog;
 #[path = "adapters/filesystem/fs.rs"]
 pub mod fs;
 #[path = "adapters/filesystem/fs_search.rs"]
 pub mod fs_search;
 #[path = "adapters/bridge/invoke.rs"]
 pub mod invoke;
-#[path = "adapters/storage/keychain.rs"]
-pub mod keychain;
 #[path = "adapters/system/log.rs"]
 pub mod log;
 #[path = "adapters/net/net.rs"]
 pub mod net;
-#[path = "adapters/desktop/notification.rs"]
-pub mod notification;
 #[path = "adapters/system/os.rs"]
 pub mod os;
 #[path = "adapters/system/os_theme.rs"]
@@ -114,14 +106,10 @@ pub fn register_all(
         process::register(js_ctx)?;
     }
     tlog("native.process");
-    dialog::register(js_ctx)?;
     shell::register(js_ctx)?;
-    clipboard::register(js_ctx)?;
-    notification::register(js_ctx)?;
     autostart::register(js_ctx)?;
     window_state::register(js_ctx)?;
-    keychain::register(js_ctx)?;
-    tlog("native.dialog_shell_clip_notif_autostart_winstate_keychain");
+    tlog("native.shell_autostart_winstate");
     store::register(js_ctx)?;
     pty::register(js_ctx)?;
     tlog("native.store_pty");

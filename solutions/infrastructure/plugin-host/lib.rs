@@ -34,6 +34,14 @@
 //   adapters/   finding, opening and registering a plugin: a driven adapter
 //               over libloading, like every other adapter in this tier.
 //               Replaceable; the ABI is not.
+//   native/     the actual OS-capability implementations backing some ABI
+//               trampolines (clipboard, dialog, notification, keychain) —
+//               plain Rust functions host_exports.rs's trampolines call and
+//               marshal across the C boundary. Colocated with the ABI that
+//               exposes them, the same way carbon-text-renderer (a crate
+//               dependency instead, being much larger) backs load_font_*.
+//               Moved here from carbon-os, which used to install these as
+//               always-on ambient globals rather than an opt-in plugin.
 //
 // Two directories rather than two loose files because the difference in blast
 // radius between them is the most important thing about this crate. `abi/`
@@ -44,3 +52,11 @@
 pub mod host_exports;
 #[path = "adapters/plugin_loader.rs"]
 pub mod plugin_loader;
+#[path = "native/clipboard.rs"]
+pub mod clipboard;
+#[path = "native/dialog.rs"]
+pub mod dialog;
+#[path = "native/notification.rs"]
+pub mod notification;
+#[path = "native/keychain.rs"]
+pub mod keychain;

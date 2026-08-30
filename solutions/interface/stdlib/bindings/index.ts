@@ -1,13 +1,21 @@
 // TypeScript wrappers over the native host imports registered by
 // infrastructure/os. Apps import what they need:
 //
-//   import { fs, process, dialog, shell, clipboard, notification,
-//            autostart, windowState, keychain } from "@carbon/runtime-bindings";
+//   import { fs, process, shell, autostart, windowState } from "@carbon/runtime-bindings";
 //
 // Each export is a small namespace whose methods call into the
 // `__cm_*` globals injected by the Rust runtime. Errors thrown by the
 // Rust side propagate as JS Errors; explicit "missing" cases (no
-// keychain entry, no saved window state) return null rather than throw.
+// saved window state) return null rather than throw.
+//
+// dialog/clipboard/notification/keychain moved OUT of this always-on
+// surface and into opt-in carbon-sdk plugins — see
+// `@carbon/plugins/{dialog,clipboard,notification,keychain}` instead. This
+// was a deliberate breaking change: those four don't mediate a permission
+// boundary the way fs/net do, so they follow fonts' plugin pattern (`carbon
+// plugin add <name>`, then `import { useX } from "@carbon/plugins/<name>"`)
+// instead of being ambient globals every app carries whether it uses them
+// or not.
 //
 // Synchronous on purpose — every method blocks on the OS call.
 // Long-running interactions (a spawned child process, a streamed
@@ -45,13 +53,6 @@ export { pty, PtySession } from "./process/pty.ts";
 export type { PtySpawnOptions } from "./process/pty.ts";
 export { shell } from "./process/shell.ts";
 
-export { dialog } from "./desktop/dialog.ts";
-export type { FileFilter, OpenDialogOptions } from "./desktop/dialog.ts";
-export { clipboard } from "./desktop/clipboard.ts";
-export { notification } from "./desktop/notification.ts";
-export type { NotificationOptions } from "./desktop/notification.ts";
-
-export { keychain } from "./storage/keychain.ts";
 export { Store } from "./storage/store.ts";
 
 export { autostart } from "./system/autostart.ts";

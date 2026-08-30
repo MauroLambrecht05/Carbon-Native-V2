@@ -46,7 +46,7 @@ extern "C" {
  * ⇒ register but skip features the runtime doesn't advertise.
  */
 #define CARBON_PLUGIN_ABI_VERSION_MAJOR 1u
-#define CARBON_PLUGIN_ABI_VERSION_MINOR 2u
+#define CARBON_PLUGIN_ABI_VERSION_MINOR 3u
 
 /* --------------------------------------------------------------------------
  * Status codes returned by host-provided helpers
@@ -56,6 +56,11 @@ extern "C" {
 #define CARBON_ERR_INVALID   -2  /* bad arguments */
 #define CARBON_ERR_QUEUE_FULL -3 /* push_event ring buffer overflow */
 #define CARBON_ERR_NO_CTX    -4  /* JS context unavailable (during shutdown) */
+#define CARBON_NOT_FOUND     -5  /* e.g. keychain_get: no entry for (service,
+                                   * account) — a real, expected outcome, not
+                                   * a failure. Distinct from CARBON_OK so a
+                                   * NULL return can mean either "not found"
+                                   * or "found but empty" without ambiguity. */
 
 /* --------------------------------------------------------------------------
  * Opaque types
@@ -248,6 +253,49 @@ struct CarbonApp {
                                size_t         len,
                                const char*    family_name,
                                uint32_t       weight);
+
+    /* --- ABI 1.3: clipboard / dialog / notification / keychain ----------
+     * These back the `clipboard`, `dialog`, `notification` and `keychain`
+     * carbon-sdk plugins — moved out of the runtime's always-on ambient
+     * globals so each is an explicit, opt-in capability like fonts.
+     *
+     * STRING-RETURNING CALLS share one ownership shape: the return value,
+     * if non-NULL, is a NUL-terminated UTF-8 string allocated via
+     * `app->alloc` — the CALLER (the plugin) must free it with `app->free`
+     * once done. `out_status`, if non-NULL, is written with:
+     *   CARBON_OK        call succeeded. The return value is authoritative
+     *                    AS-IS — NULL here means "no clipboard content" /
+     *                    "user cancelled the dialog", not a failure.
+     *   CARBON_NOT_FOUND keychain_get only: no entry for (service,account).
+     *   CARBON_ERR_GENERIC / CARBON_ERR_INVALID: a real failure. Return
+     *                    value is always NULL.
+     */
+
+    char* (*clipboard_read_text)(CarbonApp* app, int32_t* out_status);
+    int32_t (*clipboard_write_text)(CarbonApp* app, const char* text);
+    int32_t (*clipboard_clear)(CarbonApp* app);
+
+    /* `opts_json` is `{"title"?, "defaultPath"?, "filters"?: [{"name",
+     * "extensions":[...]}]}` — same shape across every dialog_* call. */
+    char* (*dialog_open_file)(CarbonApp* app, const char* opts_json, int32_t* out_status);
+    char* (*dialog_open_files)(CarbonApp* app, const char* opts_json, int32_t* out_status); /* JSON string array, "[]" if cancelled */
+    char* (*dialog_open_dir)(CarbonApp* app, const char* opts_json, int32_t* out_status);
+    char* (*dialog_save_file)(CarbonApp* app, const char* opts_json, int32_t* out_status);
+    /* Shows the picker and returns the chosen file's CONTENT, not its path
+     * — and save_file_text writes content to wherever the user chose. The
+     * only way to read/write a file the user picked from outside the app's
+     * own sandboxed directories without a raw filesystem path ever
+     * reaching JS. */
+    char* (*dialog_open_file_text)(CarbonApp* app, const char* opts_json, int32_t* out_status);
+    int32_t (*dialog_save_file_text)(CarbonApp* app, const char* opts_json, const char* content); /* 1=written, 0=cancelled, <0=error */
+    int32_t (*dialog_message)(CarbonApp* app, const char* title, const char* body, const char* level); /* level: "info"|"warning"|"error" */
+    int32_t (*dialog_confirm)(CarbonApp* app, const char* title, const char* body); /* 1=yes, 0=no, <0=error */
+
+    int32_t (*notification_send)(CarbonApp* app, const char* title, const char* body, const char* icon_path);
+
+    int32_t (*keychain_set)(CarbonApp* app, const char* service, const char* account, const char* password);
+    char* (*keychain_get)(CarbonApp* app, const char* service, const char* account, int32_t* out_status); /* out_status: CARBON_OK (found) | CARBON_NOT_FOUND | CARBON_ERR_GENERIC */
+    int32_t (*keychain_delete)(CarbonApp* app, const char* service, const char* account);
 };
 
 /* --------------------------------------------------------------------------

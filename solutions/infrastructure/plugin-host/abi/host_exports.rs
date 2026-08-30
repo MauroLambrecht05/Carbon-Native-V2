@@ -44,13 +44,17 @@ pub const CARBON_ERR_GENERIC: i32 = -1;
 pub const CARBON_ERR_INVALID: i32 = -2;
 pub const CARBON_ERR_QUEUE_FULL: i32 = -3;
 pub const CARBON_ERR_NO_CTX: i32 = -4;
+// keychain_get only: no entry for (service, account) — a real, expected
+// outcome, not a failure. See carbon_plugin.h's note on this constant.
+pub const CARBON_NOT_FOUND: i32 = -5;
 
 pub const CARBON_PLUGIN_ABI_VERSION_MAJOR: u32 = 1;
-// 2, not 1: ABI 1.2 appended load_font_path/load_font_bytes to
-// HostCarbonApp — see the note on those fields below and carbon_plugin.h's
-// APPEND-ONLY ZONE. (1.1 appended set_global_string/set_global_number/
+// 3, not 2: ABI 1.3 appended clipboard_*/dialog_*/notification_send/
+// keychain_* to HostCarbonApp — see the note on those fields below and
+// carbon_plugin.h's APPEND-ONLY ZONE. (1.2 appended load_font_path/
+// load_font_bytes; 1.1 appended set_global_string/set_global_number/
 // set_global_function/eval before that.)
-pub const CARBON_PLUGIN_ABI_VERSION_MINOR: u32 = 2;
+pub const CARBON_PLUGIN_ABI_VERSION_MINOR: u32 = 3;
 
 // ── CarbonJSContext — opaque to plugins ───────────────────────────────────
 //
@@ -155,6 +159,76 @@ pub struct HostCarbonApp {
             family_name: *const c_char,
             weight: u32,
         ) -> i32,
+    >,
+
+    // ABI 1.3. clipboard/dialog/notification/keychain — see the matching
+    // note in carbon_plugin.h's APPEND-ONLY ZONE for the shared
+    // string-return ownership contract (app->alloc'd, caller frees via
+    // app->free; out_status distinguishes a real error from a legitimate
+    // NULL like "cancelled" or "no clipboard content").
+    pub clipboard_read_text:
+        Option<unsafe extern "C" fn(app: *mut HostCarbonApp, out_status: *mut i32) -> *mut c_char>,
+    pub clipboard_write_text:
+        Option<unsafe extern "C" fn(app: *mut HostCarbonApp, text: *const c_char) -> i32>,
+    pub clipboard_clear: Option<unsafe extern "C" fn(app: *mut HostCarbonApp) -> i32>,
+
+    pub dialog_open_file: Option<
+        unsafe extern "C" fn(app: *mut HostCarbonApp, opts_json: *const c_char, out_status: *mut i32) -> *mut c_char,
+    >,
+    pub dialog_open_files: Option<
+        unsafe extern "C" fn(app: *mut HostCarbonApp, opts_json: *const c_char, out_status: *mut i32) -> *mut c_char,
+    >,
+    pub dialog_open_dir: Option<
+        unsafe extern "C" fn(app: *mut HostCarbonApp, opts_json: *const c_char, out_status: *mut i32) -> *mut c_char,
+    >,
+    pub dialog_save_file: Option<
+        unsafe extern "C" fn(app: *mut HostCarbonApp, opts_json: *const c_char, out_status: *mut i32) -> *mut c_char,
+    >,
+    pub dialog_open_file_text: Option<
+        unsafe extern "C" fn(app: *mut HostCarbonApp, opts_json: *const c_char, out_status: *mut i32) -> *mut c_char,
+    >,
+    pub dialog_save_file_text: Option<
+        unsafe extern "C" fn(app: *mut HostCarbonApp, opts_json: *const c_char, content: *const c_char) -> i32,
+    >,
+    pub dialog_message: Option<
+        unsafe extern "C" fn(
+            app: *mut HostCarbonApp,
+            title: *const c_char,
+            body: *const c_char,
+            level: *const c_char,
+        ) -> i32,
+    >,
+    pub dialog_confirm: Option<
+        unsafe extern "C" fn(app: *mut HostCarbonApp, title: *const c_char, body: *const c_char) -> i32,
+    >,
+
+    pub notification_send: Option<
+        unsafe extern "C" fn(
+            app: *mut HostCarbonApp,
+            title: *const c_char,
+            body: *const c_char,
+            icon_path: *const c_char,
+        ) -> i32,
+    >,
+
+    pub keychain_set: Option<
+        unsafe extern "C" fn(
+            app: *mut HostCarbonApp,
+            service: *const c_char,
+            account: *const c_char,
+            password: *const c_char,
+        ) -> i32,
+    >,
+    pub keychain_get: Option<
+        unsafe extern "C" fn(
+            app: *mut HostCarbonApp,
+            service: *const c_char,
+            account: *const c_char,
+            out_status: *mut i32,
+        ) -> *mut c_char,
+    >,
+    pub keychain_delete: Option<
+        unsafe extern "C" fn(app: *mut HostCarbonApp, service: *const c_char, account: *const c_char) -> i32,
     >,
 }
 
@@ -330,6 +404,269 @@ unsafe extern "C" fn host_load_font_bytes(
     }
 }
 
+// ── clipboard / dialog / notification / keychain (ABI 1.3) ────────────────
+//
+// Thin C-ABI trampolines over solutions/infrastructure/plugin-host's own
+// native/{clipboard,dialog,notification,keychain}.rs — plain Rust functions
+// carrying the actual arboard/rfd/notify-rust/keyring calls. No thread
+// affinity requirement here (unlike TEXT_ENGINE, nothing thread_local is
+// touched): in practice every call still arrives on the JS thread, because
+// the only caller path today is a plugin's `set_global_function` callback,
+// which QuickJS only ever invokes synchronously from JS.
+
+unsafe fn cstr_arg<'a>(ptr: *const c_char) -> Option<&'a str> {
+    if ptr.is_null() {
+        None
+    } else {
+        CStr::from_ptr(ptr).to_str().ok()
+    }
+}
+
+unsafe fn write_status(out_status: *mut i32, status: i32) {
+    if !out_status.is_null() {
+        *out_status = status;
+    }
+}
+
+/// Allocate a NUL-terminated copy of `s` via `host_alloc` — the plugin
+/// receiving the pointer owns it and must free it via `app->free`.
+unsafe fn alloc_cstring(s: &str) -> *mut c_char {
+    let bytes = s.as_bytes();
+    let ptr = host_alloc(bytes.len() + 1) as *mut u8;
+    if ptr.is_null() {
+        return core::ptr::null_mut();
+    }
+    core::ptr::copy_nonoverlapping(bytes.as_ptr(), ptr, bytes.len());
+    *ptr.add(bytes.len()) = 0;
+    ptr as *mut c_char
+}
+
+unsafe extern "C" fn host_clipboard_read_text(_app: *mut HostCarbonApp, out_status: *mut i32) -> *mut c_char {
+    match crate::clipboard::read_text() {
+        Ok(s) if s.is_empty() => {
+            write_status(out_status, CARBON_OK);
+            core::ptr::null_mut()
+        }
+        Ok(s) => {
+            write_status(out_status, CARBON_OK);
+            alloc_cstring(&s)
+        }
+        Err(_) => {
+            write_status(out_status, CARBON_ERR_GENERIC);
+            core::ptr::null_mut()
+        }
+    }
+}
+
+unsafe extern "C" fn host_clipboard_write_text(_app: *mut HostCarbonApp, text: *const c_char) -> i32 {
+    let Some(text) = cstr_arg(text) else { return CARBON_ERR_INVALID };
+    match crate::clipboard::write_text(text) {
+        Ok(()) => CARBON_OK,
+        Err(_) => CARBON_ERR_GENERIC,
+    }
+}
+
+unsafe extern "C" fn host_clipboard_clear(_app: *mut HostCarbonApp) -> i32 {
+    crate::clipboard::clear();
+    CARBON_OK
+}
+
+unsafe extern "C" fn host_dialog_open_file(
+    _app: *mut HostCarbonApp,
+    opts_json: *const c_char,
+    out_status: *mut i32,
+) -> *mut c_char {
+    let Some(opts) = cstr_arg(opts_json) else {
+        write_status(out_status, CARBON_ERR_INVALID);
+        return core::ptr::null_mut();
+    };
+    write_status(out_status, CARBON_OK);
+    match crate::dialog::open_file(opts) {
+        Some(p) => alloc_cstring(&p),
+        None => core::ptr::null_mut(),
+    }
+}
+
+unsafe extern "C" fn host_dialog_open_files(
+    _app: *mut HostCarbonApp,
+    opts_json: *const c_char,
+    out_status: *mut i32,
+) -> *mut c_char {
+    let Some(opts) = cstr_arg(opts_json) else {
+        write_status(out_status, CARBON_ERR_INVALID);
+        return core::ptr::null_mut();
+    };
+    write_status(out_status, CARBON_OK);
+    let paths = crate::dialog::open_files(opts);
+    let json = serde_json::to_string(&paths).unwrap_or_else(|_| "[]".to_string());
+    alloc_cstring(&json)
+}
+
+unsafe extern "C" fn host_dialog_open_dir(
+    _app: *mut HostCarbonApp,
+    opts_json: *const c_char,
+    out_status: *mut i32,
+) -> *mut c_char {
+    let Some(opts) = cstr_arg(opts_json) else {
+        write_status(out_status, CARBON_ERR_INVALID);
+        return core::ptr::null_mut();
+    };
+    write_status(out_status, CARBON_OK);
+    match crate::dialog::open_dir(opts) {
+        Some(p) => alloc_cstring(&p),
+        None => core::ptr::null_mut(),
+    }
+}
+
+unsafe extern "C" fn host_dialog_save_file(
+    _app: *mut HostCarbonApp,
+    opts_json: *const c_char,
+    out_status: *mut i32,
+) -> *mut c_char {
+    let Some(opts) = cstr_arg(opts_json) else {
+        write_status(out_status, CARBON_ERR_INVALID);
+        return core::ptr::null_mut();
+    };
+    write_status(out_status, CARBON_OK);
+    match crate::dialog::save_file(opts) {
+        Some(p) => alloc_cstring(&p),
+        None => core::ptr::null_mut(),
+    }
+}
+
+unsafe extern "C" fn host_dialog_open_file_text(
+    _app: *mut HostCarbonApp,
+    opts_json: *const c_char,
+    out_status: *mut i32,
+) -> *mut c_char {
+    let Some(opts) = cstr_arg(opts_json) else {
+        write_status(out_status, CARBON_ERR_INVALID);
+        return core::ptr::null_mut();
+    };
+    match crate::dialog::open_file_text(opts) {
+        Ok(Some(content)) => {
+            write_status(out_status, CARBON_OK);
+            alloc_cstring(&content)
+        }
+        Ok(None) => {
+            write_status(out_status, CARBON_OK);
+            core::ptr::null_mut()
+        }
+        Err(_) => {
+            write_status(out_status, CARBON_ERR_GENERIC);
+            core::ptr::null_mut()
+        }
+    }
+}
+
+unsafe extern "C" fn host_dialog_save_file_text(
+    _app: *mut HostCarbonApp,
+    opts_json: *const c_char,
+    content: *const c_char,
+) -> i32 {
+    let (Some(opts), Some(content)) = (cstr_arg(opts_json), cstr_arg(content)) else {
+        return CARBON_ERR_INVALID;
+    };
+    match crate::dialog::save_file_text(opts, content) {
+        Ok(true) => 1,
+        Ok(false) => 0,
+        Err(_) => CARBON_ERR_GENERIC,
+    }
+}
+
+unsafe extern "C" fn host_dialog_message(
+    _app: *mut HostCarbonApp,
+    title: *const c_char,
+    body: *const c_char,
+    level: *const c_char,
+) -> i32 {
+    let (Some(title), Some(body), Some(level)) = (cstr_arg(title), cstr_arg(body), cstr_arg(level)) else {
+        return CARBON_ERR_INVALID;
+    };
+    crate::dialog::message(title, body, level);
+    CARBON_OK
+}
+
+unsafe extern "C" fn host_dialog_confirm(_app: *mut HostCarbonApp, title: *const c_char, body: *const c_char) -> i32 {
+    let (Some(title), Some(body)) = (cstr_arg(title), cstr_arg(body)) else {
+        return CARBON_ERR_INVALID;
+    };
+    if crate::dialog::confirm(title, body) { 1 } else { 0 }
+}
+
+unsafe extern "C" fn host_notification_send(
+    _app: *mut HostCarbonApp,
+    title: *const c_char,
+    body: *const c_char,
+    icon_path: *const c_char,
+) -> i32 {
+    let (Some(title), Some(body)) = (cstr_arg(title), cstr_arg(body)) else {
+        return CARBON_ERR_INVALID;
+    };
+    let icon = cstr_arg(icon_path).unwrap_or("");
+    match crate::notification::send(title, body, icon) {
+        Ok(()) => CARBON_OK,
+        Err(_) => CARBON_ERR_GENERIC,
+    }
+}
+
+unsafe extern "C" fn host_keychain_set(
+    _app: *mut HostCarbonApp,
+    service: *const c_char,
+    account: *const c_char,
+    password: *const c_char,
+) -> i32 {
+    let (Some(service), Some(account), Some(password)) =
+        (cstr_arg(service), cstr_arg(account), cstr_arg(password))
+    else {
+        return CARBON_ERR_INVALID;
+    };
+    match crate::keychain::set(service, account, password) {
+        Ok(()) => CARBON_OK,
+        Err(_) => CARBON_ERR_GENERIC,
+    }
+}
+
+unsafe extern "C" fn host_keychain_get(
+    _app: *mut HostCarbonApp,
+    service: *const c_char,
+    account: *const c_char,
+    out_status: *mut i32,
+) -> *mut c_char {
+    let (Some(service), Some(account)) = (cstr_arg(service), cstr_arg(account)) else {
+        write_status(out_status, CARBON_ERR_INVALID);
+        return core::ptr::null_mut();
+    };
+    match crate::keychain::get(service, account) {
+        Ok(Some(s)) => {
+            write_status(out_status, CARBON_OK);
+            alloc_cstring(&s)
+        }
+        Ok(None) => {
+            write_status(out_status, CARBON_NOT_FOUND);
+            core::ptr::null_mut()
+        }
+        Err(_) => {
+            write_status(out_status, CARBON_ERR_GENERIC);
+            core::ptr::null_mut()
+        }
+    }
+}
+
+unsafe extern "C" fn host_keychain_delete(
+    _app: *mut HostCarbonApp,
+    service: *const c_char,
+    account: *const c_char,
+) -> i32 {
+    let (Some(service), Some(account)) = (cstr_arg(service), cstr_arg(account)) else {
+        return CARBON_ERR_INVALID;
+    };
+    match crate::keychain::delete(service, account) {
+        Ok(()) => CARBON_OK,
+        Err(_) => CARBON_ERR_GENERIC,
+    }
+}
+
 // ── Trampolines stamped into HostCarbonApp ────────────────────────────────
 
 /// `app->push_event(name, payload)` — pushes a UserEvent::PluginEvent
@@ -454,6 +791,21 @@ impl HostCarbonAppStorage {
                 eval: Some(carbon_js_eval),
                 load_font_path: Some(host_load_font_path),
                 load_font_bytes: Some(host_load_font_bytes),
+                clipboard_read_text: Some(host_clipboard_read_text),
+                clipboard_write_text: Some(host_clipboard_write_text),
+                clipboard_clear: Some(host_clipboard_clear),
+                dialog_open_file: Some(host_dialog_open_file),
+                dialog_open_files: Some(host_dialog_open_files),
+                dialog_open_dir: Some(host_dialog_open_dir),
+                dialog_save_file: Some(host_dialog_save_file),
+                dialog_open_file_text: Some(host_dialog_open_file_text),
+                dialog_save_file_text: Some(host_dialog_save_file_text),
+                dialog_message: Some(host_dialog_message),
+                dialog_confirm: Some(host_dialog_confirm),
+                notification_send: Some(host_notification_send),
+                keychain_set: Some(host_keychain_set),
+                keychain_get: Some(host_keychain_get),
+                keychain_delete: Some(host_keychain_delete),
             },
             _app_name: app_name_c,
             _app_version: app_version_c,

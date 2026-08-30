@@ -57,28 +57,22 @@ rquickjs = { version = "0.9", default-features = false, features = ["loader", "c
 # ── The OS integrations themselves ──────────────────────────────────────────
 # Pure Rust, small after LTO, using OS APIs directly rather than through a
 # portable wrapper.
-rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"] }
-keyring = { version = "3", default-features = false, features = ["windows-native", "apple-native", "linux-native"] }
-# default-features = false with no features re-added compiled on every
-# platform this crate had been tried on before — Windows/macOS notifications
-# don't need either, they use their own OS APIs internally. Linux does:
-# without "zbus" (or "dbus") xdg::show_notification has no implementation
-# compiled in at all, and the caller that isn't feature-gated the same way
-# fails to link.
 #
-# "dbus", not "zbus": tried zbus first for the pure-Rust reason everything
-# else in this file prefers it, but notify-rust 4.17.0's zbus backend
-# (zbus_rs.rs) doesn't build against zbus's own unbounded `zbus = "5"`
-# requirement once that resolves to a late-5.x patch — `xdg::ServerInformation`
-# is missing a `DynamicDeserialize` impl `Body::deserialize` now needs, a
-# real version-drift break inside notify-rust's own code, not this crate's
-# usage of it. dbus is the older, more battle-tested backend and doesn't hit
-# it; the cost is a system libdbus-1-dev on the build image (see
-# worker-linux.Dockerfile) instead of zero system deps.
-notify-rust = { version = "4", default-features = false, features = ["dbus"] }
+# rfd/notify-rust/arboard (dialog/notification/clipboard) moved to
+# carbon-plugin-host's native/ — those three are now the `dialog`,
+# `notification` and `clipboard` carbon-sdk plugins instead of always-on
+# ambient globals here. autostart (auto-launch) and shell (opener) stay: not
+# part of this migration.
+#
+# keyring STAYS here too, even though carbon-plugin-host now also depends on
+# it for the `keychain` plugin's ABI trampolines — this crate's own use of
+# it is unrelated: invoke.rs's Tauri-compat `secrets_*` commands and net.rs's
+# credential-broker fetch path (a keychain entry substituted server-side into
+# a request header, never exposed to JS) both call `keyring::Entry` directly
+# and aren't part of this migration.
+keyring = { version = "3", default-features = false, features = ["windows-native", "apple-native", "linux-native"] }
 auto-launch = { version = "0.5", default-features = false }
 opener = { version = "0.7", default-features = false }
-arboard = { version = "3", default-features = false }
 dirs = "5"
 
 # ── Networking: fetch + WebSocket ───────────────────────────────────────────

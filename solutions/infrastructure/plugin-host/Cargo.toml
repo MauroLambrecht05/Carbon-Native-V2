@@ -59,6 +59,14 @@ toml = { version = "0.8", default-features = false, features = ["parse"] }
 libloading = "0.8"
 rquickjs = { version = "0.9", default-features = false, features = ["loader", "classes", "macro"] }
 tao = { version = "0.30", default-features = false, features = ["rwh_06"] }
+# ── Native capabilities backing the clipboard/dialog/notification/keychain
+# ABI trampolines (ABI 1.3) — moved here from carbon-os along with
+# native/{clipboard,dialog,notification,keychain}.rs. Same versions/features
+# carbon-os pinned them at.
+rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"] }
+keyring = { version = "3", default-features = false, features = ["windows-native", "apple-native", "linux-native"] }
+notify-rust = { version = "4", default-features = false, features = ["dbus"] }
+arboard = { version = "3", default-features = false }
 
 # An integration test under tests/ links the crate from outside, so it sees only
 # the public API plus what is declared here — the [dependencies] above are not

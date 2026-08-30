@@ -1,7 +1,7 @@
 {
   "name": "@carbon/runtime-bindings",
   "version": "0.1.0",
-  "description": "TypeScript bindings over the carbon-mini runtime's native host imports (fs, process, pty, store, dialog, notification, clipboard, log, os, autostart, keychain, windowState, invoke).",
+  "description": "TypeScript bindings over the carbon-mini runtime's native host imports (fs, process, pty, store, log, os, autostart, windowState, invoke). dialog/notification/clipboard/keychain moved to @carbon/plugins.",
   "type": "module",
   "main": "./index.ts",
   "types": "./index.ts",

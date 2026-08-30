@@ -1,0 +1,43 @@
+# keychain — what this plugin tells the toolchain about itself.
+#
+# `carbon plugin add keychain` (and `carbon plugin install`/`list`) read
+# this. The RUNTIME reads the manifest returned by `carbon_plugin_manifest()`
+# in src/main.zig instead, because by then this file is not shipped — so the
+# two must agree, and `carbon plugin check` is what verifies they do.
+#
+# name = "keychain": `carbon.toml [plugins]`'s grant key must match the
+# plugin name the JS import resolver derives from the specifier
+# (`carbon:keychain` -> "keychain", stripping the "carbon:" prefix).
+name = "keychain"
+version = "0.1.0"
+language = "zig"
+
+# Extension points this plugin implements. Every id must exist in
+# solutions/contracts/plugin/registry/extension-points.zig — run
+# `carbon ext list` to see them, or `carbon plugin check` to verify these.
+#
+# Must stay above [abi]: see carbon-hotkey's carbon-plugin.toml for why real
+# TOML makes anything after a [section] header belong to that section.
+extension-points = ["lifecycle.register", "lifecycle.after_reload"]
+modules = ["carbon:keychain"]
+
+# What `carbon:keychain` exports to app code — read by @carbon/vite/imports
+# at BUILD time. LAZY function wrappers, not eager `export const` snapshots
+# — see fonts' carbon-plugin.toml for why (register runs after the bundle
+# evaluates, so an eager snapshot would permanently capture `undefined`).
+# "remove", not "delete": `delete` is a reserved word in JS and cannot be a
+# function declaration's name (`export function delete(...)` is a syntax
+# error) — the export name has to differ even though the underlying global
+# this plugin installs is still literally named "delete" (see main.zig).
+[exports."carbon:keychain"]
+names = ["set", "get", "remove"]
+[exports."carbon:keychain".globals]
+remove = "delete"
+
+[abi]
+major = 1
+minor = 3
+
+[capabilities]
+required = []
+optional = []

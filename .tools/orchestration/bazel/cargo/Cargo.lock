@@ -698,7 +698,6 @@ name = "carbon-os"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "arboard",
  "auto-launch",
  "base64",
  "bytes",
@@ -711,11 +710,9 @@ dependencies = [
  "grep-searcher",
  "ignore",
  "keyring",
- "notify-rust",
  "opener",
  "portable-pty",
  "reqwest",
- "rfd",
  "rquickjs",
  "serde",
  "serde_json",
@@ -748,12 +745,16 @@ name = "carbon-plugin-host"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "arboard",
  "carbon-core",
  "carbon-plugin-contract",
  "carbon-plugin-trust",
  "carbon-runtime-contract",
  "carbon-text-renderer",
+ "keyring",
  "libloading",
+ "notify-rust",
+ "rfd",
  "rquickjs",
  "serde",
  "serde_json",

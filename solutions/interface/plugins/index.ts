@@ -5,3 +5,7 @@
 // one) and re-exported here for convenience.
 
 export * from "./fonts.ts";
+export * from "./clipboard.ts";
+export * from "./dialog.ts";
+export * from "./notification.ts";
+export * from "./keychain.ts";

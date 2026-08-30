@@ -39,3 +39,12 @@ for the existing plan that "publish standard plugins" would plug into.
 | Plugin | What it does |
 |---|---|
 | [`fonts`](./fonts) | Loads custom TTF/OTF fonts at runtime, selectable by name from CSS/JSX `font-family` — see its own header comment for the full picture. |
+| [`clipboard`](./clipboard) | Read/write the system clipboard (text). |
+| [`dialog`](./dialog) | Native file pickers and message boxes, including read/write-in-one-call variants that never expose a raw filesystem path to JS. |
+| [`notification`](./notification) | Desktop toast notifications through the OS notification centre. |
+| [`keychain`](./keychain) | OS credential storage (Credential Manager / Keychain Services / Secret Service), keyed by (service, account). |
+
+Clipboard/dialog/notification/keychain used to be always-on ambient globals
+in the core runtime (`@carbon/runtime-bindings`) — moved here so they follow
+the same opt-in pattern as fonts, since none of them mediate a permission
+boundary the way filesystem/network access do.

@@ -8,7 +8,15 @@
 # The boundary runs in BOTH directions, which V1 documented nowhere:
 #
 #   [imports.*]     Rust installs the function on the QuickJS globals; JS
-#                   calls it. 139 of these.
+#                   calls it. 124 of these.
+#
+# clipboard/dialog/keychain/notification are deliberately ABSENT from this
+# file even though carbon-plugin-host's abi/host_exports.rs installs
+# comparable capability — those are plugin-installed globals (`readText`,
+# `openFile`, ...), a different, dynamic, per-app-opt-in mechanism this
+# static registry doesn't track (same reason fonts' `loadFont` was never
+# here either). They used to be [imports.*] entries; removed when they
+# moved out of carbon-os and into carbon-sdk plugins.
 #   [dispatchers]   JS installs the function; RUST calls it — and calls it
 #                   from inside an eval'd JS string literal, so the name is
 #                   opaque to every tool in the toolchain.
@@ -48,29 +56,6 @@ functions = [
   "__cm_autostart_set_name",
 ]
 
-[imports.clipboard]
-source = "carbon/host/native/clipboard.rs"
-component = "os"
-functions = [
-  "__cm_clipboard_clear",
-  "__cm_clipboard_read_text",
-  "__cm_clipboard_write_text",
-]
-
-[imports.dialog]
-source = "carbon/host/native/dialog.rs"
-component = "os"
-functions = [
-  "__cm_dialog_confirm",
-  "__cm_dialog_message",
-  "__cm_dialog_open_dir",
-  "__cm_dialog_open_file",
-  "__cm_dialog_open_file_text",
-  "__cm_dialog_open_files",
-  "__cm_dialog_save_file",
-  "__cm_dialog_save_file_text",
-]
-
 [imports.fs]
 source = "carbon/host/native/fs.rs"
 component = "os"
@@ -100,15 +85,6 @@ functions = [
   "__cm_invoke_has",
 ]
 
-[imports.keychain]
-source = "carbon/host/native/keychain.rs"
-component = "os"
-functions = [
-  "__cm_keychain_delete",
-  "__cm_keychain_get",
-  "__cm_keychain_set",
-]
-
 [imports.log]
 source = "carbon/host/native/log.rs"
 component = "os"
@@ -128,13 +104,6 @@ functions = [
   "__cm_ws_connect",
   "__cm_ws_send_binary_b64",
   "__cm_ws_send_text",
-]
-
-[imports.notification]
-source = "carbon/host/native/notification.rs"
-component = "os"
-functions = [
-  "__cm_notification_send",
 ]
 
 [imports.os]

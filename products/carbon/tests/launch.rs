@@ -96,7 +96,7 @@ const EXPECTED: &[&str] = &[
     "host_imports_registered",
     "native.fs",
     "native.process",
-    "native.dialog_shell_clip_notif_autostart_winstate_keychain",
+    "native.shell_autostart_winstate",
     "native.store_pty",
     "native.os_log_invoke_window_app",
     "native.net",
