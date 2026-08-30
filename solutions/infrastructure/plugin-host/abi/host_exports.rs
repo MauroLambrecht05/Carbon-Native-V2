@@ -49,12 +49,11 @@ pub const CARBON_ERR_NO_CTX: i32 = -4;
 pub const CARBON_NOT_FOUND: i32 = -5;
 
 pub const CARBON_PLUGIN_ABI_VERSION_MAJOR: u32 = 1;
-// 3, not 2: ABI 1.3 appended clipboard_*/dialog_*/notification_send/
-// keychain_* to HostCarbonApp — see the note on those fields below and
-// carbon_plugin.h's APPEND-ONLY ZONE. (1.2 appended load_font_path/
-// load_font_bytes; 1.1 appended set_global_string/set_global_number/
-// set_global_function/eval before that.)
-pub const CARBON_PLUGIN_ABI_VERSION_MINOR: u32 = 3;
+// 4, not 3: ABI 1.4 appended global_shortcut_register/unregister. (1.3
+// appended clipboard_*/dialog_*/notification_send/keychain_*; 1.2 appended
+// load_font_path/load_font_bytes; 1.1 appended set_global_string/
+// set_global_number/set_global_function/eval before that.)
+pub const CARBON_PLUGIN_ABI_VERSION_MINOR: u32 = 4;
 
 // ── CarbonJSContext — opaque to plugins ───────────────────────────────────
 //
@@ -230,6 +229,14 @@ pub struct HostCarbonApp {
     pub keychain_delete: Option<
         unsafe extern "C" fn(app: *mut HostCarbonApp, service: *const c_char, account: *const c_char) -> i32,
     >,
+
+    // ABI 1.4. Global (OS-wide) keyboard shortcuts — see the matching note
+    // in carbon_plugin.h's APPEND-ONLY ZONE.
+    pub global_shortcut_register: Option<
+        unsafe extern "C" fn(app: *mut HostCarbonApp, accelerator: *const c_char, out_id: *mut u32) -> i32,
+    >,
+    pub global_shortcut_unregister:
+        Option<unsafe extern "C" fn(app: *mut HostCarbonApp, accelerator: *const c_char) -> i32>,
 }
 
 /// Owns the heap allocation backing the strings inside `HostCarbonApp` plus
@@ -263,6 +270,19 @@ static PROXY: Mutex<Option<EventLoopProxy<UserEvent>>> = Mutex::new(None);
 
 pub fn install_event_loop_proxy(proxy: EventLoopProxy<UserEvent>) {
     *PROXY.lock().unwrap_or_else(|e| e.into_inner()) = Some(proxy);
+}
+
+/// Push a plugin event from ANY thread, bypassing the C-ABI entirely —
+/// for native code elsewhere in this crate (e.g. global_shortcuts.rs's
+/// background listener thread) that wants the exact same delivery
+/// `host_push_event` gives a plugin, without needing a `HostCarbonApp`
+/// pointer or C-string marshaling to call it. `host_push_event` itself
+/// delegates here after doing that marshaling.
+pub fn push_plugin_event(name: String, payload: String) {
+    let proxy = PROXY.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(p) = proxy.as_ref() {
+        let _ = p.send_event(UserEvent::PluginEvent { name, payload });
+    }
 }
 
 // ── Font loading (ABI 1.2) ─────────────────────────────────────────────────
@@ -667,6 +687,33 @@ unsafe extern "C" fn host_keychain_delete(
     }
 }
 
+// ── Global keyboard shortcuts (ABI 1.4) ────────────────────────────────────
+
+unsafe extern "C" fn host_global_shortcut_register(
+    _app: *mut HostCarbonApp,
+    accelerator: *const c_char,
+    out_id: *mut u32,
+) -> i32 {
+    let Some(accelerator) = cstr_arg(accelerator) else { return CARBON_ERR_INVALID };
+    match crate::global_shortcuts::register(accelerator) {
+        Ok(id) => {
+            if !out_id.is_null() {
+                *out_id = id;
+            }
+            CARBON_OK
+        }
+        Err(_) => CARBON_ERR_GENERIC,
+    }
+}
+
+unsafe extern "C" fn host_global_shortcut_unregister(_app: *mut HostCarbonApp, accelerator: *const c_char) -> i32 {
+    let Some(accelerator) = cstr_arg(accelerator) else { return CARBON_ERR_INVALID };
+    match crate::global_shortcuts::unregister(accelerator) {
+        Ok(()) => CARBON_OK,
+        Err(_) => CARBON_ERR_GENERIC,
+    }
+}
+
 // ── Trampolines stamped into HostCarbonApp ────────────────────────────────
 
 /// `app->push_event(name, payload)` — pushes a UserEvent::PluginEvent
@@ -806,6 +853,8 @@ impl HostCarbonAppStorage {
                 keychain_set: Some(host_keychain_set),
                 keychain_get: Some(host_keychain_get),
                 keychain_delete: Some(host_keychain_delete),
+                global_shortcut_register: Some(host_global_shortcut_register),
+                global_shortcut_unregister: Some(host_global_shortcut_unregister),
             },
             _app_name: app_name_c,
             _app_version: app_version_c,

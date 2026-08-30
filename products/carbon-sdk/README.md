@@ -43,6 +43,7 @@ for the existing plan that "publish standard plugins" would plug into.
 | [`dialog`](./dialog) | Native file pickers and message boxes, including read/write-in-one-call variants that never expose a raw filesystem path to JS. |
 | [`notification`](./notification) | Desktop toast notifications through the OS notification centre. |
 | [`keychain`](./keychain) | OS credential storage (Credential Manager / Keychain Services / Secret Service), keyed by (service, account). |
+| [`global-shortcuts`](./global-shortcuts) | System-wide keyboard shortcuts that fire even when the app is unfocused or minimized (Windows/macOS/Linux-X11). |
 
 Clipboard/dialog/notification/keychain used to be always-on ambient globals
 in the core runtime (`@carbon/runtime-bindings`) — moved here so they follow

@@ -46,7 +46,7 @@ extern "C" {
  * ⇒ register but skip features the runtime doesn't advertise.
  */
 #define CARBON_PLUGIN_ABI_VERSION_MAJOR 1u
-#define CARBON_PLUGIN_ABI_VERSION_MINOR 3u
+#define CARBON_PLUGIN_ABI_VERSION_MINOR 4u
 
 /* --------------------------------------------------------------------------
  * Status codes returned by host-provided helpers
@@ -296,6 +296,26 @@ struct CarbonApp {
     int32_t (*keychain_set)(CarbonApp* app, const char* service, const char* account, const char* password);
     char* (*keychain_get)(CarbonApp* app, const char* service, const char* account, int32_t* out_status); /* out_status: CARBON_OK (found) | CARBON_NOT_FOUND | CARBON_ERR_GENERIC */
     int32_t (*keychain_delete)(CarbonApp* app, const char* service, const char* account);
+
+    /* --- ABI 1.4: global keyboard shortcuts ------------------------------
+     * Registers/unregisters a system-wide keyboard accelerator (e.g.
+     * "Ctrl+Alt+P") that fires even when the app is unfocused or
+     * minimized — backs the `global-shortcuts` carbon-sdk plugin.
+     *
+     * Firing is delivered via the EXISTING push_event mechanism, as
+     * `push_event("global-shortcut.fired", "{\"id\":<id>}")`. `out_id`,
+     * if non-NULL, receives the SAME id that event's payload will carry
+     * for this accelerator — deterministic, so re-registering the same
+     * accelerator string always yields the same id, letting a caller
+     * filter fired-events to just the accelerator it registered.
+     *
+     * Returns CARBON_OK on success, CARBON_ERR_INVALID if `accelerator`
+     * doesn't parse (see products/carbon-sdk/global-shortcuts for the
+     * accepted syntax), CARBON_ERR_GENERIC if the OS refused the
+     * registration (e.g. already taken by another app).
+     */
+    int32_t (*global_shortcut_register)(CarbonApp* app, const char* accelerator, uint32_t* out_id);
+    int32_t (*global_shortcut_unregister)(CarbonApp* app, const char* accelerator);
 };
 
 /* --------------------------------------------------------------------------

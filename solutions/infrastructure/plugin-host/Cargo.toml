@@ -67,6 +67,11 @@ rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "t
 keyring = { version = "3", default-features = false, features = ["windows-native", "apple-native", "linux-native"] }
 notify-rust = { version = "4", default-features = false, features = ["dbus"] }
 arboard = { version = "3", default-features = false }
+# Global keyboard shortcuts (Phase 2) — cross-platform via tauri-apps'
+# global-hotkey crate rather than hand-rolled per-platform Win32/Cocoa/X11
+# code, mirroring the carbon-hotkey example plugin's push_event delivery
+# pattern but with a runtime-parsed accelerator instead of one compiled in.
+global-hotkey = "0.8"
 
 # An integration test under tests/ links the crate from outside, so it sees only
 # the public API plus what is declared here — the [dependencies] above are not

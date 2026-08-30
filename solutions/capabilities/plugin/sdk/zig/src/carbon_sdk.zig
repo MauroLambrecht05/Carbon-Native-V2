@@ -267,6 +267,20 @@ pub const CarbonApp = struct {
         const f = self.raw.keychain_delete orelse return CARBON_ERR_GENERIC;
         return f(self.raw, service, account);
     }
+
+    // ── ABI 1.4: global keyboard shortcuts ─────────────────────────────────
+
+    /// `accelerator` e.g. "Ctrl+Alt+P". `out_id` receives the id that will
+    /// tag every `global-shortcut.fired` event for this accelerator.
+    pub fn globalShortcutRegister(self: CarbonApp, accelerator: [*:0]const u8, out_id: *u32) i32 {
+        const f = self.raw.global_shortcut_register orelse return CARBON_ERR_GENERIC;
+        return f(self.raw, accelerator, out_id);
+    }
+
+    pub fn globalShortcutUnregister(self: CarbonApp, accelerator: [*:0]const u8) i32 {
+        const f = self.raw.global_shortcut_unregister orelse return CARBON_ERR_GENERIC;
+        return f(self.raw, accelerator);
+    }
 };
 
 /// Compose a manifest JSON string at comptime.

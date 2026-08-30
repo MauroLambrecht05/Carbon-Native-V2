@@ -60,3 +60,5 @@ pub mod dialog;
 pub mod notification;
 #[path = "native/keychain.rs"]
 pub mod keychain;
+#[path = "native/global_shortcuts.rs"]
+pub mod global_shortcuts;
