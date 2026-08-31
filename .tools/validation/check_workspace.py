@@ -819,12 +819,26 @@ def validate_workspace(root: Path) -> bool:
             # A library is defined by being flat — pure computation with no
             # layers to name. plugin/sdk is four files at its root and
             # that is its declared shape, not drift.
+            #
+            # Two regexes, not one: Cargo.toml spells this `carbon-kind =
+            # "library"` (a flat key, first pattern), but every TS package.json
+            # in this repo nests it as `"carbon": {"kind": "library"}` — a
+            # different shape the flat-key pattern never matched, so no TS
+            # package could ever actually claim this exemption. Found for
+            # real: interface/plugins/'s wrapper files can't be moved into a
+            # subdirectory (every already-scaffolded app's tsconfig.json
+            # bakes an absolute path straight to this directory — moving a
+            # file broke real app builds), so it needs this exemption
+            # honestly, not by drifting the flat-key regex to also match
+            # nested JSON by accident.
             manifests = "".join(
                 (package / name).read_text(encoding="utf-8", errors="replace")
                 for name in ("package.json", "Cargo.toml")
                 if (package / name).is_file()
             )
-            if re.search(r'carbon[.\-_]?kind["\s:=]+"?library"?', manifests):
+            if re.search(r'carbon[.\-_]?kind["\s:=]+"?library"?', manifests) or re.search(
+                r'"carbon"\s*:\s*\{[^{}]*"kind"\s*:\s*"library"', manifests
+            ):
                 continue
 
             for entry in sorted(package.iterdir()):

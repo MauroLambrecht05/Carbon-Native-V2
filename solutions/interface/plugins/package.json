@@ -8,17 +8,10 @@
   "types": "./index.ts",
   "exports": {
     ".": "./index.ts",
-    "./fonts": "./wrappers/fonts.ts",
-    "./clipboard": "./wrappers/clipboard.ts",
-    "./dialog": "./wrappers/dialog.ts",
-    "./notification": "./wrappers/notification.ts",
-    "./keychain": "./wrappers/keychain.ts",
-    "./global-shortcuts": "./wrappers/global-shortcuts.ts",
-    "./tray": "./wrappers/tray.ts",
-    "./deep-link": "./wrappers/deep-link.ts"
+    "./fonts": "./fonts.ts"
   },
   "carbon": {
-    "kind": "presentation"
+    "kind": "library"
   },
   "peerDependencies": {
     "react": ">=18.3.0"
