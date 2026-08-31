@@ -248,3 +248,32 @@ pub(crate) fn read_plugins_section(
         }
     }
 }
+
+/// Read [dev-signing] trusted_keys from carbon.toml — the per-project trust
+/// anchors a local (unofficially-signed) plugin's artifact may verify
+/// against instead of Carbon's own key. See
+/// `carbon_core::config::DevSigningSection`'s doc comment for the full
+/// picture. Returns an empty list (trust only Carbon's key) if carbon.toml
+/// is missing, has no [dev-signing] section, or fails to parse it.
+pub(crate) fn read_dev_signing_trusted_keys(project_dir: &PathBuf) -> Vec<String> {
+    let path = project_dir.join("carbon.toml");
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(_) => return Default::default(),
+    };
+    #[derive(serde::Deserialize, Default)]
+    struct LocalCfg {
+        #[serde(default, rename = "dev-signing")]
+        dev_signing: carbon_core::config::DevSigningSection,
+    }
+    match toml::from_str::<LocalCfg>(&text) {
+        Ok(c) => c.dev_signing.trusted_keys,
+        Err(e) => {
+            eprintln!(
+                "[carbon-mini-plugin] WARNING: failed to parse [dev-signing] in {}: {e}",
+                path.display()
+            );
+            Default::default()
+        }
+    }
+}

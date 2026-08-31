@@ -41,6 +41,10 @@ USAGE:
   carbon-plugin-sign hash <artifact>...
       Print each artifact's SHA-256 content hash — the identity the
       revocation list names. No key needed.
+
+  carbon-plugin-sign pubkey [--key <path>]
+      Print an existing key's public half (hex), without generating
+      anything. Defaults to ~/.carbon/keys/plugin-signing.key.
 ";
 
 fn main() -> ExitCode {
@@ -69,6 +73,7 @@ fn run() -> Result<()> {
         "sign" => sign(&args[1..]),
         "verify" => verify(&args[1..]),
         "hash" => hash(&args[1..]),
+        "pubkey" => pubkey(&args[1..]),
         other => {
             print!("{USAGE}");
             Err(anyhow!("unknown subcommand `{other}`"))
@@ -83,6 +88,12 @@ fn keygen(args: &[String]) -> Result<()> {
     if !rest.is_empty() {
         return Err(anyhow!("keygen takes no positional arguments"));
     }
+    // A custom --out means this is NOT Carbon's own official key (that one
+    // only ever lives at the default path) — most commonly a per-developer
+    // dev-signing key (see `carbon dev-key generate`), which has nothing to
+    // do with plugin_loader.rs's hardcoded CARBON_PLUGIN_PUBLIC_KEY, so the
+    // instructions below would be actively wrong advice for it.
+    let is_official_key = flags.get("out").is_none();
     let path = match flags.get("out") {
         Some(p) => PathBuf::from(p),
         None => keyfile::default_path()?,
@@ -100,10 +111,26 @@ fn keygen(args: &[String]) -> Result<()> {
     println!("  no already-published plugin can ever be re-signed.");
     println!();
     println!("Public key (hex): {}", encode_hex(&public));
-    println!();
-    println!("Paste this into plugin_loader.rs as CARBON_PLUGIN_PUBLIC_KEY:");
-    println!();
-    println!("{}", rust_array_literal(&public));
+    if is_official_key {
+        println!();
+        println!("Paste this into plugin_loader.rs as CARBON_PLUGIN_PUBLIC_KEY:");
+        println!();
+        println!("{}", rust_array_literal(&public));
+    }
+    Ok(())
+}
+
+fn pubkey(args: &[String]) -> Result<()> {
+    let (flags, rest) = split_flags(args)?;
+    if !rest.is_empty() {
+        return Err(anyhow!("pubkey takes no positional arguments"));
+    }
+    let path = match flags.get("key") {
+        Some(p) => PathBuf::from(p),
+        None => keyfile::default_path()?,
+    };
+    let key = keyfile::read(&path)?;
+    println!("{}", encode_hex(&key.verifying_key().to_bytes()));
     Ok(())
 }
 

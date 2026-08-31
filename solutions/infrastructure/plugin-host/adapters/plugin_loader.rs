@@ -45,20 +45,22 @@
 // point is an edit to the Zig and a regenerate; this file does not change
 // until the runtime decides to CALL the new point.
 //
-// ── ON THE FIRST-PARTY ESCAPE HATCH (NOT IMPLEMENTED — DELIBERATE) ─────────
+// ── ON THE FIRST-PARTY ESCAPE HATCH ─────────────────────────────────────────
 // .local/notes/roadmap/04-security-and-capabilities/README.md's Layer 3 keeps
 // an escape hatch: "none of steps 1–7 apply to a developer's own first-party
-// plugin in their own app... unsigned, side-loaded, full power." That hatch does
-// NOT exist yet, and this loader refuses an unsigned plugin unconditionally.
+// plugin in their own app... unsigned, side-loaded, full power."
 //
-// That is the correct order to build it in. A verification gate with a bypass
-// shipped alongside it is a gate whose bypass is the thing that gets tested; a
-// gate with no bypass is one whose every consumer is now known, because they
-// all break at once. `carbon plugin build` signing a developer's own artifact
-// with a locally-generated key, and this loader accepting a per-project
-// developer key the user explicitly registered, is the shape that hatch should
-// take — an added trust anchor a human opted into, never a flag that skips the
-// check.
+// Implemented as `verify_with_trust_anchors` below: a project's own
+// carbon.toml `[dev-signing] trusted_keys` lists Ed25519 public keys
+// (printed by `carbon dev-key generate`) the project's human author has
+// explicitly opted into trusting, and SyncPluginsUseCase signs every
+// locally-built plugin's `carbon run` artifact with that dev key
+// (`solutions/capabilities/plugin/lifecycle/infrastructure/PluginSigner.ts`'s
+// `signLocalPluginArtifact`). A local plugin still needs a real, valid
+// signature — this is a SECOND trust anchor, never a flag that skips the
+// check. Deliberately NOT a bypass: an app with an empty `[dev-signing]`
+// (the default) trusts only Carbon's own key, exactly as before this
+// existed.
 
 use crate::host_exports::{HostCarbonApp, CARBON_PLUGIN_ABI_VERSION_MAJOR};
 use anyhow::{anyhow, Result};
@@ -94,6 +96,63 @@ const CARBON_PLUGIN_PUBLIC_KEY: [u8; carbon_plugin_trust::PUBLIC_KEY_LEN] = [
     0xcd, 0x6f, 0x00, 0x9e, 0xa6, 0xd8, 0x88, 0x03, //
     0x2a, 0x00, 0x33, 0xd3, 0x34, 0xf7, 0xeb, 0x85, //
 ];
+
+/// Verify `path` against Carbon's official key first; if that fails AND the
+/// project's carbon.toml `[dev-signing] trusted_keys` lists any keys, try
+/// each of those too, accepting the first that verifies.
+///
+/// This is the shape the "first-party escape hatch" was always meant to
+/// take (see `load_one`'s doc comment and .local/notes/roadmap/
+/// 04-security-and-capabilities/README.md): a SECOND, narrower trust
+/// anchor a project's own human author explicitly opted into by listing a
+/// public key in their own carbon.toml — never a flag that skips
+/// verification outright. A local plugin still needs a real, valid Ed25519
+/// signature; it just doesn't have to be Carbon's.
+///
+/// Malformed entries in `trusted_keys` (not 64 hex chars) are skipped with
+/// a loud warning rather than refusing to start the app over a typo in a
+/// trust list — the same posture `read_dev_signing_trusted_keys` already
+/// takes for a malformed `[dev-signing]` section itself.
+fn verify_with_trust_anchors(
+    path: &std::path::Path,
+    name: &str,
+    dev_trusted_keys: &[String],
+) -> Result<carbon_plugin_trust::ContentHash> {
+    let official_err = match carbon_plugin_trust::verify_artifact(path, &CARBON_PLUGIN_PUBLIC_KEY) {
+        Ok(hash) => return Ok(hash),
+        Err(e) => e,
+    };
+
+    for hex in dev_trusted_keys {
+        let Some(bytes) = carbon_plugin_trust::digest::decode_hex(hex.trim(), carbon_plugin_trust::PUBLIC_KEY_LEN) else {
+            eprintln!(
+                "[carbon-plugin] WARNING: `{name}`'s carbon.toml [dev-signing] trusted_keys \
+                 has an entry that is not {} hex characters — skipping it: {hex:?}",
+                carbon_plugin_trust::PUBLIC_KEY_LEN * 2
+            );
+            continue;
+        };
+        let mut key = [0u8; carbon_plugin_trust::PUBLIC_KEY_LEN];
+        key.copy_from_slice(&bytes);
+        if let Ok(hash) = carbon_plugin_trust::verify_artifact(path, &key) {
+            return Ok(hash);
+        }
+    }
+
+    // Neither Carbon's key nor any trusted dev key verified — surface the
+    // official-key error (the primary, expected trust anchor) rather than
+    // the last dev-key attempt's, and mention the escape hatch when the
+    // project has none configured, since that's the likely fix.
+    if dev_trusted_keys.is_empty() {
+        Err(official_err.context(
+            "no [dev-signing] trusted_keys are configured in this project's carbon.toml — \
+             a locally-built plugin needs one to load under `carbon run`. \
+             Run `carbon dev-key generate` once, then add the printed public key.",
+        ))
+    } else {
+        Err(official_err)
+    }
+}
 
 // ── Manifest schema (subset we actually validate) ─────────────────────────
 //
@@ -209,6 +268,7 @@ impl PluginRegistry {
     pub fn load_from_config(
         manifest: &AppManifest,
         grants: &BTreeMap<String, CapabilityGrant>,
+        dev_trusted_keys: &[String],
         project_dir: &Path,
         app: *mut HostCarbonApp,
     ) -> Result<Self> {
@@ -223,7 +283,7 @@ impl PluginRegistry {
                 continue;
             }
             let granted = grants.get(name).unwrap_or(&no_grant);
-            match load_one(name, granted, project_dir, &mut exclusive_claims) {
+            match load_one(name, granted, dev_trusted_keys, project_dir, &mut exclusive_claims) {
                 Ok(p) => {
                     if std::env::var_os("CARBON_MINI_DEBUG").is_some() {
                         let points: Vec<&str> = p.points().map(PointId::as_str).collect();
@@ -372,6 +432,7 @@ impl PluginRegistry {
 fn load_one(
     name: &str,
     granted_entry: &CapabilityGrant,
+    dev_trusted_keys: &[String],
     project_dir: &Path,
     exclusive_claims: &mut BTreeMap<PointId, String>,
 ) -> Result<LoadedPlugin> {
@@ -394,22 +455,18 @@ fn load_one(
     // Both steps are refusals, never panics: the inputs are a `.dll` and a
     // `.sig` that, by assumption, someone else put there.
     //
-    // CARBON_ALLOW_UNSIGNED_PLUGINS is the deliberate first-party escape
-    // hatch this gate was always meant to have — see .local/notes/roadmap/
-    // 04-security-and-capabilities/README.md, "Escape hatch, deliberately
-    // preserved": a developer's own local-source plugin (built and staged by
-    // SyncPluginsUseCase on every `carbon dev`/`carbon run`, with no manual
-    // sign step) is not going through Carbon's public trust channel at all.
-    // Only `carbon dev` sets this env var (see dev.command.ts) — that
-    // command builds fast unsigned Debug plugins for the local edit/reload
-    // loop. `carbon run` deliberately never sets it: it builds
-    // `release: true` plugins (see run.command.ts's syncPlugins), the same
-    // artifact a distributed build ships, and that artifact must carry a
-    // real signature like any other. This is an explicit opt-in a human's
-    // own CLI invocation makes, never a flag baked into a shipped binary,
-    // and it still prints loudly rather than silently accepting the plugin.
+    // CARBON_ALLOW_UNSIGNED_PLUGINS is `carbon dev`'s escape hatch for the
+    // fast, unsigned Debug edit/reload loop — see dev.command.ts, the one
+    // place this env var is ever set. `carbon run`'s `release: true`
+    // artifact (see run.command.ts's syncPlugins) never gets that bypass:
+    // it must carry a real signature — either Carbon's own, or a
+    // project-trusted dev key (see `verify_with_trust_anchors`), which is
+    // the actual first-party escape hatch for a developer's own
+    // `carbon/plugins/local/<name>/` plugin. That hatch is a second trust
+    // anchor a human explicitly opted into via their own carbon.toml, never
+    // a flag that skips the check outright.
     if std::env::var_os("CARBON_ALLOW_UNSIGNED_PLUGINS").is_some() {
-        match carbon_plugin_trust::verify_artifact(&path, &CARBON_PLUGIN_PUBLIC_KEY) {
+        match verify_with_trust_anchors(&path, name, dev_trusted_keys) {
             Ok(content_hash) => {
                 carbon_plugin_trust::ensure_not_revoked(&content_hash)?;
                 if debug {
@@ -422,14 +479,14 @@ fn load_one(
                 // startup noise, and this must stay loud however quiet
                 // everything else gets.
                 eprintln!(
-                    "[carbon-plugin] WARNING: `{name}` has no valid Carbon signature ({e}) — \
+                    "[carbon-plugin] WARNING: `{name}` has no valid signature ({e:#}) — \
                      loading anyway because CARBON_ALLOW_UNSIGNED_PLUGINS is set. This must \
                      never be set for a distributed build."
                 );
             }
         }
     } else {
-        let content_hash = carbon_plugin_trust::verify_artifact(&path, &CARBON_PLUGIN_PUBLIC_KEY)?;
+        let content_hash = verify_with_trust_anchors(&path, name, dev_trusted_keys)?;
         carbon_plugin_trust::ensure_not_revoked(&content_hash)?;
         if debug {
             eprintln!("[carbon-plugin] `{name}` signature OK — {content_hash}");
@@ -658,3 +715,92 @@ fn resolve_plugin_path(name: &str, project_dir: &Path) -> Result<PathBuf> {
 // Suppress unused-import warnings under cfgs that don't need c_void.
 #[allow(dead_code)]
 fn _force_use_c_void(_: *mut c_void) {}
+
+#[cfg(test)]
+mod trust_anchor_tests {
+    use super::verify_with_trust_anchors;
+    use carbon_plugin_trust::digest::encode_hex;
+    use carbon_plugin_trust::signing::sign_artifact;
+    use ed25519_dalek::SigningKey;
+    use std::fs;
+
+    // Fixed TEST seeds — never Carbon's real key, never used outside this
+    // process. Distinct from each other so "wrong key" cases are real
+    // mismatches, not coincidental equality.
+    fn dev_key() -> SigningKey {
+        SigningKey::from_bytes(&[11u8; 32])
+    }
+    fn other_key() -> SigningKey {
+        SigningKey::from_bytes(&[22u8; 32])
+    }
+
+    fn temp_artifact(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "carbon-plugin-loader-trust-test-{}-{}-{name}",
+            std::process::id(),
+            fastrand_ish(),
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(format!("{name}.dll"));
+        fs::write(&path, b"pretend this is a compiled plugin").unwrap();
+        path
+    }
+
+    // No rand dependency for one throwaway disambiguator — a nanosecond
+    // timestamp is unique enough to keep parallel test runs from colliding
+    // on the same temp directory.
+    fn fastrand_ish() -> u128 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    }
+
+    #[test]
+    fn refuses_when_no_dev_keys_are_configured() {
+        let artifact = temp_artifact("no-trust-list");
+        sign_artifact(&artifact, &dev_key()).unwrap();
+
+        // Signed with a real key, but carbon.toml lists none as trusted —
+        // Carbon's official key is the only anchor tried, and this isn't
+        // signed with that, so it must refuse.
+        let err = verify_with_trust_anchors(&artifact, "test-plugin", &[]).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("[dev-signing]"),
+            "expected the empty-trust-list hint in the error, got: {err:#}"
+        );
+    }
+
+    #[test]
+    fn accepts_a_signature_from_a_listed_dev_key() {
+        let artifact = temp_artifact("trusted");
+        sign_artifact(&artifact, &dev_key()).unwrap();
+        let trusted = vec![encode_hex(&dev_key().verifying_key().to_bytes())];
+
+        assert!(verify_with_trust_anchors(&artifact, "test-plugin", &trusted).is_ok());
+    }
+
+    #[test]
+    fn refuses_a_signature_from_a_key_not_on_the_list() {
+        let artifact = temp_artifact("untrusted-signer");
+        sign_artifact(&artifact, &other_key()).unwrap();
+        // Only dev_key()'s public half is trusted — other_key() signed this.
+        let trusted = vec![encode_hex(&dev_key().verifying_key().to_bytes())];
+
+        assert!(verify_with_trust_anchors(&artifact, "test-plugin", &trusted).is_err());
+    }
+
+    #[test]
+    fn a_malformed_trusted_key_entry_is_skipped_not_a_panic() {
+        let artifact = temp_artifact("malformed-entry");
+        sign_artifact(&artifact, &dev_key()).unwrap();
+        let trusted = vec![
+            "not-64-hex-chars".to_string(),
+            encode_hex(&dev_key().verifying_key().to_bytes()),
+        ];
+
+        // The malformed first entry must not stop the real one after it from
+        // being tried.
+        assert!(verify_with_trust_anchors(&artifact, "test-plugin", &trusted).is_ok());
+    }
+}

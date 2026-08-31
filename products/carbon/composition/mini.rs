@@ -486,9 +486,11 @@ fn main() -> Result<()> {
     let app_ptr = host_app.raw();
     let app_manifest = read_app_manifest(&project_dir);
     let capability_grants = read_plugins_section(&project_dir);
+    let dev_trusted_keys = read_dev_signing_trusted_keys(&project_dir);
     let mut plugin_registry = plugin_loader::PluginRegistry::load_from_config(
         &app_manifest,
         &capability_grants,
+        &dev_trusted_keys,
         &project_dir,
         app_ptr,
     )

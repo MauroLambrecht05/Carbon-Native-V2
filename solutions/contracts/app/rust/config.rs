@@ -20,6 +20,11 @@ pub struct Config {
     /// manifest-declared plugin still loads — just with zero capabilities.
     #[serde(default)]
     pub plugins: PluginsSection,
+    /// Per-project trust anchors for locally-built plugins — see
+    /// [`DevSigningSection`]. Absent means "trust only Carbon's own
+    /// official signing key," the same as before this section existed.
+    #[serde(default, rename = "dev-signing")]
+    pub dev_signing: DevSigningSection,
 }
 
 /// Selects which carbon backend executes the app. The CLI reads this to pick
@@ -248,4 +253,31 @@ pub struct AppManifestEntry {
 pub enum PluginSource {
     Local,
     Vendor,
+}
+
+// ─── Dev-signing trust anchors ──────────────────────────────────────────────
+//
+// A developer's own `carbon/plugins/local/<name>/` plugin does not go
+// through Carbon's public trust channel — see plugin_loader.rs's
+// "ON THE FIRST-PARTY ESCAPE HATCH" comment and .local/notes/roadmap/
+// 04-security-and-capabilities/README.md's "Escape hatch, deliberately
+// preserved". The shape that hatch takes: `carbon run` signs a local
+// plugin's release artifact with a developer-generated key (`carbon
+// dev-key generate`, never Carbon's own private key), and the loader
+// accepts a signature from ANY key hex-listed here — a second, narrower
+// trust anchor the project's own human author explicitly opted into,
+// never a flag that skips verification outright.
+//
+//     [dev-signing]
+//     trusted_keys = ["<64-hex-char Ed25519 public key>"]
+//
+// Each entry is one machine's dev public key (printed by `carbon dev-key
+// generate`) — a team lists every teammate's key that is allowed to ship a
+// local plugin this project loads. An absent or empty section means the
+// project trusts only Carbon's own official key, same as before this
+// existed.
+#[derive(Debug, Default, Deserialize)]
+pub struct DevSigningSection {
+    #[serde(default)]
+    pub trusted_keys: Vec<String>,
 }

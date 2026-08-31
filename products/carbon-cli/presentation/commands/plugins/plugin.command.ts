@@ -18,10 +18,14 @@ import {
   type ExitCode,
 } from "@carbon/cli";
 import {
+  devSigningKeyPath,
   forwardSlashes,
+  generateDevSigningKey,
+  hasDevSigningKey,
   MissingSigningKeyError,
   PluginError,
   pluginUseCases,
+  readDevSigningPublicKey,
   setManifestEnabled,
 } from "@carbon/lifecycle";
 import { PRODUCTS_DIR } from "@carbon/workspace";
@@ -364,10 +368,41 @@ class InfoPluginCommand extends Command {
   }
 }
 
+class DevKeyCommand extends Command {
+  readonly meta: CommandMeta = {
+    name: "dev-key",
+    summary: "Generate (or show) this machine's local-plugin dev-signing key",
+    usage: "plugin dev-key",
+    examples: ["carbon plugin dev-key"],
+  };
+
+  execute(ctx: CommandContext): Promise<ExitCode> {
+    return reporting(ctx, async () => {
+      const existed = hasDevSigningKey();
+      const hex = existed ? await readDevSigningPublicKey(ctx.io) : await generateDevSigningKey(ctx.io);
+
+      if (existed) {
+        ctx.io.info(`dev-signing key already exists at ${ctx.io.c.dim(forwardSlashes(devSigningKeyPath()))}`);
+      } else {
+        ctx.io.success(`dev-signing key generated at ${ctx.io.c.dim(forwardSlashes(devSigningKeyPath()))}`);
+      }
+      ctx.io.raw("");
+      ctx.io.raw(`public key: ${hex}`);
+      ctx.io.raw("");
+      ctx.io.info("add it to every project's carbon.toml that should load this machine's locally-built plugins:");
+      ctx.io.raw("");
+      ctx.io.raw("  [dev-signing]");
+      ctx.io.raw(`  trusted_keys = ["${hex}"]`);
+      ctx.io.raw("");
+      return EXIT_OK;
+    });
+  }
+}
+
 export class PluginCommand extends CommandGroup {
   readonly meta: CommandMeta = {
     name: "plugin",
-    summary: "Manage native plugins (new / add / build / check / install / enable / disable / list / info)",
+    summary: "Manage native plugins (new / add / build / check / install / enable / disable / list / info / dev-key)",
     usage: "plugin <subcommand> [options]",
     examples: ["carbon plugin add fonts", "carbon plugin new my-plugin", "carbon plugin list"],
   };
@@ -382,6 +417,7 @@ export class PluginCommand extends CommandGroup {
     new DisablePluginCommand(),
     new ListPluginsCommand(),
     new InfoPluginCommand(),
+    new DevKeyCommand(),
   ];
 }
 

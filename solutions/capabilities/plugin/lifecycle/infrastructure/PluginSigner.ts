@@ -112,3 +112,100 @@ export async function signStandardPluginArtifact(artifactPath: string, logger: L
     throw new Error(`carbon-plugin-sign failed (exit ${code})`);
   }
 }
+
+// ── Developer (first-party local plugin) signing key ────────────────────────
+//
+// A SEPARATE key from Carbon's own — see plugin_loader.rs's
+// "ON THE FIRST-PARTY ESCAPE HATCH" and .local/notes/roadmap/
+// 04-security-and-capabilities/README.md. A developer's own
+// carbon/plugins/local/<name>/ plugin is not part of Carbon's public trust
+// channel, so it is never signed with Carbon's key — instead, `carbon run`
+// signs it with THIS per-developer key, and the loader accepts that
+// signature only for a project whose own carbon.toml `[dev-signing]
+// trusted_keys` explicitly lists this key's public half (printed by
+// `carbon dev-key generate`, which mints this file).
+
+/** `~/.carbon/keys/dev-signing.key` (`%USERPROFILE%` on Windows) — must
+ *  match `carbon dev-key generate`'s `--out` and keyfile.rs's format. */
+export function devSigningKeyPath(): string {
+  return join(homedir(), ".carbon", "keys", "dev-signing.key");
+}
+
+export function hasDevSigningKey(): boolean {
+  return existsSync(devSigningKeyPath());
+}
+
+export class MissingDevSigningKeyError extends Error {
+  constructor() {
+    super(
+      `no dev-signing key found at ${devSigningKeyPath()}.\n` +
+        `  A locally-built plugin (carbon/plugins/local/<name>/) needs one to load\n` +
+        `  under \`carbon run\` — run \`carbon dev-key generate\` once, then add the\n` +
+        `  printed public key to this project's carbon.toml under [dev-signing].`,
+    );
+    this.name = "MissingDevSigningKeyError";
+  }
+}
+
+/**
+ * Signs `artifactPath` in place (writes `<artifactPath>.sig` beside it)
+ * with this machine's dev-signing key — NEVER Carbon's own. Throws
+ * {@link MissingDevSigningKeyError} if no dev key exists yet; unlike
+ * {@link signStandardPluginArtifact} this is not unconditionally fatal to
+ * the caller — see SyncPluginsUseCase, which warns once and leaves the
+ * plugin unsigned rather than failing the whole `carbon run` over a
+ * one-time setup step nobody has done yet.
+ */
+export async function signLocalPluginArtifact(artifactPath: string, logger: Logger): Promise<void> {
+  if (!hasDevSigningKey()) throw new MissingDevSigningKeyError();
+
+  const tool = await ensureSignTool(logger);
+  const { code, stderr } = await spawnRun(
+    tool,
+    ["sign", artifactPath, "--key", devSigningKeyPath()],
+    { stdio: "pipe" },
+  );
+  if (code !== 0) {
+    if (stderr) logger.raw(stderr.trimEnd());
+    throw new Error(`carbon-plugin-sign failed (exit ${code})`);
+  }
+}
+
+const PUBLIC_KEY_HEX_LINE = /Public key \(hex\): ([0-9a-f]{64})/;
+
+/**
+ * Mint this machine's dev-signing key at {@link devSigningKeyPath} if one
+ * doesn't already exist, and return its public half (hex). Refuses to
+ * overwrite an existing key — the same posture `carbon-plugin-sign keygen`
+ * itself has, which this shells out to (see keyfile.rs's `write`).
+ */
+export async function generateDevSigningKey(logger: Logger): Promise<string> {
+  const tool = await ensureSignTool(logger);
+  const { code, stdout, stderr } = await spawnRun(
+    tool,
+    ["keygen", "--out", devSigningKeyPath()],
+    { stdio: "pipe" },
+  );
+  if (code !== 0) {
+    if (stderr) logger.raw(stderr.trimEnd());
+    throw new Error(`carbon-plugin-sign keygen failed (exit ${code})`);
+  }
+  const match = stdout?.match(PUBLIC_KEY_HEX_LINE);
+  if (!match) throw new Error("carbon-plugin-sign keygen succeeded but printed no public key line");
+  return match[1]!;
+}
+
+/** Read back the public half (hex) of this machine's existing dev-signing key. */
+export async function readDevSigningPublicKey(logger: Logger): Promise<string> {
+  const tool = await ensureSignTool(logger);
+  const { code, stdout, stderr } = await spawnRun(
+    tool,
+    ["pubkey", "--key", devSigningKeyPath()],
+    { stdio: "pipe" },
+  );
+  if (code !== 0) {
+    if (stderr) logger.raw(stderr.trimEnd());
+    throw new Error(`carbon-plugin-sign pubkey failed (exit ${code})`);
+  }
+  return stdout?.trim() ?? "";
+}

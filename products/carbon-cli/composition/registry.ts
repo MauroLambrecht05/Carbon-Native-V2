@@ -79,7 +79,7 @@ export function buildRegistry(): CommandRegistry {
     defineCommand(
       {
         name: "plugin",
-        summary: "Manage native plugins (new / add / build / check / install / enable / disable / list / info)",
+        summary: "Manage native plugins (new / add / build / check / install / enable / disable / list / info / dev-key)",
         usage: "plugin <subcommand> [options]",
       },
       async () => new (await import("../presentation/commands/plugins/plugin.command.ts")).PluginCommand(),

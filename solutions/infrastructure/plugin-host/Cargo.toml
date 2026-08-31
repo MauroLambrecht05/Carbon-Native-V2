@@ -96,6 +96,10 @@ winreg = "0.56"
 carbon-core = { path = "../../contracts/app/rust" }
 carbon-plugin-contract = { path = "../../contracts/plugin/rust" }
 carbon-plugin-trust = { path = "../../capabilities/plugin/trust/rust" }
+# Only for constructing test SigningKeys in plugin_loader.rs's own
+# verify_with_trust_anchors tests — production code never touches this type
+# directly, only the raw [u8; 32] carbon_plugin_trust::verify_artifact takes.
+ed25519-dalek = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { version = "0.8", default-features = false, features = ["parse"] }

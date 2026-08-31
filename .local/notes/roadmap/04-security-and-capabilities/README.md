@@ -57,6 +57,25 @@ draft decision (`network-security-stance.md`'s "no ambient fetch" stance) and wh
   `an_unsigned_plugin_is_refused` go from refused to loaded.
   (`solutions/capabilities/plugin/trust/rust/`,
   `solutions/infrastructure/plugin-host/adapters/plugin_loader.rs`)
+- **The first-party escape hatch itself** (Layer 3's "Escape hatch, deliberately
+  preserved" — previously `carbon run` against an app with a local plugin simply
+  failed to load it, a known gap this closes): `carbon plugin dev-key` mints a
+  per-developer Ed25519 key at `~/.carbon/keys/dev-signing.key` (via
+  `carbon-plugin-sign keygen --out`, reused as-is) and prints its public half for
+  a human to paste into a project's own carbon.toml `[dev-signing] trusted_keys`
+  — an explicit, project-scoped opt-in, never a bypass. `SyncPluginsUseCase`
+  signs every locally-built plugin's `carbon run` (`release: true`) artifact with
+  that key; `plugin_loader.rs`'s `verify_with_trust_anchors` tries Carbon's
+  official key first, then each configured dev key, accepting the first that
+  verifies — still a real Ed25519 signature check either way, just a second
+  trust anchor. `carbon dev`'s unsigned Debug loop is unaffected. Verified
+  end-to-end against `labs/examples/pulse` (3 local plugins): refused with a
+  clear message before `[dev-signing]` was added, all 3 loaded with signatures
+  verified after. (`solutions/capabilities/plugin/lifecycle/infrastructure/
+  PluginSigner.ts`, `.../application/usecases/SyncPluginsUseCase.ts`,
+  `solutions/contracts/app/rust/config.rs`'s `DevSigningSection`,
+  `solutions/infrastructure/plugin-host/adapters/plugin_loader.rs`,
+  `products/carbon-cli/presentation/commands/plugins/plugin.command.ts`)
 - The Zig import-table denylist checker (Layer 3 step 3), `carbon-import-check`,
   merged into the same `carbon-plugin-trust` crate (`domain/import_policy.rs` +
   `application/import_check.rs` + `tools/import_check.rs`): a module denylist
