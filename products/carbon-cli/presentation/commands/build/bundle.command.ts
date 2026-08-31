@@ -86,7 +86,13 @@ export class BundleCommand extends Command {
       // package, and a definition pointing at a missing binary is worse than
       // an error — it fails later, in the packaging tool, further from the
       // cause.
-      const binary = resolveBackendBinary(config.runtime.backend);
+      //
+      // `process.cwd()` (same base loadConfig() just resolved carbon.toml
+      // against) is passed through so a static-plugins release build's
+      // per-app dist/<crate> binary (see distBinaryPath) is found — the
+      // shared workspace path a bare `resolveBackendBinary(backend)` checks
+      // is where a DYNAMIC build's binary lives, never a static one's.
+      const binary = resolveBackendBinary(config.runtime.backend, process.cwd());
       if (!binary) {
         ctx.io.error(
           `no runtime binary for the ${config.runtime.backend} backend — run \`carbon build\` first`,

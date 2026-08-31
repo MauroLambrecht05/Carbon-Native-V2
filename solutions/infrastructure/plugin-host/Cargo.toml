@@ -33,6 +33,17 @@ path = "lib.rs"
 [lints]
 workspace = true
 
+[features]
+# Off by default: today's dlopen/dlsym/Ed25519 loader (adapters/
+# plugin_loader.rs), unconditionally correct for `carbon dev` and a
+# standalone `carbon plugin build`. On: swaps `plugin_loader` for
+# adapters/plugin_loader_static.rs — extern "C" calls straight into a
+# generated umbrella statically linked into this same binary at build time
+# by `carbon build --release`, no dlopen/dlsym/signature-check machinery
+# compiled in at all. See lib.rs's `pub mod plugin_loader` cfg and
+# plugin_loader_static.rs's header comment.
+static-plugins = []
+
 [dependencies]
 carbon-runtime-contract = { path = "../../contracts/runtime/rust" }
 # carbon-core supplies the [plugins] section of carbon.toml that the loader

@@ -47,35 +47,38 @@ pub const CFG = sdk.manifest.Config{
 
 const MANIFEST = sdk.manifest.build(CFG);
 
-export fn carbon_plugin_manifest() callconv(.c) [*:0]const u8 {
+pub fn carbon_plugin_manifest() callconv(.c) [*:0]const u8 {
     return MANIFEST;
+}
+comptime {
+    sdk.ext.implementManifest(carbon_plugin_manifest);
 }
 
 var g_app: ?sdk.CarbonApp = null;
 
 // ── lifecycle.register / lifecycle.after_reload ─────────────────────────────
+//
+// `pub`, not a bare `fn`: see sdk.ext.implement's doc comment — a static
+// release build's generated umbrella reaches these through `@import`, which
+// only works for `pub` declarations.
 
-comptime {
-    const point = sdk.ext.expect("lifecycle.register");
-    std.debug.assert(std.mem.eql(u8, point.symbol, "carbon_plugin_register"));
-}
-
-export fn carbon_plugin_register(app_raw: *sdk.RawApp) callconv(.c) void {
+pub fn carbon_plugin_register(app_raw: *sdk.RawApp) callconv(.c) void {
     const app = sdk.CarbonApp.fromRaw(app_raw);
     if (!app.abiCompatible()) return;
     g_app = app;
     installGlobals(app);
 }
-
 comptime {
-    const point = sdk.ext.expect("lifecycle.after_reload");
-    std.debug.assert(std.mem.eql(u8, point.symbol, "carbon_plugin_after_reload"));
+    sdk.ext.implement("lifecycle.register", carbon_plugin_register);
 }
 
-export fn carbon_plugin_after_reload(app_raw: *sdk.RawApp) callconv(.c) void {
+pub fn carbon_plugin_after_reload(app_raw: *sdk.RawApp) callconv(.c) void {
     const app = sdk.CarbonApp.fromRaw(app_raw);
     g_app = app;
     installGlobals(app);
+}
+comptime {
+    sdk.ext.implement("lifecycle.after_reload", carbon_plugin_after_reload);
 }
 
 fn installGlobals(app: sdk.CarbonApp) void {

@@ -50,7 +50,19 @@
 // prebuilt binaries were compiled against.
 #[path = "abi/host_exports.rs"]
 pub mod host_exports;
+// Two mutually-exclusive implementations of the SAME module path, picked by
+// the `static-plugins` Cargo feature — `carbon-mini`/`carbon-blitz`'s own
+// code (composition/mini.rs, run_loop.rs) calls `plugin_loader::
+// PluginRegistry` and never needs to know which one it got. Off (default):
+// today's dlopen/dlsym/Ed25519 pipeline, what `carbon dev` and a standalone
+// `carbon plugin build` always use. On: the statically-linked release
+// counterpart — see plugin_loader_static.rs's header comment for why it can
+// be so much shorter.
+#[cfg(not(feature = "static-plugins"))]
 #[path = "adapters/plugin_loader.rs"]
+pub mod plugin_loader;
+#[cfg(feature = "static-plugins")]
+#[path = "adapters/plugin_loader_static.rs"]
 pub mod plugin_loader;
 #[path = "native/clipboard.rs"]
 pub mod clipboard;

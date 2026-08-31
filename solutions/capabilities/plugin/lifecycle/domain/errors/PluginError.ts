@@ -68,3 +68,42 @@ export class UnknownStandardPluginError extends PluginError {
     );
   }
 }
+
+/** `carbon build --release`'s static-link path: the same problems
+ *  PreflightPluginsUseCase would only WARN about (a plugin the dynamic
+ *  loader would silently skip at every launch) instead fail the build —
+ *  see StaticLinkPluginsUseCase's own header comment for why that's the
+ *  right tradeoff for a release artifact. */
+export class StaticLinkValidationError extends PluginError {
+  readonly kind = "static-link-validation";
+  constructor(readonly problems: readonly { plugin: string; message: string; fix?: string }[]) {
+    super(
+      `${problems.length} plugin problem(s) would prevent a static release build:\n` +
+        problems
+          .map((p) => `  [plugins.${p.plugin}] ${p.message}${p.fix ? ` (fix: ${p.fix})` : ""}`)
+          .join("\n"),
+    );
+  }
+}
+
+/** Two enabled plugins both declare the same `arity = exclusive` extension
+ *  point — mirrors plugin_loader.rs's runtime `exclusive_claims` refusal,
+ *  just caught at build time instead of load order deciding a winner. */
+export class ExclusivePointConflictError extends PluginError {
+  readonly kind = "exclusive-point-conflict";
+  constructor(readonly point: string, readonly claimants: readonly string[]) {
+    super(
+      `"${point}" is an exclusive extension point and more than one enabled plugin implements it: ` +
+        `${claimants.join(", ")}. Disable one of them in carbon/manifest.toml.`,
+    );
+  }
+}
+
+/** The generated umbrella failed to build — a `zig build` failure inside
+ *  the umbrella directory, not a validation problem. */
+export class StaticUmbrellaBuildError extends PluginError {
+  readonly kind = "static-umbrella-build-failed";
+  constructor(readonly exitCode: number) {
+    super(`the static plugin umbrella failed to build — zig build exited with code ${exitCode}. See the compiler output above.`);
+  }
+}

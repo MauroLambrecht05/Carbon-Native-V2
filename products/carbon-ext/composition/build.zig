@@ -20,6 +20,22 @@
 
 const std = @import("std");
 
+/// Whether a plugin's extension-point functions are real, globally-exported
+/// C symbols (`.dynamic`, the default — one plugin per .dll/.so/.dylib,
+/// dlopen'd at runtime) or plain module-scoped Zig functions (`.static` — no
+/// export at all, meant to be called directly through a generated umbrella
+/// module that `@import`s several plugins into one statically-linked release
+/// binary). See `sdk.ext.implement`/`implementManifest` in
+/// extension_points.zig, which is what actually branches on this.
+///
+/// A plugin's OWN build.zig never sets this directly — the app-level release
+/// build tooling passes `.plugin_linkage = .static` into every enabled
+/// plugin's `b.dependency("carbon-plugin-sdk", .{...})` call when generating
+/// the umbrella; every plugin's standalone build.zig (unchanged, still
+/// `.linkage = .dynamic`) and `carbon dev`'s per-plugin pipeline never pass
+/// it, so they get today's real-export behaviour with no changes needed.
+pub const LinkageMode = enum { dynamic, static };
+
 /// The SDK's implementation, in solutions.
 const SRC = "../../../solutions/capabilities/plugin/sdk/zig/src";
 
@@ -33,6 +49,19 @@ const INCLUDE = "../presentation/include";
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const linkage_mode = b.option(
+        LinkageMode,
+        "plugin-linkage",
+        "Do extension-point implementations export real C symbols (dynamic, " ++
+            "default) or stay module-scoped for an umbrella static build (static)?",
+    ) orelse .dynamic;
+
+    // Exposed to the SDK source as `@import("carbon_plugin_linkage").mode` —
+    // see `sdk.ext.implement`/`implementManifest`, the only two places that
+    // read it.
+    const linkage_opts = b.addOptions();
+    linkage_opts.addOption(LinkageMode, "mode", linkage_mode);
+    const linkage_mod = linkage_opts.createModule();
 
     // The registry, as an importable module. Named `carbon_extension_points`
     // because that is what src/extension_points.zig imports.
@@ -54,6 +83,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     carbon_sdk_mod.addImport("carbon_extension_points", registry_mod);
+    carbon_sdk_mod.addImport("carbon_plugin_linkage", linkage_mod);
     carbon_sdk_mod.addIncludePath(b.path(INCLUDE));
 
     // Build a tiny library so `zig build` from here checks compilation.
@@ -71,6 +101,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     lib_mod.addImport("carbon_extension_points", registry_mod);
+    lib_mod.addImport("carbon_plugin_linkage", linkage_mod);
     lib_mod.addIncludePath(b.path(INCLUDE));
 
     const lib = b.addLibrary(.{
@@ -90,6 +121,7 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
     });
     tests_mod.addImport("carbon_extension_points", registry_mod);
+    tests_mod.addImport("carbon_plugin_linkage", linkage_mod);
     tests_mod.addIncludePath(b.path(INCLUDE));
 
     const tests = b.addTest(.{ .root_module = tests_mod });

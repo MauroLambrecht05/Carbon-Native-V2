@@ -12,7 +12,7 @@
 // knows that a cache was hit; whether that reads green is the caller's
 // decision, and a CI adapter emitting JSON has no answer for `c.green`.
 
-import { existsSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 // vite is dynamic-imported inside `buildVite` so cache-hit `carbon build`
 // runs do not pay the ~200 ms vite + rollup module-evaluation cost.
@@ -26,7 +26,7 @@ import {
   writeCache,
 } from "../../infrastructure/BuildCache.ts";
 import { installIsCurrent, installKey, writeInstallStamp } from "../../infrastructure/InstallState.ts";
-import { resolveBackendBinary, runtimeBinaryPath, runtimeCargoDir, SCRIPTS_DIR, TARGET_DIR, supportsMiniBytecode, usesMiniBundlePipeline } from "@carbon/workspace";
+import { distBinaryPath, resolveBackendBinary, runtimeBinaryPath, runtimeCargoDir, SCRIPTS_DIR, TARGET_DIR, supportsMiniBytecode, usesMiniBundlePipeline } from "@carbon/workspace";
 import { backendCargoFeatures, type BackendName, type RuntimeFeatureFlags } from "@carbon/contracts/app/backend";
 
 /**
@@ -120,14 +120,43 @@ export async function ensureRuntime(
   backend: BackendName,
   logger: Logger,
   flags: RuntimeFeatureFlags = {},
-  opts: { quiet?: boolean } = {},
+  opts: { quiet?: boolean; force?: boolean; projectDir?: string } = {},
 ): Promise<string> {
+  // `flags.staticPlugins` binaries are NOT generic across apps (each one has
+  // one specific app's plugins compiled in), so they cannot share
+  // runtimeBinaryPath's single workspace-wide location the way a dynamic
+  // build's binary safely does — see distBinaryPath's own doc comment for
+  // the full reasoning. `opts.projectDir` is required whenever
+  // `flags.staticPlugins` is set; every other caller omits it and gets
+  // exactly today's shared-path behavior.
+  if (flags.staticPlugins && !opts.projectDir) {
+    throw new Error(
+      "ensureRuntime: flags.staticPlugins requires opts.projectDir — a static-plugins binary is " +
+        "per-app and cannot be resolved from the shared workspace target directory alone.",
+    );
+  }
+
   // Search dist before release (resolveBackendBinary's order) rather than
   // hardcoding runtimeBinaryPath's "release" default — a dist-only build
   // (no release binary at all) must still resolve to the binary that
   // actually exists, not a path nothing was ever written to.
-  const existing = resolveBackendBinary(backend);
+  //
+  // `opts.force` skips this reuse check entirely. Needed for
+  // `flags.staticPlugins`: unlike every other flag here, WHICH plugins are
+  // linked in is per-app and can change between builds with no change to
+  // this crate's own Rust source or Cargo features — the one thing this
+  // cache key (backend + feature list, implicitly, via cargo's own
+  // incremental state) does not capture at all. A cached binary from an
+  // earlier plugin set on this same app would otherwise be silently reused.
+  const existing = opts.force ? null : resolveBackendBinary(backend, opts.projectDir);
   if (existing) return existing;
+  // The shared path is still where CARGO itself writes and caches — that
+  // part is unaffected either way, and reusing it keeps cargo's own
+  // incremental-compile state warm between static-plugins builds too. What
+  // changes is what this function RETURNS: for a static build, the shared
+  // path is copied into the app's own dist/ (see below) and that copy,
+  // never the shared path, is the answer callers get and everything
+  // downstream (bundle.command.ts) resolves against.
   const exe = runtimeBinaryPath(backend);
 
   logger.step(`compiling native runtime for ${backend} (first run only — this can take a few minutes)…`);
@@ -159,8 +188,33 @@ export async function ensureRuntime(
           "-NoProfile",
           "-ExecutionPolicy",
           "Bypass",
-          "-Command",
-          `. "${join(SCRIPTS_DIR, "automation", "bootstrap", "activate-msvc.ps1")}"; cargo ${cargoArgs.join(" ")}`,
+          // `-EncodedCommand` (base64 UTF-16LE), NOT `-Command` with a raw
+          // string. Found and fixed while testing static-plugins release
+          // builds for real (a real cargo compile, not a cache hit — the
+          // common case this pipeline hits every day, since the runtime
+          // binary is normally already built): NodeProcessRunner's Windows
+          // `shell:true` path quotes every argument with CMD.EXE's `""`
+          // convention (doubling an embedded `"`) before joining them with
+          // spaces for `cmd.exe /c`. That convention is right for cmd.exe's
+          // OWN tokenizer but wrong for how a child process's argv is
+          // actually parsed (the CommandLineToArgvW convention `\"` most
+          // Win32/.NET programs — powershell.exe included — use), so a
+          // `-Command` value containing its own `"..."` (this one always
+          // does, quoting activate-msvc.ps1's path) came out corrupted:
+          // PowerShell then failed parsing ITS OWN script text with "The
+          // string is missing the terminator". Confirmed by reproducing
+          // with `flags.staticPlugins` OFF and nothing plugin-related
+          // involved — genuinely pre-existing, not introduced by this
+          // feature. `-EncodedCommand`'s value is pure base64 — no spaces,
+          // quotes, or shell metacharacters at all — so it passes through
+          // every quoting layer (cmd.exe's join, PowerShell's own argv
+          // parse) completely unmolested regardless of what the decoded
+          // script text contains.
+          "-EncodedCommand",
+          Buffer.from(
+            `. "${join(SCRIPTS_DIR, "automation", "bootstrap", "activate-msvc.ps1")}"; cargo ${cargoArgs.join(" ")}`,
+            "utf16le",
+          ).toString("base64"),
         ],
         { cwd: dir, env: cargoEnv, stdio },
       )
@@ -176,6 +230,17 @@ export async function ensureRuntime(
     throw new Error(`cargo finished but binary not at expected path: ${exe}`);
   }
   if (opts.quiet) logger.step(`runtime binary built`);
+
+  if (flags.staticPlugins) {
+    // Durable, per-app record of what THIS app ships — see distBinaryPath's
+    // doc comment. Copied (not moved): the shared path stays intact as
+    // cargo's own build/cache location for the next invocation.
+    const dist = distBinaryPath(opts.projectDir!, backend);
+    mkdirSync(join(opts.projectDir!, "dist"), { recursive: true });
+    copyFileSync(exe, dist);
+    return dist;
+  }
+
   return exe;
 }
 

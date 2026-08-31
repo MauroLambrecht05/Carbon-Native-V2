@@ -24,6 +24,19 @@ export interface PluginProblem {
   readonly severity: "error" | "warning";
   readonly message: string;
   readonly fix?: string;
+  /**
+   * What kind of problem this is, so a caller can filter by relevance
+   * instead of matching on `message` text:
+   *   - "artifact-missing": no compiled `.dll`/`.so`/`.dylib` staged in
+   *     carbon/bin/ — only meaningful for the DYNAMIC dlopen pipeline this
+   *     use case was written for. StaticLinkPluginsUseCase's release build
+   *     is about to compile fresh from source and never reads carbon/bin/
+   *     at all, so this class of problem does not apply to it.
+   *   - "capability-missing" / "unknown-point": read from the plugin's own
+   *     carbon-plugin.toml declaration — applies identically to a plugin
+   *     regardless of whether it ends up dlopen'd or statically linked.
+   */
+  readonly kind: "artifact-missing" | "capability-missing" | "unknown-point";
 }
 
 export interface PreflightResult {
@@ -66,14 +79,20 @@ export class PreflightPluginsUseCase {
 
       // The commonest one by a wide margin: a plugin manifest.toml declares
       // that `carbon/build.zig` has never staged (or was cleaned away).
+      //
+      // Not a `continue` — a caller building a STATIC release (see
+      // StaticLinkPluginsUseCase, which filters this "artifact-missing" kind
+      // out entirely: it's about to compile fresh from source and never
+      // reads carbon/bin/ at all) still needs the capability/point checks
+      // below to run, since those read carbon-plugin.toml, not the binary.
       if (!this.workspace.exists(absolutePath)) {
         problems.push({
           plugin: name,
           severity: "error",
+          kind: "artifact-missing",
           message: `declared in carbon/manifest.toml but ${absolutePath} does not exist`,
           fix: entry.source === "local" ? "run: carbon dev (or carbon run)" : "run: carbon dev (auto-fetches vendor plugins) or carbon plugin add " + name,
         });
-        continue;
       }
 
       // The plugin's own manifest, read from its SOURCE location (own or
@@ -98,6 +117,7 @@ export class PreflightPluginsUseCase {
         problems.push({
           plugin: name,
           severity: "error",
+          kind: "capability-missing",
           message: `needs ${missing.map((m) => `"${m}"`).join(", ")}, which carbon.toml does not grant`,
           fix:
             `add to carbon.toml:\n    [plugins.${name}]\n    capabilities = [` +
@@ -111,6 +131,7 @@ export class PreflightPluginsUseCase {
           problems.push({
             plugin: name,
             severity: "warning",
+            kind: "unknown-point",
             message: `declares "${id}", which this runtime's registry does not have`,
             fix: "built against a newer SDK — that point will not be called",
           });

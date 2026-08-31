@@ -88,4 +88,45 @@ fn main() {
     if target_os == "windows" {
         println!("cargo:rustc-link-arg-bin=carbon-blitz=/STACK:268435456");
     }
+
+    // ─── static-linked plugins (release builds) ──────────────────────────
+    // `carbon-plugin-host`'s `static-plugins` feature (see its Cargo.toml)
+    // swaps in adapters/plugin_loader_static.rs, whose `extern "C"` block
+    // expects a real definition of `carbon_plugin_register` and friends to
+    // exist somewhere in the final link — normally satisfied by a plugin's
+    // OWN `export fn`, but here by ONE generated umbrella static lib that
+    // `StaticLinkPluginsUseCase.ts` builds per-app (it `@import`s every
+    // enabled plugin's src/main.zig as a distinct module and fans out to
+    // them — see that file and extension_points.zig's `sdk.ext.implement`
+    // for the mechanism). `cargo build` cannot discover that generated file
+    // on its own, hence the explicit env vars and `rerun-if-changed` below.
+    //
+    // Both env vars are set by `StaticLinkPluginsUseCase.ts` before it
+    // invokes `cargo build --features static-plugins`; a bare `cargo build`
+    // never sets `static-plugins` at all, so this block is inert for every
+    // other build (`carbon dev`, `carbon run`, a plain `cargo build`/
+    // `cargo check`).
+    if std::env::var_os("CARGO_FEATURE_STATIC_PLUGINS").is_some() {
+        let lib_dir = std::env::var("CARBON_STATIC_PLUGINS_LIB_DIR").unwrap_or_else(|_| {
+            panic!(
+                "carbon-runtime built with --features static-plugins but \
+                 CARBON_STATIC_PLUGINS_LIB_DIR is not set. This build is meant to be \
+                 invoked by `carbon build --release` (via StaticLinkPluginsUseCase.ts), \
+                 which generates the per-app umbrella static lib and points this env var \
+                 at it — a bare `cargo build --features static-plugins` has nothing to \
+                 link `carbon_plugin_register` and the other extension-point symbols \
+                 against."
+            )
+        });
+        let lib_name =
+            std::env::var("CARBON_STATIC_PLUGINS_LIB_NAME").unwrap_or_else(|_| "carbon_plugins_umbrella".to_string());
+        println!("cargo:rustc-link-search=native={lib_dir}");
+        println!("cargo:rustc-link-lib=static={lib_name}");
+        // The env vars themselves, not just their target paths: a rebuild
+        // with a DIFFERENT umbrella (different app, different enabled
+        // plugins) must not reuse a cached link against the old one.
+        println!("cargo:rerun-if-env-changed=CARBON_STATIC_PLUGINS_LIB_DIR");
+        println!("cargo:rerun-if-env-changed=CARBON_STATIC_PLUGINS_LIB_NAME");
+        println!("cargo:rerun-if-changed={lib_dir}");
+    }
 }

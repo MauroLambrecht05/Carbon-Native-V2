@@ -41,8 +41,11 @@ pub const CFG = sdk.manifest.Config{
 
 const MANIFEST = sdk.manifest.build(CFG);
 
-export fn carbon_plugin_manifest() callconv(.c) [*:0]const u8 {
+pub fn carbon_plugin_manifest() callconv(.c) [*:0]const u8 {
     return MANIFEST;
+}
+comptime {
+    sdk.ext.implementManifest(carbon_plugin_manifest);
 }
 
 var g_app: ?sdk.CarbonApp = null;
@@ -52,28 +55,30 @@ var g_app: ?sdk.CarbonApp = null;
 // Both install the same three globals. HMR re-evaluates the JS bundle in
 // the same context; per carbon_plugin.h, globals installed in
 // carbon_plugin_register are gone afterward and must be re-installed here.
+//
+// `pub`, not a bare `fn`: in a dynamic build `sdk.ext.implement` exports this
+// under the registry symbol and `pub` is redundant; in a static release
+// build nothing exports it at all and `pub` is the ONLY way the generated
+// umbrella (which `@import`s this file as a module) can reach it. See
+// `sdk.ext.implement`'s doc comment.
 
-comptime {
-    const point = sdk.ext.expect("lifecycle.register");
-    std.debug.assert(std.mem.eql(u8, point.symbol, "carbon_plugin_register"));
-}
-
-export fn carbon_plugin_register(app_raw: *sdk.RawApp) callconv(.c) void {
+pub fn carbon_plugin_register(app_raw: *sdk.RawApp) callconv(.c) void {
     const app = sdk.CarbonApp.fromRaw(app_raw);
     if (!app.abiCompatible()) return;
     g_app = app;
     installGlobals(app);
 }
-
 comptime {
-    const point = sdk.ext.expect("lifecycle.after_reload");
-    std.debug.assert(std.mem.eql(u8, point.symbol, "carbon_plugin_after_reload"));
+    sdk.ext.implement("lifecycle.register", carbon_plugin_register);
 }
 
-export fn carbon_plugin_after_reload(app_raw: *sdk.RawApp) callconv(.c) void {
+pub fn carbon_plugin_after_reload(app_raw: *sdk.RawApp) callconv(.c) void {
     const app = sdk.CarbonApp.fromRaw(app_raw);
     g_app = app;
     installGlobals(app);
+}
+comptime {
+    sdk.ext.implement("lifecycle.after_reload", carbon_plugin_after_reload);
 }
 
 fn installGlobals(app: sdk.CarbonApp) void {

@@ -17,6 +17,23 @@ const std = @import("std");
 /// resolves one at comptime.
 pub const registry = @import("carbon_extension_points");
 
+/// Whether we're compiling for a real standalone dynamic library (one
+/// plugin, dlopen'd — the only mode that existed before static release
+/// linking) or as a module `@import`ed into a generated umbrella for a
+/// statically-linked release binary. Set by the product composition root
+/// (`products/carbon-ext/composition/build.zig`'s `-Dplugin-linkage`),
+/// exposed here as a plain build-options module. Defaults to `.dynamic`, so
+/// every plugin's OWN standalone `build.zig` (and `carbon dev`'s whole
+/// pipeline) is completely unaffected unless something deliberately asks for
+/// `.static`.
+const linkage = @import("carbon_plugin_linkage");
+// `std.Build.Step.Options.addOption` re-synthesizes an equivalent enum type
+// into the generated module rather than exporting the build.zig one under
+// its original name — `@TypeOf(linkage.mode)` gets that synthesized type
+// without needing to know what it's called.
+pub const LinkageMode = @TypeOf(linkage.mode);
+pub const linkage_mode: LinkageMode = linkage.mode;
+
 pub const ExtensionPoint = registry.ExtensionPoint;
 pub const Arity = registry.Arity;
 pub const Stability = registry.Stability;
@@ -75,6 +92,52 @@ pub fn symbolOf(comptime id: []const u8) []const u8 {
 /// the points it implements cannot disagree.
 pub fn capabilityOf(comptime id: []const u8) ?[]const u8 {
     return expect(id).capability;
+}
+
+/// Implement extension point `id` with `func`.
+///
+/// Replaces the old hand-written pattern of a `comptime { _ = ext.expect(id); }`
+/// assertion next to a manually-named `export fn` — this does the same
+/// validation AND decides, from `linkage_mode`, whether `func` becomes a real
+/// exported C symbol at all:
+///
+///   * `.dynamic` (standalone `zig build`, `carbon dev`'s whole pipeline):
+///     exports `func` under the point's registry symbol, exactly as a
+///     hand-written `export fn <symbol>` did before this existed. A
+///     standalone plugin's `.dll`/`.so`/`.dylib` is byte-for-byte the same
+///     shape as before.
+///   * `.static` (compiled as one plugin among several `@import`ed into a
+///     generated release umbrella): exports nothing. `func` stays an
+///     ordinary Zig function the umbrella calls directly through its
+///     `@import` of this module — which is exactly why `func` MUST be
+///     declared `pub fn`, never a bare `fn`: dynamic mode doesn't need `pub`
+///     (the symbol leaves through `@export`, not through Zig's own module
+///     visibility), but static mode has no other way out of the module.
+///
+/// `func`'s signature is asserted against nothing here beyond what
+/// `@export`'s own type-checking already enforces when linkage is dynamic —
+/// same as the code this replaces, which relied on `export fn`'s signature
+/// being written out by hand to match the registry's documented shape.
+pub fn implement(comptime id: []const u8, comptime func: anytype) void {
+    const point = expect(id);
+    if (linkage_mode == .dynamic) {
+        @export(&func, .{ .name = point.symbol, .linkage = .strong });
+    }
+}
+
+/// Same idea as `implement`, for `carbon_plugin_manifest` — every plugin's
+/// required manifest getter, which sits outside `POINTS` (it is how a
+/// dynamically-loaded plugin gets asked what it is, BEFORE the loader knows
+/// anything else about it) so `implement`'s registry lookup doesn't apply to
+/// it. A statically-linked plugin needs no runtime-queryable manifest at all
+/// — the build-time tooling that assembled the umbrella already validated
+/// capabilities/ABI/points against this exact `carbon-plugin.toml` before
+/// generating it — so `.static` mode exports nothing here either, and the
+/// umbrella never re-declares `carbon_plugin_manifest` on its plugins' behalf.
+pub fn implementManifest(comptime func: anytype) void {
+    if (linkage_mode == .dynamic) {
+        @export(&func, .{ .name = "carbon_plugin_manifest", .linkage = .strong });
+    }
 }
 
 fn idList() []const u8 {

@@ -257,10 +257,48 @@ export function backendBinaryPath(backend: BackendName, profile: string = "relea
 }
 
 /**
- * The backend binary to actually spawn, or null if it has not been built.
- * Searches BINARY_PROFILES in order.
+ * Where a STATIC-PLUGINS release build's binary lives for one specific app —
+ * `<projectDir>/dist/<crate>`, never the shared `TARGET_DIR`.
+ *
+ * ── WHY THIS EXISTS, SEPARATE FROM backendBinaryPath ────────────────────────
+ * `TARGET_DIR` (`.tools/orchestration/bazel/cargo/target/`) is ONE location,
+ * shared by the whole workspace, for every app ever built on this machine —
+ * correct for the dynamic plugin pipeline, where the runtime binary is
+ * generic and every app's plugins load separately from that app's own
+ * `carbon/bin/` at launch. A static-plugins binary is NOT generic — it has
+ * one specific app's enabled plugins compiled directly into it — so two
+ * different apps' static release binaries cannot correctly share one path:
+ * building app B would silently leave app A's `dist/`-bound artifact
+ * pointing at app B's plugin set the next time anything resolved it from the
+ * shared location.
+ *
+ * `ensureRuntime` (BuildProjectUseCase.ts) copies the freshly-built shared-
+ * path binary here immediately after a static-plugins build — the shared
+ * path stays cargo's ordinary build/cache location, this is the durable,
+ * per-app record of what that specific app actually ships. `resolveBackendBinary`
+ * checks here FIRST when given a `projectDir`, before falling back to the
+ * shared profiles.
  */
-export function resolveBackendBinary(backend: BackendName): string | null {
+export function distBinaryPath(projectDir: string, backend: BackendName): string {
+  const exe = process.platform === "win32" ? ".exe" : "";
+  return join(projectDir, "dist", `${BACKENDS[backend].crate}${exe}`);
+}
+
+/**
+ * The backend binary to actually spawn, or null if it has not been built.
+ *
+ * When `projectDir` is given, that app's own `dist/<crate>` (see
+ * `distBinaryPath`) is checked FIRST — the only place a static-plugins
+ * release binary lives. Falls back to the shared-workspace `BINARY_PROFILES`
+ * search either way, which is the ONLY place a dynamic-plugin build's binary
+ * ever lives, so every existing caller that never passes `projectDir` sees
+ * no behavior change at all.
+ */
+export function resolveBackendBinary(backend: BackendName, projectDir?: string): string | null {
+  if (projectDir) {
+    const distPath = distBinaryPath(projectDir, backend);
+    if (existsSync(distPath)) return distPath;
+  }
   for (const profile of BINARY_PROFILES) {
     const p = backendBinaryPath(backend, profile);
     if (existsSync(p)) return p;
@@ -268,8 +306,8 @@ export function resolveBackendBinary(backend: BackendName): string | null {
   return null;
 }
 
-export function backendBinaryExists(backend: BackendName): boolean {
-  return resolveBackendBinary(backend) !== null;
+export function backendBinaryExists(backend: BackendName, projectDir?: string): boolean {
+  return resolveBackendBinary(backend, projectDir) !== null;
 }
 
 // ── Compatibility shims ──────────────────────────────────────────────────────

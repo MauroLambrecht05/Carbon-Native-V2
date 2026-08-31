@@ -95,6 +95,10 @@ audio = ["mini", "dep:carbon-audio"]
 profiling = ["mini", "dep:tracy-client", "carbon-paint/profiling"]
 # Self-update support. A/B partition state machine with crash-counter rollback.
 updater = ["mini", "dep:carbon-updater"]
+# Static-linked plugins (release builds only — see plugin-host's own feature
+# doc). `carbon build --release` passes this; `carbon dev`/a plain
+# `cargo build` never do, so the dlopen pipeline stays the default.
+static-plugins = ["carbon-plugin-host/static-plugins"]
 # Heap snapshot (cold-start exec-skip). carbon-snapshot itself is pulled in by
 # "mini" unconditionally (it always compiles); this flag only toggles the
 # build.rs linker behavior (/DYNAMICBASE:NO — see build.rs) so the executable

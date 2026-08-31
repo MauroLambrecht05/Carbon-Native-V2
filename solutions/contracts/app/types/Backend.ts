@@ -95,6 +95,14 @@ export interface RuntimeFeatureFlags {
   readonly audio?: boolean;
   /** carbon.toml `[updater] enabled` — links the A/B slot state machine. */
   readonly updater?: boolean;
+  /** `carbon build --release`'s static-plugin-linking path (see
+   *  StaticLinkPluginsUseCase and carbon-plugin-host's own feature of the
+   *  same name). Swaps the dlopen/dlsym plugin loader for one that expects
+   *  every enabled plugin's code to already be linked into this exact
+   *  binary — the caller MUST have built and pointed
+   *  CARBON_STATIC_PLUGINS_LIB_DIR/_NAME at a matching umbrella first, or
+   *  the link fails with an unresolved `carbon_plugin_register` and friends. */
+  readonly staticPlugins?: boolean;
 }
 
 export function backendCargoFeatures(
@@ -117,6 +125,10 @@ export function backendCargoFeatures(
     if (flags.audio) features.push("audio");
     if (flags.updater) features.push("updater");
   }
+  // Both backends declare this feature (see their respective Cargo.toml
+  // entries forwarding to carbon-plugin-host/static-plugins), so it's pushed
+  // unconditionally on `name`, unlike the mini-only flags above.
+  if (flags.staticPlugins) features.push("static-plugins");
 
   return features.join(",");
 }

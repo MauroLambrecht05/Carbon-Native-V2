@@ -56,6 +56,9 @@ export {
   NoHostAppError,
   PluginNotFoundError,
   UnknownStandardPluginError,
+  StaticLinkValidationError,
+  ExclusivePointConflictError,
+  StaticUmbrellaBuildError,
 } from "./domain/errors/PluginError.ts";
 
 export type {
@@ -108,9 +111,21 @@ export {
   type SyncPluginsResult,
   type ResolveZig,
 } from "./application/usecases/SyncPluginsUseCase.ts";
+export {
+  StaticLinkPluginsUseCase,
+  type StaticLinkOptions,
+  type StaticLinkResult,
+} from "./application/usecases/StaticLinkPluginsUseCase.ts";
 
 export { NodePluginWorkspace } from "./infrastructure/NodePluginWorkspace.ts";
 export { SdkTemplateSource } from "./infrastructure/SdkTemplateSource.ts";
+export {
+  generateUmbrella,
+  zigIdentifier,
+  hostZigTargetTriple,
+  type UmbrellaPlugin,
+  type UmbrellaFiles,
+} from "./infrastructure/StaticUmbrellaGenerator.ts";
 export { signStandardPluginArtifact, MissingSigningKeyError } from "./infrastructure/PluginSigner.ts";
 export {
   devSigningKeyPath,
@@ -129,6 +144,7 @@ import { CreatePluginUseCase } from "./application/usecases/CreatePluginUseCase.
 import { InspectPluginsUseCase } from "./application/usecases/InspectPluginsUseCase.ts";
 import { InstallPluginUseCase } from "./application/usecases/InstallPluginUseCase.ts";
 import { SyncPluginsUseCase } from "./application/usecases/SyncPluginsUseCase.ts";
+import { StaticLinkPluginsUseCase } from "./application/usecases/StaticLinkPluginsUseCase.ts";
 import { NodePluginWorkspace } from "./infrastructure/NodePluginWorkspace.ts";
 import { SdkTemplateSource } from "./infrastructure/SdkTemplateSource.ts";
 
@@ -153,6 +169,7 @@ export function pluginUseCases(sdkRoot: string, standardPluginsRoot: string = sd
   const build = new BuildPluginUseCase(workspace, nodeProcessRunner);
   const install = new InstallPluginUseCase(workspace, templates);
   const addStandard = new AddStandardPluginUseCase(workspace, build, install, standardPluginsRoot);
+  const preflight = new PreflightPluginsUseCase(workspace);
 
   return {
     workspace,
@@ -163,7 +180,8 @@ export function pluginUseCases(sdkRoot: string, standardPluginsRoot: string = sd
     addStandard,
     inspect: new InspectPluginsUseCase(workspace),
     check: new CheckPluginUseCase(workspace),
-    preflight: new PreflightPluginsUseCase(workspace),
+    preflight,
     sync: new SyncPluginsUseCase(workspace, nodeProcessRunner, addStandard),
+    staticLink: new StaticLinkPluginsUseCase(workspace, nodeProcessRunner, preflight, sdkRoot, standardPluginsRoot),
   };
 }
