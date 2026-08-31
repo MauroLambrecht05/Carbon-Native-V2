@@ -4,6 +4,7 @@ import type { CommandContext } from "@carbon/cli";
 // One command instead of `bun install && bun run vite:build && bun run shell:build && cargo build --release && ./carbon-runtime`.
 
 import { join, resolve } from "node:path";
+import { rmSync, existsSync } from "node:fs";
 import { loadCarbonConfig } from "@carbon/workspace";
 import { log, c } from "@carbon/logging";
 import { isBackend, VALID_BACKENDS } from "@carbon/contracts/app/backend";
@@ -20,6 +21,7 @@ interface Args {
   force: boolean;
   noBabelCache: boolean;
   verbose: boolean;
+  clean: boolean;
 }
 
 function parseArgs(rest: string[]): Args {
@@ -28,6 +30,7 @@ function parseArgs(rest: string[]): Args {
   let force = false;
   let noBabelCache = false;
   let verbose = false;
+  let clean = false;
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i];
     if (a === "--runtime" || a === "-r") {
@@ -40,6 +43,8 @@ function parseArgs(rest: string[]): Args {
       noBabelCache = true;
     } else if (a === "--verbose" || a === "-V") {
       verbose = true;
+    } else if (a === "--clean") {
+      clean = true;
     } else if (!a.startsWith("-")) {
       // Resolve to an absolute path: a relative dir (e.g. `carbon run .`)
       // otherwise flows into Bun.build plugins as a relative `path`, which
@@ -47,11 +52,44 @@ function parseArgs(rest: string[]): Args {
       projectDir = resolve(a);
     }
   }
-  return { projectDir, runtimeOverride, force, noBabelCache, verbose };
+  return { projectDir, runtimeOverride, force, noBabelCache, verbose, clean };
+}
+
+/**
+ * Wipe every generated/fetched artifact under `projectDir` — node_modules,
+ * the build cache (dist/, which also holds .carbon-cache.json), the Babel
+ * transform cache (.carbon-cache/), and every staged plugin binary
+ * (carbon/bin/) — so the pipeline below reinstalls and rebuilds all of it
+ * from scratch. `carbon.toml` and `carbon/manifest.toml` are untouched:
+ * they're the human/tool-authored source of truth, not cache.
+ *
+ * Vendor plugin SOURCE (carbon/plugins/vendor/<name>/carbon-plugin.toml) is
+ * also left alone — it's cheap, tracked metadata, not a build artifact, and
+ * syncPlugins already re-fetches it if missing. Only the compiled/staged
+ * output (carbon/bin/) actually needs wiping to force a real re-fetch.
+ */
+function cleanAll(projectDir: string): void {
+  const targets = [
+    join(projectDir, "node_modules"),
+    join(projectDir, "dist"),
+    join(projectDir, ".carbon-cache"),
+    join(projectDir, "carbon", "bin"),
+  ];
+  for (const dir of targets) {
+    if (!existsSync(dir)) continue;
+    log.step(c.dim(`clean: removing ${dir}`));
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 export async function runCommand(rest: string[]): Promise<number> {
-  const { projectDir, runtimeOverride, force, noBabelCache, verbose } = parseArgs(rest);
+  const { projectDir, runtimeOverride, force, noBabelCache, verbose, clean } = parseArgs(rest);
+
+  // Before loadCarbonConfig: carbon.toml itself is never touched by clean,
+  // but node_modules/dist/carbon/bin need to be gone before anything below
+  // (ensureNodeModules, syncPlugins, buildProject) runs, or those steps see
+  // stale-but-present artifacts and skip work clean was asked to force.
+  if (clean) cleanAll(projectDir);
 
   const cfg = loadCarbonConfig(projectDir);
   const backend = runtimeOverride ?? cfg.runtime.backend;
@@ -260,8 +298,9 @@ export class RunCommand extends Command {
     flags: [
       { name: "runtime", short: "r", placeholder: "<name>", description: "Override the carbon.toml [runtime] backend" },
       { name: "verbose", short: "V", boolean: true, description: "Show every install/build/runtime step instead of the collapsed status line" },
+      { name: "clean", boolean: true, description: "Wipe node_modules, the build cache, and staged plugins first, then reinstall/rebuild everything from scratch" },
     ],
-    examples: ["carbon run", "carbon run --runtime mini", "carbon run --verbose"],
+    examples: ["carbon run", "carbon run --runtime mini", "carbon run --verbose", "carbon run --clean"],
   };
 
   execute(ctx: CommandContext): Promise<ExitCode> {

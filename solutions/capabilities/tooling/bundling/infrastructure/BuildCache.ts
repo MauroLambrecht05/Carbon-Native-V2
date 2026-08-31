@@ -169,6 +169,63 @@ function walkWorkspaceDeps(consumerDir: string): string[] {
   return Array.from(new Set(out)).sort();
 }
 
+/**
+ * Walk every directory (or exact file) a scaffolded app's own tsconfig.json
+ * `compilerOptions.paths` points at — `@carbon/plugins/*`,
+ * `@carbon/mini-react`, etc. — return their tracked source files.
+ *
+ * These are resolved by Bun's bundler at build time (it reads tsconfig
+ * `paths` natively, the same way tsc/the editor do — see
+ * BunBundler.ts and every carbon-scaffolded tsconfig.json's `paths`
+ * block), but they are NOT a `dependencies`/`devDependencies` entry in the
+ * app's package.json, so `walkWorkspaceDeps` never sees them. Without this,
+ * editing a shared file under solutions/interface/plugins/ or
+ * solutions/interface/renderer/ doesn't change the cache key at all — the
+ * app-relative `carbon dev`/`run` keeps serving a stale bundle until
+ * dist/.carbon-cache.json is deleted by hand. Reproduced directly: editing
+ * a plugin hook and re-running `carbon run` logged "cache hit" and launched
+ * the pre-edit behavior with zero errors.
+ *
+ * No `extends` support — every carbon-scaffolded tsconfig.json is
+ * self-contained (see project-files.ts's TSCONFIG_REACT/TSCONFIG_SOLID),
+ * so this reads `paths` directly off `<projectDir>/tsconfig.json`, the same
+ * "good enough for what carbon actually generates" posture boundaries.ts's
+ * own tsconfig alias reader already takes.
+ */
+function walkTsconfigPathAliases(projectDir: string): string[] {
+  const tsconfigPath = join(projectDir, "tsconfig.json");
+  if (!existsSync(tsconfigPath)) return [];
+  let paths: Record<string, string[]>;
+  try {
+    paths = JSON.parse(readFileSync(tsconfigPath, "utf8"))?.compilerOptions?.paths ?? {};
+  } catch {
+    return [];
+  }
+
+  const out: string[] = [];
+  const seenDirs = new Set<string>();
+  for (const targets of Object.values(paths)) {
+    if (!Array.isArray(targets)) continue;
+    for (const target of targets) {
+      if (typeof target !== "string") continue;
+      // tsc resolves `paths` relative to `baseUrl`, defaulting to the
+      // tsconfig's own directory when baseUrl is absent — true for every
+      // carbon-scaffolded tsconfig. `resolve` no-ops when target is already
+      // absolute (the common case: scaffolding substitutes an absolute
+      // @@ROOT@@ for a standalone install).
+      const resolved = resolve(projectDir, target.replace(/\*$/, ""));
+      if (/\.(ts|tsx|js|jsx|mjs)$/.test(resolved)) {
+        out.push(resolved); // exact file target, e.g. "@carbon/plugins" -> index.ts
+        continue;
+      }
+      if (seenDirs.has(resolved)) continue;
+      seenDirs.add(resolved);
+      out.push(...walkSources(resolved));
+    }
+  }
+  return Array.from(new Set(out)).sort();
+}
+
 /** Walk the project dir, return absolute paths of all tracked files. */
 function walkSources(root: string): string[] {
   const out: string[] = [];
@@ -236,6 +293,17 @@ export function computeCacheKey(
   const depFiles = walkWorkspaceDeps(projectDir);
   for (const abs of depFiles) {
     h.update(`W\t${abs.replace(/\\/g, "/")}\t`);
+    h.update(readFileSync(abs));
+    h.update("\n");
+  }
+
+  // tsconfig.json `paths`-aliased sources (@carbon/plugins, @carbon/mini-react,
+  // …) — see walkTsconfigPathAliases for why these are a separate pass from
+  // walkWorkspaceDeps above. Tagged "P" and keyed by absolute path for the
+  // same collision-avoidance reason the "W" pass is.
+  const pathAliasFiles = walkTsconfigPathAliases(projectDir);
+  for (const abs of pathAliasFiles) {
+    h.update(`P\t${abs.replace(/\\/g, "/")}\t`);
     h.update(readFileSync(abs));
     h.update("\n");
   }
