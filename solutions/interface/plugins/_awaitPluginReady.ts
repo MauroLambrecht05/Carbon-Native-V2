@@ -71,6 +71,6 @@ export function awaitPluginReady(ready: () => boolean, effect: () => (() => void
   return () => {
     cancelled = true;
     if (rafId !== null) cancelAnimationFrame(rafId);
-    cleanup?.();
+    if (typeof cleanup === "function") cleanup();
   };
 }
