@@ -181,6 +181,38 @@ describe("chunkEmbeds", () => {
     expect(chunks.map((c) => c.length)).toEqual([10, 10, 3]);
     expect(chunks.flat()).toEqual(embeds);
   });
+
+  // Reproduces a real failure: Discord rejected a digest with
+  // `{"embeds": ["Embed size exceeds maximum size of 6000"]}` even though
+  // every individual embed's fields were within their OWN per-field limits
+  // and the message had well under 10 embeds — the count limit alone was
+  // never the binding constraint here.
+  test("also splits when the count is under 10 but the combined size would exceed Discord's 6000-char embed budget", () => {
+    // Each embed's Explanation field is near formatCommitEmbed's own
+    // 1024-char truncation cap — realistic for a commit with a long body,
+    // not a synthetic worst case.
+    const embeds = Array.from({ length: 8 }, (_, i) => ({
+      title: `commit ${i}`,
+      description: "by someone",
+      fields: [{ name: "Explanation", value: "x".repeat(1000) }],
+    }));
+
+    const chunks = chunkEmbeds(embeds);
+
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const chunk of chunks) {
+      const totalChars = chunk.reduce(
+        (sum, e) =>
+          sum +
+          e.title.length +
+          (e.description?.length ?? 0) +
+          (e.fields ?? []).reduce((s, f) => s + f.name.length + f.value.length, 0),
+        0,
+      );
+      expect(totalChars).toBeLessThanOrEqual(5500);
+    }
+    expect(chunks.flat()).toEqual(embeds);
+  });
 });
 
 describe("postToDiscord", () => {

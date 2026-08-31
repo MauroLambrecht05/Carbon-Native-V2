@@ -167,11 +167,49 @@ export function formatCommitEmbed(commit: CommitInfo): DiscordEmbed {
   };
 }
 
-// Discord rejects a webhook payload with more than 10 embeds in one
-// message, and a backfill digest can easily cover more commits than that.
+// Discord's combined character budget across every title/description/field
+// name/field value in ONE message's embeds — independent of, and much
+// easier to hit than, the 10-embeds-per-message count limit below. A
+// message rejected with `{"embeds": ["Embed size exceeds maximum size of
+// 6000"]}` (a real failure, not hypothetical: a backfill digest of several
+// days' commits, one with an unusually long body, blew past this while
+// every embed individually stayed under its own per-field truncation
+// limits) is what this constant exists to prevent. Kept below Discord's
+// real 6000 rather than exactly at it — the JSON payload carries other
+// bytes too (colors, urls, the top-level `content` ping), and there is no
+// value in shaving this margin thin.
+const MAX_CHUNK_CHARS = 5500;
+
+function embedSize(embed: DiscordEmbed): number {
+  const fieldsSize = (embed.fields ?? []).reduce((sum, f) => sum + f.name.length + f.value.length, 0);
+  return embed.title.length + (embed.description?.length ?? 0) + fieldsSize;
+}
+
+// Discord rejects a webhook payload with more than 10 embeds in one message
+// OR more than MAX_CHUNK_CHARS combined characters across them, and a
+// backfill digest can easily cross either limit — the count one obviously
+// (more than 10 commits since the last successful notification), the size
+// one less obviously (an ordinary handful of commits, one with a long
+// Explanation, is enough — see MAX_CHUNK_CHARS's comment). Every individual
+// embed formatCommitEmbed/formatPrEmbed produce is already truncated well
+// under MAX_CHUNK_CHARS on its own (their own per-field limits cap out
+// around 1300 chars total), so it is always safe to start a new chunk
+// rather than needing to split one embed itself.
 export function chunkEmbeds(embeds: readonly DiscordEmbed[], size = 10): DiscordEmbed[][] {
   const chunks: DiscordEmbed[][] = [];
-  for (let i = 0; i < embeds.length; i += size) chunks.push(embeds.slice(i, i + size));
+  let current: DiscordEmbed[] = [];
+  let currentChars = 0;
+  for (const embed of embeds) {
+    const chars = embedSize(embed);
+    if (current.length > 0 && (current.length >= size || currentChars + chars > MAX_CHUNK_CHARS)) {
+      chunks.push(current);
+      current = [];
+      currentChars = 0;
+    }
+    current.push(embed);
+    currentChars += chars;
+  }
+  if (current.length > 0) chunks.push(current);
   return chunks;
 }
 
