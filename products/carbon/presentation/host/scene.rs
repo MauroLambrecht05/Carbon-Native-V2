@@ -961,10 +961,25 @@ pub(crate) fn register_host_imports(
 
 // ─── Plugin loader plumbing ────────────────────────────────────────────────
 
-/// Install the JS-side `__carbon_on_event` dispatcher and the `carbon.on`
-/// subscription API. Plugins push events from worker threads via
-/// `app->push_event(name, payload)`; our event-loop handler forwards them
-/// here as `__carbon_on_event(name, payloadJson)` calls.
+/// Install the JS-side `__carbon_on_event` dispatcher and the `carbon.on`/
+/// `carbon.off` subscription API. Plugins push events from worker threads
+/// via `app->push_event(name, payload)`; our event-loop handler forwards
+/// them here as `__carbon_on_event(name, payloadJson)` calls.
+///
+/// `carbon.off(name, fn)` exists alongside the unsubscribe closure `.on`
+/// returns because plugin-authored interface hooks (tray.ts,
+/// global-shortcuts.ts, deep-link.ts, ...) are written against `.off` —
+/// matching each plugin's own Zig-side EVENT_SHIM, which installs the same
+/// `on`/`off` pair under the same `__carbon_on_event` guard as a fallback
+/// for backends (e.g. blitz) that never call this Rust-side installer. On
+/// this backend the installer below always runs first (before any plugin
+/// registers), so a plugin's own shim never runs — meaning `.off` has to be
+/// provided here too, or it silently doesn't exist and a cleanup calling it
+/// throws "not a function" the first time any effect actually tears down.
+/// Reproduced directly via `carbon dev`'s 'r' hotkey: React Fast Refresh
+/// force-reruns effects on reload, which was also the first moment
+/// anything had ever called carbon.off — nothing before that had exercised
+/// this path (see solutions/interface/plugins/_awaitPluginReady.ts).
 pub(crate) fn install_carbon_event_dispatcher(js_ctx: &JsContext) -> Result<()> {
     js_ctx.with(|ctx| -> Result<()> {
         ctx.eval::<(), _>(
@@ -981,6 +996,10 @@ pub(crate) fn install_carbon_event_dispatcher(js_ctx: &JsContext) -> Result<()> 
                 if (!set) { set = new Set(); handlers.set(name, set); }
                 set.add(fn);
                 return function unsubscribe() { handlers.get(name)?.delete(fn); };
+              };
+              // carbon.off: see the doc comment on install_carbon_event_dispatcher.
+              globalThis.carbon.off = function(name, fn) {
+                handlers.get(name)?.delete(fn);
               };
               globalThis.__carbon_on_event = function(name, payloadJson) {
                 const set = handlers.get(name);
