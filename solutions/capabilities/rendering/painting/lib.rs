@@ -588,7 +588,11 @@ fn paint_node(
     // the text engine right before each measure/draw call below so named
     // fonts loaded via the fonts plugin's loadFont() hook actually get
     // selected (see TextEngine::cur_family / font_for_char_named).
-    let effective_family = node.props.font_family.clone().or_else(|| inherited_family.clone());
+    let effective_family = node
+        .props
+        .font_family
+        .clone()
+        .or_else(|| inherited_family.clone());
 
     // Box-shadow — outset shadows painted FIRST (behind everything
     // for this node), one per entry in declaration order so the

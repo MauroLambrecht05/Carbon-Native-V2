@@ -112,10 +112,10 @@ use host::*;
 use image_host as async_image;
 use manifest::*;
 use pump::*;
-#[cfg(feature = "updater")]
-use updater_bg::*;
 use trace::*;
 use tree::*;
+#[cfg(feature = "updater")]
+use updater_bg::*;
 
 use carbon_layout::scene;
 use carbon_os as native;

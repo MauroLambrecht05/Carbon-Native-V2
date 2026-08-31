@@ -29,7 +29,7 @@ import { join } from "node:path";
 import type { Logger } from "@carbon/logging";
 import { MemoryLogger } from "@carbon/logging";
 import type { ProcessRunner } from "@carbon/process";
-import { readAppManifest } from "../../domain/services/AppManifestSection.ts";
+import { readAppManifest } from "../../infrastructure/AppManifestCodec.ts";
 import { hostArchName, hostExt, hostOsName } from "../../domain/value-objects/NativeTarget.ts";
 import { ensureZig } from "../../infrastructure/ZigToolchain.ts";
 import { hasDevSigningKey, signLocalPluginArtifact } from "../../infrastructure/PluginSigner.ts";

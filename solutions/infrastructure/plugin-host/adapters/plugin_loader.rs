@@ -124,7 +124,10 @@ fn verify_with_trust_anchors(
     };
 
     for hex in dev_trusted_keys {
-        let Some(bytes) = carbon_plugin_trust::digest::decode_hex(hex.trim(), carbon_plugin_trust::PUBLIC_KEY_LEN) else {
+        let Some(bytes) = carbon_plugin_trust::digest::decode_hex(
+            hex.trim(),
+            carbon_plugin_trust::PUBLIC_KEY_LEN,
+        ) else {
             eprintln!(
                 "[carbon-plugin] WARNING: `{name}`'s carbon.toml [dev-signing] trusted_keys \
                  has an entry that is not {} hex characters — skipping it: {hex:?}",
@@ -283,7 +286,13 @@ impl PluginRegistry {
                 continue;
             }
             let granted = grants.get(name).unwrap_or(&no_grant);
-            match load_one(name, granted, dev_trusted_keys, project_dir, &mut exclusive_claims) {
+            match load_one(
+                name,
+                granted,
+                dev_trusted_keys,
+                project_dir,
+                &mut exclusive_claims,
+            ) {
                 Ok(p) => {
                     if std::env::var_os("CARBON_MINI_DEBUG").is_some() {
                         let points: Vec<&str> = p.points().map(PointId::as_str).collect();

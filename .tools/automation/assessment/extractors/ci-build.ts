@@ -49,7 +49,11 @@ function parseSimpleYaml(content: string): YamlNode {
 function parseYamlLines(content: string): YamlNode {
   const result: YamlNode = {};
   const lines = content.split("\n");
-  const stack: Array<{ indent: number; obj: YamlNode | YamlNode[] }> = [{ indent: -1, obj: result }];
+  // Array elements can be plain scalars (e.g. a matrix's `- ubuntu-latest`),
+  // not just nested mappings — `push(val)` below needs `string` in the
+  // element type, or TS correctly rejects it as unsound.
+  const stack: Array<{ indent: number; obj: YamlNode | Array<YamlNode | string> }> =
+    [{ indent: -1, obj: result }];
 
   let i = 0;
   while (i < lines.length) {

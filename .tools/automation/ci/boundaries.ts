@@ -136,6 +136,13 @@ function walk(dir: string, onFile: (abs: string, rel: string) => void) {
     // dependency bump in the repo cannot silently move a measurement.
     ".tools/automation/benchmarks/forkbun/bun.lock",
     ".tools/automation/benchmarks/microbench/bun.lock",
+    // The semantic-assessment CLI (@babel/parser, @babel/traverse, smol-toml,
+    // …) and its separate interactive-explorer web app (its own Vite/React
+    // toolchain) each resolve dependencies .config/package.json doesn't
+    // declare at all — genuinely separate installs, not an accidental split
+    // of the shared one.
+    ".tools/automation/assessment/bun.lock",
+    ".tools/automation/assessment/web/bun.lock",
     // carbon-gpu-canvas is parked, standalone and deliberately not a member
     // of the shared workspace above — see labs/gpu-canvas/Cargo.toml.
     "labs/gpu-canvas/Cargo.lock",

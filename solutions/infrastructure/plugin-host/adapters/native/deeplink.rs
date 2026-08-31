@@ -85,9 +85,15 @@ fn register_scheme(app_name: &str, scheme: &str) -> Result<()> {
     // Best-effort — a missing update-desktop-database/xdg-mime binary
     // (unusual, but not every minimal Linux install has them) shouldn't
     // fail registration outright; the .desktop file is still written.
-    let _ = std::process::Command::new("update-desktop-database").arg(&apps_dir).status();
+    let _ = std::process::Command::new("update-desktop-database")
+        .arg(&apps_dir)
+        .status();
     let _ = std::process::Command::new("xdg-mime")
-        .args(["default", &desktop_name, &format!("x-scheme-handler/{scheme}")])
+        .args([
+            "default",
+            &desktop_name,
+            &format!("x-scheme-handler/{scheme}"),
+        ])
         .status();
 
     Ok(())
@@ -107,7 +113,11 @@ fn register_scheme(_scheme: &str) -> Result<()> {
 /// schemes) don't collide on the same loopback port.
 fn derive_port(app_name: &str, scheme: &str) -> u16 {
     let mut hash: u64 = 0xcbf29ce484222325;
-    for b in app_name.bytes().chain(std::iter::once(b':')).chain(scheme.bytes()) {
+    for b in app_name
+        .bytes()
+        .chain(std::iter::once(b':'))
+        .chain(scheme.bytes())
+    {
         hash ^= b as u64;
         hash = hash.wrapping_mul(0x100000001b3);
     }
@@ -155,7 +165,10 @@ fn start_listener(app_name: &str, scheme: &str) {
 }
 
 fn deliver(url: &str) {
-    let payload = format!("{{\"url\":{}}}", serde_json::to_string(url).unwrap_or_else(|_| "\"\"".to_string()));
+    let payload = format!(
+        "{{\"url\":{}}}",
+        serde_json::to_string(url).unwrap_or_else(|_| "\"\"".to_string())
+    );
     crate::host_exports::push_plugin_event("deeplink.url".to_string(), payload);
 }
 

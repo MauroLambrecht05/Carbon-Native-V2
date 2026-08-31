@@ -1245,11 +1245,7 @@ impl State {
                     // keep_scene branch above exists to prevent, and unlike a
                     // GUI screenshot this is checkable from a log.
                     if std::env::var_os("CARBON_MINI_TIMING").is_some() {
-                        let n = self
-                            .reload_scene
-                            .lock()
-                            .map(|s| s.nodes.len())
-                            .unwrap_or(0);
+                        let n = self.reload_scene.lock().map(|s| s.nodes.len()).unwrap_or(0);
                         eprintln!("[carbon-mini-hmr-timing] keep_scene={keep_scene} scene_nodes_after_reload={n}");
                     }
 

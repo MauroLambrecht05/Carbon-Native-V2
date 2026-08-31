@@ -34,13 +34,15 @@ export {
   grantedCapabilities,
 } from "./domain/services/CapabilityGrants.ts";
 export {
-  readAppManifest,
-  upsertManifestEntry,
-  setManifestEnabled,
   type AppManifest,
   type AppManifestEntry,
   type PluginSource,
 } from "./domain/services/AppManifestSection.ts";
+export {
+  readAppManifest,
+  upsertManifestEntry,
+  setManifestEnabled,
+} from "./infrastructure/AppManifestCodec.ts";
 export {
   hostOsName,
   hostArchName,

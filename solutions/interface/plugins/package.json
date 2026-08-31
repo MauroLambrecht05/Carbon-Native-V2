@@ -8,7 +8,14 @@
   "types": "./index.ts",
   "exports": {
     ".": "./index.ts",
-    "./fonts": "./fonts.ts"
+    "./fonts": "./wrappers/fonts.ts",
+    "./clipboard": "./wrappers/clipboard.ts",
+    "./dialog": "./wrappers/dialog.ts",
+    "./notification": "./wrappers/notification.ts",
+    "./keychain": "./wrappers/keychain.ts",
+    "./global-shortcuts": "./wrappers/global-shortcuts.ts",
+    "./tray": "./wrappers/tray.ts",
+    "./deep-link": "./wrappers/deep-link.ts"
   },
   "carbon": {
     "kind": "presentation"

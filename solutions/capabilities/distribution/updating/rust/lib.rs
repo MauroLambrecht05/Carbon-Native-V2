@@ -31,12 +31,12 @@ pub mod downloader;
 #[path = "infrastructure/http_client.rs"]
 pub mod http_client;
 
+pub use http_client::{fetch_manifest, fetch_manifest_sig, fetch_stop_list};
 pub use manifest::UpdaterManifest;
 pub use rollout::in_rollout;
 pub use state::SlotState;
 pub use stop_list::StopList;
 pub use verify::{verify_artifact_signature, verify_manifest_signature};
-pub use http_client::{fetch_manifest, fetch_manifest_sig, fetch_stop_list};
 
 pub type Result<T> = anyhow::Result<T>;
 

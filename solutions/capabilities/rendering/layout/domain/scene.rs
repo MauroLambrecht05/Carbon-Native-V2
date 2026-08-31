@@ -2171,7 +2171,16 @@ impl Scene {
                 return None;
             }
         }
-        let (children_ids, style, ctx, child_font_size, user_width, is_svg, child_mono, child_family) = {
+        let (
+            children_ids,
+            style,
+            ctx,
+            child_font_size,
+            user_width,
+            is_svg,
+            child_mono,
+            child_family,
+        ) = {
             let n = self.nodes.get(&id)?;
             let is_text = matches!(n.kind, NodeKind::Text);
             let is_svg = matches!(n.kind, NodeKind::Svg);
@@ -2194,7 +2203,11 @@ impl Scene {
             // The font-family STRING itself, same inheritance rule. See
             // NodeCtx::family's doc comment for why this has to match the
             // paint side exactly.
-            let effective_family = n.props.font_family.clone().or_else(|| inherited_family.clone());
+            let effective_family = n
+                .props
+                .font_family
+                .clone()
+                .or_else(|| inherited_family.clone());
             // Text nodes with content carry their text + effective
             // font-size into the measure callback. Wrapper elements with
             // a child text node don't have own .text — they go through

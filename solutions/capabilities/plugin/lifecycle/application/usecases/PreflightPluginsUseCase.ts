@@ -14,7 +14,7 @@ import { extensionPoint } from "@carbon/contracts/plugin/extension-points";
 
 import { parsePluginDeclaration } from "../../domain/entities/PluginDeclaration.ts";
 import { NoHostAppError } from "../../domain/errors/PluginError.ts";
-import { readAppManifest } from "../../domain/services/AppManifestSection.ts";
+import { readAppManifest } from "../../infrastructure/AppManifestCodec.ts";
 import { grantedCapabilities } from "../../domain/services/CapabilityGrants.ts";
 import { hostArchName, hostExt, hostOsName } from "../../domain/value-objects/NativeTarget.ts";
 import type { PluginWorkspace } from "../ports/PluginWorkspace.ts";

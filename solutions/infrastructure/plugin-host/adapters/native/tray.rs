@@ -66,7 +66,8 @@ pub fn setup(icon_path: &str, tooltip: &str, menu_items_json: &str) -> Result<()
         let menu = Menu::new();
         for item in &items {
             let menu_item = MenuItem::with_id(item.id.clone(), &item.label, true, None);
-            menu.append(&menu_item).map_err(|e| anyhow!(e.to_string()))?;
+            menu.append(&menu_item)
+                .map_err(|e| anyhow!(e.to_string()))?;
         }
         builder = builder.with_menu(Box::new(menu));
     }
@@ -92,16 +93,28 @@ fn ensure_listener_threads() {
                 // Down would fire on press, before the OS has decided this
                 // isn't the start of a drag; Up is what every tray-icon
                 // convention (and this crate's own docs) treats as a click.
-                if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
-                    crate::host_exports::push_plugin_event("tray.click".to_string(), "{}".to_string());
+                if let TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Up,
+                    ..
+                } = event
+                {
+                    crate::host_exports::push_plugin_event(
+                        "tray.click".to_string(),
+                        "{}".to_string(),
+                    );
                 }
             }
         });
         std::thread::spawn(|| {
             let receiver = MenuEvent::receiver();
             while let Ok(event) = receiver.recv() {
-                let id_json = serde_json::to_string(&event.id.0).unwrap_or_else(|_| "\"\"".to_string());
-                crate::host_exports::push_plugin_event("tray.menu".to_string(), format!("{{\"id\":{id_json}}}"));
+                let id_json =
+                    serde_json::to_string(&event.id.0).unwrap_or_else(|_| "\"\"".to_string());
+                crate::host_exports::push_plugin_event(
+                    "tray.menu".to_string(),
+                    format!("{{\"id\":{id_json}}}"),
+                );
             }
         });
     });

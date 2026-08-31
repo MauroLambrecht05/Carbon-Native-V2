@@ -10,7 +10,8 @@
 import { join } from "node:path";
 import { NoHostAppError, PluginNotFoundError } from "../../domain/errors/PluginError.ts";
 import { grantedCapabilities } from "../../domain/services/CapabilityGrants.ts";
-import { readAppManifest, type PluginSource } from "../../domain/services/AppManifestSection.ts";
+import { type PluginSource } from "../../domain/services/AppManifestSection.ts";
+import { readAppManifest } from "../../infrastructure/AppManifestCodec.ts";
 import { hostArchName, hostExt, hostOsName } from "../../domain/value-objects/NativeTarget.ts";
 import type { PluginWorkspace } from "../ports/PluginWorkspace.ts";
 

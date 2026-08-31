@@ -73,7 +73,11 @@ pub(crate) fn check_for_update_once(
     // tracked as a real gap, not quietly "handled".
     let _ = &manifest.min_version;
 
-    if !carbon_updater::in_rollout(&state.installation_id, &manifest.version, manifest.rollout as u8) {
+    if !carbon_updater::in_rollout(
+        &state.installation_id,
+        &manifest.version,
+        manifest.rollout as u8,
+    ) {
         return Ok(()); // Not in this rollout stage yet — check again next interval.
     }
 
@@ -83,7 +87,12 @@ pub(crate) fn check_for_update_once(
     );
 
     let staging_dir = install_dir.join("staging");
-    let downloaded = carbon_updater::downloader::download_update(&manifest, platform, &staging_dir, &cfg.pubkey)?;
+    let downloaded = carbon_updater::downloader::download_update(
+        &manifest,
+        platform,
+        &staging_dir,
+        &cfg.pubkey,
+    )?;
     eprintln!(
         "[carbon-updater] downloaded + verified {} ({} bytes)",
         downloaded.path.display(),
@@ -95,7 +104,10 @@ pub(crate) fn check_for_update_once(
     // mark_first_frame (run_loop.rs) own the crash-counter side of what
     // happens after that next launch actually starts.
     carbon_updater::apply::apply_update(install_dir, &staging_dir, &manifest.version, platform)?;
-    eprintln!("[carbon-updater] staged {} — will be active next launch", manifest.version);
+    eprintln!(
+        "[carbon-updater] staged {} — will be active next launch",
+        manifest.version
+    );
 
     Ok(())
 }

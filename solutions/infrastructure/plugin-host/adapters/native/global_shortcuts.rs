@@ -73,7 +73,10 @@ fn ensure_listener_thread() {
             while let Ok(event) = receiver.recv() {
                 if event.state() == HotKeyState::Pressed {
                     let payload = format!("{{\"id\":{}}}", event.id());
-                    crate::host_exports::push_plugin_event("global-shortcut.fired".to_string(), payload);
+                    crate::host_exports::push_plugin_event(
+                        "global-shortcut.fired".to_string(),
+                        payload,
+                    );
                 }
             }
         });

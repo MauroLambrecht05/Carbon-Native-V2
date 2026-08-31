@@ -173,22 +173,46 @@ pub struct HostCarbonApp {
     pub clipboard_clear: Option<unsafe extern "C" fn(app: *mut HostCarbonApp) -> i32>,
 
     pub dialog_open_file: Option<
-        unsafe extern "C" fn(app: *mut HostCarbonApp, opts_json: *const c_char, out_status: *mut i32) -> *mut c_char,
+        unsafe extern "C" fn(
+            app: *mut HostCarbonApp,
+            opts_json: *const c_char,
+            out_status: *mut i32,
+        ) -> *mut c_char,
     >,
     pub dialog_open_files: Option<
-        unsafe extern "C" fn(app: *mut HostCarbonApp, opts_json: *const c_char, out_status: *mut i32) -> *mut c_char,
+        unsafe extern "C" fn(
+            app: *mut HostCarbonApp,
+            opts_json: *const c_char,
+            out_status: *mut i32,
+        ) -> *mut c_char,
     >,
     pub dialog_open_dir: Option<
-        unsafe extern "C" fn(app: *mut HostCarbonApp, opts_json: *const c_char, out_status: *mut i32) -> *mut c_char,
+        unsafe extern "C" fn(
+            app: *mut HostCarbonApp,
+            opts_json: *const c_char,
+            out_status: *mut i32,
+        ) -> *mut c_char,
     >,
     pub dialog_save_file: Option<
-        unsafe extern "C" fn(app: *mut HostCarbonApp, opts_json: *const c_char, out_status: *mut i32) -> *mut c_char,
+        unsafe extern "C" fn(
+            app: *mut HostCarbonApp,
+            opts_json: *const c_char,
+            out_status: *mut i32,
+        ) -> *mut c_char,
     >,
     pub dialog_open_file_text: Option<
-        unsafe extern "C" fn(app: *mut HostCarbonApp, opts_json: *const c_char, out_status: *mut i32) -> *mut c_char,
+        unsafe extern "C" fn(
+            app: *mut HostCarbonApp,
+            opts_json: *const c_char,
+            out_status: *mut i32,
+        ) -> *mut c_char,
     >,
     pub dialog_save_file_text: Option<
-        unsafe extern "C" fn(app: *mut HostCarbonApp, opts_json: *const c_char, content: *const c_char) -> i32,
+        unsafe extern "C" fn(
+            app: *mut HostCarbonApp,
+            opts_json: *const c_char,
+            content: *const c_char,
+        ) -> i32,
     >,
     pub dialog_message: Option<
         unsafe extern "C" fn(
@@ -199,7 +223,11 @@ pub struct HostCarbonApp {
         ) -> i32,
     >,
     pub dialog_confirm: Option<
-        unsafe extern "C" fn(app: *mut HostCarbonApp, title: *const c_char, body: *const c_char) -> i32,
+        unsafe extern "C" fn(
+            app: *mut HostCarbonApp,
+            title: *const c_char,
+            body: *const c_char,
+        ) -> i32,
     >,
 
     pub notification_send: Option<
@@ -228,13 +256,21 @@ pub struct HostCarbonApp {
         ) -> *mut c_char,
     >,
     pub keychain_delete: Option<
-        unsafe extern "C" fn(app: *mut HostCarbonApp, service: *const c_char, account: *const c_char) -> i32,
+        unsafe extern "C" fn(
+            app: *mut HostCarbonApp,
+            service: *const c_char,
+            account: *const c_char,
+        ) -> i32,
     >,
 
     // ABI 1.4. Global (OS-wide) keyboard shortcuts — see the matching note
     // in carbon_plugin.h's APPEND-ONLY ZONE.
     pub global_shortcut_register: Option<
-        unsafe extern "C" fn(app: *mut HostCarbonApp, accelerator: *const c_char, out_id: *mut u32) -> i32,
+        unsafe extern "C" fn(
+            app: *mut HostCarbonApp,
+            accelerator: *const c_char,
+            out_id: *mut u32,
+        ) -> i32,
     >,
     pub global_shortcut_unregister:
         Option<unsafe extern "C" fn(app: *mut HostCarbonApp, accelerator: *const c_char) -> i32>,
@@ -252,7 +288,8 @@ pub struct HostCarbonApp {
 
     // ABI 1.6. Deep linking — see the matching note in carbon_plugin.h's
     // APPEND-ONLY ZONE.
-    pub deeplink_register: Option<unsafe extern "C" fn(app: *mut HostCarbonApp, scheme: *const c_char) -> i32>,
+    pub deeplink_register:
+        Option<unsafe extern "C" fn(app: *mut HostCarbonApp, scheme: *const c_char) -> i32>,
 }
 
 /// Owns the heap allocation backing the strings inside `HostCarbonApp` plus
@@ -429,7 +466,10 @@ unsafe extern "C" fn host_load_font_bytes(
     let ok = TEXT_ENGINE.with(|cell| {
         cell.borrow()
             .as_ref()
-            .map(|te| te.borrow_mut().load_font_bytes_named(owned, family, weight_arg(weight)))
+            .map(|te| {
+                te.borrow_mut()
+                    .load_font_bytes_named(owned, family, weight_arg(weight))
+            })
             .unwrap_or(false)
     });
     if ok {
@@ -477,7 +517,10 @@ unsafe fn alloc_cstring(s: &str) -> *mut c_char {
     ptr as *mut c_char
 }
 
-unsafe extern "C" fn host_clipboard_read_text(_app: *mut HostCarbonApp, out_status: *mut i32) -> *mut c_char {
+unsafe extern "C" fn host_clipboard_read_text(
+    _app: *mut HostCarbonApp,
+    out_status: *mut i32,
+) -> *mut c_char {
     match crate::clipboard::read_text() {
         Ok(s) if s.is_empty() => {
             write_status(out_status, CARBON_OK);
@@ -494,8 +537,13 @@ unsafe extern "C" fn host_clipboard_read_text(_app: *mut HostCarbonApp, out_stat
     }
 }
 
-unsafe extern "C" fn host_clipboard_write_text(_app: *mut HostCarbonApp, text: *const c_char) -> i32 {
-    let Some(text) = cstr_arg(text) else { return CARBON_ERR_INVALID };
+unsafe extern "C" fn host_clipboard_write_text(
+    _app: *mut HostCarbonApp,
+    text: *const c_char,
+) -> i32 {
+    let Some(text) = cstr_arg(text) else {
+        return CARBON_ERR_INVALID;
+    };
     match crate::clipboard::write_text(text) {
         Ok(()) => CARBON_OK,
         Err(_) => CARBON_ERR_GENERIC,
@@ -616,18 +664,27 @@ unsafe extern "C" fn host_dialog_message(
     body: *const c_char,
     level: *const c_char,
 ) -> i32 {
-    let (Some(title), Some(body), Some(level)) = (cstr_arg(title), cstr_arg(body), cstr_arg(level)) else {
+    let (Some(title), Some(body), Some(level)) = (cstr_arg(title), cstr_arg(body), cstr_arg(level))
+    else {
         return CARBON_ERR_INVALID;
     };
     crate::dialog::message(title, body, level);
     CARBON_OK
 }
 
-unsafe extern "C" fn host_dialog_confirm(_app: *mut HostCarbonApp, title: *const c_char, body: *const c_char) -> i32 {
+unsafe extern "C" fn host_dialog_confirm(
+    _app: *mut HostCarbonApp,
+    title: *const c_char,
+    body: *const c_char,
+) -> i32 {
     let (Some(title), Some(body)) = (cstr_arg(title), cstr_arg(body)) else {
         return CARBON_ERR_INVALID;
     };
-    if crate::dialog::confirm(title, body) { 1 } else { 0 }
+    if crate::dialog::confirm(title, body) {
+        1
+    } else {
+        0
+    }
 }
 
 unsafe extern "C" fn host_notification_send(
@@ -710,7 +767,9 @@ unsafe extern "C" fn host_global_shortcut_register(
     accelerator: *const c_char,
     out_id: *mut u32,
 ) -> i32 {
-    let Some(accelerator) = cstr_arg(accelerator) else { return CARBON_ERR_INVALID };
+    let Some(accelerator) = cstr_arg(accelerator) else {
+        return CARBON_ERR_INVALID;
+    };
     match crate::global_shortcuts::register(accelerator) {
         Ok(id) => {
             if !out_id.is_null() {
@@ -722,8 +781,13 @@ unsafe extern "C" fn host_global_shortcut_register(
     }
 }
 
-unsafe extern "C" fn host_global_shortcut_unregister(_app: *mut HostCarbonApp, accelerator: *const c_char) -> i32 {
-    let Some(accelerator) = cstr_arg(accelerator) else { return CARBON_ERR_INVALID };
+unsafe extern "C" fn host_global_shortcut_unregister(
+    _app: *mut HostCarbonApp,
+    accelerator: *const c_char,
+) -> i32 {
+    let Some(accelerator) = cstr_arg(accelerator) else {
+        return CARBON_ERR_INVALID;
+    };
     match crate::global_shortcuts::unregister(accelerator) {
         Ok(()) => CARBON_OK,
         Err(_) => CARBON_ERR_GENERIC,
@@ -738,7 +802,9 @@ unsafe extern "C" fn host_tray_setup(
     tooltip: *const c_char,
     menu_items_json: *const c_char,
 ) -> i32 {
-    let Some(icon_path) = cstr_arg(icon_path) else { return CARBON_ERR_INVALID };
+    let Some(icon_path) = cstr_arg(icon_path) else {
+        return CARBON_ERR_INVALID;
+    };
     let tooltip = cstr_arg(tooltip).unwrap_or("");
     let menu_items_json = cstr_arg(menu_items_json).unwrap_or("");
     match crate::tray::setup(icon_path, tooltip, menu_items_json) {
@@ -750,7 +816,9 @@ unsafe extern "C" fn host_tray_setup(
 // ── Deep linking (ABI 1.6) ──────────────────────────────────────────────
 
 unsafe extern "C" fn host_deeplink_register(app: *mut HostCarbonApp, scheme: *const c_char) -> i32 {
-    let Some(scheme) = cstr_arg(scheme) else { return CARBON_ERR_INVALID };
+    let Some(scheme) = cstr_arg(scheme) else {
+        return CARBON_ERR_INVALID;
+    };
     let app_name = if app.is_null() {
         ""
     } else {

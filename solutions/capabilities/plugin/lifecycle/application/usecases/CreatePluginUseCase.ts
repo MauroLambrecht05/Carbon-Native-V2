@@ -2,7 +2,7 @@
 
 import { join, relative } from "node:path";
 import { TargetNotEmptyError, UnknownLanguageError } from "../../domain/errors/PluginError.ts";
-import { upsertManifestEntry } from "../../domain/services/AppManifestSection.ts";
+import { upsertManifestEntry } from "../../infrastructure/AppManifestCodec.ts";
 import {
   DEFAULT_LANGUAGE,
   languageNamed,

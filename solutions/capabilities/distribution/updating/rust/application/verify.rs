@@ -27,7 +27,8 @@ fn decode_pubkey(pubkey_base64: &str) -> Result<VerifyingKey> {
     let bytes: [u8; 32] = bytes
         .try_into()
         .map_err(|v: Vec<u8>| anyhow!("updater pubkey must be 32 bytes, got {}", v.len()))?;
-    VerifyingKey::from_bytes(&bytes).map_err(|e| anyhow!("updater pubkey is not a valid Ed25519 point: {e}"))
+    VerifyingKey::from_bytes(&bytes)
+        .map_err(|e| anyhow!("updater pubkey is not a valid Ed25519 point: {e}"))
 }
 
 fn decode_signature(sig_base64: &str) -> Result<Signature> {
@@ -60,13 +61,21 @@ fn verify_bytes(bytes: &[u8], sig_base64: &str, pubkey_base64: &str) -> Result<(
 /// must be the exact bytes as fetched (the literal HTTP response body), not a
 /// re-serialization of the parsed struct — the signature covers those exact
 /// bytes, same as @carbon/signing's verifyManifest on the publishing side.
-pub fn verify_manifest_signature(manifest_json: &str, sig_base64: &str, pubkey_base64: &str) -> Result<()> {
+pub fn verify_manifest_signature(
+    manifest_json: &str,
+    sig_base64: &str,
+    pubkey_base64: &str,
+) -> Result<()> {
     verify_bytes(manifest_json.as_bytes(), sig_base64, pubkey_base64)
         .context("manifest signature verification failed")
 }
 
 /// Verifies a downloaded artifact against its `platforms[...].signature` entry.
-pub fn verify_artifact_signature(bytes: &[u8], sig_base64: &str, pubkey_base64: &str) -> Result<()> {
+pub fn verify_artifact_signature(
+    bytes: &[u8],
+    sig_base64: &str,
+    pubkey_base64: &str,
+) -> Result<()> {
     verify_bytes(bytes, sig_base64, pubkey_base64).context("artifact signature verification failed")
 }
 
@@ -77,7 +86,8 @@ mod tests {
 
     fn keypair() -> (SigningKey, String) {
         let key = SigningKey::from_bytes(&[7u8; 32]);
-        let pubkey_b64 = base64::engine::general_purpose::STANDARD.encode(key.verifying_key().to_bytes());
+        let pubkey_b64 =
+            base64::engine::general_purpose::STANDARD.encode(key.verifying_key().to_bytes());
         (key, pubkey_b64)
     }
 
@@ -144,7 +154,8 @@ mod tests {
 
     fn keypair_seed(seed: u8) -> (SigningKey, String) {
         let key = SigningKey::from_bytes(&[seed; 32]);
-        let pubkey_b64 = base64::engine::general_purpose::STANDARD.encode(key.verifying_key().to_bytes());
+        let pubkey_b64 =
+            base64::engine::general_purpose::STANDARD.encode(key.verifying_key().to_bytes());
         (key, pubkey_b64)
     }
 }

@@ -26,7 +26,7 @@ export const TSCONFIG_SOLID = `{
       "@carbon/mini-solid": ["@@ROOT@@/solutions/interface/renderer/solid/index.ts"],
       "@carbon/mini-solid/*": ["@@ROOT@@/solutions/interface/renderer/solid/*"],
       "@carbon/plugins": ["@@ROOT@@/solutions/interface/plugins/index.ts"],
-      "@carbon/plugins/*": ["@@ROOT@@/solutions/interface/plugins/*"]
+      "@carbon/plugins/*": ["@@ROOT@@/solutions/interface/plugins/wrappers/*"]
     }
   },
   "include": ["App.tsx", "src/**/*"]
@@ -70,7 +70,7 @@ export const TSCONFIG_REACT = `{
       "@carbon/mini-react": ["@@ROOT@@/solutions/interface/renderer/react/index.ts"],
       "@carbon/mini-react/*": ["@@ROOT@@/solutions/interface/renderer/react/*"],
       "@carbon/plugins": ["@@ROOT@@/solutions/interface/plugins/index.ts"],
-      "@carbon/plugins/*": ["@@ROOT@@/solutions/interface/plugins/*"]
+      "@carbon/plugins/*": ["@@ROOT@@/solutions/interface/plugins/wrappers/*"]
     }
   },
   "include": ["**/*.ts", "**/*.tsx", "**/*.d.ts"]

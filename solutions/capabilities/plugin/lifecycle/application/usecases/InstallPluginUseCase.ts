@@ -22,7 +22,7 @@ import {
   NoHostAppError,
   NotAPluginDirectoryError,
 } from "../../domain/errors/PluginError.ts";
-import { upsertManifestEntry } from "../../domain/services/AppManifestSection.ts";
+import { upsertManifestEntry } from "../../infrastructure/AppManifestCodec.ts";
 import { LANGUAGES, type PluginLanguage } from "../../domain/value-objects/PluginLanguage.ts";
 import { hostArchName, hostExt, hostOsName } from "../../domain/value-objects/NativeTarget.ts";
 import { PluginName } from "../../domain/value-objects/PluginName.ts";

@@ -43,7 +43,11 @@ pub fn download_update(
     let version_dir = staging_dir.join(&manifest.version);
     fs::create_dir_all(&version_dir)?;
 
-    let filename = platform_entry.url.split('/').next_back().unwrap_or("update.bin");
+    let filename = platform_entry
+        .url
+        .split('/')
+        .next_back()
+        .unwrap_or("update.bin");
     let file_path = version_dir.join(filename);
 
     if !(file_path.exists() && verify_file(&file_path, platform_entry, pubkey_base64).is_ok()) {
@@ -143,13 +147,16 @@ mod tests {
     #[test]
     fn verify_file_rejects_a_sha256_mismatch_before_checking_the_signature() {
         let key = SigningKey::from_bytes(&[1u8; 32]);
-        let pubkey = base64::engine::general_purpose::STANDARD.encode(key.verifying_key().to_bytes());
-        let dir = std::env::temp_dir().join(format!("carbon-updater-verify-{}", std::process::id()));
+        let pubkey =
+            base64::engine::general_purpose::STANDARD.encode(key.verifying_key().to_bytes());
+        let dir =
+            std::env::temp_dir().join(format!("carbon-updater-verify-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("artifact.bin");
         fs::write(&path, b"real content").unwrap();
 
-        let sig = base64::engine::general_purpose::STANDARD.encode(key.sign(b"real content").to_bytes());
+        let sig =
+            base64::engine::general_purpose::STANDARD.encode(key.sign(b"real content").to_bytes());
         let entry = PlatformEntry {
             signature: sig,
             url: "https://example.com/artifact.bin".into(),
@@ -164,8 +171,10 @@ mod tests {
     #[test]
     fn verify_file_accepts_matching_hash_and_signature() {
         let key = SigningKey::from_bytes(&[2u8; 32]);
-        let pubkey = base64::engine::general_purpose::STANDARD.encode(key.verifying_key().to_bytes());
-        let dir = std::env::temp_dir().join(format!("carbon-updater-verify-ok-{}", std::process::id()));
+        let pubkey =
+            base64::engine::general_purpose::STANDARD.encode(key.verifying_key().to_bytes());
+        let dir =
+            std::env::temp_dir().join(format!("carbon-updater-verify-ok-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("artifact.bin");
         let content = b"real installer bytes";
@@ -192,9 +201,13 @@ mod tests {
         // consistent (artifact, sha256) pair is not enough on its own.
         let real_key = SigningKey::from_bytes(&[3u8; 32]);
         let attacker_key = SigningKey::from_bytes(&[4u8; 32]);
-        let real_pubkey = base64::engine::general_purpose::STANDARD.encode(real_key.verifying_key().to_bytes());
+        let real_pubkey =
+            base64::engine::general_purpose::STANDARD.encode(real_key.verifying_key().to_bytes());
 
-        let dir = std::env::temp_dir().join(format!("carbon-updater-verify-wrongkey-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "carbon-updater-verify-wrongkey-{}",
+            std::process::id()
+        ));
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("artifact.bin");
         let content = b"forged installer bytes";
@@ -206,7 +219,8 @@ mod tests {
             format!("{:x}", hasher.finalize())
         };
         // Signed by the attacker's key, not the one the app trusts.
-        let forged_sig = base64::engine::general_purpose::STANDARD.encode(attacker_key.sign(content).to_bytes());
+        let forged_sig =
+            base64::engine::general_purpose::STANDARD.encode(attacker_key.sign(content).to_bytes());
         let entry = PlatformEntry {
             signature: forged_sig,
             url: "https://example.com/artifact.bin".into(),

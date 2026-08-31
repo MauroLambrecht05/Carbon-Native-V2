@@ -118,8 +118,8 @@ fn main() {
                  against."
             )
         });
-        let lib_name =
-            std::env::var("CARBON_STATIC_PLUGINS_LIB_NAME").unwrap_or_else(|_| "carbon_plugins_umbrella".to_string());
+        let lib_name = std::env::var("CARBON_STATIC_PLUGINS_LIB_NAME")
+            .unwrap_or_else(|_| "carbon_plugins_umbrella".to_string());
         println!("cargo:rustc-link-search=native={lib_dir}");
         println!("cargo:rustc-link-lib=static={lib_name}");
         // The env vars themselves, not just their target paths: a rebuild

@@ -32,7 +32,7 @@ import { MemoryLogger } from "@carbon/logging";
 import type { ProcessRunner } from "@carbon/process";
 import { extensionPoint } from "@carbon/contracts/plugin/extension-points";
 import { parsePluginDeclaration } from "../../domain/entities/PluginDeclaration.ts";
-import { readAppManifest } from "../../domain/services/AppManifestSection.ts";
+import { readAppManifest } from "../../infrastructure/AppManifestCodec.ts";
 import { NoHostAppError, StaticLinkValidationError, StaticUmbrellaBuildError } from "../../domain/errors/PluginError.ts";
 import { ensureZig } from "../../infrastructure/ZigToolchain.ts";
 import { generateUmbrella, type UmbrellaPlugin } from "../../infrastructure/StaticUmbrellaGenerator.ts";

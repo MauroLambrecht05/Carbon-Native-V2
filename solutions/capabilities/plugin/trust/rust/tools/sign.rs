@@ -93,7 +93,7 @@ fn keygen(args: &[String]) -> Result<()> {
     // dev-signing key (see `carbon dev-key generate`), which has nothing to
     // do with plugin_loader.rs's hardcoded CARBON_PLUGIN_PUBLIC_KEY, so the
     // instructions below would be actively wrong advice for it.
-    let is_official_key = flags.get("out").is_none();
+    let is_official_key = !flags.contains_key("out");
     let path = match flags.get("out") {
         Some(p) => PathBuf::from(p),
         None => keyfile::default_path()?,

@@ -165,7 +165,12 @@ impl TextEngine {
     /// Inter's matching weight. This is what the fonts plugin's
     /// `loadFont(path, family, weight)` JS hook calls into, through the
     /// plugin ABI's `load_font_bytes` field.
-    pub fn load_font_bytes_named(&mut self, bytes: Vec<u8>, family: Option<String>, weight: Option<u16>) -> bool {
+    pub fn load_font_bytes_named(
+        &mut self,
+        bytes: Vec<u8>,
+        family: Option<String>,
+        weight: Option<u16>,
+    ) -> bool {
         // Make sure the embedded defaults are in first, then append. Face
         // selection filters by (mono-class, weight, coverage), so position
         // no longer matters — a runtime-loaded monospace font is still
@@ -185,7 +190,12 @@ impl TextEngine {
 
     /// Load a font from a file path and append to the stack, optionally
     /// named/weighted — see `load_font_bytes_named`.
-    pub fn load_font_path_named(&mut self, path: &Path, family: Option<String>, weight: Option<u16>) -> bool {
+    pub fn load_font_path_named(
+        &mut self,
+        path: &Path,
+        family: Option<String>,
+        weight: Option<u16>,
+    ) -> bool {
         match std::fs::read(path) {
             Ok(bytes) => self.load_font_bytes_named(bytes, family, weight),
             Err(_) => false,
@@ -956,71 +966,6 @@ fn normalize_family(s: &str) -> String {
         .to_ascii_lowercase()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn normalize_family_strips_quotes_whitespace_and_case() {
-        assert_eq!(normalize_family("\"Poppins\""), "poppins");
-        assert_eq!(normalize_family(" 'Poppins' "), "poppins");
-        assert_eq!(normalize_family("POPPINS"), "poppins");
-        assert_eq!(normalize_family("  sans-serif "), "sans-serif");
-    }
-
-    // Real font bytes (the embedded Roboto backstop), not synthetic data —
-    // used as a stand-in "custom" font distinct from Inter so the test can
-    // tell the two apart by which one actually got selected.
-
-    #[test]
-    fn a_named_font_is_selected_over_the_default_stack_when_family_matches() {
-        let mut te = TextEngine::new();
-        assert!(te.load_font_bytes_named(FALLBACK_FONT_BYTES.to_vec(), Some("MyCustomFont".to_string()), None));
-        let named_idx = te.fonts.len() - 1;
-        assert_eq!(te.family_names[named_idx].as_deref(), Some("MyCustomFont"));
-
-        // CSS-shaped chain with quotes + a generic fallback — normalize_family
-        // must see through both.
-        te.cur_family = Some("\"MyCustomFont\", sans-serif".to_string());
-        let (_, idx) = te.font_for_char('A', false, 400).expect("should resolve a font");
-        assert_eq!(idx as usize, named_idx, "expected the named font, not the default Inter face");
-    }
-
-    #[test]
-    fn no_cur_family_uses_the_ordinary_coverage_search() {
-        let mut te = TextEngine::new();
-        te.preload(); // embeds Inter/Roboto; Inter-Regular lands at index 0
-        assert!(te.cur_family.is_none());
-        let (_, idx) = te.font_for_char('A', false, 400).expect("should resolve a font");
-        assert_eq!(idx, 0, "no family requested — should use the primary (Inter-Regular)");
-    }
-
-    #[test]
-    fn an_unmatched_family_falls_back_to_the_default_search_instead_of_returning_nothing() {
-        let mut te = TextEngine::new();
-        te.preload();
-        te.cur_family = Some("NoSuchFontAnywhere".to_string());
-        let (_, idx) = te.font_for_char('A', false, 400).expect("should still resolve via fallback");
-        assert_eq!(idx, 0, "no matching family — should fall back to Inter-Regular, not None");
-    }
-
-    #[test]
-    fn among_multiple_weights_of_the_same_family_the_closest_weight_wins() {
-        let mut te = TextEngine::new();
-        assert!(te.load_font_bytes_named(FALLBACK_FONT_BYTES.to_vec(), Some("Multi".to_string()), Some(400)));
-        let regular_idx = te.fonts.len() - 1;
-        assert!(te.load_font_bytes_named(INTER_BOLD.to_vec(), Some("Multi".to_string()), Some(700)));
-        let bold_idx = te.fonts.len() - 1;
-
-        te.cur_family = Some("Multi".to_string());
-        let (_, idx) = te.font_for_char('A', false, 700).expect("should resolve a font");
-        assert_eq!(idx as usize, bold_idx, "weight 700 should pick the bold variant of the named family");
-
-        let (_, idx) = te.font_for_char('A', false, 400).expect("should resolve a font");
-        assert_eq!(idx as usize, regular_idx, "weight 400 should pick the regular variant of the named family");
-    }
-}
-
 /// Coverage gamma LUT. fontdue hands back linear coverage; blending it
 /// straight (as sRGB alpha) renders text thinner/lighter than a browser,
 /// which gamma-corrects its text AA (stem darkening). Boosting mid-coverage
@@ -1112,5 +1057,107 @@ fn blit_glyph(
                 pixels[idx] = p;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_family_strips_quotes_whitespace_and_case() {
+        assert_eq!(normalize_family("\"Poppins\""), "poppins");
+        assert_eq!(normalize_family(" 'Poppins' "), "poppins");
+        assert_eq!(normalize_family("POPPINS"), "poppins");
+        assert_eq!(normalize_family("  sans-serif "), "sans-serif");
+    }
+
+    // Real font bytes (the embedded Roboto backstop), not synthetic data —
+    // used as a stand-in "custom" font distinct from Inter so the test can
+    // tell the two apart by which one actually got selected.
+
+    #[test]
+    fn a_named_font_is_selected_over_the_default_stack_when_family_matches() {
+        let mut te = TextEngine::new();
+        assert!(te.load_font_bytes_named(
+            FALLBACK_FONT_BYTES.to_vec(),
+            Some("MyCustomFont".to_string()),
+            None
+        ));
+        let named_idx = te.fonts.len() - 1;
+        assert_eq!(te.family_names[named_idx].as_deref(), Some("MyCustomFont"));
+
+        // CSS-shaped chain with quotes + a generic fallback — normalize_family
+        // must see through both.
+        te.cur_family = Some("\"MyCustomFont\", sans-serif".to_string());
+        let (_, idx) = te
+            .font_for_char('A', false, 400)
+            .expect("should resolve a font");
+        assert_eq!(
+            idx as usize, named_idx,
+            "expected the named font, not the default Inter face"
+        );
+    }
+
+    #[test]
+    fn no_cur_family_uses_the_ordinary_coverage_search() {
+        let mut te = TextEngine::new();
+        te.preload(); // embeds Inter/Roboto; Inter-Regular lands at index 0
+        assert!(te.cur_family.is_none());
+        let (_, idx) = te
+            .font_for_char('A', false, 400)
+            .expect("should resolve a font");
+        assert_eq!(
+            idx, 0,
+            "no family requested — should use the primary (Inter-Regular)"
+        );
+    }
+
+    #[test]
+    fn an_unmatched_family_falls_back_to_the_default_search_instead_of_returning_nothing() {
+        let mut te = TextEngine::new();
+        te.preload();
+        te.cur_family = Some("NoSuchFontAnywhere".to_string());
+        let (_, idx) = te
+            .font_for_char('A', false, 400)
+            .expect("should still resolve via fallback");
+        assert_eq!(
+            idx, 0,
+            "no matching family — should fall back to Inter-Regular, not None"
+        );
+    }
+
+    #[test]
+    fn among_multiple_weights_of_the_same_family_the_closest_weight_wins() {
+        let mut te = TextEngine::new();
+        assert!(te.load_font_bytes_named(
+            FALLBACK_FONT_BYTES.to_vec(),
+            Some("Multi".to_string()),
+            Some(400)
+        ));
+        let regular_idx = te.fonts.len() - 1;
+        assert!(te.load_font_bytes_named(
+            INTER_BOLD.to_vec(),
+            Some("Multi".to_string()),
+            Some(700)
+        ));
+        let bold_idx = te.fonts.len() - 1;
+
+        te.cur_family = Some("Multi".to_string());
+        let (_, idx) = te
+            .font_for_char('A', false, 700)
+            .expect("should resolve a font");
+        assert_eq!(
+            idx as usize, bold_idx,
+            "weight 700 should pick the bold variant of the named family"
+        );
+
+        let (_, idx) = te
+            .font_for_char('A', false, 400)
+            .expect("should resolve a font");
+        assert_eq!(
+            idx as usize, regular_idx,
+            "weight 400 should pick the regular variant of the named family"
+        );
     }
 }

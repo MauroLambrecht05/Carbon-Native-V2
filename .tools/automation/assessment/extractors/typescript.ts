@@ -72,7 +72,7 @@ function nodeToText(node: t.Node | null | undefined): string {
     return `${nodeToText(node.callee)}?.(...)`;
   }
   if (t.isAwaitExpression(node)) return `await ${nodeToText(node.argument)}`;
-  if (t.isTypeofTypeAnnotation && t.isTSTypeQuery) return "";
+  if (t.isTypeofTypeAnnotation(node) || t.isTSTypeQuery(node)) return "";
   return node.type;
 }
 
@@ -370,7 +370,13 @@ export function extractTypeScript(filePath: string, relPath: string): RawFileExt
       const node: t.IfStatement = path.node;
       // Only extract top-level ifs inside functions/methods (skip nested ones that will be captured as nested)
       const parent = path.parent;
-      const isNestedIf = t.isIfStatement(parent) || t.isElseStatement?.(parent);
+      // Babel has no distinct "else" node — an else-if/else clause is just
+      // an IfStatement's own `alternate`, so `t.isIfStatement(parent)`
+      // alone already covers "this if is part of an if/else-if chain".
+      // `t.isElseStatement` never existed on @babel/types; the `?.` masked
+      // that at runtime (always undefined, so this half of the check never
+      // actually fired) until a stricter TS catch caught the typo outright.
+      const isNestedIf = t.isIfStatement(parent);
 
       const condition = extractConditionText(node.test);
       const trueAction = extractStatementSummary(node.consequent);
