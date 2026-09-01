@@ -95,6 +95,21 @@ export interface RuntimeFeatureFlags {
   readonly audio?: boolean;
   /** carbon.toml `[updater] enabled` — links the A/B slot state machine. */
   readonly updater?: boolean;
+  /** carbon.toml `[runtime] network` — links fetch()/WebSocket() (reqwest+
+   *  tokio+rustls, ~2.3 MiB). Unlike image/audio/updater, undefined here
+   *  means ON, not off — every app built before this flag existed already
+   *  has networking, so the absent-key case has to preserve that, not
+   *  silently drop it. Explicit `false` is the only way to opt out. Applies
+   *  to both backends (carbon-os is shared), unlike the mini-only flags
+   *  above. */
+  readonly network?: boolean;
+  /** carbon.toml `[runtime] svg` — links usvg/resvg (~534 KiB) for
+   *  `data:image/svg+xml` decode, the form npm icon libraries ship inline
+   *  icons as. Same "absent means on" shape as `network` and, like it,
+   *  independent of `network` — decoding a data: URL never touches the
+   *  network. Mini-only: blitz's presentation host never used image_host
+   *  at all. */
+  readonly svg?: boolean;
   /** `carbon build --release`'s static-plugin-linking path (see
    *  StaticLinkPluginsUseCase and carbon-plugin-host's own feature of the
    *  same name). Swaps the dlopen/dlsym plugin loader for one that expects
@@ -124,11 +139,18 @@ export function backendCargoFeatures(
     if (flags.image) features.push("image");
     if (flags.audio) features.push("audio");
     if (flags.updater) features.push("updater");
+    // `!== false`, not a truthy check — see RuntimeFeatureFlags' doc
+    // comment on `svg`: absent must mean on, matching `network` below.
+    if (flags.svg !== false) features.push("svg");
   }
   // Both backends declare this feature (see their respective Cargo.toml
   // entries forwarding to carbon-plugin-host/static-plugins), so it's pushed
   // unconditionally on `name`, unlike the mini-only flags above.
   if (flags.staticPlugins) features.push("static-plugins");
+  // Same "both backends" shape as static-plugins — carbon-os is shared, not
+  // mini-specific. `!== false` (not truthy-check): absent must mean on, see
+  // this field's own doc comment on RuntimeFeatureFlags.
+  if (flags.network !== false) features.push("network");
 
   return features.join(",");
 }

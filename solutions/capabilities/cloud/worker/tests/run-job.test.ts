@@ -89,7 +89,7 @@ import { mock } from "bun:test";
 mock.module("@carbon/workspace", () => ({
   loadCarbonConfig: async () => ({
     app: { name: "demo", version: "1.0.0" },
-    runtime: { backend: "mini", bytecode: false, image: false, audio: false },
+    runtime: { backend: "mini", bytecode: false, image: false, audio: false, network: true, svg: true },
     raw: {},
   }),
 }));

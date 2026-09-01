@@ -339,7 +339,6 @@ pub(crate) fn snapshot_build_app(project_dir: &std::path::Path) -> Result<()> {
                 "__cm_test","__cm_invoke","__cm_invoke_has",
                 "__cm_autostart_enable","__cm_autostart_disable","__cm_autostart_is_enabled",
                 "__cm_proc_relaunch_self","__cm_shell_open","__cm_shell_reveal",
-                "__cm_pty_spawn","__cm_pty_write","__cm_pty_read","__cm_pty_resize","__cm_pty_close",
                 "__cm_window_close","__cm_window_focus","__cm_window_hide","__cm_window_show",
                 "__cm_window_minimize","__cm_window_maximize","__cm_window_unmaximize",
                 "__cm_window_toggle_maximize","__cm_window_is_focused","__cm_window_is_maximized",

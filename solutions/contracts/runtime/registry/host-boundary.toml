@@ -139,19 +139,6 @@ functions = [
   "__cm_proc_write_stdin",
 ]
 
-[imports.pty]
-source = "carbon/host/native/pty.rs"
-component = "os"
-functions = [
-  "__cm_pty_close",
-  "__cm_pty_kill",
-  "__cm_pty_read",
-  "__cm_pty_resize",
-  "__cm_pty_spawn",
-  "__cm_pty_wait",
-  "__cm_pty_write",
-]
-
 [imports.shell]
 source = "carbon/host/native/shell.rs"
 component = "os"
@@ -291,8 +278,6 @@ functions = [
   "__cm_has_pending",
   "__cm_hmr_reset",
   "__cm_node_id_seq",
-  "__cm_pty_dispatch_exit",
-  "__cm_pty_dispatch_output",
   "__cm_raf_queue",
   "__cm_raf_seq",
   "__cm_resolve_class",

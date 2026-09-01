@@ -1491,5 +1491,6 @@ fn fill_text(c: &mut Canvas2d, te: &mut TextEngine, op: &[Value], _stroke: bool)
         clip_bottom,
         0.0,
         mono,
+        false, // Canvas2D `ctx.font` italic isn't parsed yet — out of scope here.
     );
 }

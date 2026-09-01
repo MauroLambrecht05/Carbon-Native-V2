@@ -517,6 +517,7 @@ unsafe fn alloc_cstring(s: &str) -> *mut c_char {
     ptr as *mut c_char
 }
 
+#[cfg(feature = "clipboard")]
 unsafe extern "C" fn host_clipboard_read_text(
     _app: *mut HostCarbonApp,
     out_status: *mut i32,
@@ -537,6 +538,7 @@ unsafe extern "C" fn host_clipboard_read_text(
     }
 }
 
+#[cfg(feature = "clipboard")]
 unsafe extern "C" fn host_clipboard_write_text(
     _app: *mut HostCarbonApp,
     text: *const c_char,
@@ -550,11 +552,13 @@ unsafe extern "C" fn host_clipboard_write_text(
     }
 }
 
+#[cfg(feature = "clipboard")]
 unsafe extern "C" fn host_clipboard_clear(_app: *mut HostCarbonApp) -> i32 {
     crate::clipboard::clear();
     CARBON_OK
 }
 
+#[cfg(feature = "dialog")]
 unsafe extern "C" fn host_dialog_open_file(
     _app: *mut HostCarbonApp,
     opts_json: *const c_char,
@@ -571,6 +575,7 @@ unsafe extern "C" fn host_dialog_open_file(
     }
 }
 
+#[cfg(feature = "dialog")]
 unsafe extern "C" fn host_dialog_open_files(
     _app: *mut HostCarbonApp,
     opts_json: *const c_char,
@@ -586,6 +591,7 @@ unsafe extern "C" fn host_dialog_open_files(
     alloc_cstring(&json)
 }
 
+#[cfg(feature = "dialog")]
 unsafe extern "C" fn host_dialog_open_dir(
     _app: *mut HostCarbonApp,
     opts_json: *const c_char,
@@ -602,6 +608,7 @@ unsafe extern "C" fn host_dialog_open_dir(
     }
 }
 
+#[cfg(feature = "dialog")]
 unsafe extern "C" fn host_dialog_save_file(
     _app: *mut HostCarbonApp,
     opts_json: *const c_char,
@@ -618,6 +625,7 @@ unsafe extern "C" fn host_dialog_save_file(
     }
 }
 
+#[cfg(feature = "dialog")]
 unsafe extern "C" fn host_dialog_open_file_text(
     _app: *mut HostCarbonApp,
     opts_json: *const c_char,
@@ -643,6 +651,7 @@ unsafe extern "C" fn host_dialog_open_file_text(
     }
 }
 
+#[cfg(feature = "dialog")]
 unsafe extern "C" fn host_dialog_save_file_text(
     _app: *mut HostCarbonApp,
     opts_json: *const c_char,
@@ -658,6 +667,7 @@ unsafe extern "C" fn host_dialog_save_file_text(
     }
 }
 
+#[cfg(feature = "dialog")]
 unsafe extern "C" fn host_dialog_message(
     _app: *mut HostCarbonApp,
     title: *const c_char,
@@ -672,6 +682,7 @@ unsafe extern "C" fn host_dialog_message(
     CARBON_OK
 }
 
+#[cfg(feature = "dialog")]
 unsafe extern "C" fn host_dialog_confirm(
     _app: *mut HostCarbonApp,
     title: *const c_char,
@@ -687,6 +698,7 @@ unsafe extern "C" fn host_dialog_confirm(
     }
 }
 
+#[cfg(feature = "notification")]
 unsafe extern "C" fn host_notification_send(
     _app: *mut HostCarbonApp,
     title: *const c_char,
@@ -703,6 +715,7 @@ unsafe extern "C" fn host_notification_send(
     }
 }
 
+#[cfg(feature = "keychain")]
 unsafe extern "C" fn host_keychain_set(
     _app: *mut HostCarbonApp,
     service: *const c_char,
@@ -720,6 +733,7 @@ unsafe extern "C" fn host_keychain_set(
     }
 }
 
+#[cfg(feature = "keychain")]
 unsafe extern "C" fn host_keychain_get(
     _app: *mut HostCarbonApp,
     service: *const c_char,
@@ -746,6 +760,7 @@ unsafe extern "C" fn host_keychain_get(
     }
 }
 
+#[cfg(feature = "keychain")]
 unsafe extern "C" fn host_keychain_delete(
     _app: *mut HostCarbonApp,
     service: *const c_char,
@@ -762,6 +777,7 @@ unsafe extern "C" fn host_keychain_delete(
 
 // ── Global keyboard shortcuts (ABI 1.4) ────────────────────────────────────
 
+#[cfg(feature = "global-shortcuts")]
 unsafe extern "C" fn host_global_shortcut_register(
     _app: *mut HostCarbonApp,
     accelerator: *const c_char,
@@ -781,6 +797,7 @@ unsafe extern "C" fn host_global_shortcut_register(
     }
 }
 
+#[cfg(feature = "global-shortcuts")]
 unsafe extern "C" fn host_global_shortcut_unregister(
     _app: *mut HostCarbonApp,
     accelerator: *const c_char,
@@ -796,6 +813,7 @@ unsafe extern "C" fn host_global_shortcut_unregister(
 
 // ── System tray (ABI 1.5) ──────────────────────────────────────────────────
 
+#[cfg(feature = "tray")]
 unsafe extern "C" fn host_tray_setup(
     _app: *mut HostCarbonApp,
     icon_path: *const c_char,
@@ -815,6 +833,7 @@ unsafe extern "C" fn host_tray_setup(
 
 // ── Deep linking (ABI 1.6) ──────────────────────────────────────────────
 
+#[cfg(feature = "deep-link")]
 unsafe extern "C" fn host_deeplink_register(app: *mut HostCarbonApp, scheme: *const c_char) -> i32 {
     let Some(scheme) = cstr_arg(scheme) else {
         return CARBON_ERR_INVALID;
@@ -954,25 +973,93 @@ impl HostCarbonAppStorage {
                 eval: Some(carbon_js_eval),
                 load_font_path: Some(host_load_font_path),
                 load_font_bytes: Some(host_load_font_bytes),
+                // Each pair below: the real trampoline when that plugin's
+                // Cargo feature is on, `None` when it's off (compiled out
+                // entirely — see lib.rs's matching `#[cfg(feature = "...")]`
+                // on the native/<name>.rs module and this file's own cfg on
+                // each host_* fn above). `None` is a normal, already-handled
+                // case for every one of these fields — the SDK wrapper
+                // (carbon_sdk.zig's CarbonApp methods) already does
+                // `self.raw.clipboard_read_text orelse return
+                // CARBON_ERR_GENERIC` etc., so a plugin calling a capability
+                // its host build doesn't have gets a clean error, not a
+                // null-pointer crash.
+                #[cfg(feature = "clipboard")]
                 clipboard_read_text: Some(host_clipboard_read_text),
+                #[cfg(not(feature = "clipboard"))]
+                clipboard_read_text: None,
+                #[cfg(feature = "clipboard")]
                 clipboard_write_text: Some(host_clipboard_write_text),
+                #[cfg(not(feature = "clipboard"))]
+                clipboard_write_text: None,
+                #[cfg(feature = "clipboard")]
                 clipboard_clear: Some(host_clipboard_clear),
+                #[cfg(not(feature = "clipboard"))]
+                clipboard_clear: None,
+                #[cfg(feature = "dialog")]
                 dialog_open_file: Some(host_dialog_open_file),
+                #[cfg(not(feature = "dialog"))]
+                dialog_open_file: None,
+                #[cfg(feature = "dialog")]
                 dialog_open_files: Some(host_dialog_open_files),
+                #[cfg(not(feature = "dialog"))]
+                dialog_open_files: None,
+                #[cfg(feature = "dialog")]
                 dialog_open_dir: Some(host_dialog_open_dir),
+                #[cfg(not(feature = "dialog"))]
+                dialog_open_dir: None,
+                #[cfg(feature = "dialog")]
                 dialog_save_file: Some(host_dialog_save_file),
+                #[cfg(not(feature = "dialog"))]
+                dialog_save_file: None,
+                #[cfg(feature = "dialog")]
                 dialog_open_file_text: Some(host_dialog_open_file_text),
+                #[cfg(not(feature = "dialog"))]
+                dialog_open_file_text: None,
+                #[cfg(feature = "dialog")]
                 dialog_save_file_text: Some(host_dialog_save_file_text),
+                #[cfg(not(feature = "dialog"))]
+                dialog_save_file_text: None,
+                #[cfg(feature = "dialog")]
                 dialog_message: Some(host_dialog_message),
+                #[cfg(not(feature = "dialog"))]
+                dialog_message: None,
+                #[cfg(feature = "dialog")]
                 dialog_confirm: Some(host_dialog_confirm),
+                #[cfg(not(feature = "dialog"))]
+                dialog_confirm: None,
+                #[cfg(feature = "notification")]
                 notification_send: Some(host_notification_send),
+                #[cfg(not(feature = "notification"))]
+                notification_send: None,
+                #[cfg(feature = "keychain")]
                 keychain_set: Some(host_keychain_set),
+                #[cfg(not(feature = "keychain"))]
+                keychain_set: None,
+                #[cfg(feature = "keychain")]
                 keychain_get: Some(host_keychain_get),
+                #[cfg(not(feature = "keychain"))]
+                keychain_get: None,
+                #[cfg(feature = "keychain")]
                 keychain_delete: Some(host_keychain_delete),
+                #[cfg(not(feature = "keychain"))]
+                keychain_delete: None,
+                #[cfg(feature = "global-shortcuts")]
                 global_shortcut_register: Some(host_global_shortcut_register),
+                #[cfg(not(feature = "global-shortcuts"))]
+                global_shortcut_register: None,
+                #[cfg(feature = "global-shortcuts")]
                 global_shortcut_unregister: Some(host_global_shortcut_unregister),
+                #[cfg(not(feature = "global-shortcuts"))]
+                global_shortcut_unregister: None,
+                #[cfg(feature = "tray")]
                 tray_setup: Some(host_tray_setup),
+                #[cfg(not(feature = "tray"))]
+                tray_setup: None,
+                #[cfg(feature = "deep-link")]
                 deeplink_register: Some(host_deeplink_register),
+                #[cfg(not(feature = "deep-link"))]
+                deeplink_register: None,
             },
             _app_name: app_name_c,
             _app_version: app_version_c,

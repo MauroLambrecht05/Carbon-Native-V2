@@ -21,6 +21,12 @@ pub struct PaintProps {
     pub color: Option<u32>,
     pub font_size: Option<f32>,
     pub border_radius: f32,
+    /// CSS (draft) `corner-shape`. `None` = the existing circular-arc
+    /// corners (unaffected — this is purely additive). `Some(n)` = a
+    /// superellipse of exponent `n` instead ("squircle" = a fixed
+    /// n=4). Applies everywhere `border_radius` already does: the
+    /// background fill, border stroke, box-shadow, and outline.
+    pub corner_shape: Option<f32>,
     /// CSS `opacity` [0,1]. None = fully opaque (1.0). Applies to the node
     /// AND its whole subtree as a group (the paint loop composites the
     /// subtree to an offscreen layer and blits it at this alpha), matching
@@ -92,9 +98,29 @@ pub struct PaintProps {
     /// Currently applied to `<text>` nodes only — block-level alignment
     /// via flex is independent.
     pub text_align: Option<String>,
+    /// CSS `white-space`. Accepted: "normal" (default — wraps if a width
+    /// is set, else single-line) | "nowrap" (always single-line,
+    /// regardless of width) | "pre" (preserve literal `\n` line breaks,
+    /// never word-wrap). Affects both the Taffy measure pass (so the
+    /// layout box doesn't grow tall from wrapping that paint won't do)
+    /// and the paint pass.
+    pub white_space: Option<String>,
+    /// CSS `text-overflow`. Accepted: "clip" (default) | "ellipsis" —
+    /// truncates single-line text to the node's layout width with a
+    /// trailing "…" instead of overflowing. Forces single-line behavior
+    /// like `white-space: nowrap` while set.
+    pub text_overflow: Option<String>,
     /// CSS `text-decoration`. Accepted: "underline" | "line-through" |
     /// "none". Painted as a 1-2 px line at the appropriate baseline.
     pub text_decoration: Option<String>,
+    /// CSS `font-style`. Accepted: "italic" | "oblique" (both render
+    /// identically — a synthetic shear; there are no real italic font
+    /// files loaded, only upright weights). Like `text_align` and
+    /// `text_decoration`, this is an OWN-value-only prop: it doesn't
+    /// inherit down the tree the way real CSS `font-style` does — a
+    /// `<text>` child needs it set directly, same existing limitation
+    /// those two props already have.
+    pub font_style: Option<String>,
     /// CSS `line-height`. Number (unitless multiplier) or px length.
     /// Applied to multi-line text wrapping. None = font default
     /// (currently 1.2× font-size).
@@ -137,6 +163,16 @@ pub struct PaintProps {
     pub border_bottom_width: Option<f32>,
     #[serde(default)]
     pub border_left_width: Option<f32>,
+    /// CSS `outline-width` — a stroke drawn OUTSIDE the border edge
+    /// (offset by `outline_offset`), unlike border which sits ON the
+    /// box edge. Doesn't contribute to layout size, matching CSS.
+    pub outline_width: f32,
+    /// `outline-color`. None = currentColor (falls back to the node's
+    /// effective text color, like `border_color` does).
+    pub outline_color: Option<u32>,
+    /// `outline-offset` — gap between the border edge and the outline,
+    /// in px. May be negative (outline drawn inside the border edge).
+    pub outline_offset: f32,
     /// Sizing — accepts both `100` (px) and `"50%"` (percent of parent).
     pub width: Option<Len>,
     pub height: Option<Len>,
@@ -144,6 +180,10 @@ pub struct PaintProps {
     pub max_width: Option<Len>,
     pub min_height: Option<Len>,
     pub max_height: Option<Len>,
+    /// CSS `aspect-ratio` as width/height (e.g. `16/9` → 1.777...).
+    /// Resolved by Taffy: when only one of width/height is definite,
+    /// the other is derived from this ratio.
+    pub aspect_ratio: Option<f32>,
     /// Flex item sizing. flex-grow / flex-shrink default to 0 / 1.
     /// flex-basis defaults to auto (None).
     pub flex_grow: Option<f32>,
@@ -164,10 +204,47 @@ pub struct PaintProps {
     /// testing). None = no override; falls back to the base prop.
     pub background_hover: Option<u32>,
     pub color_hover: Option<u32>,
+    /// Focus-state overrides — applied when this node holds keyboard
+    /// focus (`scene.focused == Some(id)`). Real focus tracking
+    /// currently only ever reaches `Input`/`Textarea` nodes (see
+    /// `Scene::focusable_inputs`), so these are no-ops on anything
+    /// else — a `<button>` can't become focused yet, so its
+    /// `focus:`-derived styles never trigger. That's a real, narrower
+    /// gap than these fields themselves (tracked separately: general
+    /// keyboard focus/Tab-order for non-input clickables), not
+    /// something to paper over here by substituting hover.
+    pub background_focus: Option<u32>,
+    pub color_focus: Option<u32>,
     /// `overflow-y: scroll` — the node becomes a scrollport. Mouse wheel
     /// events over this node update its scroll offset; children get
     /// translated up by that offset and clipped to the node's box.
     pub overflow_y: bool,
+    /// Auto edge-fade on a scrollport signaling more content is
+    /// scrollable above/below — the Notion/Radix-ScrollArea pattern,
+    /// promoted from an app-level manual overlay to an engine primitive.
+    /// Only paints when the node also has a solid `background` (the
+    /// fade blends TOWARD that color; there's nothing correct to fade
+    /// toward otherwise). No-op on nodes without `overflow_y`.
+    pub scroll_shadow: bool,
+    /// CSS `scrollbar-color: <thumb> <track>`. None = the engine's
+    /// default translucent-white thumb/track.
+    pub scrollbar_thumb_color: Option<u32>,
+    pub scrollbar_track_color: Option<u32>,
+    /// CSS `scrollbar-width`. None = the default 4px bar. `Some(0.0)`
+    /// (from the `none` keyword) hides the bar entirely while leaving
+    /// the scrollport itself still scrollable.
+    pub scrollbar_width: Option<f32>,
+    /// CSS `scroll-snap-type` on a scrollport. `"mandatory"` or
+    /// `"proximity"` (the axis token is dropped — this engine only has
+    /// a y scroll model, so it's always the y axis). `None` = no
+    /// snapping. See `Scene::scroll_snap_target`'s doc comment for how
+    /// each strictness level is approximated without a real
+    /// gesture/momentum model.
+    pub scroll_snap_type: Option<String>,
+    /// CSS `scroll-snap-align` on a scrollable child. `"start"` |
+    /// `"center"` | `"end"` — which edge of the child aligns to the
+    /// matching edge of its scrollport when snapped.
+    pub scroll_snap_align: Option<String>,
     /// Path to an image to paint inside this node's layout box. The path
     /// is resolved against the project_dir at paint time and decoded
     /// once via tiny_skia::Pixmap::load_png. Stretched to cover the box.
@@ -175,6 +252,21 @@ pub struct PaintProps {
     /// How to fit the background_image in the box: "cover" (default —
     /// fills, may crop) or "stretch" (stretches both axes independently).
     pub background_size: Option<String>,
+    /// CSS `background-image: url(a), url(b), ...` — 2+ comma-separated
+    /// layers. First-listed paints ON TOP (CSS ordering), so paint walks
+    /// this in reverse. Populated ONLY when 2+ layers are present;
+    /// single-layer values keep going through `background_image` above
+    /// unchanged (that's also what the `src` attribute path writes to).
+    #[serde(default)]
+    pub background_layers: Vec<String>,
+    /// Per-layer `background-size`, aligned by index with
+    /// `background_layers`. Shorter than it → the last entry repeats;
+    /// empty → "cover" for every layer. Kept independent of
+    /// `background_layers` (rather than zipped together at parse time)
+    /// because `background-image` and `background-size` arrive as two
+    /// separate `set_prop` calls in unspecified order.
+    #[serde(default)]
+    pub background_layer_sizes: Vec<String>,
     /// CSS-style cursor name. Recognized values: default | pointer | hand |
     /// text | ibeam | crosshair | not-allowed | wait | progress | grab |
     /// grabbing | col-resize | row-resize. None + clickable = pointer
@@ -258,6 +350,23 @@ pub struct PaintProps {
     /// Order within each kind preserves declaration order.
     #[serde(default)]
     pub box_shadow: Vec<BoxShadow>,
+    /// CSS `text-shadow`. Same declaration-order/stacking convention as
+    /// `box_shadow`. Applies to plain `text` content only (not `spans`).
+    #[serde(default)]
+    pub text_shadow: Vec<TextShadow>,
+    /// CSS `filter: blur(...) drop-shadow(...)`. Applied to the node +
+    /// its whole painted subtree as a group (same offscreen-layer
+    /// technique as `opacity`) — set means at least one recognized
+    /// filter function was present.
+    #[serde(default)]
+    pub filter: Option<FilterList>,
+    /// CSS `mix-blend-mode`. Applies to the node + its whole painted
+    /// subtree as a group (same offscreen-layer technique as `opacity`
+    /// and `filter`), blended against whatever's already been painted
+    /// behind it. Stores the raw CSS keyword; the paint side maps it to
+    /// a `tiny_skia::BlendMode` (they correspond almost 1:1). `None` /
+    /// `"normal"` / an unrecognized keyword all mean normal compositing.
+    pub mix_blend_mode: Option<String>,
     /// CSS `transform: translate(...) rotate(...) scale(...)`. Applied
     /// to fill operations (and SVG path content) for this node and its
     /// descendants. Text content stays axis-aligned — a known
@@ -294,6 +403,12 @@ pub enum GradientShape {
     Linear { angle_deg: f32 },
     /// Center as fraction (0.0..1.0). Always elliptical-to-box-size.
     Radial { cx: f32, cy: f32 },
+    /// `conic-gradient(from <angle> at <cx> <cy>, ...)`. Same angle
+    /// convention as `Linear` (0° = up, clockwise) and same center
+    /// convention as `Radial`. No native tiny-skia shader for this —
+    /// the paint side samples the stop list per pixel by hand instead
+    /// of building a `Shader`.
+    Conic { angle_deg: f32, cx: f32, cy: f32 },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -314,6 +429,38 @@ pub struct BoxShadow {
     /// fill) instead of behind it (drawn BEFORE).
     pub inset: bool,
 }
+
+/// CSS `text-shadow` entry. Same fields as `BoxShadow` minus `spread`
+/// and `inset` (text-shadow doesn't have either).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TextShadow {
+    pub offset_x: f32,
+    pub offset_y: f32,
+    pub blur: f32,
+    /// 0xAARRGGBB
+    pub color: u32,
+}
+
+/// One `filter` function. Unrecognized functions (brightness, contrast,
+/// saturate, ...) are dropped at parse time rather than represented here.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum FilterOp {
+    /// `blur(<length>)` — Gaussian blur, std-dev == the given px length.
+    Blur(f32),
+    /// `drop-shadow(<x> <y> [<blur>] [<color>])` — blurs the alpha
+    /// silhouette of the filtered subtree (not a box shape, unlike
+    /// `box-shadow`) and composites it behind the original.
+    DropShadow {
+        offset_x: f32,
+        offset_y: f32,
+        blur: f32,
+        /// 0xAARRGGBB
+        color: u32,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct FilterList(pub Vec<FilterOp>);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TransformOp {
@@ -361,6 +508,10 @@ pub struct TextSpan {
     /// by editors for "selection inside a token".
     #[serde(default)]
     pub background: Option<u32>,
+    /// Per-run `font-style: italic`, same synthetic-shear rendering as
+    /// the node-level `font_style` prop.
+    #[serde(default)]
+    pub italic: bool,
 }
 
 /// CSS `clip-path` shape. Coordinates are stored in `Len` so we can
@@ -484,6 +635,13 @@ pub struct NodeCtx {
     /// (painting/lib.rs's `effective_family`) or the measured box won't
     /// match what gets rendered.
     pub family: Option<String>,
+    /// True when `white-space: nowrap` or `text-overflow: ellipsis` is
+    /// in effect — the measure callback returns single-line height
+    /// regardless of the available width, matching what paint actually
+    /// renders (a truncated/overflowing single line, never a wrapped
+    /// stack). Must mirror the paint-side decision in painting/lib.rs or
+    /// the layout box won't match what gets drawn into it.
+    pub force_nowrap: bool,
 }
 
 pub struct Scene {
@@ -1385,6 +1543,10 @@ impl Scene {
                         n.props.background_gradient =
                             crate::css_parse::parse_radial_gradient(trimmed);
                         n.props.background = None;
+                    } else if trimmed.starts_with("conic-gradient(") {
+                        n.props.background_gradient =
+                            crate::css_parse::parse_conic_gradient(trimmed);
+                        n.props.background = None;
                     } else {
                         n.props.background = parse_color(&v);
                         n.props.background_gradient = None;
@@ -1425,6 +1587,25 @@ impl Scene {
                 "left" => {
                     n.props.left = parse_len(&v);
                 }
+                // Logical inset properties, aliased to their physical
+                // LTR equivalent. No bidi/RTL model exists in this
+                // engine (no `direction` prop, no mirrored layout) — so
+                // "inline-start" always means "left", same as it would
+                // in an LTR document. An RTL app gets the wrong edge
+                // rather than the right one turned around; there's no
+                // way to do better without a real direction concept.
+                "inset-inline-start" | "inset_inline_start" | "insetInlineStart" => {
+                    n.props.left = parse_len(&v);
+                }
+                "inset-inline-end" | "inset_inline_end" | "insetInlineEnd" => {
+                    n.props.right = parse_len(&v);
+                }
+                "inset-block-start" | "inset_block_start" | "insetBlockStart" => {
+                    n.props.top = parse_len(&v);
+                }
+                "inset-block-end" | "inset_block_end" | "insetBlockEnd" => {
+                    n.props.bottom = parse_len(&v);
+                }
                 "z-index" | "z_index" | "zIndex" => {
                     n.props.z_index = parse_f32(&v)
                         .map(|f| f.round() as i32)
@@ -1437,9 +1618,19 @@ impl Scene {
                 "color-hover" | "color_hover" | "colorHover" => {
                     n.props.color_hover = parse_color(&v);
                 }
+                "background-focus" | "background_focus" | "backgroundFocus" => {
+                    n.props.background_focus = parse_color(&v);
+                }
+                "color-focus" | "color_focus" | "colorFocus" => {
+                    n.props.color_focus = parse_color(&v);
+                }
                 "font_size" | "fontSize" | "font-size" => n.props.font_size = parse_f32(&v),
                 "border_radius" | "borderRadius" | "border-radius" => {
                     n.props.border_radius = parse_f32(&v).unwrap_or(0.0);
+                }
+                "corner-shape" | "corner_shape" | "cornerShape" => {
+                    n.props.corner_shape =
+                        v.as_str().and_then(crate::css_parse::parse_corner_shape);
                 }
                 "opacity" => {
                     // Accept a unitless number (CSS opacity) or a string.
@@ -1552,6 +1743,30 @@ impl Scene {
                 "paddingBottom" | "padding_bottom" | "padding-bottom" => {
                     n.props.padding_bottom = parse_f32(&v)
                 }
+                // Logical padding, LTR-aliased — see the inset-inline-*
+                // comment above for why there's no real bidi mapping.
+                "padding-inline" | "padding_inline" | "paddingInline" => {
+                    let p = parse_f32(&v);
+                    n.props.padding_left = p;
+                    n.props.padding_right = p;
+                }
+                "padding-inline-start" | "padding_inline_start" | "paddingInlineStart" => {
+                    n.props.padding_left = parse_f32(&v);
+                }
+                "padding-inline-end" | "padding_inline_end" | "paddingInlineEnd" => {
+                    n.props.padding_right = parse_f32(&v);
+                }
+                "padding-block" | "padding_block" | "paddingBlock" => {
+                    let p = parse_f32(&v);
+                    n.props.padding_top = p;
+                    n.props.padding_bottom = p;
+                }
+                "padding-block-start" | "padding_block_start" | "paddingBlockStart" => {
+                    n.props.padding_top = parse_f32(&v);
+                }
+                "padding-block-end" | "padding_block_end" | "paddingBlockEnd" => {
+                    n.props.padding_bottom = parse_f32(&v);
+                }
                 "margin" => {
                     let m = parse_len(&v);
                     n.props.margin_left = m;
@@ -1577,6 +1792,29 @@ impl Scene {
                 "marginBottom" | "margin_bottom" | "margin-bottom" => {
                     n.props.margin_bottom = parse_len(&v)
                 }
+                // Logical margin, LTR-aliased — see inset-inline-*.
+                "margin-inline" | "margin_inline" | "marginInline" => {
+                    let m = parse_len(&v);
+                    n.props.margin_left = m;
+                    n.props.margin_right = m;
+                }
+                "margin-inline-start" | "margin_inline_start" | "marginInlineStart" => {
+                    n.props.margin_left = parse_len(&v);
+                }
+                "margin-inline-end" | "margin_inline_end" | "marginInlineEnd" => {
+                    n.props.margin_right = parse_len(&v);
+                }
+                "margin-block" | "margin_block" | "marginBlock" => {
+                    let m = parse_len(&v);
+                    n.props.margin_top = m;
+                    n.props.margin_bottom = m;
+                }
+                "margin-block-start" | "margin_block_start" | "marginBlockStart" => {
+                    n.props.margin_top = parse_len(&v);
+                }
+                "margin-block-end" | "margin_block_end" | "marginBlockEnd" => {
+                    n.props.margin_bottom = parse_len(&v);
+                }
                 "fontWeight" | "font_weight" | "font-weight" => {
                     // Accept "bold" | "normal" | "lighter" | numeric 100-900.
                     if let Some(s) = v.as_str() {
@@ -1592,6 +1830,39 @@ impl Scene {
                 }
                 "textAlign" | "text_align" | "text-align" => {
                     n.props.text_align = v.as_str().map(|s| s.to_string());
+                }
+                "fontStyle" | "font_style" | "font-style" => {
+                    n.props.font_style = v
+                        .as_str()
+                        .and_then(|s| matches!(s, "italic" | "oblique").then(|| s.to_string()));
+                }
+                "whiteSpace" | "white_space" | "white-space" => {
+                    n.props.white_space = v.as_str().map(|s| s.to_string());
+                }
+                "textOverflow" | "text_overflow" | "text-overflow" => {
+                    n.props.text_overflow = v.as_str().map(|s| s.to_string());
+                }
+                "text-shadow" | "text_shadow" | "textShadow" => {
+                    let raw = v.as_str().unwrap_or("");
+                    if raw.trim().is_empty() || raw.trim() == "none" {
+                        n.props.text_shadow.clear();
+                    } else {
+                        n.props.text_shadow = crate::css_parse::parse_text_shadow(raw);
+                    }
+                }
+                "filter" => {
+                    let raw = v.as_str().unwrap_or("");
+                    n.props.filter = crate::css_parse::parse_filter(raw);
+                }
+                "mix-blend-mode" | "mix_blend_mode" | "mixBlendMode" => {
+                    n.props.mix_blend_mode = v.as_str().and_then(|s| {
+                        let s = s.trim();
+                        if s.is_empty() || s == "normal" {
+                            None
+                        } else {
+                            Some(s.to_string())
+                        }
+                    });
                 }
                 "textDecoration"
                 | "text_decoration"
@@ -1642,11 +1913,16 @@ impl Scene {
                             let background = parse_color(
                                 item.get("background").unwrap_or(&serde_json::Value::Null),
                             );
+                            let italic = item
+                                .get("italic")
+                                .and_then(|b| b.as_bool())
+                                .unwrap_or(false);
                             out.push(TextSpan {
                                 text,
                                 color,
                                 weight,
                                 background,
+                                italic,
                             });
                         }
                         n.props.spans = Some(out);
@@ -1670,6 +1946,15 @@ impl Scene {
                 "borderLeftWidth" | "border_left_width" | "border-left-width" => {
                     n.props.border_left_width = parse_f32(&v);
                 }
+                "outlineWidth" | "outline_width" | "outline-width" => {
+                    n.props.outline_width = parse_f32(&v).unwrap_or(0.0);
+                }
+                "outlineColor" | "outline_color" | "outline-color" => {
+                    n.props.outline_color = parse_color(&v);
+                }
+                "outlineOffset" | "outline_offset" | "outline-offset" => {
+                    n.props.outline_offset = parse_f32(&v).unwrap_or(0.0);
+                }
                 "gap" => n.props.gap = parse_f32(&v),
                 "width" => n.props.width = parse_len(&v),
                 "height" => n.props.height = parse_len(&v),
@@ -1677,6 +1962,14 @@ impl Scene {
                 "maxWidth" | "max_width" | "max-width" => n.props.max_width = parse_len(&v),
                 "minHeight" | "min_height" | "min-height" => n.props.min_height = parse_len(&v),
                 "maxHeight" | "max_height" | "max-height" => n.props.max_height = parse_len(&v),
+                "aspect-ratio" | "aspect_ratio" | "aspectRatio" => {
+                    // Accepts a CSS string ("16/9", "1.5", "auto") or a
+                    // bare JSON number (aspectRatio: 1.5 in inline style).
+                    n.props.aspect_ratio = match v.as_str() {
+                        Some(s) => crate::css_parse::parse_aspect_ratio(s),
+                        None => parse_f32(&v),
+                    };
+                }
                 "flexGrow" | "flex_grow" | "flex-grow" => n.props.flex_grow = parse_f32(&v),
                 "flexShrink" | "flex_shrink" | "flex-shrink" => n.props.flex_shrink = parse_f32(&v),
                 "flexBasis" | "flex_basis" | "flex-basis" => n.props.flex_basis = parse_len(&v),
@@ -1702,14 +1995,19 @@ impl Scene {
                 }
                 "background-image" | "background_image" | "backgroundImage" | "bg-image" => {
                     if let Some(s) = v.as_str() {
-                        // Accept `path`, `"path"`, or `url(path)` / `url("path")`.
-                        let mut s = s.trim().to_string();
-                        if s.starts_with("url(") && s.ends_with(')') {
-                            s = s[4..s.len() - 1].trim().to_string();
-                        }
-                        s = s.trim_matches(|c: char| c == '"' || c == '\'').to_string();
-                        if !s.is_empty() {
-                            n.props.background_image = Some(s);
+                        let layers = crate::css_parse::parse_bg_image_layers(s);
+                        if layers.len() >= 2 {
+                            // Multi-layer: goes through background_layers;
+                            // clear the single-image slot so both paths
+                            // don't paint at once on a later single->multi
+                            // or multi->single re-render.
+                            n.props.background_layers = layers;
+                            n.props.background_image = None;
+                        } else {
+                            n.props.background_layers.clear();
+                            if let Some(first) = layers.into_iter().next() {
+                                n.props.background_image = Some(first);
+                            }
                         }
                     }
                 }
@@ -1737,6 +2035,10 @@ impl Scene {
                 }
                 "background-size" | "background_size" | "backgroundSize" => {
                     n.props.background_size = v.as_str().map(|s| s.to_string());
+                    if let Some(s) = v.as_str() {
+                        n.props.background_layer_sizes =
+                            s.split(',').map(|t| t.trim().to_string()).collect();
+                    }
                 }
                 "cursor" => {
                     n.props.cursor = v.as_str().map(|s| s.to_string());
@@ -1832,6 +2134,48 @@ impl Scene {
                     } else if v.as_bool() == Some(true) {
                         n.props.overflow_y = true;
                     }
+                }
+                "scroll-shadow" | "scroll_shadow" | "scrollShadow" => {
+                    n.props.scroll_shadow = match &v {
+                        serde_json::Value::Bool(b) => *b,
+                        serde_json::Value::String(s) => matches!(s.as_str(), "true" | "auto" | "1"),
+                        _ => false,
+                    };
+                }
+                "scroll-snap-type" | "scroll_snap_type" | "scrollSnapType" => {
+                    n.props.scroll_snap_type = v.as_str().and_then(|s| {
+                        if s.contains("mandatory") {
+                            Some("mandatory".to_string())
+                        } else if s.contains("proximity") {
+                            Some("proximity".to_string())
+                        } else {
+                            None
+                        }
+                    });
+                }
+                "scroll-snap-align" | "scroll_snap_align" | "scrollSnapAlign" => {
+                    n.props.scroll_snap_align = v.as_str().and_then(|s| {
+                        let s = s.trim();
+                        matches!(s, "start" | "center" | "end").then(|| s.to_string())
+                    });
+                }
+                "scrollbar-color" | "scrollbar_color" | "scrollbarColor" => {
+                    if let Some(s) = v.as_str() {
+                        let mut parts = s.split_whitespace();
+                        n.props.scrollbar_thumb_color =
+                            parts.next().and_then(crate::css_parse::parse_color_str);
+                        n.props.scrollbar_track_color =
+                            parts.next().and_then(crate::css_parse::parse_color_str);
+                    }
+                }
+                "scrollbar-width" | "scrollbar_width" | "scrollbarWidth" => {
+                    n.props.scrollbar_width = match v.as_str() {
+                        Some("none") => Some(0.0),
+                        Some("thin") => Some(2.0),
+                        Some("auto") => None,
+                        Some(_) => None,
+                        None => parse_f32(&v),
+                    };
                 }
                 // Set by the JS <canvas> intrinsic. Stored as integer id
                 // pointing into gpu::registry().
@@ -1950,9 +2294,73 @@ impl Scene {
         max_bottom + pad_bottom
     }
 
+    /// `scroll-snap-type`/`scroll-snap-align` support. Given a
+    /// scrollport `id` already clamped to `raw` and its `viewport_h`,
+    /// returns the y offset to actually land on: `None` means "don't
+    /// snap, use `raw` as-is" (no `scroll_snap_type`, no snap-aligned
+    /// children, or — in `proximity` mode — nothing close enough).
+    ///
+    /// Trade-off, stated plainly: real CSS scroll-snap resolves once a
+    /// scroll GESTURE settles (after momentum decays), which needs a
+    /// timer and a notion of "the user stopped scrolling" — this
+    /// engine's wheel handling is a flat per-event `set_scroll_y` call
+    /// with no gesture/momentum model to hook a debounce into. So this
+    /// resolves a snap target on EVERY call instead: `mandatory` always
+    /// jumps to the nearest snap point (works well for discrete
+    /// mouse-wheel notches and reads as "wheel = advance one item",
+    /// which plenty of real carousels do on purpose; a continuous
+    /// trackpad gesture will feel stepped rather than fluid-then-settle);
+    /// `proximity` only jumps when `raw` already landed within
+    /// `PROXIMITY_PX` of a snap point, otherwise scroll stays exactly
+    /// where the gesture put it.
+    fn scroll_snap_target(
+        &self,
+        id: u32,
+        raw: f32,
+        viewport_h: f32,
+        max_offset: f32,
+    ) -> Option<f32> {
+        const PROXIMITY_PX: f32 = 48.0;
+        let n = self.nodes.get(&id)?;
+        let strictness = n.props.scroll_snap_type.as_deref()?;
+        let mut best: Option<f32> = None;
+        for &cid in &n.children {
+            let c = match self.nodes.get(&cid) {
+                Some(c) => c,
+                None => continue,
+            };
+            let align = match c.props.scroll_snap_align.as_deref() {
+                Some(a) => a,
+                None => continue,
+            };
+            let layout = match c.computed_layout {
+                Some(l) => l,
+                None => continue,
+            };
+            let candidate = match align {
+                "start" => layout.location.y,
+                "end" => layout.location.y + layout.size.height - viewport_h,
+                _ => layout.location.y + layout.size.height * 0.5 - viewport_h * 0.5, // "center"
+            }
+            .clamp(0.0, max_offset);
+            if best
+                .map(|b: f32| (candidate - raw).abs() < (b - raw).abs())
+                .unwrap_or(true)
+            {
+                best = Some(candidate);
+            }
+        }
+        let best = best?;
+        if strictness == "proximity" && (best - raw).abs() > PROXIMITY_PX {
+            return None;
+        }
+        Some(best)
+    }
+
     /// Update the y scroll offset for a scrollable node, clamped to
-    /// `[0, max(0, content_height - viewport_height)]`. Returns the
-    /// clamped value so the caller can detect saturation.
+    /// `[0, max(0, content_height - viewport_height)]`, then snapped
+    /// per `scroll_snap_target` if the node has `scroll-snap-type` set.
+    /// Returns the final value so the caller can detect saturation.
     pub fn set_scroll_y(&mut self, id: u32, raw: f32) -> f32 {
         let n = match self.nodes.get(&id) {
             Some(n) => n,
@@ -1965,6 +2373,9 @@ impl Scene {
         let content_h = self.content_height(id);
         let max_offset = (content_h - viewport_h).max(0.0);
         let clamped = raw.clamp(0.0, max_offset);
+        let clamped = self
+            .scroll_snap_target(id, clamped, viewport_h, max_offset)
+            .unwrap_or(clamped);
         self.scroll_offsets.insert(id, clamped);
         // Full repaint on scroll. The scoped-damage path erases only the
         // scroll container's bounding box and relies on per-node cull
@@ -2073,6 +2484,19 @@ impl Scene {
                     // named font's real glyph widths would size the box
                     // wrong relative to what actually gets painted into it.
                     te.cur_family = ctx.family.clone();
+                    // `white-space: nowrap` / `text-overflow: ellipsis` —
+                    // paint never wraps this leaf (it truncates or
+                    // overflows instead), so the layout box must stay
+                    // single-line tall regardless of the available width.
+                    // Must mirror the paint-side decision (painting/lib.rs)
+                    // or the box wouldn't fit what's actually drawn.
+                    if ctx.force_nowrap {
+                        let (single_w, line_h) = te.measure_mono(text, *fs, pm);
+                        return Size {
+                            width: known_dims.width.unwrap_or(single_w),
+                            height: known_dims.height.unwrap_or(line_h),
+                        };
+                    }
                     // Honor a pinned width before anything else.
                     if let Some(pw) = known_dims.width {
                         let (_, mh) = te.measure_wrapped_pm(text, *fs, pw, pm);
@@ -2215,10 +2639,13 @@ impl Scene {
             // child via inheritance.
             let ctx = if is_text {
                 if let Some(t) = &n.props.text {
+                    let force_nowrap = matches!(n.props.white_space.as_deref(), Some("nowrap"))
+                        || matches!(n.props.text_overflow.as_deref(), Some("ellipsis"));
                     NodeCtx {
                         text: Some((t.clone(), effective_fs)),
                         prefer_mono: effective_mono,
                         family: effective_family.clone(),
+                        force_nowrap,
                     }
                 } else {
                     NodeCtx::default()
@@ -2381,6 +2808,45 @@ impl Scene {
         }
     }
 
+    /// `position: sticky` support, shared by every tree-walking pass that
+    /// positions children (paint, hit_test, drag-region hit-test, scroll
+    /// hit-test) so all of them agree on where a sticky element actually
+    /// sits. Given the y-origin a child would normally be painted/tested
+    /// at (`child_oy`, already scroll-shifted if the parent scrolls) plus
+    /// the parent's own screen-y and height, returns the origin to
+    /// actually use: unchanged, UNLESS the child is `position: sticky`
+    /// with a `top` inset AND its natural position (`child_oy +
+    /// child.computed_layout.location.y`) would sit above
+    /// `parent_y + top` — in which case it's shifted down just enough to
+    /// pin the child there instead.
+    ///
+    /// This is the one approximation this engine makes for sticky:
+    /// relative to the DIRECT parent only (no positioned-ancestor chain
+    /// walk), same simplification `absolute`/`fixed` already make — see
+    /// `PaintProps::position`'s doc comment. Safe to call unconditionally
+    /// for every child (sticky or not, scrolling parent or not): a
+    /// non-sticky child, or one whose natural position is already below
+    /// the threshold, gets `child_oy` back unchanged.
+    pub fn sticky_oy(&self, child_id: u32, child_oy: f32, parent_y: f32, parent_h: f32) -> f32 {
+        let child = match self.nodes.get(&child_id) {
+            Some(c) => c,
+            None => return child_oy,
+        };
+        if child.props.position.as_deref() != Some("sticky") {
+            return child_oy;
+        }
+        let (Some(top), Some(layout)) = (child.props.top, child.computed_layout) else {
+            return child_oy;
+        };
+        let natural = child_oy + layout.location.y;
+        let threshold = parent_y + resolve_len(top, parent_h);
+        if natural < threshold {
+            child_oy + (threshold - natural)
+        } else {
+            child_oy
+        }
+    }
+
     /// Hit test: return the deepest clickable node id under (x, y), if any.
     pub fn hit_test(&self, x: f32, y: f32) -> Option<u32> {
         self.hit_test_recurse(self.root, x, y, 0.0, 0.0)
@@ -2438,7 +2904,8 @@ impl Scene {
             0.0
         };
         for &c in n.children.iter().rev() {
-            if let Some(hit) = self.hit_test_recurse(c, x, y, nx, ny - scroll_y) {
+            let child_oy = self.sticky_oy(c, ny - scroll_y, ny, nh);
+            if let Some(hit) = self.hit_test_recurse(c, x, y, nx, child_oy) {
                 return Some(hit);
             }
         }
@@ -2492,7 +2959,8 @@ impl Scene {
             0.0
         };
         for &c in n.children.iter().rev() {
-            if let Some(hit) = self.drag_region_recurse(c, x, y, nx, ny - scroll_y, region) {
+            let child_oy = self.sticky_oy(c, ny - scroll_y, ny, nh);
+            if let Some(hit) = self.drag_region_recurse(c, x, y, nx, child_oy, region) {
                 return Some(hit);
             }
         }
@@ -2531,7 +2999,8 @@ impl Scene {
             0.0
         };
         for &c in n.children.iter().rev() {
-            if let Some(hit) = self.hit_test_scrollable_recurse(c, x, y, nx, ny - scroll_y) {
+            let child_oy = self.sticky_oy(c, ny - scroll_y, ny, nh);
+            if let Some(hit) = self.hit_test_scrollable_recurse(c, x, y, nx, child_oy) {
                 return Some(hit);
             }
         }
@@ -2581,26 +3050,24 @@ fn next_char_boundary(s: &str, mut i: usize) -> usize {
     i
 }
 
+/// Parse a JSON color value into 0xAARRGGBB. String values go through
+/// `css_parse::parse_color_str` — hex (3/6/8-digit) + `rgb()`/`rgba()`/
+/// `hsl()`/`hsla()`/named colors/`transparent`. Every color-typed prop
+/// in this file's `set_prop` (background, color, the hover/focus
+/// variants, border-color, outline-color, SVG fill/stroke) funnels
+/// through here, so this one function used to be the whole bug: it was
+/// hex-only (hand-rolled, predating `css_parse.rs`), while box-shadow/
+/// gradients/scrollbar-color already used the fuller parser. Anything
+/// using ONLY Tailwind-class-derived colors never noticed — the
+/// Tailwind pipeline's own opacity modifiers (`bg-black/50`) compile to
+/// 8-digit hex at build time, never emit `rgba()` — but a literal
+/// `rgba(...)`/`hsl(...)` fill on an SVG icon (or any inline `style`)
+/// silently failed to parse and painted nothing. Confirmed and fixed
+/// from a real repro: an icon set using `fill="rgba(...)"` rendered
+/// completely invisible.
 fn parse_color(v: &serde_json::Value) -> Option<u32> {
     if let Some(s) = v.as_str() {
-        let s = s.trim_start_matches('#');
-        if s.len() == 6 {
-            let n = u32::from_str_radix(s, 16).ok()?;
-            return Some(0xFF000000 | n);
-        } else if s.len() == 8 {
-            let n = u32::from_str_radix(s, 16).ok()?;
-            let r = (n >> 24) & 0xFF;
-            let g = (n >> 16) & 0xFF;
-            let b = (n >> 8) & 0xFF;
-            let a = n & 0xFF;
-            return Some((a << 24) | (r << 16) | (g << 8) | b);
-        } else if s.len() == 3 {
-            let r = u32::from_str_radix(&s[0..1], 16).ok()? * 0x11;
-            let g = u32::from_str_radix(&s[1..2], 16).ok()? * 0x11;
-            let b = u32::from_str_radix(&s[2..3], 16).ok()? * 0x11;
-            return Some(0xFF000000 | (r << 16) | (g << 8) | b);
-        }
-        None
+        crate::css_parse::parse_color_str(s)
     } else {
         v.as_u64().map(|n| n as u32)
     }
@@ -2768,6 +3235,16 @@ fn len_to_dim(l: Len) -> Dimension {
     match l {
         Len::Length(px) => Dimension::Length(px),
         Len::Percent(p) => Dimension::Percent(p),
+    }
+}
+
+/// Resolve a `Len` to a concrete px value against `against` (its
+/// percent basis). Used where a raw f32 is needed outside Taffy's own
+/// style resolution — e.g. `position: sticky`'s scroll-time threshold.
+pub fn resolve_len(l: Len, against: f32) -> f32 {
+    match l {
+        Len::Length(px) => px,
+        Len::Percent(p) => p / 100.0 * against,
     }
 }
 
@@ -3201,6 +3678,9 @@ fn props_to_style_with_inherited(
     }
     if let Some(mh) = props.max_height {
         style.max_size.height = len_to_dim(mh);
+    }
+    if let Some(ar) = props.aspect_ratio {
+        style.aspect_ratio = Some(ar);
     }
     // Flex item sizing — defaults match the CSS spec (grow=0, shrink=1,
     // basis=auto). Only apply when set so we don't overwrite Taffy's

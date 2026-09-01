@@ -47,3 +47,8 @@ workspace = true
 [dependencies]
 tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd", "png-format"] }
 fontdue = { version = "0.9", default-features = false, features = ["std"] }
+# Decompresses the embedded fonts (see lib.rs's `embedded_font!` macro).
+# Already linked elsewhere in the runtime (carbon-snapshot uses it for the
+# heap-snapshot arena) — reusing it here for a ~455 KiB font-asset win
+# costs no additional decompressor.
+lz4_flex = { version = "0.11", default-features = false, features = ["safe-decode", "safe-encode", "std"] }

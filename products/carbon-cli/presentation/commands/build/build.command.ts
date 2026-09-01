@@ -102,6 +102,8 @@ export async function buildCommand(rest: string[]): Promise<number> {
       image: cfg.runtime.image,
       audio: cfg.runtime.audio,
       updater: cfg.updater?.enabled,
+      network: cfg.runtime.network,
+      svg: cfg.runtime.svg,
       staticPlugins: release,
     }, {
       quiet: !verbose,
@@ -112,6 +114,11 @@ export async function buildCommand(rest: string[]): Promise<number> {
       // is what protects against a DIFFERENT app's build clobbering it).
       force: release,
       projectDir,
+      // Only reached (staticPlugins gates the per-app copy that would use
+      // it) on a --release build, but harmless to always pass — the app's
+      // own [app] name is what a user actually wants to see in dist/,
+      // not carbon-mini.exe/carbon-blitz.exe regardless of what they built.
+      exeName: cfg.app.name,
     });
     await buildProject(projectDir, backend, log, {
       // Release forces bytecode regardless of carbon.toml so the shipped app

@@ -26,6 +26,8 @@ async function test() {
       // typechecked this file, so nothing said so.
       image: false,
       audio: false,
+      network: true,
+      svg: true,
     },
     raw: {},
   };

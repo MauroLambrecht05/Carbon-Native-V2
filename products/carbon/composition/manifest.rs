@@ -31,16 +31,8 @@ pub(crate) fn read_app_metadata(project_dir: &PathBuf) -> (String, String) {
         #[serde(default)]
         app: LocalApp,
     }
-    let cfg: LocalCfg = toml::from_str(&text).unwrap_or_default();
+    let cfg: LocalCfg = basic_toml::from_str(&text).unwrap_or_default();
     (cfg.app.name, cfg.app.version)
-}
-
-/// Initial window dimensions in logical pixels. Reads `[window]` from
-/// carbon.toml; otherwise returns sensible desktop-app defaults (1100×720).
-/// Always returns positive values — never zero or negative.
-pub(crate) fn read_window_size(project_dir: &PathBuf) -> (f64, f64) {
-    let cfg = read_window_cfg(project_dir);
-    (cfg.0, cfg.1)
 }
 
 /// Returns (width, height, decorated). `decorated = false` lets the React
@@ -64,7 +56,7 @@ pub(crate) fn read_window_cfg(project_dir: &PathBuf) -> (f64, f64, bool) {
         #[serde(default)]
         window: WinSection,
     }
-    let cfg: LocalCfg = toml::from_str(&text).unwrap_or_default();
+    let cfg: LocalCfg = basic_toml::from_str(&text).unwrap_or_default();
     let w = cfg.window.width.unwrap_or(default.0).max(320.0);
     let h = cfg.window.height.unwrap_or(default.1).max(240.0);
     let decorated = cfg.window.decorated.unwrap_or(default.2);
@@ -93,7 +85,7 @@ pub(crate) fn read_process_enabled(project_dir: &PathBuf) -> bool {
         #[serde(default)]
         runtime: RuntimeSection,
     }
-    toml::from_str::<LocalCfg>(&text)
+    basic_toml::from_str::<LocalCfg>(&text)
         .map(|c| c.runtime.process)
         .unwrap_or(false)
 }
@@ -102,6 +94,7 @@ pub(crate) fn read_process_enabled(project_dir: &PathBuf) -> bool {
 /// has zero network egress — the fetch/WebSocket machinery is present but
 /// every connection is refused, not silently allowed. `"*"` as the sole
 /// entry is an explicit, deliberate opt-out of the check, not a default.
+#[cfg(feature = "network")]
 pub(crate) fn read_net_section(project_dir: &PathBuf) -> Vec<String> {
     let path = project_dir.join("carbon.toml");
     let text = match std::fs::read_to_string(&path) {
@@ -118,7 +111,7 @@ pub(crate) fn read_net_section(project_dir: &PathBuf) -> Vec<String> {
         #[serde(default)]
         net: NetSection,
     }
-    toml::from_str::<LocalCfg>(&text)
+    basic_toml::from_str::<LocalCfg>(&text)
         .map(|c| c.net.allowed_origins)
         .unwrap_or_default()
 }
@@ -129,6 +122,11 @@ pub(crate) fn read_net_section(project_dir: &PathBuf) -> Vec<String> {
 /// (`CARBON_MANIFEST_URL`) instead, because nothing here parsed this section
 /// at all — the same "hand-rolled, only the fields we need" convention as
 /// `read_net_section`/`read_process_enabled` above, not carbon-core's Config.
+// Gated to match read_updater_section's own call site in mini.rs
+// (`#[cfg(feature = "updater")]`) — without this, these compiled
+// unconditionally into every binary regardless of whether the `updater`
+// feature (and thus the only caller) was even enabled.
+#[cfg(feature = "updater")]
 #[derive(serde::Deserialize, Clone)]
 pub(crate) struct UpdaterSection {
     #[serde(default = "yes")]
@@ -149,12 +147,15 @@ pub(crate) struct UpdaterSection {
     pub crash_threshold: u32,
 }
 
+#[cfg(feature = "updater")]
 fn yes() -> bool {
     true
 }
+#[cfg(feature = "updater")]
 fn default_channel() -> String {
     "stable".to_string()
 }
+#[cfg(feature = "updater")]
 fn default_crash_threshold() -> u32 {
     3
 }
@@ -164,6 +165,7 @@ fn default_crash_threshold() -> u32 {
 /// updater that has no key to verify against or nowhere to fetch from, so
 /// the caller (mini.rs) treats `None` as "don't spawn the background thread
 /// at all" rather than spawning one that would only ever fail.
+#[cfg(feature = "updater")]
 pub(crate) fn read_updater_section(project_dir: &PathBuf) -> Option<UpdaterSection> {
     let path = project_dir.join("carbon.toml");
     let text = std::fs::read_to_string(&path).ok()?;
@@ -172,7 +174,7 @@ pub(crate) fn read_updater_section(project_dir: &PathBuf) -> Option<UpdaterSecti
         #[serde(default)]
         updater: Option<UpdaterSection>,
     }
-    let section = match toml::from_str::<LocalCfg>(&text) {
+    let section = match basic_toml::from_str::<LocalCfg>(&text) {
         Ok(c) => c.updater?,
         Err(e) => {
             eprintln!(
@@ -203,7 +205,7 @@ pub(crate) fn read_app_manifest(project_dir: &PathBuf) -> carbon_core::config::A
         Ok(t) => t,
         Err(_) => return Default::default(),
     };
-    match toml::from_str(&text) {
+    match basic_toml::from_str(&text) {
         Ok(m) => m,
         Err(e) => {
             eprintln!(
@@ -235,7 +237,7 @@ pub(crate) fn read_plugins_section(
         #[serde(default)]
         plugins: std::collections::BTreeMap<String, carbon_core::config::CapabilityGrant>,
     }
-    match toml::from_str::<LocalCfg>(&text) {
+    match basic_toml::from_str::<LocalCfg>(&text) {
         Ok(c) => c.plugins,
         Err(e) => {
             // A parse error in [plugins] is worth surfacing — silently
@@ -266,7 +268,7 @@ pub(crate) fn read_dev_signing_trusted_keys(project_dir: &PathBuf) -> Vec<String
         #[serde(default, rename = "dev-signing")]
         dev_signing: carbon_core::config::DevSigningSection,
     }
-    match toml::from_str::<LocalCfg>(&text) {
+    match basic_toml::from_str::<LocalCfg>(&text) {
         Ok(c) => c.dev_signing.trusted_keys,
         Err(e) => {
             eprintln!(

@@ -26,7 +26,7 @@ name = "carbon-os"
 version = "0.1.0"
 edition = "2021"
 rust-version.workspace = true
-description = "Native OS integration for the carbon runtime: the __cm_* host functions for filesystem, process, dialog, clipboard, keychain, notifications, shell, PTY, store, window and networking."
+description = "Native OS integration for the carbon runtime: the __cm_* host functions for filesystem, process, dialog, clipboard, keychain, notifications, shell, store, window and networking."
 # The workspace manifest lives in .tools/orchestration/bazel/cargo, beside the
 # Bazel rules that drive it. Cargo only walks UP from a crate, so it would
 # never find it — the link has to be explicit.
@@ -40,6 +40,18 @@ path = "lib.rs"
 # root so one rationale covers every crate. See //.tools/orchestration/bazel/cargo/Cargo.toml.
 [lints]
 workspace = true
+
+[features]
+# On by default — preserves today's behavior (fetch()/WebSocket() always
+# available) for every existing app, none of which have ever had to declare
+# anything about networking since the flag didn't exist until now. An app
+# opts OUT via `[runtime] network = false` in carbon.toml, which
+# `backendCargoFeatures` (contracts/app/types/Backend.ts) turns into
+# `--no-default-features` + this feature omitted, dropping
+# reqwest+tokio+tokio-tungstenite+rustls+ring+h2+crypto/compression —
+# ~2.3 MiB measured via cargo-bloat on this exact binary.
+default = ["network"]
+network = ["dep:reqwest", "dep:tokio", "dep:tokio-tungstenite", "dep:futures-util", "dep:bytes", "dep:base64"]
 
 [dependencies]
 carbon-runtime-contract = { path = "../../contracts/runtime/rust" }
@@ -75,18 +87,15 @@ auto-launch = { version = "0.5", default-features = false }
 opener = { version = "0.7", default-features = false }
 dirs = "5"
 
-# ── Networking: fetch + WebSocket ───────────────────────────────────────────
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json", "gzip", "brotli", "http2"] }
-tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "macros", "sync", "time"] }
-tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
-futures-util = { version = "0.3", default-features = false }
-bytes = "1"
-base64 = "0.22"
+# ── Networking: fetch + WebSocket — all optional, behind the `network`
+# feature above. See lib.rs's `pub mod net` cfg and register_network.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json", "gzip", "brotli", "http2"], optional = true }
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "macros", "sync", "time"], optional = true }
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "rustls-tls-webpki-roots"], optional = true }
+futures-util = { version = "0.3", default-features = false, optional = true }
+bytes = { version = "1", optional = true }
+base64 = { version = "0.22", optional = true }
 
-# ── Process, PTY and file search ────────────────────────────────────────────
-portable-pty = "0.8"
+# shell_exec.rs's session-management (distinct from the interactive PTY
+# terminal, which moved to the terminal plugin) still needs this.
 shared_child = "1"
-ignore = "0.4"
-globset = "0.4"
-grep-regex = "0.1"
-grep-searcher = "0.1"

@@ -1,34 +1,50 @@
-// async_image.rs — HTTP(S) image loader for `background-image: url(...)`.
+// async_image.rs — URL-style image loader for `background-image: url(...)`
+// and `data:` URIs, for anything the synchronous on-disk PNG cache in
+// `paint::get_image` doesn't cover.
 //
-// The synchronous local-file image cache in `paint::get_image` handles
-// PNG on disk. For URL-style sources we need an async path: spawn a
-// reqwest GET on the shared tokio runtime, decode the bytes, stash the
-// resulting Pixmap into a global cache, and post `UserEvent::RequestPaint`
-// so the next frame picks it up.
+// TWO INDEPENDENT CAPABILITIES LIVE IN THIS ONE FILE, gated separately:
+//
+//   - `svg` feature: `data:image/svg+xml,…` decode — "the form every npm
+//     icon pack uses for inline icons" (react-icons/lucide/heroicons-style
+//     libraries). Fully synchronous, decoded via usvg/resvg, ready on the
+//     SAME frame. Needs ZERO networking — decoding a data: URL never
+//     touches the network. This is the common case for shipping an icon
+//     library and MUST keep working regardless of the `network` flag.
+//   - `network` feature: genuine `http://`/`https://` fetches — spawn a
+//     reqwest GET on the shared tokio runtime, decode the bytes, stash the
+//     resulting Pixmap into the cache below, and post
+//     `UserEvent::RequestPaint` so the next frame picks it up.
+//
+// The two used to be accidentally coupled (this whole file gated behind
+// `network` alone) — an app that opted out of networking to shrink its
+// binary silently lost icon-library support too, which has nothing to do
+// with networking. Split apart deliberately now; see `svg`'s own doc
+// comment in products/carbon/Cargo.toml for the rest of the reasoning.
 //
 // The cache is a Mutex<HashMap<url, State>> where State is one of:
 //   - Loading: fetch in flight; don't kick off another
 //   - Ready(Pixmap): decoded, ready to blit
-//   - Failed: fetch or decode errored; cache the failure so we don't retry
-//             forever on every frame
+//   - Failed: fetch or decode errored (or the URL needed a feature that's
+//             off); cache the failure so we don't retry forever on every
+//             frame
 //
-// Decode path:
+// Raster decode path (used by BOTH capabilities above — a data: URL or an
+// http:// URL can equally point at a PNG/JPEG):
 //   - PNG: tiny_skia::Pixmap::decode_png (no extra deps; png-format
 //     feature is already on in Cargo.toml)
 //   - Other formats (JPEG, WebP, GIF): only when the `image` feature is
 //     enabled, decoded via carbon-image's `decoder::decode_bytes` and
 //     copied into a fresh Pixmap. Without the feature, those URLs fail
 //     and the user gets a cleared box.
-//
-// Triggered from paint::get_image when it sees an http:// or https://
-// prefix.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
 use tiny_skia::Pixmap;
 
+#[cfg(feature = "network")]
 use crate::native::net::{http_client, post, rt};
+#[cfg(feature = "network")]
 use crate::UserEvent;
 
 enum State {
@@ -82,6 +98,16 @@ pub fn get(url: &str) -> Option<Pixmap> {
         }
     }
 
+    start_remote_fetch(url);
+    None
+}
+
+/// The non-`data:` branch — a genuine `http://`/`https://` fetch. Real
+/// implementation needs `network`; without it, the URL simply can't be
+/// loaded, cached as Failed with a clear message instead of a silent
+/// cleared box with no explanation.
+#[cfg(feature = "network")]
+fn start_remote_fetch(url: &str) {
     // Mark as loading BEFORE spawn so a second paint that happens in
     // the same tick doesn't double-fire.
     {
@@ -89,9 +115,20 @@ pub fn get(url: &str) -> Option<Pixmap> {
         guard.insert(url.to_string(), State::Loading);
     }
     spawn_fetch(url.to_string());
-    None
 }
 
+#[cfg(not(feature = "network"))]
+fn start_remote_fetch(url: &str) {
+    let mut guard = cache().lock().unwrap_or_else(|e| e.into_inner());
+    guard.insert(url.to_string(), State::Failed);
+    eprintln!(
+        "[carbon-mini] cannot load remote image '{url}' — the 'network' \
+         feature is off (carbon.toml: [runtime] network = true to enable \
+         http(s):// image sources; data: URLs work regardless)"
+    );
+}
+
+#[cfg(feature = "network")]
 fn spawn_fetch(url: String) {
     rt().spawn(async move {
         let result = fetch_and_decode(&url).await;
@@ -112,6 +149,7 @@ fn spawn_fetch(url: String) {
     });
 }
 
+#[cfg(feature = "network")]
 async fn fetch_and_decode(url: &str) -> Result<Pixmap, String> {
     let resp = http_client()
         .get(url)
@@ -209,6 +247,7 @@ fn decode_data_url(after_data: &str) -> Result<Pixmap, String> {
 /// will eventually paint into (that's a paint-time concern), so we
 /// pre-rasterise at the intrinsic size — tiny-skia stretches it to the
 /// box via its existing nearest-neighbor scale in the paint pipeline.
+#[cfg(feature = "svg")]
 fn rasterise_svg(svg: &str) -> Result<Pixmap, String> {
     let opts = usvg::Options::default();
     let tree = usvg::Tree::from_str(svg, &opts).map_err(|e| format!("svg parse: {e}"))?;
@@ -233,6 +272,14 @@ fn rasterise_svg(svg: &str) -> Result<Pixmap, String> {
     let transform = tiny_skia::Transform::from_scale(scale, scale);
     resvg::render(&tree, transform, &mut pm.as_mut());
     Ok(pm)
+}
+
+#[cfg(not(feature = "svg"))]
+fn rasterise_svg(_svg: &str) -> Result<Pixmap, String> {
+    Err("data:image/svg+xml requires the 'svg' feature \
+         (carbon.toml: [runtime] svg = true — on by default, so this only \
+         fires if it was explicitly turned off)"
+        .to_string())
 }
 
 /// Tiny percent-decoder. data: URLs commonly use it for SVG content

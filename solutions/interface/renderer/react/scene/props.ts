@@ -11,6 +11,8 @@ import {
   type ClickEvent,
 } from "./events.ts";
 import { resolveNodeClassName } from "../styling/class-names.ts";
+import { maybeStartTransition, parseTransition, recordAppliedValue, setAnimation, transitionConfig } from "./transitions.ts";
+import { applySceneStyleProp } from "./css-vars.ts";
 
 function isEventProp(name: string): boolean {
   return name.length > 2 && name[0] === "o" && name[1] === "n" && name[2] >= "A" && name[2] <= "Z";
@@ -134,13 +136,11 @@ export function applyProps(node: CmNode, props: Record<string, unknown>): void {
     // them. Skip here; the post-loop block does the work.
     if (key === "className" || key === "class") continue;
 
-    // Generic — stringify and forward. Skip undefined props (which
-    // `JSON.stringify` returns `undefined` for, breaking the
-    // string-typed host import).
+    // Generic — resolve any `var(...)` references, then stringify and
+    // forward. Skip undefined props (which `JSON.stringify` returns
+    // `undefined` for, breaking the string-typed host import).
     if (v === undefined) continue;
-    const json = JSON.stringify(v);
-    if (typeof json !== "string") continue;
-    __cm_set_prop(node.id, key, json);
+    applySceneStyleProp(node, key, v);
   }
 
   // ── className resolution (last so we see every data-*, aria-* prop) ──
@@ -161,9 +161,34 @@ export function applyProps(node: CmNode, props: Record<string, unknown>): void {
     for (const sk of Object.keys(inlineStyle)) {
       const sv = inlineStyle[sk];
       if (sv === undefined) continue;
-      const json = JSON.stringify(sv);
-      if (typeof json !== "string") continue;
-      __cm_set_prop(node.id, sk, json);
+      // `transition` configures future tweens on this node; it isn't
+      // itself a paintable prop, so it never reaches __cm_set_prop.
+      if (sk === "transition") {
+        transitionConfig.set(node.id, parseTransition(String(sv)));
+        continue;
+      }
+      // `animation` — same story, but setAnimation is the whole
+      // start/restart/stop decision (see its own doc comment for why
+      // this can't just be `maybeStartTransition`-shaped).
+      if (sk === "animation") {
+        setAnimation(node, String(sv));
+        continue;
+      }
+      // `--name: value` — defines a custom property (never forwarded);
+      // consuming a `var(...)` reference happens inside
+      // `applySceneStyleProp` for every OTHER key below.
+      if (sk.startsWith("--")) {
+        applySceneStyleProp(node, sk, sv);
+        continue;
+      }
+      // An animatable prop with an active transition spec tweens
+      // instead of jumping straight to the new value.
+      if (maybeStartTransition(node, sk, sv)) {
+        recordAppliedValue(node.id, sk, sv);
+        continue;
+      }
+      applySceneStyleProp(node, sk, sv);
+      recordAppliedValue(node.id, sk, sv);
     }
   }
 

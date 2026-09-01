@@ -96,6 +96,12 @@ mod snapshot_spike;
 // presentation
 #[path = "../presentation/host/scene.rs"]
 mod host;
+// URL-style (http/https/data:) background images — image.rs internally
+// splits its two capabilities (svg: data:image/svg+xml, zero networking;
+// network: genuine http(s) fetch) via their own cfg gates, but the module
+// itself only needs to exist when at least one of them does. Synchronous
+// on-disk PNG decode (paint::get_image) is unaffected either way.
+#[cfg(any(feature = "svg", feature = "network"))]
 #[path = "../presentation/host/image.rs"]
 mod image_host;
 #[path = "../presentation/js/pump.rs"]
@@ -109,6 +115,7 @@ use bundle::*;
 use features::*;
 use heap_snapshot::*;
 use host::*;
+#[cfg(any(feature = "svg", feature = "network"))]
 use image_host as async_image;
 use manifest::*;
 use pump::*;
@@ -120,7 +127,6 @@ use updater_bg::*;
 use carbon_layout::scene;
 use carbon_os as native;
 use carbon_os::os_theme;
-use carbon_platform as platform;
 use carbon_plugin_host::host_exports;
 use carbon_plugin_host::plugin_loader;
 use carbon_snapshot as snapshot;
@@ -159,7 +165,11 @@ fn main() -> Result<()> {
     paint::set_project_dir(project_dir.clone());
     // paint can't depend on async_image directly (see paint's
     // set_async_image_resolver doc comment) — wire the real implementation
-    // in via the hook instead.
+    // in via the hook instead. Only exists when `svg` or `network` is on;
+    // with both off, the hook is simply never set and every URL-style
+    // background-image source fails the same way an unknown scheme always
+    // has (see image.rs's own header on the Failed cache state).
+    #[cfg(any(feature = "svg", feature = "network"))]
     paint::set_async_image_resolver(async_image::get);
 
     // Locate JS bundle. Prefer zstd-compressed bytecode > raw bytecode > source.
@@ -351,6 +361,9 @@ fn main() -> Result<()> {
     // run at least once. An app with no `[net] allowed_origins` in
     // carbon.toml gets an empty list: fetch/WebSocket are present but have
     // nowhere they're allowed to connect, not a silent default-allow.
+    // Only meaningful when `network` is on — with it off there's no fetch/
+    // WebSocket to allowlist for at all.
+    #[cfg(feature = "network")]
     crate::native::net::set_allowed_origins(read_net_section(&project_dir));
 
     // Native OS integration imports — fs, process, dialog, shell,
@@ -861,6 +874,7 @@ fn main() -> Result<()> {
         reload_path,
         reload_scene,
         t0,
+        scroll_velocity: std::collections::HashMap::new(),
     };
 
     event_loop.run(move |event, _target, control_flow| {

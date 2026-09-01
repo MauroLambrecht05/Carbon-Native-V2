@@ -13,6 +13,7 @@
 
 import "../host/imports.ts";
 import type { CmNode } from "../scene/node.ts";
+import { applySceneStyleProp, resolveCssVars } from "../scene/css-vars.ts";
 
 /// Resolve a node's className string (read from node._props) into inline
 /// scene styles. Called twice: first from applyProps (immediate), then
@@ -34,21 +35,29 @@ export function resolveNodeClassName(node: CmNode): void {
     if (!tok) continue;
     const split = splitVariantPrefix(tok);
     if (split) {
-      // hover: variants — resolve the base class and apply each style
-      // under the matching `*-hover` scene-prop name. The runtime's
-      // hover hit-test (main.rs CursorMoved → hovered slot) already
-      // swaps these in/out at paint time.
+      // hover:/focus:/focus-visible: variants — resolve the base class
+      // and apply each style under the matching `*-hover`/`*-focus`
+      // scene-prop name. hover and focus are genuinely DIFFERENT scene
+      // states (`scene.hovered` vs `scene.focused`) — they used to be
+      // folded together here (every `focus:` class applied as a hover
+      // override), which meant a keyboard-tabbed button showed nothing
+      // and a moused-over-but-not-focused one incorrectly showed a
+      // "focus" style. `focus-visible` doesn't distinguish keyboard vs.
+      // mouse focus in this engine (no separate tracking for that) — it
+      // gets the same treatment as `focus`, which is the closer of the
+      // two to correct.
       if (split.variant === "hover" || split.variant === "focus" || split.variant === "focus-visible") {
-        let hoverStyles: Record<string, unknown> | null = null;
-        try { hoverStyles = resolve(split.base); } catch { /* unknown */ }
-        if (!hoverStyles) continue;
-        for (const sk of Object.keys(hoverStyles)) {
-          const sv = hoverStyles[sk];
+        let variantStyles: Record<string, unknown> | null = null;
+        try { variantStyles = resolve(split.base); } catch { /* unknown */ }
+        if (!variantStyles) continue;
+        const toStateKey = split.variant === "hover" ? hoverPropKey : focusPropKey;
+        for (const sk of Object.keys(variantStyles)) {
+          const sv = variantStyles[sk];
           if (sv === undefined) continue;
-          const hoverKey = hoverPropKey(sk);
-          const sjson = JSON.stringify(sv);
+          const stateKey = toStateKey(sk);
+          const sjson = JSON.stringify(resolveCssVars(sv, node));
           if (typeof sjson !== "string") continue;
-          __cm_set_prop(node.id, hoverKey, sjson);
+          __cm_set_prop(node.id, stateKey, sjson);
         }
         continue;
       }
@@ -65,9 +74,7 @@ export function resolveNodeClassName(node: CmNode): void {
     for (const sk of Object.keys(styles)) {
       const sv = styles[sk];
       if (sv === undefined) continue;
-      const sjson = JSON.stringify(sv);
-      if (typeof sjson !== "string") continue;
-      __cm_set_prop(node.id, sk, sjson);
+      applySceneStyleProp(node, sk, sv);
     }
   }
   // Re-apply inline style AFTER class-derived props so inline > class
@@ -81,8 +88,7 @@ export function resolveNodeClassName(node: CmNode): void {
     for (const sk of Object.keys(inlineStyle)) {
       const sv = inlineStyle[sk];
       if (sv === undefined) continue;
-      const sjson = JSON.stringify(sv);
-      if (typeof sjson === "string") __cm_set_prop(node.id, sk, sjson);
+      applySceneStyleProp(node, sk, sv);
     }
   }
 }
@@ -98,6 +104,17 @@ function hoverPropKey(baseKey: string): string {
   // namespaced name the scene ignores — no-op rather than overwriting
   // the base.
   return `${baseKey}-hover`;
+}
+
+/// Same idea as `hoverPropKey`, for `focus:`/`focus-visible:`. The scene
+/// models bg + color focus overrides (see `PaintProps::background_focus`)
+/// — real focus tracking currently only ever reaches Input/Textarea
+/// nodes, so this is a no-op on anything else until general keyboard
+/// focus exists for other clickables.
+function focusPropKey(baseKey: string): string {
+  if (baseKey === "background") return "background-focus";
+  if (baseKey === "color") return "color-focus";
+  return `${baseKey}-focus`;
 }
 
 /// Walk a subtree resolving every descendant's className. Used by the
@@ -136,13 +153,58 @@ function splitVariantPrefix(tok: string): { variant: string; base: string } | nu
 //   • `data-[name=value]` — true when `data-name` prop equals value
 //     (case-insensitive). Bare `data-[name]` matches truthy.
 //   • `aria-[name=value]` — same shape against aria-* props.
-//   • Interaction states (`hover`, `focus`, etc.) — return false; we
-//     don't have hover state in scene-graph mode yet.
-//   • Anything we don't recognize — return false (conservative drop;
-//     the static base styles still ship).
+//   • `disabled` / `checked` — read straight off the `disabled`/`checked`
+//     prop (a boolean attribute, same shape as any other JSX prop —
+//     nothing "runtime interaction" about it, unlike hover/focus).
+//   • `first` / `last` / `odd` / `even` — this node's position among
+//     `node.parent.children`. Correct at INITIAL mount (by the time the
+//     whole tree attaches to its container, `reResolveSubtree` walks
+//     it top-down and every node's siblings are already all present —
+//     see host-config.ts's `appendChildToContainer`). NOT re-evaluated
+//     for existing siblings when a list changes AFTER mount — appending
+//     a new last item to a live list won't un-mark the old last item,
+//     the same "evaluated once at insertion, not kept live" limitation
+//     `group-data`/`peer-data` below already have. Fine for the common
+//     case (a list rendered once); a list whose length changes after
+//     mount can end up with a stale extra element carrying `last:`/
+//     `odd:`/`even:` styling it should have lost.
+//   • `peer-checked` — same sibling-lookup machinery as `peer-data-*`
+//     below, checking the peer's `checked` prop directly instead of a
+//     `data-*` attribute.
+//   • Interaction states genuinely needing runtime tracking this scene
+//     graph doesn't do (`focus-within`, `active`, `visited`,
+//     `group-hover`, `group-focus`, `peer-hover`) — return false.
+//   • Anything else we don't recognize — return false (conservative
+//     drop; the static base styles still ship).
 function variantApplies(variant: string, props: Record<string, unknown>, node?: CmNode): boolean {
-  // hover/focus/active/disabled — runtime interaction we don't track yet.
-  if (/^(hover|focus|focus-visible|focus-within|active|disabled|visited|checked|placeholder|first|last|odd|even|group-hover|group-focus|peer-hover|peer-focus|peer-checked)$/.test(variant)) {
+  if (variant === "disabled") return isTruthyAttr(props.disabled);
+  if (variant === "checked") return isTruthyAttr(props.checked);
+  if ((variant === "first" || variant === "first-child") && node) {
+    return !!node.parent && node.parent.children[0] === node;
+  }
+  if ((variant === "last" || variant === "last-child") && node) {
+    const sibs = node.parent?.children;
+    return !!sibs && sibs[sibs.length - 1] === node;
+  }
+  if (variant === "odd" && node) {
+    const i = node.parent?.children.indexOf(node) ?? -1;
+    return i >= 0 && i % 2 === 0; // 0-indexed even -> CSS's 1-indexed odd
+  }
+  if (variant === "even" && node) {
+    const i = node.parent?.children.indexOf(node) ?? -1;
+    return i >= 0 && i % 2 === 1;
+  }
+  const peerChecked = variant.match(/^peer-checked(?:\/([a-zA-Z0-9_-]+))?$/);
+  if (peerChecked && node) {
+    const peer = findPeer(node, peerChecked[1]);
+    if (!peer) return false;
+    const peerProps = (peer as unknown as { _props?: Record<string, unknown> })._props ?? {};
+    return isTruthyAttr(peerProps.checked);
+  }
+  // focus-within/active/visited/group-hover/group-focus/peer-hover —
+  // runtime interaction (or, for `visited`, navigation history) this
+  // scene graph doesn't track.
+  if (/^(hover|focus|focus-visible|focus-within|active|visited|placeholder|group-hover|group-focus|peer-hover|peer-focus)$/.test(variant)) {
     return false;
   }
   // dark/light/sm/md/lg/etc — already handled by stripVariants at build
@@ -229,6 +291,12 @@ function variantApplies(variant: string, props: Record<string, unknown>, node?: 
   // placeholder, …) — drop. Their styles live in shadow-of-shadow CSS
   // that doesn't interact with carbon-mini's paint model.
   return false;
+}
+
+// Same truthiness convention the data-*/aria-* checks below already
+// use: present, not `false`, not an empty string.
+function isTruthyAttr(v: unknown): boolean {
+  return v != null && v !== false && v !== "";
 }
 
 function innerDataVariant(inner: string, props: Record<string, unknown>): boolean {

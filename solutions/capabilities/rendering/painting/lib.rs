@@ -296,6 +296,8 @@ pub fn paint_scene(scene: &Scene, pixmap: &mut Pixmap, scale: f32, text_engine: 
             pixmap,
             text_engine,
             false,
+            false,
+            false,
         );
     }
     psub("nodes_painted", pt0);
@@ -385,6 +387,16 @@ fn paint_node(
     // that alpha (correct CSS group-opacity). The internal re-entry sets
     // this true to paint the subtree normally into the layer.
     ignore_opacity: bool,
+    // Same technique, same reentry contract, for `filter`. Checked
+    // AFTER opacity (see the ordering note on the filter block below)
+    // so filter -> opacity is the effective composite order, matching
+    // how a browser applies effects.
+    ignore_filter: bool,
+    // Same technique for `mix-blend-mode`, checked BEFORE opacity/filter
+    // (see the ordering note on the blend block below) — it composites
+    // the fully-rendered (opacity- and filter-applied) subtree against
+    // the backdrop, so it has to be the outermost of the three.
+    ignore_blend: bool,
 ) {
     let node = match scene.nodes.get(&id) {
         Some(n) => n,
@@ -394,6 +406,51 @@ fn paint_node(
         Some(l) => l,
         None => return,
     };
+
+    // ── CSS mix-blend-mode (group) ──────────────────────────────────────
+    // Outermost of the three group effects: renders this node + subtree
+    // (with its OWN opacity/filter still applied normally — ignore_blend
+    // is the only flag forced true on re-entry) into a layer, then
+    // composites that finished layer against whatever's already painted
+    // behind it using the requested blend mode instead of normal
+    // source-over. Gated so the default (no blend mode) case costs
+    // nothing.
+    if !ignore_blend {
+        if let Some(mode) = node
+            .props
+            .mix_blend_mode
+            .as_deref()
+            .and_then(parse_blend_mode)
+        {
+            if let Some(mut layer) = Pixmap::new(pixmap.width(), pixmap.height()) {
+                paint_node(
+                    scene,
+                    id,
+                    parent_x,
+                    parent_y,
+                    inherited_color,
+                    inherited_font_size,
+                    inherited_mono,
+                    inherited_family.clone(),
+                    inherited_weight,
+                    clip_top,
+                    clip_bottom,
+                    clip_left,
+                    clip_right,
+                    parent_transform,
+                    &mut layer,
+                    text_engine,
+                    ignore_opacity,
+                    ignore_filter,
+                    true,
+                );
+                let mut pp = PixmapPaint::default();
+                pp.blend_mode = mode;
+                pixmap.draw_pixmap(0, 0, layer.as_ref(), &pp, Transform::identity(), None);
+            }
+            return;
+        }
+    }
 
     // ── CSS opacity (group) ────────────────────────────────────────────
     // Render this node + subtree into a transparent full-frame layer, then
@@ -422,10 +479,55 @@ fn paint_node(
                     &mut layer,
                     text_engine,
                     true,
+                    ignore_filter,
+                    ignore_blend,
                 );
                 let mut pp = PixmapPaint::default();
                 pp.opacity = op.clamp(0.0, 1.0);
                 pixmap.draw_pixmap(0, 0, layer.as_ref(), &pp, Transform::identity(), None);
+            }
+            return;
+        }
+    }
+
+    // ── CSS filter (group) ─────────────────────────────────────────────
+    // Same offscreen-layer technique as opacity above, checked second so
+    // the effective composite order is filter -> opacity (a browser
+    // computes/blurs the filtered content first, then fades the result).
+    // Gated so the default no-filter case costs nothing.
+    if !ignore_filter {
+        if let Some(filter_list) = node.props.filter.clone() {
+            if let Some(mut layer) = Pixmap::new(pixmap.width(), pixmap.height()) {
+                paint_node(
+                    scene,
+                    id,
+                    parent_x,
+                    parent_y,
+                    inherited_color,
+                    inherited_font_size,
+                    inherited_mono,
+                    inherited_family.clone(),
+                    inherited_weight,
+                    clip_top,
+                    clip_bottom,
+                    clip_left,
+                    clip_right,
+                    parent_transform,
+                    &mut layer,
+                    text_engine,
+                    ignore_opacity,
+                    true,
+                    ignore_blend,
+                );
+                apply_filters(&mut layer, &filter_list.0, text_engine.scale);
+                pixmap.draw_pixmap(
+                    0,
+                    0,
+                    layer.as_ref(),
+                    &PixmapPaint::default(),
+                    Transform::identity(),
+                    None,
+                );
             }
             return;
         }
@@ -560,7 +662,15 @@ fn paint_node(
     // When this node is the currently-hovered clickable, *_hover
     // overrides win over the base prop.
     let is_hovered = scene.hovered == Some(id);
-    let own_color = if is_hovered {
+    // Focus wins over hover when both apply (e.g. a click-focused input
+    // the mouse also happens to be sitting over) — matches how a
+    // visible focus ring is expected to take priority over a hover
+    // tint. Real `scene.focused` currently only ever reaches Input/
+    // Textarea nodes; see `PaintProps::background_focus`'s doc comment.
+    let is_focused = scene.focused == Some(id);
+    let own_color = if is_focused {
+        node.props.color_focus.or(node.props.color)
+    } else if is_hovered {
         node.props.color_hover.or(node.props.color)
     } else {
         node.props.color
@@ -622,7 +732,14 @@ fn paint_node(
             let rect_h = h + shadow.spread * 2.0;
             let rr = (node.props.border_radius + shadow.spread.max(0.0)).max(0.0);
             if rr > 0.0 {
-                if let Some(path) = rounded_rect_path(rect_x, rect_y, rect_w, rect_h, rr) {
+                if let Some(path) = rounded_rect_path_shaped(
+                    rect_x,
+                    rect_y,
+                    rect_w,
+                    rect_h,
+                    rr,
+                    node.props.corner_shape,
+                ) {
                     tmp.fill_path(&path, &sp, FillRule::Winding, Transform::identity(), None);
                 }
             } else if let Some(rect) =
@@ -643,7 +760,9 @@ fn paint_node(
 
     // Background — clip the fill rect against the visible y band so
     // scrolled-out portions don't paint over the nav.
-    let bg_color = if is_hovered {
+    let bg_color = if is_focused {
+        node.props.background_focus.or(node.props.background)
+    } else if is_hovered {
         node.props.background_hover.or(node.props.background)
     } else {
         node.props.background
@@ -677,7 +796,39 @@ fn paint_node(
         false
     };
 
-    if !clip_handled && (bg_gradient.is_some() || bg_color.is_some()) {
+    // Conic gradients have no native tiny-skia shader (only linear and
+    // radial exist) — sample the stop list per pixel into a temp
+    // pixmap instead, then blit it. Bypasses the shader-based fill
+    // below entirely (guarded by `conic_handled`) the same way
+    // `clip_handled` bypasses it for clip-path.
+    let conic_handled = if !clip_handled {
+        if let Some(crate::scene::GradientDef {
+            shape: crate::scene::GradientShape::Conic { angle_deg, cx, cy },
+            stops,
+        }) = bg_gradient
+        {
+            paint_conic_background(
+                pixmap,
+                *angle_deg,
+                *cx,
+                *cy,
+                stops,
+                x,
+                y,
+                w,
+                h,
+                node.props.border_radius,
+                node.props.corner_shape,
+                node_transform,
+            )
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
+    if !clip_handled && !conic_handled && (bg_gradient.is_some() || bg_color.is_some()) {
         let mut paint = Paint::default();
         if let Some(g) = bg_gradient {
             // Build a tiny-skia gradient shader fitted to the node's
@@ -729,6 +880,10 @@ fn paint_node(
                         Transform::identity(),
                     )
                 }
+                // No tiny-skia shader for this — handled separately by
+                // `conic_handled` above (a degenerate-box conic falls
+                // through to here with nothing left to paint).
+                crate::scene::GradientShape::Conic { .. } => None,
             };
             if let Some(sh) = shader {
                 paint.shader = sh;
@@ -781,7 +936,9 @@ fn paint_node(
                 true
             };
             if fully_inside_clip && fully_inside_damage {
-                if let Some(path) = rounded_rect_path(x, y, w, h, rr) {
+                if let Some(path) =
+                    rounded_rect_path_shaped(x, y, w, h, rr, node.props.corner_shape)
+                {
                     pixmap.fill_path(&path, &paint, FillRule::Winding, node_transform, None);
                 }
             } else if ch > 0.0 {
@@ -812,24 +969,7 @@ fn paint_node(
                     let iw = img.width() as f32;
                     let ih = img.height() as f32;
                     let mode = node.props.background_size.as_deref().unwrap_or("cover");
-                    let (sx, sy, ox, oy) = if mode == "stretch" {
-                        (w / iw, h / ih, 0.0_f32, 0.0_f32)
-                    } else if mode == "contain" {
-                        // contain: scale DOWN so both axes <= box, then center.
-                        // This is the <img> default (set in scene.rs's "src"
-                        // arm) — preserves aspect ratio and never crops, which
-                        // is what icons/logos need.
-                        let s = (w / iw).min(h / ih);
-                        let dw = iw * s;
-                        let dh = ih * s;
-                        (s, s, (w - dw) * 0.5, (h - dh) * 0.5)
-                    } else {
-                        // cover: scale up so both axes >= box, then center
-                        let s = (w / iw).max(h / ih);
-                        let dw = iw * s;
-                        let dh = ih * s;
-                        (s, s, (w - dw) * 0.5, (h - dh) * 0.5)
-                    };
+                    let (sx, sy, ox, oy) = bg_fit_scale(iw, ih, w, h, mode);
                     // Compose the bg-image positioning transform with the
                     // node's CSS transform so a rotated/scaled view
                     // carries its background image with it.
@@ -845,6 +985,36 @@ fn paint_node(
                     pp.quality = tiny_skia::FilterQuality::Bilinear;
                     pixmap.draw_pixmap(0, 0, img.as_ref(), &pp, transform, None);
                 }
+            }
+        }
+        // Multi-layer `background-image: url(a), url(b), ...`. CSS
+        // paints the FIRST-listed layer on top, so walk in reverse —
+        // last layer first (bottom), first layer last (top). Per-layer
+        // size comes from `background_layer_sizes` at the same index,
+        // repeating its last entry for any layer past the end (CSS's
+        // own behavior when there are more image layers than sizes).
+        if w > 0.0 && h > 0.0 && !node.props.background_layers.is_empty() {
+            let sizes = &node.props.background_layer_sizes;
+            for (i, layer_path) in node.props.background_layers.iter().enumerate().rev() {
+                let Some(img) = get_image(layer_path) else {
+                    continue;
+                };
+                if img.width() == 0 || img.height() == 0 {
+                    continue;
+                }
+                let mode = sizes
+                    .get(i)
+                    .or_else(|| sizes.last())
+                    .map(String::as_str)
+                    .unwrap_or("cover");
+                let (sx, sy, ox, oy) =
+                    bg_fit_scale(img.width() as f32, img.height() as f32, w, h, mode);
+                let transform = Transform::from_scale(sx, sy)
+                    .post_translate(x + ox, y + oy)
+                    .post_concat(node_transform);
+                let mut pp = PixmapPaint::default();
+                pp.quality = tiny_skia::FilterQuality::Bilinear;
+                pixmap.draw_pixmap(0, 0, img.as_ref(), &pp, transform, None);
             }
         }
     } // end if !clip_handled
@@ -889,7 +1059,9 @@ fn paint_node(
                 sp.anti_alias = node.props.border_radius > 0.0;
                 let outer_rr = node.props.border_radius.max(0.0);
                 if outer_rr > 0.0 {
-                    if let Some(path) = rounded_rect_path(0.0, 0.0, w, h, outer_rr) {
+                    if let Some(path) =
+                        rounded_rect_path_shaped(0.0, 0.0, w, h, outer_rr, node.props.corner_shape)
+                    {
                         tmp.fill_path(&path, &sp, FillRule::Winding, Transform::identity(), None);
                     }
                 } else if let Some(rect) = Rect::from_xywh(0.0, 0.0, w.max(0.001), h.max(0.001)) {
@@ -912,8 +1084,14 @@ fn paint_node(
                     cp.blend_mode = BlendMode::DestinationOut;
                     cp.anti_alias = inner_rr > 0.0;
                     if inner_rr > 0.0 {
-                        if let Some(path) = rounded_rect_path(cut_x, cut_y, cut_w, cut_h, inner_rr)
-                        {
+                        if let Some(path) = rounded_rect_path_shaped(
+                            cut_x,
+                            cut_y,
+                            cut_w,
+                            cut_h,
+                            inner_rr,
+                            node.props.corner_shape,
+                        ) {
                             tmp.fill_path(
                                 &path,
                                 &cp,
@@ -945,7 +1123,9 @@ fn paint_node(
                     mp.anti_alias = true;
                     // Fill the rounded rect — pixels inside stay,
                     // pixels outside get zeroed.
-                    if let Some(path) = rounded_rect_path(0.0, 0.0, w, h, outer_rr) {
+                    if let Some(path) =
+                        rounded_rect_path_shaped(0.0, 0.0, w, h, outer_rr, node.props.corner_shape)
+                    {
                         tmp.fill_path(&path, &mp, FillRule::Winding, Transform::identity(), None);
                     }
                 }
@@ -998,12 +1178,13 @@ fn paint_node(
                     // half the width so the stroke's outer edge sits on the
                     // box edge (CSS border-box).
                     bp.anti_alias = true;
-                    if let Some(path) = rounded_rect_path(
+                    if let Some(path) = rounded_rect_path_shaped(
                         x + bt * 0.5,
                         y + bt * 0.5,
                         (w - bt).max(0.001),
                         (h - bt).max(0.001),
                         (rr - bt * 0.5).max(0.0),
+                        node.props.corner_shape,
                     ) {
                         let mut stroke = tiny_skia::Stroke::default();
                         stroke.width = bt;
@@ -1052,6 +1233,39 @@ fn paint_node(
                         side(x + w - br_w, y, br_w, h, pixmap);
                     }
                 }
+            }
+        }
+    }
+
+    // ── CSS outline ───────────────────────────────────────────────────
+    // Painted after border, same layer. Unlike border, outline sits
+    // OUTSIDE the box edge (offset by `outline_offset`) and never
+    // contributes to layout size — that's handled entirely here at
+    // paint time, nothing in the Taffy style reflects it.
+    if node.props.outline_width > 0.0 && w > 0.0 && h > 0.0 {
+        let oc = node.props.outline_color.unwrap_or(effective_color);
+        let a = ((oc >> 24) & 0xFF) as u8;
+        if a != 0 {
+            let r = ((oc >> 16) & 0xFF) as u8;
+            let g = ((oc >> 8) & 0xFF) as u8;
+            let b = (oc & 0xFF) as u8;
+            let mut op = Paint::default();
+            op.set_color_rgba8(r, g, b, a);
+            op.anti_alias = true;
+            let ow = node.props.outline_width;
+            let off = node.props.outline_offset;
+            let rr = (node.props.border_radius + off).max(0.0);
+            if let Some(path) = rounded_rect_path_shaped(
+                x - off - ow * 0.5,
+                y - off - ow * 0.5,
+                (w + (off + ow * 0.5) * 2.0).max(0.001),
+                (h + (off + ow * 0.5) * 2.0).max(0.001),
+                rr,
+                node.props.corner_shape,
+            ) {
+                let mut stroke = tiny_skia::Stroke::default();
+                stroke.width = ow;
+                pixmap.stroke_path(&path, &op, &stroke, node_transform, None);
             }
         }
     }
@@ -1138,6 +1352,7 @@ fn paint_node(
                         clip_bottom,
                         letter_spacing,
                         is_mono,
+                        span.italic,
                     );
                     pen_x += sw;
                 }
@@ -1148,7 +1363,7 @@ fn paint_node(
 
     // Text — wrapped + clipped per glyph-row by the text engine.
     if let NodeKind::Text = node.kind {
-        if let Some(text) = &node.props.text {
+        if let Some(orig_text) = &node.props.text {
             // Paint-level wrap policy: only wrap when the user
             // explicitly set a width on the text. `width=None` means
             // "single-line, never wrap", regardless of what Taffy
@@ -1160,7 +1375,50 @@ fn paint_node(
             // the box rightward, which is a minor visual issue
             // compared to the broken word-wrap stacking we'd see
             // otherwise.
-            let paint_max_width = if node.props.width.is_some() { w } else { 0.0 };
+            //
+            // `white-space: nowrap` and `text-overflow: ellipsis` both
+            // force single-line regardless of width — must mirror the
+            // Taffy measure callback's `force_nowrap` (scene.rs) or the
+            // layout box won't match what's painted here.
+            let is_ellipsis = node.props.text_overflow.as_deref() == Some("ellipsis");
+            let force_nowrap = is_ellipsis || node.props.white_space.as_deref() == Some("nowrap");
+            let paint_max_width = if force_nowrap {
+                0.0
+            } else if node.props.width.is_some() {
+                w
+            } else {
+                0.0
+            };
+            let letter_spacing = node.props.letter_spacing.unwrap_or(0.0);
+            let is_mono = effective_mono;
+            // Own-value only (see `PaintProps::font_style`'s doc comment
+            // on why this doesn't inherit like real CSS font-style).
+            let italic = matches!(
+                node.props.font_style.as_deref(),
+                Some("italic") | Some("oblique")
+            );
+            // Real weight/family via the Inter face stack (Regular → Bold)
+            // or a plugin-loaded named font. Set before the alignment
+            // measurement below too, so a named font's real glyph widths
+            // (not the fallback stack's) decide the centered/right offset.
+            text_engine.cur_weight = effective_weight;
+            text_engine.cur_family = effective_family.clone();
+            // Truncate to the layout box width with a trailing "…"
+            // instead of letting it overflow. Only meaningful with a
+            // real box width to truncate against.
+            let truncated;
+            let text: &str = if is_ellipsis && w > 0.0 {
+                truncated = text_engine.truncate_ellipsis_mono(
+                    orig_text,
+                    effective_font_size,
+                    letter_spacing,
+                    is_mono,
+                    w,
+                );
+                &truncated
+            } else {
+                orig_text.as_str()
+            };
             // text-align: shift the paint origin so the rendered
             // glyphs sit center / right inside the box. Only fires
             // when the text fits on a single line (paint_max_width
@@ -1169,14 +1427,6 @@ fn paint_node(
             // engine, which is a larger refactor.
             let align = node.props.text_align.as_deref().unwrap_or("left");
             let lh_prop = node.props.line_height;
-            let letter_spacing = node.props.letter_spacing.unwrap_or(0.0);
-            let is_mono = effective_mono;
-            // Real weight/family via the Inter face stack (Regular → Bold)
-            // or a plugin-loaded named font. Set before the alignment
-            // measurement below too, so a named font's real glyph widths
-            // (not the fallback stack's) decide the centered/right offset.
-            text_engine.cur_weight = effective_weight;
-            text_engine.cur_family = effective_family.clone();
             let mut x_off = 0.0_f32;
             if align != "left" && w > 0.0 {
                 let (tw, _th) = text_engine.measure_styled_mono(
@@ -1193,20 +1443,109 @@ fn paint_node(
                     };
                 }
             }
-            text_engine.draw_text_wrapped_clipped_styled_mono(
-                pixmap,
-                text,
-                x + x_off + text_shift_x,
-                y + text_shift_y,
-                effective_font_size,
-                effective_color,
-                paint_max_width,
-                clip_top,
-                clip_bottom,
-                lh_prop,
-                letter_spacing,
-                is_mono,
-            );
+            // ── text-shadow ──────────────────────────────────────────
+            // Painted BEHIND the glyphs, first-declared on top (same
+            // stacking convention as box-shadow). Mirrors box-shadow's
+            // blur technique: rasterize at LOGICAL resolution into a
+            // padded temp pixmap (so a Gaussian blur has headroom to
+            // bleed), then let `node_transform`'s HiDPI scale upsample
+            // it on the final blit — text_engine.scale/x_clip are
+            // save/restored since they're engine-global state, not
+            // per-call params.
+            if !node.props.text_shadow.is_empty() {
+                let (measured_w, measured_h) = if paint_max_width > 0.0 {
+                    text_engine.measure_wrapped_pm(
+                        text,
+                        effective_font_size,
+                        paint_max_width,
+                        is_mono,
+                    )
+                } else {
+                    text_engine.measure_styled_mono(
+                        text,
+                        effective_font_size,
+                        letter_spacing,
+                        is_mono,
+                    )
+                };
+                for shadow in node.props.text_shadow.iter().rev() {
+                    let blur_r = shadow.blur.round().max(0.0) as u32;
+                    let pad = (blur_r as f32) * 2.0 + 4.0;
+                    let tw = (measured_w + pad * 2.0).max(1.0).ceil() as u32;
+                    let th = (measured_h + pad * 2.0).max(1.0).ceil() as u32;
+                    if let Some(mut tmp) = tiny_skia::Pixmap::new(tw, th) {
+                        let saved_scale = text_engine.scale;
+                        let saved_x_clip = text_engine.x_clip;
+                        text_engine.scale = 1.0;
+                        text_engine.x_clip = (f32::NEG_INFINITY, f32::INFINITY);
+                        text_engine.draw_text_wrapped_clipped_styled_mono(
+                            &mut tmp,
+                            text,
+                            pad + x_off,
+                            pad,
+                            effective_font_size,
+                            shadow.color,
+                            paint_max_width,
+                            f32::NEG_INFINITY,
+                            f32::INFINITY,
+                            lh_prop,
+                            letter_spacing,
+                            is_mono,
+                            italic,
+                        );
+                        text_engine.scale = saved_scale;
+                        text_engine.x_clip = saved_x_clip;
+                        crate::blur::box_blur(&mut tmp, blur_r);
+                        let dst_x = (x - pad + shadow.offset_x).round() as i32;
+                        let dst_y = (y - pad + shadow.offset_y).round() as i32;
+                        let pp = PixmapPaint::default();
+                        pixmap.draw_pixmap(dst_x, dst_y, tmp.as_ref(), &pp, node_transform, None);
+                    }
+                }
+            }
+            // `white-space: pre` — preserve literal `\n` line breaks and
+            // never word-wrap (the generic wrapped-draw path treats a
+            // whole `\n`-containing string as one unbroken line when
+            // paint_max_width is 0, silently dropping the newline glyph
+            // instead of breaking on it). Draw each hard line directly.
+            if node.props.white_space.as_deref() == Some("pre") && !is_ellipsis {
+                let line_h = text_engine.resolve_line_height(effective_font_size, lh_prop);
+                for (i, line) in text.split('\n').enumerate() {
+                    let ly = y + text_shift_y + (i as f32) * line_h;
+                    if ly + line_h < clip_top || ly > clip_bottom {
+                        continue;
+                    }
+                    text_engine.draw_text_styled_mono(
+                        pixmap,
+                        line,
+                        x + x_off + text_shift_x,
+                        ly,
+                        effective_font_size,
+                        effective_color,
+                        clip_top,
+                        clip_bottom,
+                        letter_spacing,
+                        is_mono,
+                        italic,
+                    );
+                }
+            } else {
+                text_engine.draw_text_wrapped_clipped_styled_mono(
+                    pixmap,
+                    text,
+                    x + x_off + text_shift_x,
+                    y + text_shift_y,
+                    effective_font_size,
+                    effective_color,
+                    paint_max_width,
+                    clip_top,
+                    clip_bottom,
+                    lh_prop,
+                    letter_spacing,
+                    is_mono,
+                    italic,
+                );
+            }
             // text-decoration: paint an underline or strikethrough
             // band across the measured text width. We measure
             // single-line; multi-line decoration needs per-line
@@ -1487,34 +1826,44 @@ fn paint_node(
     // child has a non-default z-index — the common case — skip
     // the sort entirely so the cost of z-index is zero on flows
     // that don't use it.
-    let needs_z_sort = node.children.iter().any(|cid| {
-        scene
-            .nodes
-            .get(cid)
-            .and_then(|n| n.props.z_index)
-            .map(|z| z != 0)
-            .unwrap_or(false)
-    });
+    //
+    // `position: sticky` children get an implicit z-floor of 1 (unless
+    // they set an explicit z-index higher than that) — CSS elevates any
+    // positioned element above its static siblings in paint order even
+    // at z-index:auto, and without this a pinned sticky header would
+    // still be painted BEFORE its later siblings in child order, so a
+    // scrolled-up row would paint over (visually cover) the header that
+    // just stuck in place above it.
+    let effective_z = |cid: &u32| -> i32 {
+        let n = scene.nodes.get(cid);
+        let z = n.and_then(|n| n.props.z_index).unwrap_or(0);
+        let is_sticky = n
+            .map(|n| n.props.position.as_deref() == Some("sticky"))
+            .unwrap_or(false);
+        if is_sticky {
+            z.max(1)
+        } else {
+            z
+        }
+    };
+    let needs_z_sort = node.children.iter().any(|cid| effective_z(cid) != 0);
     let mut child_order: Vec<u32>;
     let children_slice: &[u32] = if needs_z_sort {
         child_order = node.children.clone();
-        child_order.sort_by_key(|cid| {
-            scene
-                .nodes
-                .get(cid)
-                .and_then(|n| n.props.z_index)
-                .unwrap_or(0)
-        });
+        child_order.sort_by_key(effective_z);
         &child_order[..]
     } else {
         &node.children[..]
     };
     for &cid in children_slice {
+        // `position: sticky` — see `Scene::sticky_oy`'s doc comment.
+        // Safe to call unconditionally: a no-op for non-sticky children.
+        let sticky_child_oy = scene.sticky_oy(cid, child_oy, y, h);
         paint_node(
             scene,
             cid,
             x,
-            child_oy,
+            sticky_child_oy,
             effective_color,
             effective_font_size,
             effective_mono,
@@ -1527,6 +1876,8 @@ fn paint_node(
             node_transform,
             pixmap,
             text_engine,
+            false,
+            false,
             false,
         );
     }
@@ -1564,31 +1915,99 @@ fn paint_node(
         }
     }
 
+    // Scroll-shadow — auto edge fade signaling more content is
+    // scrollable above/below (Notion / Radix ScrollArea pattern),
+    // painted after children so it overlays scrolled-in content, before
+    // the scrollbar thumb so the thumb stays on top of everything. Only
+    // meaningful with a solid background to fade TOWARD — skipped
+    // otherwise since there'd be nothing correct to blend into.
+    if node.props.overflow_y && node.props.scroll_shadow {
+        if let Some(bg) = bg_color {
+            let content_h = scene.content_height(id);
+            if content_h > h && h > 0.0 && w > 0.0 {
+                let scroll_y = scene.scroll_y(id);
+                let max_scroll = (content_h - h).max(0.0);
+                let fade_h = 24.0_f32.min(h * 0.5);
+                let a = ((bg >> 24) & 0xFF) as u8;
+                let r = ((bg >> 16) & 0xFF) as u8;
+                let g = ((bg >> 8) & 0xFF) as u8;
+                let b = (bg & 0xFF) as u8;
+                let mut paint_edge_fade = |top: bool| {
+                    use tiny_skia::{GradientStop, LinearGradient, Point, SpreadMode};
+                    let (a0, a1) = if top { (a, 0) } else { (0, a) };
+                    let stops = vec![
+                        GradientStop::new(0.0, Color::from_rgba8(r, g, b, a0)),
+                        GradientStop::new(1.0, Color::from_rgba8(r, g, b, a1)),
+                    ];
+                    let fy = if top { y } else { y + h - fade_h };
+                    let shader = LinearGradient::new(
+                        Point::from_xy(x, fy),
+                        Point::from_xy(x, fy + fade_h),
+                        stops,
+                        SpreadMode::Pad,
+                        Transform::identity(),
+                    );
+                    if let (Some(shader), Some(rect)) = (
+                        shader,
+                        Rect::from_xywh(x, fy, w.max(0.001), fade_h.max(0.001)),
+                    ) {
+                        let mut fp = Paint::default();
+                        fp.shader = shader;
+                        fp.anti_alias = false;
+                        pixmap.fill_rect(rect, &fp, node_transform, None);
+                    }
+                };
+                if scroll_y > 0.5 {
+                    paint_edge_fade(true);
+                }
+                if scroll_y < max_scroll - 0.5 {
+                    paint_edge_fade(false);
+                }
+            }
+        }
+    }
+
     // Scrollbar — paint after children so it sits on top. Only draw
     // when content actually overflows; otherwise the scrollport is
     // visually identical to a non-scrollable view.
     if node.props.overflow_y {
+        let bar_w = node.props.scrollbar_width.unwrap_or(4.0);
         let content_h = scene.content_height(id);
-        if content_h > h && h > 0.0 {
+        // `scrollbar-width: none` (bar_w == 0) hides the bar but the
+        // scrollport stays scrollable — matches the CSS property, which
+        // only ever affects paint, never interactivity.
+        if content_h > h && h > 0.0 && bar_w > 0.0 {
             let scroll_y = scene.scroll_y(id);
             let max_scroll = (content_h - h).max(1.0);
             let thumb_min = 24.0_f32;
             let thumb_h = ((h * h) / content_h).max(thumb_min).min(h);
             let thumb_y = y + (scroll_y / max_scroll) * (h - thumb_h);
-            let bar_w = 4.0_f32;
             let bar_x = x + w - bar_w - 4.0; // 4px gutter from right edge
 
-            // Track (subtle, almost-invisible).
+            let track_argb = node.props.scrollbar_track_color.unwrap_or(0x10_ffffff);
+            let thumb_argb = node.props.scrollbar_thumb_color.unwrap_or(0x60_ffffff);
+            let argb_channels = |c: u32| {
+                (
+                    ((c >> 16) & 0xFF) as u8,
+                    ((c >> 8) & 0xFF) as u8,
+                    (c & 0xFF) as u8,
+                    ((c >> 24) & 0xFF) as u8,
+                )
+            };
+
+            // Track (subtle, almost-invisible by default).
+            let (tr, tg, tb, ta) = argb_channels(track_argb);
             let mut track_paint = Paint::default();
-            track_paint.set_color_rgba8(0xff, 0xff, 0xff, 0x10);
+            track_paint.set_color_rgba8(tr, tg, tb, ta);
             track_paint.anti_alias = true;
             if let Some(rect) = Rect::from_xywh(bar_x, y + 4.0, bar_w, (h - 8.0).max(1.0)) {
                 pixmap.fill_rect(rect, &track_paint, node_transform, None);
             }
 
-            // Thumb (more visible).
+            // Thumb (more visible by default).
+            let (hr, hg, hb, ha) = argb_channels(thumb_argb);
             let mut thumb_paint = Paint::default();
-            thumb_paint.set_color_rgba8(0xff, 0xff, 0xff, 0x60);
+            thumb_paint.set_color_rgba8(hr, hg, hb, ha);
             thumb_paint.anti_alias = true;
             if let Some(path) = rounded_rect_path(bar_x, thumb_y, bar_w, thumb_h, bar_w / 2.0) {
                 pixmap.fill_path(&path, &thumb_paint, FillRule::Winding, node_transform, None);
@@ -1661,6 +2080,149 @@ fn blit_rgba(
     }
 }
 
+/// Run `filter` ops over an already-painted layer, in declaration order.
+/// `scale` is the HiDPI root scale (`text_engine.scale`) — the layer is a
+/// full PHYSICAL-resolution pixmap (unlike the box/text-shadow temp
+/// pixmaps, which are logical and rely on `node_transform` to upscale on
+/// blit), so every px length in a filter arg must be scaled up to match.
+fn apply_filters(pixmap: &mut Pixmap, ops: &[crate::scene::FilterOp], scale: f32) {
+    use crate::scene::FilterOp;
+    for op in ops {
+        match op {
+            FilterOp::Blur(px) => {
+                // CSS Filter Effects: a Gaussian blur with standard
+                // deviation equal to the given length.
+                let sigma = (*px * scale).max(0.0);
+                if sigma > 0.0 {
+                    crate::blur::gaussian_blur(pixmap, sigma);
+                }
+            }
+            FilterOp::DropShadow {
+                offset_x,
+                offset_y,
+                blur,
+                color,
+            } => {
+                let w = pixmap.width();
+                let h = pixmap.height();
+                // Colorize: a copy of the layer's ALPHA silhouette,
+                // recolored to the shadow color (still premultiplied —
+                // out_a scales both the color and its own alpha).
+                let mut shadow_layer = match Pixmap::new(w, h) {
+                    Some(p) => p,
+                    None => continue,
+                };
+                let sa = ((*color >> 24) & 0xFF) as u16;
+                let sr = ((*color >> 16) & 0xFF) as u16;
+                let sg = ((*color >> 8) & 0xFF) as u16;
+                let sb = (*color & 0xFF) as u16;
+                {
+                    let src = pixmap.data();
+                    let dst = shadow_layer.data_mut();
+                    for i in (0..src.len()).step_by(4) {
+                        let a = src[i + 3] as u16;
+                        let out_a = (a * sa) / 255;
+                        dst[i] = ((sr * out_a) / 255) as u8;
+                        dst[i + 1] = ((sg * out_a) / 255) as u8;
+                        dst[i + 2] = ((sb * out_a) / 255) as u8;
+                        dst[i + 3] = out_a as u8;
+                    }
+                }
+                let sigma = (*blur * scale).max(0.0);
+                if sigma > 0.0 {
+                    crate::blur::gaussian_blur(&mut shadow_layer, sigma);
+                }
+                // Composite: shadow BEHIND the original. Paint the
+                // shadow (offset) onto a fresh canvas, then the
+                // original on top, then swap it in.
+                if let Some(mut composed) = Pixmap::new(w, h) {
+                    let pp = PixmapPaint::default();
+                    let dx = (*offset_x * scale).round() as i32;
+                    let dy = (*offset_y * scale).round() as i32;
+                    composed.draw_pixmap(
+                        dx,
+                        dy,
+                        shadow_layer.as_ref(),
+                        &pp,
+                        Transform::identity(),
+                        None,
+                    );
+                    composed.draw_pixmap(0, 0, pixmap.as_ref(), &pp, Transform::identity(), None);
+                    *pixmap = composed;
+                }
+            }
+        }
+    }
+}
+
+/// Samples of a superellipse quarter-curve from (1, 0) to (0, 1), in a
+/// unit square — `n=2` reproduces a quarter-circle exactly (`cos t,
+/// sin t`); a higher `n` flattens it toward the square's corner (CSS's
+/// draft `corner-shape: superellipse(n)` / the common "squircle"
+/// approximation at n≈4). `steps` segments give `steps + 1` points.
+fn superellipse_quarter(n: f32, steps: usize) -> Vec<(f32, f32)> {
+    let n = n.max(0.1);
+    (0..=steps)
+        .map(|i| {
+            let t = (i as f32 / steps as f32) * std::f32::consts::FRAC_PI_2;
+            let u = t.cos().max(0.0).powf(2.0 / n);
+            let v = t.sin().max(0.0).powf(2.0 / n);
+            (u, v)
+        })
+        .collect()
+}
+
+/// Same rounded-box outline as `rounded_rect_path`, but with
+/// `corner_shape_n` in effect: `None` defers to the plain circular-arc
+/// version unchanged; `Some(n)` walks each corner along a superellipse
+/// of exponent `n` instead, sampled as a short polyline (smooth enough
+/// at the radii UI actually uses; no need for true bezier fitting).
+fn rounded_rect_path_shaped(
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    r: f32,
+    corner_shape_n: Option<f32>,
+) -> Option<tiny_skia::Path> {
+    let n = match corner_shape_n {
+        Some(n) => n,
+        None => return rounded_rect_path(x, y, w, h, r),
+    };
+    let r = r.min(w / 2.0).min(h / 2.0).max(0.0);
+    if r <= 0.0 {
+        let mut pb = PathBuilder::new();
+        pb.move_to(x, y);
+        pb.line_to(x + w, y);
+        pb.line_to(x + w, y + h);
+        pb.line_to(x, y + h);
+        pb.close();
+        return pb.finish();
+    }
+    const STEPS: usize = 10;
+    let q = superellipse_quarter(n, STEPS);
+    let mut pb = PathBuilder::new();
+    pb.move_to(x + r, y);
+    pb.line_to(x + w - r, y);
+    for &(u, v) in q.iter().skip(1) {
+        pb.line_to(x + w - r + v * r, y + r - u * r); // top-right
+    }
+    pb.line_to(x + w, y + h - r);
+    for &(u, v) in q.iter().skip(1) {
+        pb.line_to(x + w - r + u * r, y + h - r + v * r); // bottom-right
+    }
+    pb.line_to(x + r, y + h);
+    for &(u, v) in q.iter().skip(1) {
+        pb.line_to(x + r - v * r, y + h - r + u * r); // bottom-left
+    }
+    pb.line_to(x, y + r);
+    for &(u, v) in q.iter().skip(1) {
+        pb.line_to(x + r - u * r, y + r - v * r); // top-left
+    }
+    pb.close();
+    pb.finish()
+}
+
 fn rounded_rect_path(x: f32, y: f32, w: f32, h: f32, r: f32) -> Option<tiny_skia::Path> {
     let r = r.min(w / 2.0).min(h / 2.0).max(0.0);
     let mut pb = PathBuilder::new();
@@ -1675,6 +2237,184 @@ fn rounded_rect_path(x: f32, y: f32, w: f32, h: f32, r: f32) -> Option<tiny_skia
     pb.quad_to(x, y, x + r, y);
     pb.close();
     pb.finish()
+}
+
+/// Scale/offset to fit an `iw`×`ih` image into a `w`×`h` box under a
+/// `background-size` mode: "stretch" (fill both axes independently),
+/// "contain" (scale down to fit inside, no crop — the `<img>` default),
+/// or anything else including the CSS default "cover" (scale up to
+/// fill, may crop). Returns `(scale_x, scale_y, offset_x, offset_y)` in
+/// box-local px, image drawn at `offset` sized `iw*scale × ih*scale`.
+fn bg_fit_scale(iw: f32, ih: f32, w: f32, h: f32, mode: &str) -> (f32, f32, f32, f32) {
+    if mode == "stretch" {
+        (w / iw, h / ih, 0.0, 0.0)
+    } else if mode == "contain" {
+        let s = (w / iw).min(h / ih);
+        let dw = iw * s;
+        let dh = ih * s;
+        (s, s, (w - dw) * 0.5, (h - dh) * 0.5)
+    } else {
+        let s = (w / iw).max(h / ih);
+        let dw = iw * s;
+        let dh = ih * s;
+        (s, s, (w - dw) * 0.5, (h - dh) * 0.5)
+    }
+}
+
+/// Map a CSS `mix-blend-mode` keyword to its tiny-skia `BlendMode`. The
+/// two vocabularies correspond almost 1:1 (tiny-skia's is Skia's, which
+/// already implements the W3C Compositing spec CSS blend modes draw
+/// from) — this is purely a name translation, no new blending math.
+/// `None` for `normal` (plain source-over — the caller's default, no
+/// group layer needed) or anything unrecognized.
+fn parse_blend_mode(s: &str) -> Option<tiny_skia::BlendMode> {
+    use tiny_skia::BlendMode;
+    match s.trim() {
+        "multiply" => Some(BlendMode::Multiply),
+        "screen" => Some(BlendMode::Screen),
+        "overlay" => Some(BlendMode::Overlay),
+        "darken" => Some(BlendMode::Darken),
+        "lighten" => Some(BlendMode::Lighten),
+        "color-dodge" => Some(BlendMode::ColorDodge),
+        "color-burn" => Some(BlendMode::ColorBurn),
+        "hard-light" => Some(BlendMode::HardLight),
+        "soft-light" => Some(BlendMode::SoftLight),
+        "difference" => Some(BlendMode::Difference),
+        "exclusion" => Some(BlendMode::Exclusion),
+        "hue" => Some(BlendMode::Hue),
+        "saturation" => Some(BlendMode::Saturation),
+        "color" => Some(BlendMode::Color),
+        "luminosity" => Some(BlendMode::Luminosity),
+        // "normal" and anything unrecognized — no group layer needed.
+        _ => None,
+    }
+}
+
+/// Linear-interpolate two 0xAARRGGBB colors, channel by channel.
+fn lerp_argb(c1: u32, c2: u32, f: f32) -> u32 {
+    let f = f.clamp(0.0, 1.0);
+    let mix = |shift: u32| -> u32 {
+        let v1 = ((c1 >> shift) & 0xFF) as f32;
+        let v2 = ((c2 >> shift) & 0xFF) as f32;
+        (v1 + (v2 - v1) * f).round().clamp(0.0, 255.0) as u32
+    };
+    (mix(24) << 24) | (mix(16) << 16) | (mix(8) << 8) | mix(0)
+}
+
+/// Sample a gradient stop list at fraction `t` (0..1), same offset
+/// convention `parse_stops` already produces for linear/radial/conic.
+/// Assumes stops are in ascending-offset order (true for anything the
+/// CSS parser emits); out-of-range `t` clamps to the nearest end stop.
+fn sample_gradient_stops(stops: &[crate::scene::GradientStopDef], t: f32) -> u32 {
+    match stops.len() {
+        0 => 0x0000_0000,
+        1 => stops[0].color,
+        _ => {
+            let t = t.clamp(0.0, 1.0);
+            if t <= stops[0].offset {
+                return stops[0].color;
+            }
+            let last = stops.len() - 1;
+            if t >= stops[last].offset {
+                return stops[last].color;
+            }
+            for pair in stops.windows(2) {
+                let (a, b) = (&pair[0], &pair[1]);
+                if t >= a.offset && t <= b.offset {
+                    let span = (b.offset - a.offset).max(1e-6);
+                    return lerp_argb(a.color, b.color, (t - a.offset) / span);
+                }
+            }
+            stops[last].color
+        }
+    }
+}
+
+/// Rasterize a `conic-gradient(...)` into a box-sized temp pixmap
+/// (respecting `border_radius` via the usual DestinationIn clip), then
+/// blit it. There's no native tiny-skia sweep/conic shader (only
+/// linear and radial), so this samples the stop list per pixel by
+/// hand instead of building a `Shader` — the same trade-off box-shadow
+/// and clip-path already make for effects tiny-skia doesn't offer
+/// directly. `angle_deg` follows the same 0°=up/clockwise convention
+/// as `GradientShape::Linear`; `cx`/`cy` are box-fraction center,
+/// matching `GradientShape::Radial`. Returns false (nothing painted)
+/// on a degenerate box or fewer than 2 stops.
+#[allow(clippy::too_many_arguments)]
+fn paint_conic_background(
+    pixmap: &mut Pixmap,
+    angle_deg: f32,
+    cx: f32,
+    cy: f32,
+    stops: &[crate::scene::GradientStopDef],
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    border_radius: f32,
+    corner_shape: Option<f32>,
+    node_transform: Transform,
+) -> bool {
+    if w <= 0.0 || h <= 0.0 || stops.len() < 2 {
+        return false;
+    }
+    let iw = w.ceil() as u32;
+    let ih = h.ceil() as u32;
+    if iw == 0 || ih == 0 {
+        return false;
+    }
+    let mut tmp = match Pixmap::new(iw, ih) {
+        Some(p) => p,
+        None => return false,
+    };
+    let ccx = cx * w;
+    let ccy = cy * h;
+    {
+        let data = tmp.data_mut();
+        for py in 0..ih {
+            for px in 0..iw {
+                // Sample pixel centers so a 1x1 box doesn't sample
+                // exactly on the (degenerate) center point.
+                let dx = px as f32 + 0.5 - ccx;
+                let dy = py as f32 + 0.5 - ccy;
+                // Same "0°=up, clockwise" parametrization as Linear
+                // (dx = sin θ, dy = -cos θ), solved for θ.
+                let raw_deg = dx.atan2(-dy).to_degrees();
+                let a = (((raw_deg - angle_deg) % 360.0) + 360.0) % 360.0;
+                let color = sample_gradient_stops(stops, a / 360.0);
+                let alpha = (color >> 24) & 0xFF;
+                let r = (color >> 16) & 0xFF;
+                let g = (color >> 8) & 0xFF;
+                let b = color & 0xFF;
+                // tiny-skia stores premultiplied RGBA8.
+                let idx = ((py * iw + px) * 4) as usize;
+                data[idx] = ((r * alpha) / 255) as u8;
+                data[idx + 1] = ((g * alpha) / 255) as u8;
+                data[idx + 2] = ((b * alpha) / 255) as u8;
+                data[idx + 3] = alpha as u8;
+            }
+        }
+    }
+    if border_radius > 0.0 {
+        use tiny_skia::BlendMode;
+        let mut mp = Paint::default();
+        mp.set_color_rgba8(255, 255, 255, 255);
+        mp.blend_mode = BlendMode::DestinationIn;
+        mp.anti_alias = true;
+        if let Some(path) = rounded_rect_path_shaped(0.0, 0.0, w, h, border_radius, corner_shape) {
+            tmp.fill_path(&path, &mp, FillRule::Winding, Transform::identity(), None);
+        }
+    }
+    let pp = PixmapPaint::default();
+    pixmap.draw_pixmap(
+        x.round() as i32,
+        y.round() as i32,
+        tmp.as_ref(),
+        &pp,
+        node_transform,
+        None,
+    );
+    true
 }
 
 fn resolve_len_x(l: crate::scene::Len, w: f32) -> f32 {
@@ -1771,6 +2511,11 @@ pub(crate) fn paint_clipped_background(
                     Transform::identity(),
                 )
             }
+            // clip-path + conic-gradient together isn't handled (the
+            // per-pixel conic rasterizer lives in the un-clipped bg
+            // path only) — degrades to "no gradient" for this combo
+            // rather than painting something wrong.
+            crate::scene::GradientShape::Conic { .. } => None,
         };
         let mut bp = Paint::default();
         if let Some(sh) = shader {
@@ -1941,4 +2686,150 @@ pub(crate) fn build_clip_path(
         }
     }
     pb.finish()
+}
+
+#[cfg(test)]
+mod corner_shape_tests {
+    use super::*;
+
+    #[test]
+    fn n_equals_2_reproduces_a_quarter_circle() {
+        // u^2 + v^2 should be ~1 for every sample when n=2 (the
+        // exponent that collapses the superellipse to a circle).
+        for &(u, v) in &superellipse_quarter(2.0, 10) {
+            let r2 = u * u + v * v;
+            assert!(
+                (r2 - 1.0).abs() < 1e-4,
+                "n=2 should be a unit circle, got r^2={r2}"
+            );
+        }
+    }
+
+    #[test]
+    fn endpoints_are_the_corners_axis_tangent_points() {
+        let q = superellipse_quarter(4.0, 10);
+        let (u0, v0) = q[0];
+        let (ul, vl) = *q.last().unwrap();
+        assert!(
+            (u0 - 1.0).abs() < 1e-5 && v0.abs() < 1e-5,
+            "start should be (1,0), got ({u0},{v0})"
+        );
+        assert!(
+            ul.abs() < 1e-5 && (vl - 1.0).abs() < 1e-5,
+            "end should be (0,1), got ({ul},{vl})"
+        );
+    }
+
+    #[test]
+    fn shaped_path_falls_back_to_the_circular_one_when_n_is_none() {
+        // Same box, same radius — both should produce a path with the
+        // same bounding box regardless of which corner style was used.
+        let round = rounded_rect_path(10.0, 10.0, 100.0, 60.0, 12.0).unwrap();
+        let shaped = rounded_rect_path_shaped(10.0, 10.0, 100.0, 60.0, 12.0, None).unwrap();
+        assert_eq!(round.bounds().width(), shaped.bounds().width());
+        assert_eq!(round.bounds().height(), shaped.bounds().height());
+    }
+
+    #[test]
+    fn a_squircle_path_spans_the_same_box_as_the_circular_one() {
+        let round = rounded_rect_path(0.0, 0.0, 80.0, 80.0, 20.0).unwrap();
+        let squircle = rounded_rect_path_shaped(0.0, 0.0, 80.0, 80.0, 20.0, Some(4.0)).unwrap();
+        // Squircle corners bulge OUTWARD relative to a circular arc of
+        // the same radius (less cut-off near the tangent points), so
+        // the bounding box can't be smaller — but it also can't exceed
+        // the box's own extent, since every sample point is clamped to
+        // within the r x r corner square.
+        assert!((squircle.bounds().width() - round.bounds().width()).abs() < 1e-3);
+        assert!((squircle.bounds().height() - round.bounds().height()).abs() < 1e-3);
+    }
+
+    #[test]
+    fn zero_radius_is_a_plain_rect_for_both_styles() {
+        let shaped = rounded_rect_path_shaped(0.0, 0.0, 40.0, 20.0, 0.0, Some(4.0)).unwrap();
+        assert_eq!(shaped.bounds().width(), 40.0);
+        assert_eq!(shaped.bounds().height(), 20.0);
+    }
+}
+
+#[cfg(test)]
+mod blend_mode_tests {
+    use super::*;
+
+    #[test]
+    fn recognized_keywords_map_to_the_matching_blend_mode() {
+        assert_eq!(
+            parse_blend_mode("multiply"),
+            Some(tiny_skia::BlendMode::Multiply)
+        );
+        assert_eq!(
+            parse_blend_mode("luminosity"),
+            Some(tiny_skia::BlendMode::Luminosity)
+        );
+        assert_eq!(
+            parse_blend_mode("hard-light"),
+            Some(tiny_skia::BlendMode::HardLight)
+        );
+    }
+
+    #[test]
+    fn normal_and_unknown_keywords_are_none() {
+        assert_eq!(parse_blend_mode("normal"), None);
+        assert_eq!(parse_blend_mode(""), None);
+        assert_eq!(parse_blend_mode("not-a-real-mode"), None);
+    }
+}
+
+#[cfg(test)]
+mod conic_gradient_tests {
+    use super::*;
+    use crate::scene::GradientStopDef;
+
+    fn stop(offset: f32, color: u32) -> GradientStopDef {
+        GradientStopDef { offset, color }
+    }
+
+    #[test]
+    fn sampling_before_the_first_stop_clamps_to_it() {
+        let stops = vec![stop(0.25, 0xFFFF0000), stop(0.75, 0xFF0000FF)];
+        assert_eq!(sample_gradient_stops(&stops, 0.0), 0xFFFF0000);
+        assert_eq!(sample_gradient_stops(&stops, 0.1), 0xFFFF0000);
+    }
+
+    #[test]
+    fn sampling_past_the_last_stop_clamps_to_it() {
+        let stops = vec![stop(0.25, 0xFFFF0000), stop(0.75, 0xFF0000FF)];
+        assert_eq!(sample_gradient_stops(&stops, 0.9), 0xFF0000FF);
+        assert_eq!(sample_gradient_stops(&stops, 1.0), 0xFF0000FF);
+    }
+
+    #[test]
+    fn sampling_the_midpoint_between_two_stops_averages_channels() {
+        let stops = vec![stop(0.0, 0xFF000000), stop(1.0, 0xFFFFFFFF)];
+        let mid = sample_gradient_stops(&stops, 0.5);
+        let r = (mid >> 16) & 0xFF;
+        // Exact rounding can land on 127 or 128 — assert the neighborhood,
+        // not one implementation's rounding, same convention the
+        // rgba-alpha color test in css_parse uses.
+        assert!(
+            (126..=129).contains(&r),
+            "expected a mid-gray, got {mid:#010x}"
+        );
+    }
+
+    #[test]
+    fn a_single_stop_is_a_solid_color_everywhere() {
+        let stops = vec![stop(0.5, 0xFF00FF00)];
+        assert_eq!(sample_gradient_stops(&stops, 0.0), 0xFF00FF00);
+        assert_eq!(sample_gradient_stops(&stops, 1.0), 0xFF00FF00);
+    }
+
+    #[test]
+    fn lerp_argb_interpolates_alpha_too() {
+        let c = lerp_argb(0x00000000, 0xFFFFFFFF, 0.5);
+        let a = (c >> 24) & 0xFF;
+        assert!(
+            (126..=129).contains(&a),
+            "expected mid alpha, got {c:#010x}"
+        );
+    }
 }

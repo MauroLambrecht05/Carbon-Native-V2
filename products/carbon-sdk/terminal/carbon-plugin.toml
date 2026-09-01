@@ -1,0 +1,21 @@
+# GENERATED — do not hand-edit. Source of truth is the `CFG`
+# config in src/main.zig; run `zig build gen-manifest` after
+# changing it. See manifest.zig's `toToml` doc comment for why
+# this file exists at all alongside that config.
+name = "terminal"
+version = "0.1.0"
+language = "zig"
+
+extension-points = ["lifecycle.register","lifecycle.after_reload","lifecycle.shutdown"]
+modules = ["carbon:terminal"]
+
+[exports."carbon:terminal"]
+names = ["spawn","write","resize","read","kill","close","wait"]
+
+[abi]
+major = 1
+minor = 6
+
+[capabilities]
+required = []
+optional = []

@@ -106,18 +106,13 @@ pub enum UserEvent {
         id: u32,
         message: String,
     },
-    // ── PTY events (from native/pty.rs reader threads) ──
-    /// New PTY output bytes have been buffered. JS drains them via
-    /// `__cm_pty_read(id)` (base64). The main loop's handler eval's
-    /// a JS dispatcher so push-mode apps don't have to poll.
-    PtyOutput {
-        id: u32,
-    },
-    /// PTY child exited (EOF on the master read). JS-side terminal
-    /// emulators flip their session state to "closed" here.
-    PtyExit {
-        id: u32,
-    },
+    // PtyOutput/PtyExit removed — PTY moved to the terminal plugin
+    // (carbon:terminal, products/carbon-sdk/terminal), which posts its own
+    // "pty-output"/"pty-exit" events through the generic
+    // PluginEvent{name, payload} below instead of a dedicated UserEvent
+    // variant. Nothing ever constructed these two after native/pty.rs was
+    // deleted; kept as their own variants would have meant a Rust-side
+    // event type only a Zig plugin could ever produce.
     // ── Window control (invoke channel forwards to these) ──
     /// Show, hide, minimize, maximize, restore, toggle-maximize, close.
     WindowOp(WindowOp),

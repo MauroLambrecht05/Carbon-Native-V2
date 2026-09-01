@@ -86,7 +86,9 @@ mod trace;
 use css::*;
 use dom::*;
 use host::*;
-use manifest::{read_net_section, read_process_enabled};
+#[cfg(feature = "network")]
+use manifest::read_net_section;
+use manifest::read_process_enabled;
 use pump::*;
 use trace::*;
 
@@ -329,6 +331,9 @@ fn main() -> Result<()> {
     // (or no carbon.toml found at all) gets an empty list: fetch/WebSocket are
     // present but have nowhere they're allowed to connect, not a silent
     // default-allow.
+    // Only meaningful when `network` is on — with it off there's no fetch/
+    // WebSocket to allowlist for at all (see mini.rs's matching guard).
+    #[cfg(feature = "network")]
     crate::native::net::set_allowed_origins(
         project_dir
             .as_ref()
@@ -744,18 +749,6 @@ fn main() -> Result<()> {
                     let msg = serde_json::to_string(&message).unwrap_or_else(|_| "\"\"".into());
                     let s = format!("globalThis.__cm_ws_dispatch_error&&__cm_ws_dispatch_error({id},{msg});");
                     let _ = js_ctx.with(|ctx| ctx.eval::<(), _>(s.as_bytes()));
-                }
-                UserEvent::PtyOutput { id } => {
-                    let s = format!("globalThis.__cm_pty_dispatch_output&&__cm_pty_dispatch_output({id});");
-                    let _ = js_ctx.with(|ctx| ctx.eval::<(), _>(s.as_bytes()));
-                    drain_and_flush(&js_rt, &js_ctx);
-                    window_for_loop.request_redraw();
-                }
-                UserEvent::PtyExit { id } => {
-                    let s = format!("globalThis.__cm_pty_dispatch_exit&&__cm_pty_dispatch_exit({id});");
-                    let _ = js_ctx.with(|ctx| ctx.eval::<(), _>(s.as_bytes()));
-                    drain_and_flush(&js_rt, &js_ctx);
-                    window_for_loop.request_redraw();
                 }
                 UserEvent::WindowOp(op) => {
                     use WindowOp::*;

@@ -140,6 +140,8 @@ export async function runCommand(rest: string[]): Promise<number> {
       image: cfg.runtime.image,
       audio: cfg.runtime.audio,
       updater: cfg.updater?.enabled,
+      network: cfg.runtime.network,
+      svg: cfg.runtime.svg,
     }, { quiet: !verbose });
     // Huge delta here means cargo just compiled the runtime from scratch —
     // ensureRuntime's status text says so right before that happens ("first

@@ -64,7 +64,7 @@ workspace = true
 # every non-optional [dependencies] entry is compiled for every `--bin` in
 # the package, so backend-exclusive deps MUST be optional).
 mini = [
-  "dep:tiny-skia", "dep:resvg", "dep:usvg", "dep:fontdue", "dep:taffy", "dep:softbuffer",
+  "dep:tiny-skia", "dep:fontdue", "dep:taffy", "dep:softbuffer",
   "dep:carbon-fast-math", "dep:carbon-text-renderer", "dep:carbon-layout", "dep:carbon-paint",
   "dep:carbon-snapshot", "dep:lz4_flex",
 ]
@@ -80,9 +80,14 @@ blitz = ["dep:blitz-dom", "dep:blitz-paint", "dep:blitz-traits", "dep:anyrender"
 # compiled-out (not deleted) — re-enable by restoring the dependency line
 # below and this feature's activation list, not by rewriting that code.
 gpu = []
-# Image loading. Off by default to extract 0.8 MB.
+# Non-PNG remote raster formats (JPEG/WebP/GIF). Off by default to extract
+# 0.8 MB. Forwards "network" — this is specifically for the http(s)://
+# fetch-then-decode path in presentation/host/image.rs::decode_non_png;
+# it never compiled without networking, so make that explicit rather than
+# accidental. NOT needed for local/data: URL images — see the `svg`
+# feature below for why those are a separate concern from this one.
 # Phase 2: migrates to carbon-image plugin with dynamic loading.
-image = ["mini", "dep:carbon-image"]
+image = ["mini", "dep:carbon-image", "network"]
 # Audio support. Off by default to extract 0.4 MB.
 # Phase 2: migrates to carbon-audio plugin with dynamic loading.
 audio = ["mini", "dep:carbon-audio"]
@@ -105,6 +110,24 @@ static-plugins = ["carbon-plugin-host/static-plugins"]
 # loads at a constant base, required for the snapshot's absolute code
 # pointers to stay valid. Off by default keeps ASLR on for normal builds.
 snapshot = ["mini"]
+# fetch()/WebSocket() — forwards to carbon-os's own feature of the same
+# name (~2.3 MiB: reqwest+tokio+tokio-tungstenite+rustls+ring+h2+crypto/
+# compression). `backendCargoFeatures` pushes this UNLESS carbon.toml
+# explicitly sets `[runtime] network = false` — opposite default from
+# image/audio/updater above, because every app built before this flag
+# existed already has networking and never declared a dependency on it.
+network = ["carbon-os/network"]
+# SVG rendering (usvg+resvg, ~534 KiB measured via cargo-bloat) for
+# presentation/host/image.rs's data:image/svg+xml decode path — "the form
+# every npm icon pack uses for inline icons" per that file's own comment
+# (react-icons/lucide/heroicons-style libraries). Fully synchronous, zero
+# networking involved — decoding a data: URL never touches the network.
+# ON by default for the same reason `network` is: every app built before
+# this flag existed already has icon-library support and never declared a
+# dependency on it. NOTE: does not gate the hand-authored inline-JSX
+# `<svg><path/></svg>` icon path (painting/infrastructure/svg.rs) — that
+# never used usvg/resvg and stays unconditional regardless of this flag.
+svg = ["dep:usvg", "dep:resvg"]
 
 # No default features. Cargo's `--features` stacks additively on top of
 # defaults rather than replacing them — a bare `cargo build --bin carbon-blitz
@@ -191,7 +214,14 @@ tao = { version = "0.30", default-features = false, features = ["rwh_06"] }
 rquickjs = { version = "0.9", default-features = false, features = ["loader", "classes", "macro"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-toml = { version = "0.8", default-features = false, features = ["parse"] }
+# basic-toml, not `toml` — the runtime only ever DESERIALIZES carbon.toml/
+# manifest.toml once at startup (confirmed: no toml::to_string, no
+# toml::Value use anywhere in this crate), never edits or re-serializes it.
+# `toml` v0.8+ is built on toml_edit even for plain from_str (~342 KiB
+# measured via cargo-bloat on this exact binary, entirely round-trip-
+# formatting machinery this crate never uses) — basic-toml is a minimal,
+# serde-only, read-only parser with the same `from_str::<T>(&str)` shape.
+basic-toml = "0.1"
 anyhow = { version = "1", default-features = false, features = ["std"] }
 # Plugin loader — carbon-core provides the [plugins] config schema, and
 # libloading does the actual cross-platform dlopen / GetProcAddress dance.
@@ -200,7 +230,12 @@ libloading = "0.8"
 
 # ── The layers that were included source in V1 ──────────────────────────────
 carbon-runtime-contract = { path = "../../solutions/contracts/runtime/rust" }
-carbon-os = { path = "../../solutions/infrastructure/os" }
+# default-features = false: carbon-os's own `network` default would
+# otherwise always win regardless of this crate's --features list (Cargo
+# unions a dependency's crate-level defaults into the build unless the
+# depending edge disables them) — see the `network` feature above, which is
+# what actually turns it back on for the common case.
+carbon-os = { path = "../../solutions/infrastructure/os", default-features = false }
 carbon-platform = { path = "../../solutions/infrastructure/platform" }
 carbon-plugin-host = { path = "../../solutions/infrastructure/plugin-host" }
 # arboard — system clipboard. Used by the text input primitive for

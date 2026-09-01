@@ -70,14 +70,8 @@ declare global {
   const __cm_os_theme: () => string;
   const __cm_os_version: () => string;
 
-  // ─── PTY ───────────────────────────────────────────────────────────────
-  const __cm_pty_spawn: (specJson: string) => number;
-  const __cm_pty_write: (id: number, data: string) => void;
-  const __cm_pty_read: (id: number) => string;
-  const __cm_pty_resize: (id: number, cols: number, rows: number) => void;
-  const __cm_pty_close: (id: number) => void;
-  const __cm_pty_kill: (id: number) => void;
-  const __cm_pty_wait: (id: number) => number;
+  // PTY moved to the terminal plugin (carbon:terminal) — no longer
+  // always-on `__cm_pty_*` globals, see products/carbon-sdk/terminal.
 
   // ─── Process ───────────────────────────────────────────────────────────
   const __cm_proc_pid_self: () => number;

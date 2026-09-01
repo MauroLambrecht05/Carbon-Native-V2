@@ -14,7 +14,9 @@
 // runtime binary because they're tiny (<300 KB total after LTO) and
 // every productivity app needs at least some of them.
 
-use anyhow::{anyhow, Result};
+#[cfg(feature = "network")]
+use anyhow::anyhow;
+use anyhow::Result;
 use rquickjs::Context as JsContext;
 use tao::event_loop::EventLoopProxy;
 
@@ -35,14 +37,22 @@ use carbon_runtime_contract::UserEvent;
 pub mod app;
 #[path = "adapters/system/autostart.rs"]
 pub mod autostart;
+#[path = "adapters/system/event_proxy.rs"]
+pub mod event_proxy;
 #[path = "adapters/filesystem/fs.rs"]
 pub mod fs;
-#[path = "adapters/filesystem/fs_search.rs"]
-pub mod fs_search;
 #[path = "adapters/bridge/invoke.rs"]
 pub mod invoke;
 #[path = "adapters/system/log.rs"]
 pub mod log;
+// `fetch`/`WebSocket` — gated behind the `network` Cargo feature, ON BY
+// DEFAULT (see this crate's Cargo.toml `[features] default`) so an
+// existing app that never declared anything about networking keeps working
+// exactly as before. An app can opt OUT via `[runtime] network = false` in
+// carbon.toml to drop ~2.3 MiB (reqwest+rustls+h2+tokio+ring+crypto/
+// compression, measured via cargo-bloat on this exact binary) if it
+// genuinely never calls fetch()/WebSocket().
+#[cfg(feature = "network")]
 #[path = "adapters/net/net.rs"]
 pub mod net;
 #[path = "adapters/system/os.rs"]
@@ -51,8 +61,6 @@ pub mod os;
 pub mod os_theme;
 #[path = "adapters/process/process.rs"]
 pub mod process;
-#[path = "adapters/process/pty.rs"]
-pub mod pty;
 #[path = "adapters/process/shell.rs"]
 pub mod shell;
 #[path = "adapters/process/shell_exec.rs"]
@@ -111,7 +119,6 @@ pub fn register_all(
     window_state::register(js_ctx)?;
     tlog("native.shell_autostart_winstate");
     store::register(js_ctx)?;
-    pty::register(js_ctx)?;
     tlog("native.store_pty");
     os::register(js_ctx)?;
     log::register(js_ctx)?;
@@ -123,13 +130,21 @@ pub fn register_all(
     app::register(js_ctx)?;
     tlog("native.os_log_invoke_window_app");
 
-    // Networking: cache the EventLoopProxy so tokio tasks can post
-    // back, register host imports, then eval the JS shim that exposes
-    // a Web-compatible `fetch` / `WebSocket` / `Response` / `Headers` /
-    // `AbortController` over those host imports.
-    net::set_proxy(proxy);
-    net::register(js_ctx)?;
+    // Networking — see register_network's own two cfg'd bodies below for
+    // what "on"/"off" actually mean here.
+    event_proxy::set_proxy(proxy);
+    register_network(js_ctx)?;
     tlog("native.net");
+    Ok(())
+}
+
+/// `fetch()`/`WebSocket()`: cache the EventLoopProxy so tokio tasks can post
+/// back, register host imports, then eval the JS shim that exposes a
+/// Web-compatible `fetch` / `WebSocket` / `Response` / `Headers` /
+/// `AbortController` over those host imports.
+#[cfg(feature = "network")]
+fn register_network(js_ctx: &JsContext) -> Result<()> {
+    net::register(js_ctx)?;
     static NET_SHIM: &str = include_str!("adapters/net/net_shim.js");
     js_ctx.with(|ctx| -> Result<()> {
         match ctx.eval::<(), _>(NET_SHIM.as_bytes()) {
@@ -158,5 +173,13 @@ pub fn register_all(
             }
         }
     })?;
+    Ok(())
+}
+
+/// `network = false`: no `fetch`/`WebSocket` globals at all — same shape as
+/// `image`/`audio` when their flag is off, an app that opted out gets a
+/// clean "not defined" instead of a half-working stub.
+#[cfg(not(feature = "network"))]
+fn register_network(_js_ctx: &JsContext) -> Result<()> {
     Ok(())
 }

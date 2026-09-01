@@ -279,23 +279,57 @@ export function backendBinaryPath(backend: BackendName, profile: string = "relea
  * checks here FIRST when given a `projectDir`, before falling back to the
  * shared profiles.
  */
-export function distBinaryPath(projectDir: string, backend: BackendName): string {
+/**
+ * Turn an app's `[app] name` into a filesystem-safe executable base name
+ * (no extension). `validateManifest` only checks `name` is present, not
+ * that it's filename-safe — a project could reasonably put a
+ * `display_name`-shaped string there — so this replaces anything invalid
+ * in a Windows filename (`< > : " / \ | ? *` and control characters)
+ * with `-`, collapses repeats, and trims. Falls back to `"app"` for a
+ * name that sanitizes down to nothing (e.g. all-emoji).
+ */
+export function sanitizeExeName(name: string): string {
+  const cleaned = name
+    .trim()
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return cleaned || "app";
+}
+
+/**
+ * Where a static-plugins release build's binary lives for one app,
+ * optionally under a custom name instead of the crate name
+ * (`carbon-mini`/`carbon-blitz`) — see `sanitizeExeName`. Passing the
+ * same `exeName` used to BUILD the binary is the caller's job; this
+ * function just computes the path, it doesn't know which one exists.
+ */
+export function distBinaryPath(projectDir: string, backend: BackendName, exeName?: string): string {
   const exe = process.platform === "win32" ? ".exe" : "";
-  return join(projectDir, "dist", `${BACKENDS[backend].crate}${exe}`);
+  const base = exeName ? sanitizeExeName(exeName) : BACKENDS[backend].crate;
+  return join(projectDir, "dist", `${base}${exe}`);
 }
 
 /**
  * The backend binary to actually spawn, or null if it has not been built.
  *
- * When `projectDir` is given, that app's own `dist/<crate>` (see
+ * When `projectDir` is given, that app's own `dist/<name>` (see
  * `distBinaryPath`) is checked FIRST — the only place a static-plugins
- * release binary lives. Falls back to the shared-workspace `BINARY_PROFILES`
- * search either way, which is the ONLY place a dynamic-plugin build's binary
- * ever lives, so every existing caller that never passes `projectDir` sees
- * no behavior change at all.
+ * release binary lives. `exeName`, if given, is tried before the
+ * crate-named path — so a release build made with a custom name is found
+ * without breaking an existing per-app binary built before `exeName`
+ * existed (still named `carbon-mini`/`carbon-blitz`, and still found via
+ * the crate-named check right after). Falls back to the shared-workspace
+ * `BINARY_PROFILES` search either way, which is the ONLY place a
+ * dynamic-plugin build's binary ever lives, so every existing caller
+ * that never passes `projectDir`/`exeName` sees no behavior change at all.
  */
-export function resolveBackendBinary(backend: BackendName, projectDir?: string): string | null {
+export function resolveBackendBinary(backend: BackendName, projectDir?: string, exeName?: string): string | null {
   if (projectDir) {
+    if (exeName) {
+      const named = distBinaryPath(projectDir, backend, exeName);
+      if (existsSync(named)) return named;
+    }
     const distPath = distBinaryPath(projectDir, backend);
     if (existsSync(distPath)) return distPath;
   }
@@ -306,8 +340,8 @@ export function resolveBackendBinary(backend: BackendName, projectDir?: string):
   return null;
 }
 
-export function backendBinaryExists(backend: BackendName, projectDir?: string): boolean {
-  return resolveBackendBinary(backend, projectDir) !== null;
+export function backendBinaryExists(backend: BackendName, projectDir?: string, exeName?: string): boolean {
+  return resolveBackendBinary(backend, projectDir, exeName) !== null;
 }
 
 // ── Compatibility shims ──────────────────────────────────────────────────────

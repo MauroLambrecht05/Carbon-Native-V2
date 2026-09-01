@@ -13,6 +13,7 @@
 // screen.
 
 use carbon_layout::css_parse::*;
+use carbon_layout::scene::{FilterOp, GradientShape};
 
 // 0xAARRGGBB throughout. Spelling the alpha out in each expectation is
 // deliberate: the byte order is the single easiest thing to get wrong here,
@@ -176,6 +177,47 @@ fn a_gradient_that_is_not_one_is_none() {
     assert!(parse_linear_gradient("linear-gradient(").is_none());
 }
 
+#[test]
+fn conic_gradient_defaults_to_zero_degrees_and_centered() {
+    let g = parse_conic_gradient("conic-gradient(#ff0000, #0000ff)").expect("should parse");
+    assert_eq!(g.stops.len(), 2);
+    match g.shape {
+        GradientShape::Conic { angle_deg, cx, cy } => {
+            assert_eq!(angle_deg, 0.0);
+            assert_eq!(cx, 0.5);
+            assert_eq!(cy, 0.5);
+        }
+        other => panic!("expected Conic, got {other:?}"),
+    }
+}
+
+#[test]
+fn conic_gradient_reads_from_angle_and_at_position() {
+    let g = parse_conic_gradient("conic-gradient(from 90deg at 25% 75%, red, blue)")
+        .expect("should parse");
+    match g.shape {
+        GradientShape::Conic { angle_deg, cx, cy } => {
+            assert_eq!(angle_deg, 90.0);
+            assert_eq!(cx, 0.25);
+            assert_eq!(cy, 0.75);
+        }
+        other => panic!("expected Conic, got {other:?}"),
+    }
+}
+
+#[test]
+fn conic_gradient_from_only_no_at_clause() {
+    let g = parse_conic_gradient("conic-gradient(from 45deg, red, blue)").expect("should parse");
+    match g.shape {
+        GradientShape::Conic { angle_deg, cx, cy } => {
+            assert_eq!(angle_deg, 45.0);
+            assert_eq!(cx, 0.5);
+            assert_eq!(cy, 0.5);
+        }
+        other => panic!("expected Conic, got {other:?}"),
+    }
+}
+
 // ── Box shadow ──────────────────────────────────────────────────────────────
 
 #[test]
@@ -248,4 +290,122 @@ fn clip_paths_parse() {
 fn an_unknown_clip_path_is_none() {
     assert!(parse_clip_path("squircle(4)").is_none());
     assert!(parse_clip_path("").is_none());
+}
+
+// ── Text shadow ───────────────────────────────────────────────────────────
+
+#[test]
+fn text_shadow_reads_offsets_blur_and_colour() {
+    let shadows = parse_text_shadow("1px 2px 3px rgba(0,0,0,0.5)");
+    assert_eq!(shadows.len(), 1);
+    assert_eq!(shadows[0].offset_x, 1.0);
+    assert_eq!(shadows[0].offset_y, 2.0);
+    assert_eq!(shadows[0].blur, 3.0);
+}
+
+#[test]
+fn text_shadow_multiple_comma_separated() {
+    let shadows = parse_text_shadow("0 1px 0 #000, 0 0 4px #f00");
+    assert_eq!(shadows.len(), 2);
+}
+
+#[test]
+fn text_shadow_without_a_colour_is_dropped() {
+    // Fewer than 3 tokens (no colour found among them) can't build a
+    // shadow — matches box-shadow's "garbage yields emptiness" contract.
+    assert!(parse_text_shadow("1px 2px").is_empty());
+}
+
+// ── filter ───────────────────────────────────────────────────────────────
+
+#[test]
+fn filter_blur_reads_the_length() {
+    let f = parse_filter("blur(4px)").expect("should parse");
+    match &f.0[0] {
+        FilterOp::Blur(px) => assert_eq!(*px, 4.0),
+        other => panic!("expected Blur, got {other:?}"),
+    }
+}
+
+#[test]
+fn filter_drop_shadow_reads_offsets_blur_and_colour() {
+    let f = parse_filter("drop-shadow(2px 4px 6px rgba(0,0,0,0.4))").expect("should parse");
+    match &f.0[0] {
+        FilterOp::DropShadow {
+            offset_x,
+            offset_y,
+            blur,
+            ..
+        } => {
+            assert_eq!(*offset_x, 2.0);
+            assert_eq!(*offset_y, 4.0);
+            assert_eq!(*blur, 6.0);
+        }
+        other => panic!("expected DropShadow, got {other:?}"),
+    }
+}
+
+#[test]
+fn filter_chains_multiple_functions() {
+    let f = parse_filter("blur(2px) drop-shadow(0 1px 2px #000)").expect("should parse");
+    assert_eq!(f.0.len(), 2);
+}
+
+#[test]
+fn filter_none_and_empty_and_unknown_are_none() {
+    assert!(parse_filter("none").is_none());
+    assert!(parse_filter("").is_none());
+    assert!(parse_filter("brightness(1.2)").is_none());
+}
+
+// ── aspect-ratio ─────────────────────────────────────────────────────────
+
+#[test]
+fn aspect_ratio_reads_a_fraction() {
+    let r = parse_aspect_ratio("16/9").expect("should parse");
+    assert!((r - 16.0 / 9.0).abs() < 1e-6);
+}
+
+#[test]
+fn aspect_ratio_reads_a_fraction_with_spaces() {
+    let r = parse_aspect_ratio("16 / 9").expect("should parse");
+    assert!((r - 16.0 / 9.0).abs() < 1e-6);
+}
+
+#[test]
+fn aspect_ratio_reads_a_bare_number() {
+    assert_eq!(parse_aspect_ratio("1.5"), Some(1.5));
+}
+
+#[test]
+fn aspect_ratio_auto_and_garbage_are_none() {
+    assert!(parse_aspect_ratio("auto").is_none());
+    assert!(parse_aspect_ratio("").is_none());
+    assert!(parse_aspect_ratio("banana").is_none());
+    // A zero denominator has no ratio to give back.
+    assert!(parse_aspect_ratio("16/0").is_none());
+}
+
+// ── corner-shape ─────────────────────────────────────────────────────────
+
+#[test]
+fn corner_shape_squircle_is_a_fixed_exponent() {
+    assert_eq!(parse_corner_shape("squircle"), Some(4.0));
+    assert_eq!(parse_corner_shape("Squircle"), Some(4.0)); // case-insensitive
+}
+
+#[test]
+fn corner_shape_superellipse_reads_the_exponent() {
+    assert_eq!(parse_corner_shape("superellipse(6)"), Some(6.0));
+    assert_eq!(parse_corner_shape("superellipse(2.5)"), Some(2.5));
+}
+
+#[test]
+fn corner_shape_round_and_garbage_are_none() {
+    assert!(parse_corner_shape("round").is_none());
+    assert!(parse_corner_shape("").is_none());
+    assert!(parse_corner_shape("bevel").is_none());
+    // A non-positive exponent has no valid curve to give back.
+    assert!(parse_corner_shape("superellipse(0)").is_none());
+    assert!(parse_corner_shape("superellipse(-2)").is_none());
 }

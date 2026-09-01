@@ -24,12 +24,15 @@ use std::collections::HashMap;
 use std::net::{IpAddr, ToSocketAddrs};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
-use tao::event_loop::EventLoopProxy;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 use tokio::task::AbortHandle;
 use tokio_tungstenite::tungstenite::Message as WsMsg;
 
+// `pub use`, not a plain `use` — products/carbon/presentation/host/image.rs
+// (the HTTP(S) image loader, itself inherently network-dependent via
+// http_client/rt below) imports `post` through this module's own path.
+pub use crate::event_proxy::post;
 use carbon_runtime_contract::UserEvent;
 
 // ─── Globals ──────────────────────────────────────────────────────────────
@@ -54,21 +57,6 @@ pub fn http_client() -> &'static reqwest::Client {
             .build()
             .expect("reqwest client build")
     })
-}
-
-fn proxy_slot() -> &'static Mutex<Option<EventLoopProxy<UserEvent>>> {
-    static P: OnceLock<Mutex<Option<EventLoopProxy<UserEvent>>>> = OnceLock::new();
-    P.get_or_init(|| Mutex::new(None))
-}
-
-pub fn post(ev: UserEvent) {
-    if let Some(p) = proxy_slot()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .as_ref()
-    {
-        let _ = p.send_event(ev);
-    }
 }
 
 fn next_id() -> u32 {
@@ -103,10 +91,10 @@ fn ws_registry() -> &'static Mutex<HashMap<u32, WsHandle>> {
 }
 
 // ─── Init ─────────────────────────────────────────────────────────────────
-
-pub fn set_proxy(proxy: EventLoopProxy<UserEvent>) {
-    *proxy_slot().lock().unwrap_or_else(|e| e.into_inner()) = Some(proxy);
-}
+// `post`/`set_proxy` moved to crate::event_proxy — see that module's own
+// header for why (invoke.rs's window-control commands used them too, so
+// they can't live inside the network-only feature gate this module is
+// behind).
 
 // ─── Origin allowlist ───────────────────────────────────────────────────────
 //

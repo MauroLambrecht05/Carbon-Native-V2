@@ -19,7 +19,7 @@ import {
 
 const config: CarbonConfig = {
   app: { name: "demo", version: "1.2.3", display_name: "Demo App" },
-  runtime: { backend: "mini", bytecode: false, image: false, audio: false },
+  runtime: { backend: "mini", bytecode: false, image: false, audio: false, network: true, svg: true },
   raw: {},
 };
 

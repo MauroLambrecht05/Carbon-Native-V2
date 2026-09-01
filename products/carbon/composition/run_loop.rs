@@ -6,6 +6,7 @@
 // reordered, split, or merged.
 
 use super::*;
+use std::collections::HashMap;
 
 /// Everything the old `event_loop.run(move |event, ...| { ... })` closure
 /// captured by `move`. Built once in `main()` right before the loop starts,
@@ -31,6 +32,18 @@ pub(crate) struct State {
     pub(crate) reload_path: Option<PathBuf>,
     pub(crate) reload_scene: Arc<Mutex<Scene>>,
     pub(crate) t0: Instant,
+    /// Momentum/inertia scroll: per-scrollport y velocity (px/frame),
+    /// keyed by node id. Set (overwritten, not accumulated — a new
+    /// wheel event supersedes whatever momentum was left) on each
+    /// native-scrollport wheel event; decayed by `MOMENTUM_FRICTION`
+    /// once per `RedrawRequested` frame until it drops below
+    /// `MOMENTUM_MIN_VELOCITY`, at which point the entry is dropped.
+    /// There's no gesture/momentum model anywhere else in this engine
+    /// (see `Scene::scroll_snap_target`'s doc comment for the same
+    /// caveat on scroll-snap) — Windows' wheel/touchpad events carry no
+    /// OS-simulated momentum tail the way macOS's do, so without this a
+    /// flick-scroll just stops dead the instant the input stops.
+    pub(crate) scroll_velocity: HashMap<u32, f32>,
 }
 
 impl State {
@@ -89,6 +102,24 @@ impl State {
                 ..
             } => {
                 crate::native::window::set_is_focused(focused);
+                // `window.focus`/`window.blur` dispatch — this used to live in
+                // a SECOND, later `WindowEvent::Focused` arm (composition/
+                // run_loop.rs) that could never run: match arms are tried in
+                // order, and this earlier arm already matches every
+                // `Focused(_)` event, so the later one was unreachable dead
+                // code and this dispatch has never actually fired. Merged
+                // here rather than left dead — found while sweeping unused-
+                // code warnings, not something anyone asked to fix, but
+                // leaving a JS-visible event permanently silent seemed worse
+                // than restoring it.
+                let script = format!(
+                    "globalThis.__cm_dispatch_window_focus && globalThis.__cm_dispatch_window_focus({});",
+                    focused
+                );
+                let _ = self.js_ctx.with(|ctx| -> Result<()> {
+                    let _ = ctx.eval::<(), _>(script.as_bytes());
+                    Ok(())
+                });
             }
             Event::WindowEvent {
                 event: WindowEvent::CursorMoved { position, .. },
@@ -511,19 +542,6 @@ impl State {
                 // dispatch above.
                 self.plugin_registry
                     .dispatch_theme_changed(matches!(theme, Theme::Dark));
-            }
-            Event::WindowEvent {
-                event: WindowEvent::Focused(focused),
-                ..
-            } => {
-                let script = format!(
-                    "globalThis.__cm_dispatch_window_focus && globalThis.__cm_dispatch_window_focus({});",
-                    focused
-                );
-                let _ = self.js_ctx.with(|ctx| -> Result<()> {
-                    let _ = ctx.eval::<(), _>(script.as_bytes());
-                    Ok(())
-                });
             }
             Event::WindowEvent {
                 event: WindowEvent::HoveredFile(path),
@@ -987,6 +1005,13 @@ impl State {
                                     node_id, cur, new_y
                                 );
                             }
+                            // Momentum: this event's own delta becomes the
+                            // starting velocity for the coast-to-stop decay
+                            // in RedrawRequested — overwrites (not adds to)
+                            // any leftover momentum from a still-decaying
+                            // earlier flick, since actively-arriving wheel
+                            // input always supersedes it.
+                            self.scroll_velocity.insert(node_id, dy);
                             self.window.request_redraw();
                         }
                     }
@@ -1075,24 +1100,6 @@ impl State {
                     id, msg,
                 );
                 let _ = self.js_ctx.with(|ctx| ctx.eval::<(), _>(script.as_bytes()));
-            }
-            Event::UserEvent(UserEvent::PtyOutput { id }) => {
-                let script = format!(
-                    "globalThis.__cm_pty_dispatch_output && globalThis.__cm_pty_dispatch_output({});",
-                    id,
-                );
-                let _ = self.js_ctx.with(|ctx| ctx.eval::<(), _>(script.as_bytes()));
-                drain_and_flush_react(&self.js_rt, &self.js_ctx);
-                self.window.request_redraw();
-            }
-            Event::UserEvent(UserEvent::PtyExit { id }) => {
-                let script = format!(
-                    "globalThis.__cm_pty_dispatch_exit && globalThis.__cm_pty_dispatch_exit({});",
-                    id,
-                );
-                let _ = self.js_ctx.with(|ctx| ctx.eval::<(), _>(script.as_bytes()));
-                drain_and_flush_react(&self.js_rt, &self.js_ctx);
-                self.window.request_redraw();
             }
             Event::UserEvent(UserEvent::WindowOp(op)) => {
                 use crate::WindowOp::*;
@@ -1304,6 +1311,33 @@ impl State {
                 } else {
                     false
                 };
+
+                // ─── Momentum / inertia scroll ──────────────────────────────────
+                // Decay any active flick-scroll velocity by one frame's worth
+                // of friction, applying it through the same `set_scroll_y`
+                // path a wheel event uses (so it gets clamping AND
+                // scroll-snap for free — see `scroll_velocity`'s doc comment
+                // on `State` for why this exists at all). Self-perpetuating
+                // via `request_redraw`, same pattern as the rAF drain above,
+                // for as long as any velocity remains above the stop
+                // threshold; harmless to run against an entry that's already
+                // clamped at a scroll boundary (it just decays to removal a
+                // few frames sooner).
+                const MOMENTUM_FRICTION: f32 = 0.90;
+                const MOMENTUM_MIN_VELOCITY: f32 = 0.5;
+                if !self.scroll_velocity.is_empty() {
+                    let mut s = self.scene.lock().unwrap_or_else(|e| e.into_inner());
+                    self.scroll_velocity.retain(|&node_id, v| {
+                        let cur = s.scroll_y(node_id);
+                        s.set_scroll_y(node_id, cur - *v);
+                        *v *= MOMENTUM_FRICTION;
+                        v.abs() >= MOMENTUM_MIN_VELOCITY
+                    });
+                    drop(s);
+                    if !self.scroll_velocity.is_empty() {
+                        self.window.request_redraw();
+                    }
+                }
 
                 // ─── Damage Tracking ───────────────────────────────────────────
                 // Two damage flags: `dirty` forces a layout pass + paint;

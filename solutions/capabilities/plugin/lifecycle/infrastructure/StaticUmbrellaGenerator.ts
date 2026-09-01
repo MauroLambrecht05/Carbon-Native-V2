@@ -265,7 +265,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .@"plugin-linkage" = .static,
     });
-
+${plugins.length === 0 ? "    _ = sdk; // no enabled plugins — nothing below imports it, and Zig treats an unused local as a hard error\n" : ""}
     const mod = b.createModule(.{
         .root_source_file = b.path("umbrella.zig"),
         .target = target,

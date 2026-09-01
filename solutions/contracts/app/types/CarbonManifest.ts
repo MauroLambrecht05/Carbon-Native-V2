@@ -37,6 +37,27 @@ export interface CarbonConfig {
     image: boolean;
     /** Link the Web Audio implementation. */
     audio: boolean;
+    /**
+     * Link `fetch`/`WebSocket` (reqwest+rustls+tokio — ~2.3 MiB measured via
+     * cargo-bloat). ON by default, unlike image/audio: every existing app
+     * built before this flag existed already gets networking, so defaulting
+     * it off would silently break `fetch()` calls nobody declared a
+     * dependency on. Set `network = false` to opt OUT and shrink the binary
+     * for an app that genuinely never calls fetch()/WebSocket().
+     */
+    network: boolean;
+    /**
+     * Link usvg/resvg (~534 KiB) for `data:image/svg+xml` decode — the
+     * form every npm icon library (react-icons/lucide/heroicons-style)
+     * ships inline icons as. ON by default for the same reason as
+     * `network`: every app built before this flag existed already has
+     * icon-library support and never declared a dependency on it.
+     * Independent of `network` — decoding a data: URL never touches the
+     * network, so this can be true while network is false. Does NOT gate
+     * hand-authored inline `<svg><path/></svg>` JSX icons, which never
+     * used usvg/resvg and always work regardless of this flag.
+     */
+    svg: boolean;
   };
   updater?: {
     enabled: boolean;
@@ -105,6 +126,8 @@ export function validateManifest(parsed: Record<string, any>, path?: string): Ca
       bytecode: Boolean(parsed.runtime?.bytecode ?? false),
       image: Boolean(parsed.runtime?.image ?? false),
       audio: Boolean(parsed.runtime?.audio ?? false),
+      network: Boolean(parsed.runtime?.network ?? true),
+      svg: Boolean(parsed.runtime?.svg ?? true),
     },
     updater,
     raw: parsed,

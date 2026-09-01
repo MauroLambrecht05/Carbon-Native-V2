@@ -34,6 +34,19 @@ path = "lib.rs"
 workspace = true
 
 [features]
+# All 7 native backends on by default — preserves today's behavior
+# (every app's binary carries every capability, unconditionally) with zero
+# risk to `carbon dev`/`carbon run`/existing release builds. Slimming a
+# real app's binary needs an explicit `--no-default-features --features
+# <subset>` build of this crate driven by that app's actually-enabled
+# plugin list — see the per-feature doc comment below for why that wiring
+# isn't done automatically yet (it would need `backendCargoFeatures` to
+# know the enabled-plugins list for EVERY `ensureRuntime` caller —
+# `dev`/`run`/`build`, not just the release path — since this is a
+# compile-time Cargo feature regardless of how a plugin's own code gets
+# loaded later).
+default = ["clipboard", "dialog", "notification", "keychain", "global-shortcuts", "tray", "deep-link"]
+
 # Off by default: today's dlopen/dlsym/Ed25519 loader (adapters/
 # plugin_loader.rs), unconditionally correct for `carbon dev` and a
 # standalone `carbon plugin build`. On: swaps `plugin_loader` for
@@ -43,6 +56,27 @@ workspace = true
 # compiled in at all. See lib.rs's `pub mod plugin_loader` cfg and
 # plugin_loader_static.rs's header comment.
 static-plugins = []
+
+# ── Per-plugin native backends ──────────────────────────────────────────────
+# Each of these gates BOTH the native/<name>.rs module (lib.rs's `pub mod`
+# lines) AND the matching `Some(host_*)` ↔ `None` struct-literal fields on
+# HostCarbonApp (host_exports.rs) behind one Cargo feature, keyed to the
+# SAME name as the carbon-sdk plugin it backs. Until this, every one of
+# these — and their real dependency (arboard/rfd/notify-rust/keyring/
+# global-hotkey/tray-icon/winreg) — compiled into EVERY app's binary
+# regardless of whether that app enabled the plugin at all, the same
+# unconditional-cost pattern the terminal/file-search plugins were pulled
+# out of `carbon-os` to avoid. `backendCargoFeatures` (contracts/app/types/
+# Backend.ts) is what actually turns "this app's carbon/manifest.toml
+# enables clipboard" into `--features clipboard` at build time — see its
+# own comment for the release-vs-dev distinction.
+clipboard = ["dep:arboard"]
+dialog = ["dep:rfd"]
+notification = ["dep:notify-rust"]
+keychain = ["dep:keyring"]
+"global-shortcuts" = ["dep:global-hotkey"]
+tray = ["dep:tray-icon", "dep:image"]
+"deep-link" = ["dep:winreg"]
 
 [dependencies]
 carbon-runtime-contract = { path = "../../contracts/runtime/rust" }
@@ -74,22 +108,22 @@ tao = { version = "0.30", default-features = false, features = ["rwh_06"] }
 # ABI trampolines (ABI 1.3) — moved here from carbon-os along with
 # native/{clipboard,dialog,notification,keychain}.rs. Same versions/features
 # carbon-os pinned them at.
-rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"] }
-keyring = { version = "3", default-features = false, features = ["windows-native", "apple-native", "linux-native"] }
-notify-rust = { version = "4", default-features = false, features = ["dbus"] }
-arboard = { version = "3", default-features = false }
+rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"], optional = true }
+keyring = { version = "3", default-features = false, features = ["windows-native", "apple-native", "linux-native"], optional = true }
+notify-rust = { version = "4", default-features = false, features = ["dbus"], optional = true }
+arboard = { version = "3", default-features = false, optional = true }
 # Global keyboard shortcuts (Phase 2) — cross-platform via tauri-apps'
 # global-hotkey crate rather than hand-rolled per-platform Win32/Cocoa/X11
 # code, mirroring the carbon-hotkey example plugin's push_event delivery
 # pattern but with a runtime-parsed accelerator instead of one compiled in.
-global-hotkey = "0.8"
+global-hotkey = { version = "0.8", optional = true }
 # System tray (Phase 3) — tauri-apps' tray-icon crate, same org/ecosystem
 # as global-hotkey above. Not depending on muda directly: tray-icon
 # re-exports its own pinned muda (tray_icon::menu) — adding a separate top-
 # level muda dependency risks resolving a DIFFERENT version with
 # incompatible types for TrayIconBuilder::menu().
-tray-icon = "0.24"
-image = { version = "0.25", default-features = false, features = ["png"] }
+tray-icon = { version = "0.24", optional = true }
+image = { version = "0.25", default-features = false, features = ["png"], optional = true }
 # Deep-linking (Phase 4) — self-registers a custom URL scheme at runtime
 # (Windows: user-scope registry; Linux: ~/.local/share/applications
 # .desktop + xdg-mime) and forwards a second launch's URL to the first
@@ -97,7 +131,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 # see native/deeplink.rs for why this isn't a named-pipe/Unix-socket
 # crate instead).
 [target.'cfg(windows)'.dependencies]
-winreg = "0.56"
+winreg = { version = "0.56", optional = true }
 
 # An integration test under tests/ links the crate from outside, so it sees only
 # the public API plus what is declared here — the [dependencies] above are not

@@ -4,8 +4,6 @@
 // the same signature. That keeps main() free of feature gates — it calls
 // `maybe_register_image` unconditionally and the linker decides.
 
-use super::*;
-
 // carbon-image: opt-in image loading (DISABLED in Phase 1A to save 0.8 MB).
 // When enabled, activated when the env var CARBON_IMAGE_PATHS is set
 // (comma-separated glob allowlist) or CARBON_IMAGE=1 (dev mode).

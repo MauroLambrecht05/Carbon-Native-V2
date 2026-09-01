@@ -422,6 +422,75 @@ fn set_scroll_y_clamps_to_content_minus_viewport() {
 }
 
 #[test]
+fn mandatory_scroll_snap_jumps_to_the_nearest_start_aligned_child() {
+    let mut scene = Scene::new();
+    scene.create_node(1, "view", PaintProps::default());
+    scene.create_node(2, "view", PaintProps::default());
+    scene.create_node(3, "view", PaintProps::default());
+    scene.insert_node(1, 2, None);
+    scene.insert_node(1, 3, None);
+    scene.nodes.get_mut(&1).unwrap().props.overflow_y = true;
+    scene.nodes.get_mut(&1).unwrap().props.scroll_snap_type = Some("mandatory".to_string());
+    scene.nodes.get_mut(&1).unwrap().computed_layout = Some(layout(0.0, 0.0, 100.0, 100.0));
+    let n2 = scene.nodes.get_mut(&2).unwrap();
+    n2.computed_layout = Some(layout(0.0, 0.0, 100.0, 100.0));
+    n2.props.scroll_snap_align = Some("start".to_string());
+    let n3 = scene.nodes.get_mut(&3).unwrap();
+    n3.computed_layout = Some(layout(0.0, 100.0, 100.0, 100.0));
+    n3.props.scroll_snap_align = Some("start".to_string());
+
+    // Closer to child 2's snap point (y=0) than child 3's (y=100).
+    assert_eq!(scene.set_scroll_y(1, 40.0), 0.0);
+    // Closer to child 3's snap point.
+    assert_eq!(scene.set_scroll_y(1, 70.0), 100.0);
+}
+
+#[test]
+fn mandatory_scroll_snap_center_align_centers_the_child_in_the_viewport() {
+    let mut scene = Scene::new();
+    scene.create_node(1, "view", PaintProps::default());
+    scene.create_node(2, "view", PaintProps::default());
+    scene.insert_node(1, 2, None);
+    scene.nodes.get_mut(&1).unwrap().props.overflow_y = true;
+    scene.nodes.get_mut(&1).unwrap().props.scroll_snap_type = Some("mandatory".to_string());
+    // 100px-tall viewport; content taller than it so there's room to scroll.
+    scene.nodes.get_mut(&1).unwrap().computed_layout = Some(layout(0.0, 0.0, 100.0, 100.0));
+    let n2 = scene.nodes.get_mut(&2).unwrap();
+    // A 40px child at content-y 100..140. Centering it in a 100px
+    // viewport wants scroll_y = 100 + 20 - 50 = 70.
+    n2.computed_layout = Some(layout(0.0, 100.0, 100.0, 40.0));
+    n2.props.scroll_snap_align = Some("center".to_string());
+    // A trailing spacer so content_height (and thus max_offset) covers
+    // scroll_y=70 without clamping it away.
+    scene.create_node(3, "view", PaintProps::default());
+    scene.insert_node(1, 3, None);
+    scene.nodes.get_mut(&3).unwrap().computed_layout = Some(layout(0.0, 140.0, 100.0, 100.0));
+
+    assert_eq!(scene.set_scroll_y(1, 60.0), 70.0);
+}
+
+#[test]
+fn proximity_scroll_snap_only_engages_within_the_threshold() {
+    let mut scene = Scene::new();
+    scene.create_node(1, "view", PaintProps::default());
+    scene.create_node(2, "view", PaintProps::default());
+    scene.insert_node(1, 2, None);
+    scene.nodes.get_mut(&1).unwrap().props.overflow_y = true;
+    scene.nodes.get_mut(&1).unwrap().props.scroll_snap_type = Some("proximity".to_string());
+    scene.nodes.get_mut(&1).unwrap().computed_layout = Some(layout(0.0, 0.0, 100.0, 100.0));
+    let n2 = scene.nodes.get_mut(&2).unwrap();
+    // Tall enough that max_offset comfortably covers both raw values below.
+    n2.computed_layout = Some(layout(0.0, 0.0, 100.0, 500.0));
+    n2.props.scroll_snap_align = Some("start".to_string());
+
+    // Within the proximity threshold of the only snap point (y=0) —
+    // snaps.
+    assert_eq!(scene.set_scroll_y(1, 20.0), 0.0);
+    // Far from it — stays exactly where the raw scroll landed.
+    assert_eq!(scene.set_scroll_y(1, 200.0), 200.0);
+}
+
+#[test]
 fn set_scroll_y_is_a_no_op_without_overflow_y() {
     let mut scene = Scene::new();
     scene.create_node(1, "view", PaintProps::default());
@@ -503,6 +572,51 @@ fn hit_test_shifts_children_by_the_scrollport_offset() {
     // Child sits at content-y 400; scrolled up by 380 it's visible at y=20.
     assert_eq!(scene.hit_test(10.0, 20.0), Some(2));
     assert_eq!(scene.hit_test(10.0, 90.0), None);
+}
+
+#[test]
+fn sticky_position_pins_at_its_top_inset_once_scrolled_past_it() {
+    let mut scene = Scene::new();
+    scene.create_node(1, "view", PaintProps::default());
+    scene.create_node(2, "button", PaintProps::default());
+    scene.insert_node(1, 2, None);
+    scene.set_root(1);
+    scene.nodes.get_mut(&1).unwrap().props.overflow_y = true;
+    scene.nodes.get_mut(&1).unwrap().computed_layout = Some(layout(0.0, 0.0, 100.0, 300.0));
+    let n2 = scene.nodes.get_mut(&2).unwrap();
+    n2.computed_layout = Some(layout(0.0, 200.0, 100.0, 40.0)); // sits at content-y 200
+    n2.props.position = Some("sticky".to_string());
+    n2.props.top = Some(Len::Length(0.0));
+
+    // Unscrolled: its natural position (y=200) is already below the
+    // sticky threshold (y=0), so it just sits where it naturally is —
+    // sticky only kicks in once scrolling would push it past the line.
+    assert_eq!(scene.hit_test(10.0, 210.0), Some(2));
+    assert_eq!(scene.hit_test(10.0, 10.0), None);
+
+    // Scroll far enough that the natural position (200 - 250 = -50)
+    // would go above the threshold — it pins at the scrollport's own
+    // top edge (+ the 0px inset) instead of scrolling off with the rest.
+    scene.scroll_offsets.insert(1, 250.0);
+    assert_eq!(scene.hit_test(10.0, 10.0), Some(2));
+    assert_eq!(scene.hit_test(10.0, 210.0), None);
+}
+
+#[test]
+fn sticky_without_a_top_inset_behaves_like_an_ordinary_scrolled_child() {
+    let mut scene = Scene::new();
+    scene.create_node(1, "view", PaintProps::default());
+    scene.create_node(2, "button", PaintProps::default());
+    scene.insert_node(1, 2, None);
+    scene.set_root(1);
+    scene.nodes.get_mut(&1).unwrap().props.overflow_y = true;
+    scene.nodes.get_mut(&1).unwrap().computed_layout = Some(layout(0.0, 0.0, 100.0, 300.0));
+    let n2 = scene.nodes.get_mut(&2).unwrap();
+    n2.computed_layout = Some(layout(0.0, 200.0, 100.0, 40.0));
+    n2.props.position = Some("sticky".to_string()); // no `top` — nothing to pin to
+    scene.scroll_offsets.insert(1, 250.0);
+
+    assert_eq!(scene.hit_test(10.0, 10.0), None);
 }
 
 #[test]
@@ -919,6 +1033,44 @@ fn set_prop_margin_shorthand_sets_all_sides_marginx_touches_only_two() {
 }
 
 #[test]
+fn logical_margin_and_padding_alias_to_ltr_physical_sides() {
+    let mut scene = Scene::new();
+    scene.create_node(1, "view", PaintProps::default());
+    scene.set_prop(1, "marginInlineStart", "5");
+    scene.set_prop(1, "marginInlineEnd", "6");
+    scene.set_prop(1, "marginBlockStart", "7");
+    scene.set_prop(1, "marginBlockEnd", "8");
+    let props = &scene.nodes.get(&1).unwrap().props;
+    assert_eq!(len_px(props.margin_left), Some(5.0));
+    assert_eq!(len_px(props.margin_right), Some(6.0));
+    assert_eq!(len_px(props.margin_top), Some(7.0));
+    assert_eq!(len_px(props.margin_bottom), Some(8.0));
+
+    scene.set_prop(1, "paddingInline", "3");
+    scene.set_prop(1, "paddingBlock", "4");
+    let props = &scene.nodes.get(&1).unwrap().props;
+    assert_eq!(props.padding_left, Some(3.0));
+    assert_eq!(props.padding_right, Some(3.0));
+    assert_eq!(props.padding_top, Some(4.0));
+    assert_eq!(props.padding_bottom, Some(4.0));
+}
+
+#[test]
+fn logical_inset_properties_alias_to_ltr_physical_sides() {
+    let mut scene = Scene::new();
+    scene.create_node(1, "view", PaintProps::default());
+    scene.set_prop(1, "insetInlineStart", "1");
+    scene.set_prop(1, "insetInlineEnd", "2");
+    scene.set_prop(1, "insetBlockStart", "3");
+    scene.set_prop(1, "insetBlockEnd", "4");
+    let props = &scene.nodes.get(&1).unwrap().props;
+    assert_eq!(len_px(props.left), Some(1.0));
+    assert_eq!(len_px(props.right), Some(2.0));
+    assert_eq!(len_px(props.top), Some(3.0));
+    assert_eq!(len_px(props.bottom), Some(4.0));
+}
+
+#[test]
 fn set_prop_font_weight_accepts_keywords_and_both_json_number_and_string_forms() {
     let mut scene = Scene::new();
     scene.create_node(1, "text", PaintProps::default());
@@ -952,6 +1104,38 @@ fn set_prop_spans_defaults_missing_fields_and_null_clears_them() {
 
     scene.set_prop(1, "spans", "null");
     assert!(scene.nodes.get(&1).unwrap().props.spans.is_none());
+}
+
+#[test]
+fn set_prop_spans_reads_the_per_span_italic_flag() {
+    let mut scene = Scene::new();
+    scene.create_node(1, "text", PaintProps::default());
+    let spans_json = "[{\"text\":\"a\",\"italic\":true},{\"text\":\"b\"}]";
+    scene.set_prop(1, "spans", spans_json);
+    let spans = scene.nodes.get(&1).unwrap().props.spans.clone().unwrap();
+    assert!(spans[0].italic);
+    assert!(!spans[1].italic); // missing "italic" defaults to false
+}
+
+#[test]
+fn set_prop_font_style_accepts_italic_and_oblique_only() {
+    let mut scene = Scene::new();
+    scene.create_node(1, "text", PaintProps::default());
+    scene.set_prop(1, "fontStyle", "italic");
+    assert_eq!(
+        scene.nodes.get(&1).unwrap().props.font_style.as_deref(),
+        Some("italic")
+    );
+    scene.set_prop(1, "font-style", "oblique");
+    assert_eq!(
+        scene.nodes.get(&1).unwrap().props.font_style.as_deref(),
+        Some("oblique")
+    );
+    scene.set_prop(1, "fontStyle", "normal");
+    assert_eq!(scene.nodes.get(&1).unwrap().props.font_style, None);
+    scene.set_prop(1, "fontStyle", "italic");
+    scene.set_prop(1, "fontStyle", "garbage");
+    assert_eq!(scene.nodes.get(&1).unwrap().props.font_style, None);
 }
 
 #[test]
@@ -1048,6 +1232,62 @@ fn set_prop_svg_stroke_and_fill_handle_current_color_and_none() {
     assert_eq!(
         scene.nodes.get(&1).unwrap().props.svg_fill,
         Some(0xFF00FF00)
+    );
+}
+
+#[test]
+fn set_prop_svg_fill_and_stroke_accept_rgba_and_hsl_not_just_hex() {
+    // Regression test for a real bug: `stroke`/`fill` (and every other
+    // color-typed prop — background, color, border-color, outline-color,
+    // the hover/focus variants) used to funnel through a hand-rolled,
+    // hex-only parser in this file, while box-shadow/gradients/
+    // scrollbar-color already used css_parse's fuller one. An icon set
+    // using literal `fill="rgba(...)"` rendered completely invisible —
+    // the color silently failed to parse and the SVG painted nothing.
+    let mut scene = Scene::new();
+    scene.create_node(1, "path", PaintProps::default());
+
+    scene.set_prop(1, "fill", "rgba(0, 255, 0, 1)");
+    assert_eq!(
+        scene.nodes.get(&1).unwrap().props.svg_fill,
+        Some(0xFF00FF00)
+    );
+
+    scene.set_prop(1, "stroke", "rgb(255, 0, 0)");
+    assert_eq!(
+        scene.nodes.get(&1).unwrap().props.svg_stroke,
+        Some(0xFFFF0000)
+    );
+
+    // hsl(120, 100%, 50%) is pure green, same as rgba(0,255,0,1) above.
+    scene.set_prop(1, "fill", "hsl(120, 100%, 50%)");
+    assert_eq!(
+        scene.nodes.get(&1).unwrap().props.svg_fill,
+        Some(0xFF00FF00)
+    );
+}
+
+#[test]
+fn set_prop_background_and_border_color_accept_rgba_not_just_hex() {
+    // Same regression, for the non-SVG color props that share the bug.
+    let mut scene = Scene::new();
+    scene.create_node(1, "view", PaintProps::default());
+
+    scene.set_prop(1, "background", "rgba(0, 0, 0, 0.5)");
+    let bg = scene.nodes.get(&1).unwrap().props.background.unwrap();
+    assert_eq!((bg >> 24) & 0xFF, 128); // alpha ~0.5 -> ~128 (rounds to 128)
+    assert_eq!(bg & 0x00FF_FFFF, 0x000000);
+
+    scene.set_prop(1, "border-color", "rgb(0, 0, 255)");
+    assert_eq!(
+        scene.nodes.get(&1).unwrap().props.border_color,
+        Some(0xFF0000FF)
+    );
+
+    scene.set_prop(1, "outline-color", "hsl(0, 100%, 50%)"); // pure red
+    assert_eq!(
+        scene.nodes.get(&1).unwrap().props.outline_color,
+        Some(0xFFFF0000)
     );
 }
 
@@ -1163,4 +1403,43 @@ fn set_prop_gracefully_ignores_unparseable_values_and_unknown_keys() {
     assert_eq!(scene.nodes.get(&1).unwrap().props.font_size, None);
     scene.set_prop(1, "totally-not-a-real-prop", "whatever");
     assert_eq!(scene.nodes.get(&1).unwrap().props.background, None);
+}
+
+#[test]
+fn set_prop_background_image_two_or_more_layers_goes_through_background_layers() {
+    let mut scene = Scene::new();
+    scene.create_node(1, "view", PaintProps::default());
+    scene.set_prop(1, "background-image", "url(a.png), url(b.png)");
+    let props = &scene.nodes.get(&1).unwrap().props;
+    assert_eq!(props.background_layers, vec!["a.png", "b.png"]);
+    // Single-image slot is cleared so the two paint paths never both fire.
+    assert_eq!(props.background_image, None);
+}
+
+#[test]
+fn set_prop_background_image_one_layer_still_uses_the_single_image_slot() {
+    let mut scene = Scene::new();
+    scene.create_node(1, "view", PaintProps::default());
+    // Establish multi-layer state first...
+    scene.set_prop(1, "background-image", "url(a.png), url(b.png)");
+    // ...then a later single-layer set should switch back to the
+    // single-image path and clear the stale layers.
+    scene.set_prop(1, "background-image", "url(c.png)");
+    let props = &scene.nodes.get(&1).unwrap().props;
+    assert_eq!(props.background_image.as_deref(), Some("c.png"));
+    assert!(props.background_layers.is_empty());
+}
+
+#[test]
+fn set_prop_background_size_splits_into_per_layer_sizes() {
+    let mut scene = Scene::new();
+    scene.create_node(1, "view", PaintProps::default());
+    scene.set_prop(1, "background-image", "url(a.png), url(b.png), url(c.png)");
+    scene.set_prop(1, "background-size", "contain, stretch");
+    let props = &scene.nodes.get(&1).unwrap().props;
+    assert_eq!(props.background_layer_sizes, vec!["contain", "stretch"]);
+    // Also still drives the single-layer `background_size` slot, since
+    // background-image/background-size arrive as independent set_prop
+    // calls and either one might be the multi-layer one.
+    assert_eq!(props.background_size.as_deref(), Some("contain, stretch"));
 }

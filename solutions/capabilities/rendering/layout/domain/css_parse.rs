@@ -9,8 +9,8 @@
 // GradientStopDef, BoxShadow, TransformList, TransformOp}`.
 
 use crate::scene::{
-    BoxShadow, ClipPath, GradientDef, GradientShape, GradientStopDef, Len, TransformList,
-    TransformOp,
+    BoxShadow, ClipPath, FilterList, FilterOp, GradientDef, GradientShape, GradientStopDef, Len,
+    TextShadow, TransformList, TransformOp,
 };
 
 /// Splits a CSS argument list on top-level commas — commas inside `()`
@@ -341,6 +341,57 @@ pub fn parse_radial_gradient(s: &str) -> Option<GradientDef> {
     })
 }
 
+/// `conic-gradient([from <angle>] [at <cx> <cy>], <stop-list>)`. Both the
+/// `from`/`at` clauses are optional and independent (either, both, or
+/// neither may appear, in that order). `from` defaults to 0deg (up),
+/// `at` defaults to center — same defaults as the CSS spec.
+pub fn parse_conic_gradient(s: &str) -> Option<GradientDef> {
+    let args = strip_fn(s.trim(), "conic-gradient")?;
+    let parts = split_top_level(args);
+    if parts.is_empty() {
+        return None;
+    }
+
+    let mut stops_start = 0usize;
+    let mut angle = 0.0f32;
+    let mut cx = 0.5f32;
+    let mut cy = 0.5f32;
+    let first = parts[0].trim().to_ascii_lowercase();
+    let looks_like_position = first.starts_with("from ") || first.starts_with("at ");
+    if looks_like_position {
+        if let Some(at_idx) = first.find("at ") {
+            let pos = &first[at_idx + 3..];
+            let mut it = pos.split_whitespace();
+            if let Some(p) = it.next() {
+                cx = parse_position_axis(p).unwrap_or(0.5);
+            }
+            if let Some(p) = it.next() {
+                cy = parse_position_axis(p).unwrap_or(0.5);
+            }
+        }
+        if let Some(from_idx) = first.find("from ") {
+            // The angle token sits right after "from " and ends at the
+            // next whitespace (before a possible "at" clause).
+            let rest = first[from_idx + 5..].trim();
+            let angle_tok = rest.split_whitespace().next().unwrap_or("");
+            angle = parse_angle(angle_tok).unwrap_or(0.0);
+        }
+        stops_start = 1;
+    }
+    let stops = parse_stops(&parts[stops_start..])?;
+    if stops.len() < 2 {
+        return None;
+    }
+    Some(GradientDef {
+        shape: GradientShape::Conic {
+            angle_deg: angle,
+            cx,
+            cy,
+        },
+        stops,
+    })
+}
+
 fn parse_position_axis(s: &str) -> Option<f32> {
     let t = s.trim();
     match t {
@@ -528,6 +579,191 @@ fn parse_translate_component(s: &str) -> (f32, bool) {
         return (p.trim().parse::<f32>().unwrap_or(0.0), true);
     }
     (parse_length(t).unwrap_or(0.0), false)
+}
+
+// ─── Text-shadow ──────────────────────────────────────────────────────────
+
+/// CSS `text-shadow`: `<offsetX> <offsetY> [<blur>] <color>`. Comma-
+/// separated entries become multiple shadows, same declaration-order
+/// stacking convention as `box-shadow` (first listed sits on top).
+/// Unlike `box-shadow`, there's no `inset`/`spread` to strip.
+pub fn parse_text_shadow(s: &str) -> Vec<TextShadow> {
+    split_top_level(s)
+        .into_iter()
+        .filter_map(|entry| parse_text_shadow_one(&entry))
+        .collect()
+}
+
+fn parse_text_shadow_one(s: &str) -> Option<TextShadow> {
+    let tokens = tokenize_shadow(s);
+    if tokens.len() < 3 {
+        return None;
+    }
+    let toks: Vec<&str> = tokens.iter().map(|t| t.as_str()).collect();
+    let (color_idx, color) = toks
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(i, t)| parse_color_str(t).map(|c| (i, c)))?;
+    let nums: Vec<f32> = toks[..color_idx]
+        .iter()
+        .map(|t| parse_length(t).unwrap_or(0.0))
+        .collect();
+    Some(TextShadow {
+        offset_x: nums.first().copied().unwrap_or(0.0),
+        offset_y: nums.get(1).copied().unwrap_or(0.0),
+        blur: nums.get(2).copied().unwrap_or(0.0).max(0.0),
+        color,
+    })
+}
+
+// ─── filter ───────────────────────────────────────────────────────────────
+
+/// CSS `filter: blur(<len>) drop-shadow(<x> <y> [<blur>] [<color>])`.
+/// Unsupported functions (brightness, contrast, saturate, grayscale,
+/// invert, sepia, hue-rotate, mix-blend-mode isn't a filter but gets
+/// asked for too — none of these are recognized) are silently dropped,
+/// same policy as `parse_transform`'s skew/matrix/perspective. Returns
+/// `None` for `none` / empty / a value that yields no recognized ops.
+pub fn parse_filter(s: &str) -> Option<FilterList> {
+    let t = s.trim();
+    if t.is_empty() || t.eq_ignore_ascii_case("none") {
+        return None;
+    }
+    let mut ops = Vec::new();
+    let mut rest = t;
+    while !rest.is_empty() {
+        let paren = rest.find('(')?;
+        let name = rest[..paren].trim().to_ascii_lowercase();
+        // Depth-tracked scan for the MATCHING close paren — args can
+        // themselves be a function call (`drop-shadow(... rgba(...))`),
+        // so the naive "first `)`" used by parse_transform (which never
+        // sees nested calls) isn't safe here.
+        let mut depth = 1i32;
+        let mut close = None;
+        for (i, c) in rest[paren + 1..].char_indices() {
+            match c {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        close = Some(i);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let close = close?;
+        let args = rest[paren + 1..paren + 1 + close].trim();
+        rest = rest[paren + 1 + close + 1..].trim();
+        match name.as_str() {
+            "blur" => {
+                if let Some(px) = parse_length(args) {
+                    ops.push(FilterOp::Blur(px.max(0.0)));
+                }
+            }
+            "drop-shadow" => {
+                let tokens = tokenize_shadow(args);
+                let toks: Vec<&str> = tokens.iter().map(|t| t.as_str()).collect();
+                if toks.is_empty() {
+                    continue;
+                }
+                // Color is optional per spec (defaults to currentColor —
+                // approximated here as opaque black since paint_node
+                // doesn't thread the inherited color into the filter
+                // parser). When present it can be found anywhere in the
+                // token list; everything else is offset/blur numbers.
+                let (color, num_toks): (u32, &[&str]) = match toks
+                    .iter()
+                    .enumerate()
+                    .rev()
+                    .find_map(|(i, t)| parse_color_str(t).map(|c| (i, c)))
+                {
+                    Some((idx, c)) => (c, &toks[..idx]),
+                    None => (0xFF000000, &toks[..]),
+                };
+                let nums: Vec<f32> = num_toks
+                    .iter()
+                    .map(|t| parse_length(t).unwrap_or(0.0))
+                    .collect();
+                ops.push(FilterOp::DropShadow {
+                    offset_x: nums.first().copied().unwrap_or(0.0),
+                    offset_y: nums.get(1).copied().unwrap_or(0.0),
+                    blur: nums.get(2).copied().unwrap_or(0.0).max(0.0),
+                    color,
+                });
+            }
+            _ => {} // unsupported filter fn — silently drop
+        }
+    }
+    if ops.is_empty() {
+        None
+    } else {
+        Some(FilterList(ops))
+    }
+}
+
+// ─── background-image (multi-layer) ────────────────────────────────────────
+
+/// Split `background-image: url(a), url(b), ...` on top-level commas and
+/// unwrap each `url(...)` / quoted entry down to a bare path, same
+/// unwrapping `set_prop`'s single-layer "background-image" arm already
+/// does. Empty entries are dropped.
+pub fn parse_bg_image_layers(s: &str) -> Vec<String> {
+    split_top_level(s)
+        .into_iter()
+        .filter_map(|entry| {
+            let mut t = entry.trim().to_string();
+            if t.starts_with("url(") && t.ends_with(')') {
+                t = t[4..t.len() - 1].trim().to_string();
+            }
+            t = t.trim_matches(|c: char| c == '"' || c == '\'').to_string();
+            if t.is_empty() {
+                None
+            } else {
+                Some(t)
+            }
+        })
+        .collect()
+}
+
+// ─── corner-shape ─────────────────────────────────────────────────────────
+
+/// CSS (draft) `corner-shape: round | squircle | superellipse(<n>)`.
+/// `round` (the default everywhere already) and anything unrecognized
+/// return `None` — meaning "use the existing circular-arc corners".
+/// `squircle` is a fixed n=4 superellipse (the common approximation of
+/// the iOS-icon look); `superellipse(<n>)` takes an explicit exponent.
+pub fn parse_corner_shape(s: &str) -> Option<f32> {
+    let t = s.trim();
+    if t.eq_ignore_ascii_case("squircle") {
+        return Some(4.0);
+    }
+    if let Some(args) = strip_fn(t, "superellipse") {
+        return args.trim().parse::<f32>().ok().filter(|n| *n > 0.0);
+    }
+    None
+}
+
+// ─── aspect-ratio ─────────────────────────────────────────────────────────
+
+/// CSS `aspect-ratio: <width> / <height>` or a bare number (`1.5`).
+/// `auto` / unparseable → `None`.
+pub fn parse_aspect_ratio(s: &str) -> Option<f32> {
+    let t = s.trim();
+    if t.is_empty() || t.eq_ignore_ascii_case("auto") {
+        return None;
+    }
+    if let Some((w, h)) = t.split_once('/') {
+        let w: f32 = w.trim().parse().ok()?;
+        let h: f32 = h.trim().parse().ok()?;
+        if h == 0.0 {
+            return None;
+        }
+        return Some(w / h);
+    }
+    t.parse::<f32>().ok().filter(|v| *v > 0.0)
 }
 
 // ─── Transform ────────────────────────────────────────────────────────────

@@ -89,10 +89,13 @@ export class BundleCommand extends Command {
       //
       // `process.cwd()` (same base loadConfig() just resolved carbon.toml
       // against) is passed through so a static-plugins release build's
-      // per-app dist/<crate> binary (see distBinaryPath) is found — the
+      // per-app dist/<name> binary (see distBinaryPath) is found — the
       // shared workspace path a bare `resolveBackendBinary(backend)` checks
       // is where a DYNAMIC build's binary lives, never a static one's.
-      const binary = resolveBackendBinary(config.runtime.backend, process.cwd());
+      // `config.app.name` is tried first (what `carbon build` names it
+      // now), falling back to the crate name for a binary built before
+      // that — see resolveBackendBinary's own doc comment.
+      const binary = resolveBackendBinary(config.runtime.backend, process.cwd(), config.app.name);
       if (!binary) {
         ctx.io.error(
           `no runtime binary for the ${config.runtime.backend} backend — run \`carbon build\` first`,

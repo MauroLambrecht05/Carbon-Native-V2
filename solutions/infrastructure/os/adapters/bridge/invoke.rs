@@ -23,7 +23,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use crate::net::post;
+use crate::event_proxy::post;
 use carbon_runtime_contract::{UserEvent, WindowOp};
 
 // Handlers are stored behind `Arc` (not a bare `Box`) so `__cm_invoke` can
@@ -421,11 +421,21 @@ fn register_builtins() {
     set_handler("wsl_default_distro", |_args| Ok(Value::Null));
     set_handler("wsl_home", |_args| Ok(Value::Null));
 
-    // ── Search / glob / grep — ripgrep-backed (see fs_search.rs) ───────
-    set_handler("fs_grep", crate::fs_search::fs_grep);
-    set_handler("fs_glob", crate::fs_search::fs_glob);
-    set_handler("fs_search", crate::fs_search::fs_search);
-    set_handler("list_subdirs", crate::fs_search::list_subdirs);
+    // lm_ping / ai_http_stream — reqwest-backed, only exist when the
+    // `network` Cargo feature is on (default: on — see carbon-os/Cargo.toml
+    // and lib.rs's register_network for what opting out actually drops).
+    #[cfg(feature = "network")]
+    {
+        set_handler("lm_ping", crate::net::lm_ping);
+        set_handler("ai_http_stream", crate::net::ai_http_stream_invoke);
+    }
+
+    // fs_grep/fs_glob/fs_search/list_subdirs moved out of the always-on
+    // runtime and into the file-search plugin (products/carbon-sdk/
+    // file-search) — see that plugin's own header for why: these pulled in
+    // ~1.2 MiB of regex/glob/gitignore-walking crates unconditionally, for
+    // a capability most apps never use. `carbon plugin add file-search`
+    // opts an app back in.
 
     // ── Shell command execution / sessions / background procs ──────────
     // (see shell_exec.rs — distinct from the interactive PTY terminal)
@@ -440,10 +450,6 @@ fn register_builtins() {
     set_handler("shell_bg_logs", crate::shell_exec::shell_bg_logs);
     set_handler("shell_bg_kill", crate::shell_exec::shell_bg_kill);
     set_handler("shell_bg_list", crate::shell_exec::shell_bg_list);
-
-    // ── lm_ping / ai_http_stream — see net.rs ───────────────────────────
-    set_handler("lm_ping", crate::net::lm_ping);
-    set_handler("ai_http_stream", crate::net::ai_http_stream_invoke);
 
     // Tauri plugin-store commands — return null/empty so the LazyStore
     // wrapper falls back to its defaults map without crashing on

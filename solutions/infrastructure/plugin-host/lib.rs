@@ -71,17 +71,24 @@ pub mod plugin_loader;
 #[path = "adapters/plugin_loader_static.rs"]
 pub mod plugin_loader;
 
+#[cfg(feature = "clipboard")]
 #[path = "adapters/native/clipboard.rs"]
 pub mod clipboard;
+#[cfg(feature = "deep-link")]
 #[path = "adapters/native/deeplink.rs"]
 pub mod deeplink;
+#[cfg(feature = "dialog")]
 #[path = "adapters/native/dialog.rs"]
 pub mod dialog;
+#[cfg(feature = "global-shortcuts")]
 #[path = "adapters/native/global_shortcuts.rs"]
 pub mod global_shortcuts;
+#[cfg(feature = "keychain")]
 #[path = "adapters/native/keychain.rs"]
 pub mod keychain;
+#[cfg(feature = "notification")]
 #[path = "adapters/native/notification.rs"]
 pub mod notification;
+#[cfg(feature = "tray")]
 #[path = "adapters/native/tray.rs"]
 pub mod tray;

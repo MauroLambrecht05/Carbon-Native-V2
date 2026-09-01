@@ -49,8 +49,8 @@ export type { FileStat } from "./filesystem/fs.ts";
 
 export { process, ChildProcess } from "./process/process.ts";
 export type { ExecResult, SpawnOptions } from "./process/process.ts";
-export { pty, PtySession } from "./process/pty.ts";
-export type { PtySpawnOptions } from "./process/pty.ts";
+// PTY moved to the terminal plugin (carbon:terminal) — not always-on
+// anymore, see products/carbon-sdk/terminal.
 export { shell } from "./process/shell.ts";
 
 export { Store } from "./storage/store.ts";

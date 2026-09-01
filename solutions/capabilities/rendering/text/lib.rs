@@ -20,19 +20,42 @@
 use fontdue::{Font, FontSettings};
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::OnceLock;
 use tiny_skia::{Pixmap, PremultipliedColorU8};
 
 /// Inter static weights — the default UI font stack. Inter is what most
 /// shadcn/tailwind apps (terax included) declare, and shipping real 400/
 /// 500/600/700 faces gives true weight rendering instead of a synthetic
-/// faux-bold double-draw. Latin coverage; ~325 KB each.
-const INTER_REGULAR: &[u8] = include_bytes!("assets/Inter-Regular.ttf");
-const INTER_MEDIUM: &[u8] = include_bytes!("assets/Inter-Medium.ttf");
-const INTER_SEMIBOLD: &[u8] = include_bytes!("assets/Inter-SemiBold.ttf");
-const INTER_BOLD: &[u8] = include_bytes!("assets/Inter-Bold.ttf");
-/// Coverage backstop (~37 KB Roboto Latin subset) for the rare glyph
-/// outside Inter's cmap. Lowest priority in the stack.
-const FALLBACK_FONT_BYTES: &[u8] = include_bytes!("assets/Roboto-Regular-Latin.ttf");
+/// faux-bold double-draw. Latin coverage; ~325 KB raw, ~215 KB each
+/// lz4-compressed (see `embedded_font!` below) — decompressed once, into a
+/// process-wide cache, the first time any TextEngine needs the default
+/// stack (`ensure_loaded`), not per-instance and not at startup.
+///
+/// lz4, not a stronger codec: `lz4_flex` is already linked (carbon-snapshot
+/// uses it for the heap-snapshot arena), so reusing it here costs zero
+/// additional binary weight — the tradeoff is a more modest ratio (~66%)
+/// than zstd/brotli would give, in exchange for not adding a second
+/// decompressor crate just for this.
+macro_rules! embedded_font {
+    ($name:ident, $path:literal) => {
+        fn $name() -> &'static [u8] {
+            static CACHE: OnceLock<Vec<u8>> = OnceLock::new();
+            CACHE.get_or_init(|| {
+                const COMPRESSED: &[u8] = include_bytes!($path);
+                lz4_flex::block::decompress_size_prepended(COMPRESSED)
+                    .expect("embedded font decompress")
+            })
+        }
+    };
+}
+
+embedded_font!(inter_regular, "assets/Inter-Regular.ttf.lz4");
+embedded_font!(inter_medium, "assets/Inter-Medium.ttf.lz4");
+embedded_font!(inter_semibold, "assets/Inter-SemiBold.ttf.lz4");
+embedded_font!(inter_bold, "assets/Inter-Bold.ttf.lz4");
+// Coverage backstop (~37 KB raw Roboto Latin subset) for the rare glyph
+// outside Inter's cmap. Lowest priority in the stack.
+embedded_font!(fallback_font_bytes, "assets/Roboto-Regular-Latin.ttf.lz4");
 
 pub struct TextEngine {
     /// Font stack — per-glyph fallback chain filtered by (mono-class,
@@ -219,11 +242,11 @@ impl TextEngine {
         // 2. Append the embedded Inter weight stack + Roboto backstop once.
         if !self.default_loaded {
             for (bytes, weight) in [
-                (INTER_REGULAR, 400u16),
-                (INTER_MEDIUM, 500),
-                (INTER_SEMIBOLD, 600),
-                (INTER_BOLD, 700),
-                (FALLBACK_FONT_BYTES, 400),
+                (inter_regular(), 400u16),
+                (inter_medium(), 500),
+                (inter_semibold(), 600),
+                (inter_bold(), 700),
+                (fallback_font_bytes(), 400),
             ] {
                 if let Ok(font) = Font::from_bytes(bytes, FontSettings::default()) {
                     self.fonts.push(font);
@@ -595,6 +618,55 @@ impl TextEngine {
         (max_w, line_h * lines.len() as f32)
     }
 
+    /// CSS `text-overflow: ellipsis` support. If `text` already fits
+    /// within `max_width`, returns it unchanged. Otherwise trims it
+    /// (whole chars only) and appends "…", growing the kept prefix as
+    /// far as it fits alongside the ellipsis glyph. `max_width <= 0`
+    /// means "unconstrained" — returned unchanged. O(n) measure calls
+    /// for an n-char string; fine for UI-label-length text, the only
+    /// case this is meant for.
+    pub fn truncate_ellipsis_mono(
+        &mut self,
+        text: &str,
+        font_size: f32,
+        letter_spacing: f32,
+        is_mono: bool,
+        max_width: f32,
+    ) -> String {
+        if max_width <= 0.0 {
+            return text.to_string();
+        }
+        let (full_w, _) = self.measure_styled_mono(text, font_size, letter_spacing, is_mono);
+        if full_w <= max_width {
+            return text.to_string();
+        }
+        let ellipsis_w = self
+            .measure_styled_mono("\u{2026}", font_size, 0.0, is_mono)
+            .0;
+        if ellipsis_w > max_width {
+            return String::new();
+        }
+        let budget = max_width - ellipsis_w;
+        let mut acc = 0.0_f32;
+        let mut end = 0usize;
+        for (i, ch) in text.char_indices() {
+            let mut cw = self
+                .measure_styled_mono(&ch.to_string(), font_size, 0.0, is_mono)
+                .0;
+            if i > 0 {
+                cw += letter_spacing;
+            }
+            if acc + cw > budget {
+                break;
+            }
+            acc += cw;
+            end = i + ch.len_utf8();
+        }
+        let mut out = text[..end].to_string();
+        out.push('\u{2026}');
+        out
+    }
+
     pub fn draw_text_wrapped(
         &mut self,
         pixmap: &mut Pixmap,
@@ -689,6 +761,7 @@ impl TextEngine {
             line_height_prop,
             letter_spacing,
             false,
+            false,
         );
     }
 
@@ -706,6 +779,7 @@ impl TextEngine {
         line_height_prop: Option<f32>,
         letter_spacing: f32,
         is_mono: bool,
+        italic: bool,
     ) {
         let (single_w, intrinsic_h) =
             self.measure_styled_mono(text, font_size, letter_spacing, is_mono);
@@ -735,6 +809,7 @@ impl TextEngine {
                 clip_bottom,
                 letter_spacing,
                 is_mono,
+                italic,
             );
         }
     }
@@ -786,6 +861,7 @@ impl TextEngine {
             clip_bottom,
             letter_spacing,
             false,
+            false,
         );
     }
 
@@ -801,6 +877,7 @@ impl TextEngine {
         clip_bottom: f32,
         letter_spacing: f32,
         is_mono: bool,
+        italic: bool,
     ) {
         // HiDPI: this is the single glyph-blit leaf every text path funnels
         // through, so scaling here (and nowhere else in text.rs) rasterizes
@@ -911,6 +988,7 @@ impl TextEngine {
                 clip_bottom as i32,
                 x_clip.0,
                 x_clip.1,
+                italic,
             );
 
             pen_x += if is_mono { mono_advance } else { advance };
@@ -987,6 +1065,15 @@ fn coverage_lut() -> &'static [u8; 256] {
     })
 }
 
+/// Synthetic-italic shear, in fractional px of x-shift per px of glyph
+/// height — this engine has no real italic font files loaded (only
+/// upright Inter/Roboto weights), so `font-style: italic` gets the same
+/// treatment browsers give a missing italic face: an oblique shear of
+/// the upright glyph, same idea as the existing faux-bold double-draw.
+/// ~11°, applied per SCANLINE (not sub-pixel), so it staircases visibly
+/// at large sizes — acceptable at the UI text sizes this is meant for.
+const ITALIC_SHEAR: f32 = 0.2;
+
 #[inline]
 fn blit_glyph(
     pixmap: &mut Pixmap,
@@ -1005,6 +1092,7 @@ fn blit_glyph(
     clip_bottom: i32,
     clip_left: f32,
     clip_right: f32,
+    italic: bool,
 ) {
     if gw == 0 || gh == 0 {
         return;
@@ -1021,8 +1109,15 @@ fn blit_glyph(
         if py < clip_top || py >= clip_bottom {
             continue;
         }
+        // Top of the glyph (row 0) shifts furthest right, the baseline
+        // row stays put — the standard oblique slant direction.
+        let row_shear = if italic {
+            (ITALIC_SHEAR * (gh as f32 - 1.0 - row as f32)).round() as i32
+        } else {
+            0
+        };
         for col in 0..gw {
-            let px = dx + col as i32;
+            let px = dx + row_shear + col as i32;
             if px < 0 || px >= pw {
                 continue;
             }
@@ -1061,6 +1156,55 @@ fn blit_glyph(
 }
 
 #[cfg(test)]
+mod blit_glyph_tests {
+    use super::*;
+
+    /// A 1px-wide, fully-opaque vertical line, `height` px tall — makes
+    /// the per-row shear trivial to read back: whichever column is lit
+    /// in a given row IS that row's shear offset.
+    fn vertical_line_bitmap(height: usize) -> Vec<u8> {
+        vec![255u8; height]
+    }
+
+    fn opaque_col_at(pixmap: &Pixmap, x: i32, y: i32) -> bool {
+        if x < 0 || y < 0 || x as u32 >= pixmap.width() || y as u32 >= pixmap.height() {
+            return false;
+        }
+        pixmap.pixels()[y as usize * pixmap.width() as usize + x as usize].alpha() > 0
+    }
+
+    #[test]
+    fn upright_glyphs_land_in_the_same_column_on_every_row() {
+        let mut pm = Pixmap::new(20, 20).unwrap();
+        let bmp = vertical_line_bitmap(6);
+        blit_glyph(
+            &mut pm, 5, 0, 1, 6, &bmp, 255, 255, 255, 255, 20, 20, 0, 20, 0.0, 20.0, false,
+        );
+        for row in 0..6 {
+            assert!(
+                opaque_col_at(&pm, 5, row),
+                "row {row} should be lit at col 5"
+            );
+        }
+    }
+
+    #[test]
+    fn italic_glyphs_shear_more_at_the_top_row_than_the_bottom() {
+        let mut pm = Pixmap::new(20, 20).unwrap();
+        let bmp = vertical_line_bitmap(11); // shear(row 0) = round(0.2*10) = 2
+        blit_glyph(
+            &mut pm, 5, 0, 1, 11, &bmp, 255, 255, 255, 255, 20, 20, 0, 20, 0.0, 20.0, true,
+        );
+        // Top row: shifted right by 2.
+        assert!(opaque_col_at(&pm, 7, 0));
+        assert!(!opaque_col_at(&pm, 5, 0));
+        // Bottom (baseline) row: unshifted.
+        assert!(opaque_col_at(&pm, 5, 10));
+        assert!(!opaque_col_at(&pm, 7, 10));
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1080,7 +1224,7 @@ mod tests {
     fn a_named_font_is_selected_over_the_default_stack_when_family_matches() {
         let mut te = TextEngine::new();
         assert!(te.load_font_bytes_named(
-            FALLBACK_FONT_BYTES.to_vec(),
+            fallback_font_bytes().to_vec(),
             Some("MyCustomFont".to_string()),
             None
         ));
@@ -1131,13 +1275,13 @@ mod tests {
     fn among_multiple_weights_of_the_same_family_the_closest_weight_wins() {
         let mut te = TextEngine::new();
         assert!(te.load_font_bytes_named(
-            FALLBACK_FONT_BYTES.to_vec(),
+            fallback_font_bytes().to_vec(),
             Some("Multi".to_string()),
             Some(400)
         ));
         let regular_idx = te.fonts.len() - 1;
         assert!(te.load_font_bytes_named(
-            INTER_BOLD.to_vec(),
+            inter_bold().to_vec(),
             Some("Multi".to_string()),
             Some(700)
         ));

@@ -333,6 +333,17 @@ export function resolveTailwindClass(raw: string): StyleProps | null {
     const v = SPACING_SCALE[cls.slice(3)];
     return v !== undefined ? { "padding-left": v } : null;
   }
+  // Logical padding (ps-/pe- = padding-inline-start/end). LTR-aliased
+  // by the runtime (no bidi/direction model) — see scene.rs's
+  // inset-inline-* set_prop comment.
+  if (cls.startsWith("ps-")) {
+    const v = SPACING_SCALE[cls.slice(3)];
+    return v !== undefined ? { "padding-inline-start": v } : null;
+  }
+  if (cls.startsWith("pe-")) {
+    const v = SPACING_SCALE[cls.slice(3)];
+    return v !== undefined ? { "padding-inline-end": v } : null;
+  }
 
   // Spacing — margin
   if (cls.startsWith("m-")) {
@@ -362,6 +373,16 @@ export function resolveTailwindClass(raw: string): StyleProps | null {
   if (cls.startsWith("ml-")) {
     const v = SPACING_SCALE[cls.slice(3)];
     return v !== undefined ? { "margin-left": v } : null;
+  }
+  // Logical margin (ms-/me- = margin-inline-start/end). Same LTR-alias
+  // caveat as the padding pair above.
+  if (cls.startsWith("ms-")) {
+    const v = SPACING_SCALE[cls.slice(3)];
+    return v !== undefined ? { "margin-inline-start": v } : null;
+  }
+  if (cls.startsWith("me-")) {
+    const v = SPACING_SCALE[cls.slice(3)];
+    return v !== undefined ? { "margin-inline-end": v } : null;
   }
 
   // Gap
@@ -432,6 +453,9 @@ export function resolveTailwindClass(raw: string): StyleProps | null {
     if (rest === "justify") return { "text-align": "justify" };
     if (rest === "start") return { "text-align": "left" };
     if (rest === "end") return { "text-align": "right" };
+    // text-overflow: text-ellipsis / text-clip.
+    if (rest === "ellipsis") return { "text-overflow": "ellipsis" };
+    if (rest === "clip") return { "text-overflow": "clip" };
     // Arbitrary numeric — text-[11px], text-[1.5rem] — interpret as
     // font-size. lookupColor would treat the same string as a hex
     // colour and emit `color: "11px"` which the paint pipeline can't
@@ -695,9 +719,15 @@ export function resolveTailwindClass(raw: string): StyleProps | null {
   if (cls === "truncate") {
     return { overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap" };
   }
+  if (cls === "whitespace-normal") return { "white-space": "normal" };
   if (cls === "whitespace-nowrap") return { "white-space": "nowrap" };
   if (cls === "whitespace-pre") return { "white-space": "pre" };
+  // pre-line/pre-wrap have no matching engine value (our white-space
+  // only understands normal/nowrap/pre) — emitting them as-is is
+  // harmless: set_prop stores the string but nothing branches on it,
+  // so paint falls back to normal (wrap-if-width-set) behavior.
   if (cls === "whitespace-pre-wrap") return { "white-space": "pre-wrap" };
+  if (cls === "whitespace-pre-line") return { "white-space": "pre-line" };
 
   // ── Cursor
   if (cls.startsWith("cursor-")) return { cursor: cls.slice(7) };
@@ -712,10 +742,95 @@ export function resolveTailwindClass(raw: string): StyleProps | null {
   if (cls === "select-all") return { "user-select": "all" };
   if (cls === "select-auto") return { "user-select": "auto" };
 
+  // ── animation. Values match Tailwind's own defaults exactly — the
+  // matching `@keyframes` are pre-registered under these same names in
+  // both renderers' transitions.ts (registerKeyframes("spin", ...) etc).
+  if (cls === "animate-spin") return { animation: "spin 1s linear infinite" };
+  if (cls === "animate-ping") return { animation: "ping 1s cubic-bezier(0,0,0.2,1) infinite" };
+  if (cls === "animate-pulse") return { animation: "pulse 2s cubic-bezier(0.4,0,0.6,1) infinite" };
+  if (cls === "animate-bounce") return { animation: "bounce 1s infinite" };
+  if (cls === "animate-none") return { animation: "none" };
+
+  // ── scroll-snap. `snap-x`/`snap-y` (axis) have no handler — this
+  // engine only has a y scroll model, so there's no meaningful thing
+  // to do with an x-axis declaration; they're silently no-ops like any
+  // other unsupported value in this file.
+  if (cls === "snap-mandatory") return { "scroll-snap-type": "mandatory" };
+  if (cls === "snap-proximity") return { "scroll-snap-type": "proximity" };
+  if (cls === "snap-none") return { "scroll-snap-type": "none" };
+  if (cls === "snap-start") return { "scroll-snap-align": "start" };
+  if (cls === "snap-center") return { "scroll-snap-align": "center" };
+  if (cls === "snap-end") return { "scroll-snap-align": "end" };
+  if (cls === "snap-align-none") return { "scroll-snap-align": "none" };
+
+  // ── mix-blend-mode
+  if (cls.startsWith("mix-blend-")) {
+    const mode = cls.slice(10);
+    const KNOWN = new Set([
+      "normal", "multiply", "screen", "overlay", "darken", "lighten",
+      "color-dodge", "color-burn", "hard-light", "soft-light",
+      "difference", "exclusion", "hue", "saturation", "color", "luminosity",
+    ]);
+    // "plus-lighter"/"plus-darker" have no tiny-skia equivalent — fall
+    // through to the unmatched/null default rather than mis-map them.
+    if (KNOWN.has(mode)) return { "mix-blend-mode": mode };
+  }
+
   // ── Outline / resize / appearance
-  if (cls === "outline-none") return { outline: "none" };
+  if (cls === "outline-none") return { "outline-width": 0 };
+  // Bare `outline` — Tailwind's default outline-width is "medium" (no
+  // explicit style knob on our side, so pick a visible-but-not-heavy
+  // 2px default matching the common focus-ring look).
+  if (cls === "outline") return { "outline-width": 2 };
+  if (cls.startsWith("outline-offset-") || cls.startsWith("-outline-offset-")) {
+    const neg = cls.startsWith("-");
+    const rest = cls.slice(neg ? 16 : 15);
+    if (/^\d+$/.test(rest)) return { "outline-offset": neg ? -Number(rest) : Number(rest) };
+  }
+  if (cls.startsWith("outline-")) {
+    const rest = cls.slice(8);
+    if (/^\d+$/.test(rest)) return { "outline-width": Number(rest) };
+    // outline-dashed/-dotted/-double etc. have no matching prop (no
+    // outline-style support) — fall through to the color lookup, then
+    // to the unmatched/null default.
+    const c = lookupColor(rest);
+    if (c) return { "outline-color": c };
+  }
   if (cls === "resize-none") return { resize: "none" };
   if (cls === "appearance-none") return { appearance: "none" };
+
+  // ── aspect-ratio
+  if (cls === "aspect-square") return { "aspect-ratio": "1/1" };
+  if (cls === "aspect-video") return { "aspect-ratio": "16/9" };
+  if (cls === "aspect-auto") return { "aspect-ratio": "auto" };
+  if (cls.startsWith("aspect-[") && cls.endsWith("]")) {
+    return { "aspect-ratio": cls.slice(8, -1) };
+  }
+
+  // ── filter: blur / drop-shadow. Chainable per the CSS spec — each
+  // resolved class contributes one `filter` function; Tailwind expects
+  // the LAST applied `blur-*`/`drop-shadow-*` class to win (like any
+  // other utility), which the caller's class-merge order already gives.
+  const BLUR: Record<string, number> = {
+    none: 0, sm: 4, DEFAULT: 8, md: 12, lg: 16, xl: 24, "2xl": 40, "3xl": 64,
+  };
+  if (cls === "blur") return { filter: `blur(${BLUR.DEFAULT}px)` };
+  if (cls.startsWith("blur-")) {
+    const v = BLUR[cls.slice(5)];
+    if (v !== undefined) return { filter: `blur(${v}px)` };
+  }
+  if (cls === "drop-shadow-none") return { filter: "none" };
+  if (cls === "drop-shadow-sm") return { filter: "drop-shadow(0 1px 1px rgba(0,0,0,0.05))" };
+  if (cls === "drop-shadow" || cls === "drop-shadow-md") {
+    return { filter: "drop-shadow(0 1px 2px rgba(0,0,0,0.1)) drop-shadow(0 1px 1px rgba(0,0,0,0.06))" };
+  }
+  if (cls === "drop-shadow-lg") {
+    return { filter: "drop-shadow(0 4px 4px rgba(0,0,0,0.15)) drop-shadow(0 2px 2px rgba(0,0,0,0.06))" };
+  }
+  if (cls === "drop-shadow-xl") {
+    return { filter: "drop-shadow(0 8px 6px rgba(0,0,0,0.1)) drop-shadow(0 4px 3px rgba(0,0,0,0.08))" };
+  }
+  if (cls === "drop-shadow-2xl") return { filter: "drop-shadow(0 12px 10px rgba(0,0,0,0.2))" };
 
   // ── Shadow approximations
   if (cls === "shadow-sm") return { "box-shadow": "0 1px 2px 0 rgba(0,0,0,0.05)" };

@@ -21,8 +21,10 @@ import {
   maybeStartTransition,
   parseTransition,
   recordAppliedValue,
+  setAnimation,
   transitionConfig,
 } from "../scene/transitions.ts";
+import { applySceneStyleProp } from "../scene/css-vars.ts";
 import { canvasReadyHandlers, ensureCanvasSurface } from "../intrinsics/canvas.ts";
 
 // ─── Renderer: maps Solid's universal API onto our scene-graph host imports
@@ -96,11 +98,22 @@ const renderer = createRenderer<CmNode>({
           transitionConfig.set(node.id, parseTransition(String(value[key])));
           continue;
         }
+        if (key === "animation") {
+          setAnimation(node, String(value[key]));
+          continue;
+        }
+        // `--name: value` — defines a custom property (never
+        // forwarded); consuming a `var(...)` reference happens inside
+        // `applySceneStyleProp` for every OTHER key below.
+        if (key.startsWith("--")) {
+          applySceneStyleProp(node, key, value[key]);
+          continue;
+        }
         if (maybeStartTransition(node, key, value[key])) {
           recordAppliedValue(node.id, key, value[key]);
           continue;
         }
-        __cm_set_prop(node.id, key, JSON.stringify(value[key]));
+        applySceneStyleProp(node, key, value[key]);
         recordAppliedValue(node.id, key, value[key]);
       }
       __cm_request_paint();
@@ -111,6 +124,11 @@ const renderer = createRenderer<CmNode>({
     // the prop itself; it only triggers tweens on subsequent sets).
     if (name === "transition") {
       transitionConfig.set(node.id, parseTransition(String(value)));
+      return;
+    }
+    // Standalone `animation` prop — same rationale as `transition` above.
+    if (name === "animation") {
+      setAnimation(node, String(value));
       return;
     }
     // Click: register handler + mark node clickable for hit-testing.
@@ -165,8 +183,8 @@ const renderer = createRenderer<CmNode>({
       recordAppliedValue(node.id, name, value);
       return;
     }
-    // Generic: stringify the value and forward.
-    __cm_set_prop(node.id, name, JSON.stringify(value));
+    // Generic: resolve any `var(...)` references, stringify, forward.
+    applySceneStyleProp(node, name, value);
     recordAppliedValue(node.id, name, value);
     __cm_request_paint();
   },

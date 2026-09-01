@@ -120,7 +120,7 @@ export async function ensureRuntime(
   backend: BackendName,
   logger: Logger,
   flags: RuntimeFeatureFlags = {},
-  opts: { quiet?: boolean; force?: boolean; projectDir?: string } = {},
+  opts: { quiet?: boolean; force?: boolean; projectDir?: string; exeName?: string } = {},
 ): Promise<string> {
   // `flags.staticPlugins` binaries are NOT generic across apps (each one has
   // one specific app's plugins compiled in), so they cannot share
@@ -148,7 +148,7 @@ export async function ensureRuntime(
   // cache key (backend + feature list, implicitly, via cargo's own
   // incremental state) does not capture at all. A cached binary from an
   // earlier plugin set on this same app would otherwise be silently reused.
-  const existing = opts.force ? null : resolveBackendBinary(backend, opts.projectDir);
+  const existing = opts.force ? null : resolveBackendBinary(backend, opts.projectDir, opts.exeName);
   if (existing) return existing;
   // The shared path is still where CARGO itself writes and caches — that
   // part is unaffected either way, and reusing it keeps cargo's own
@@ -157,7 +157,25 @@ export async function ensureRuntime(
   // path is copied into the app's own dist/ (see below) and that copy,
   // never the shared path, is the answer callers get and everything
   // downstream (bundle.command.ts) resolves against.
-  const exe = runtimeBinaryPath(backend);
+  //
+  // Cargo profile: `flags.staticPlugins` is the same signal build.command.ts
+  // already sets from `--release` — this is a SHIPPING build, so it uses the
+  // workspace's `dist` profile (opt-level "z", fat LTO, one codegen unit,
+  // stripped — see .tools/orchestration/bazel/cargo/Cargo.toml's own
+  // comment: "what //products/carbon:mini and the release workflow use, and
+  // what every published benchmark number describes"), not `release`
+  // (opt-level 3, thin LTO, unstripped — tuned for fast local iteration, not
+  // for what ships). Measured on carbon-mini with no optional features: the
+  // `release` profile produced a 15.7 MiB binary; `dist` produced 10.5 MiB
+  // for the exact same code — a 33% difference from the profile alone, and
+  // this function shipped `release` unconditionally until now. `run`/`dev`
+  // never set `staticPlugins`, so their `ensureRuntime` calls are completely
+  // unaffected — they keep using `release` for fast rebuilds, same as
+  // before. `BINARY_PROFILES` (used by `resolveBackendBinary`'s shared-path
+  // fallback) already searches "dist" before "release", so this fix needed
+  // no change on the resolution side — only the build side was ever wrong.
+  const cargoProfile = flags.staticPlugins ? "dist" : "release";
+  const exe = runtimeBinaryPath(backend, cargoProfile);
 
   logger.step(`compiling native runtime for ${backend} (first run only — this can take a few minutes)…`);
   const dir = runtimeCargoDir(backend);
@@ -165,7 +183,7 @@ export async function ensureRuntime(
   // features (see carbon/runtime/Cargo.toml) — both --bin and --features
   // must be explicit, or cargo has no runnable target to select.
   const cargoArgs = [
-    "build", "--release",
+    "build", "--profile", cargoProfile,
     "--bin", `carbon-${backend}`,
     "--no-default-features",
     "--features", backendCargoFeatures(backend, flags),
@@ -234,8 +252,11 @@ export async function ensureRuntime(
   if (flags.staticPlugins) {
     // Durable, per-app record of what THIS app ships — see distBinaryPath's
     // doc comment. Copied (not moved): the shared path stays intact as
-    // cargo's own build/cache location for the next invocation.
-    const dist = distBinaryPath(opts.projectDir!, backend);
+    // cargo's own build/cache location for the next invocation. Named
+    // after `opts.exeName` (the app's own `[app] name`, sanitized by
+    // distBinaryPath) when given, so what a user finds in dist/ isn't
+    // stuck reading `carbon-mini.exe` regardless of what they're building.
+    const dist = distBinaryPath(opts.projectDir!, backend, opts.exeName);
     mkdirSync(join(opts.projectDir!, "dist"), { recursive: true });
     copyFileSync(exe, dist);
     return dist;
