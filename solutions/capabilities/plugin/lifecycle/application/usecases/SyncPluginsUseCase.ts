@@ -33,6 +33,11 @@ import { readAppManifest } from "../../infrastructure/AppManifestCodec.ts";
 import { hostArchName, hostExt, hostOsName } from "../../domain/value-objects/NativeTarget.ts";
 import { ensureZig } from "../../infrastructure/ZigToolchain.ts";
 import { hasDevSigningKey, signLocalPluginArtifact } from "../../infrastructure/PluginSigner.ts";
+import {
+  computePluginBuildKey,
+  readPluginBuildCache,
+  writePluginBuildCache,
+} from "../../infrastructure/PluginBuildCache.ts";
 import type { PluginWorkspace } from "../ports/PluginWorkspace.ts";
 import type { AddStandardPluginUseCase } from "./AddStandardPluginUseCase.ts";
 
@@ -81,12 +86,34 @@ export class SyncPluginsUseCase {
     if (!this.workspace.exists(join(carbonDir, "build.zig"))) return { staged: [] };
 
     const zig = await this.resolveZig(logger);
-    const args = ["build", "--prefix", "."];
-    if (opts?.release) args.push("-Drelease=true");
 
-    const { code } = await this.processes.run(zig, args, { cwd: carbonDir, stdio: "inherit" });
-    if (code !== 0) {
-      throw new Error(`carbon/build.zig failed to build — exit code ${code}. See the compiler output above.`);
+    // Skip the `zig build` subprocess entirely when nothing that affects a
+    // local plugin's output has changed since the last successful build —
+    // see PluginBuildCache.ts's header comment for why this matters: the
+    // process-spawn + build-graph re-evaluation overhead (~600-800ms,
+    // measured) is paid even when zig itself has nothing to do, on EVERY
+    // `carbon run`/`carbon dev` for any app with a local plugin. Only trusted
+    // when every enabled local plugin's artifact is still actually on disk —
+    // a `--clean` or manual `carbon/bin/` wipe must still force a rebuild
+    // even if the cache file alone (same directory) somehow survived.
+    const release = !!opts?.release;
+    const localEntries = [...manifest.plugins].filter(([, e]) => e.enabled && e.source === "local");
+    const localArtifactsPresent = localEntries.every(
+      ([name]) => this.workspace.exists(join(binDir, `${name}.${ext}`)),
+    );
+    const buildKey = computePluginBuildKey(carbonDir, zig, release);
+    const cached = readPluginBuildCache(binDir);
+    const cacheHit = localArtifactsPresent && cached?.key === buildKey;
+
+    if (!cacheHit) {
+      const args = ["build", "--prefix", "."];
+      if (release) args.push("-Drelease=true");
+
+      const { code } = await this.processes.run(zig, args, { cwd: carbonDir, stdio: "inherit" });
+      if (code !== 0) {
+        throw new Error(`carbon/build.zig failed to build — exit code ${code}. See the compiler output above.`);
+      }
+      writePluginBuildCache(binDir, buildKey);
     }
 
     // 3. Sign every LOCAL plugin's just-built RELEASE artifact with this
@@ -98,16 +125,19 @@ export class SyncPluginsUseCase {
     //    signing them here would be wasted work on every keystroke-driven
     //    rebuild. Vendor plugins are Carbon-signed already, at fetch time
     //    (AddStandardPluginUseCase) — untouched here.
-    if (opts?.release) {
-      const localNames = [...manifest.plugins].filter(([, e]) => e.enabled && e.source === "local");
-      if (localNames.length > 0 && !hasDevSigningKey()) {
+    //
+    //    Skipped entirely on a cache hit: the artifact's bytes are unchanged
+    //    from the build that produced its still-on-disk .sig file, so
+    //    re-signing would just recompute the same signature.
+    if (!cacheHit && opts?.release) {
+      if (localEntries.length > 0 && !hasDevSigningKey()) {
         logger.warn(
-          `no dev-signing key found — the local plugin(s) built above (${localNames.map(([n]) => n).join(", ")}) ` +
+          `no dev-signing key found — the local plugin(s) built above (${localEntries.map(([n]) => n).join(", ")}) ` +
             `will fail to load under \`carbon run\`. Run \`carbon dev-key generate\` once, then add the printed ` +
             `public key to this project's carbon.toml under [dev-signing].`,
         );
       } else {
-        for (const [name] of localNames) {
+        for (const [name] of localEntries) {
           const artifactPath = join(binDir, `${name}.${ext}`);
           if (!this.workspace.exists(artifactPath)) continue;
           await signLocalPluginArtifact(artifactPath, logger);
