@@ -50,6 +50,9 @@ interface Args {
   /** Show every internal step (install/build/runtime output, timing
    *  breakdowns) instead of the collapsed status line + ready banner. */
   verbose: boolean;
+  /** Forward CARBON_MINI_DEBUG=1 to the runtime — see run.command.ts's
+   *  matching flag for what it unlocks. */
+  debug: boolean;
 }
 
 function parseArgs(rest: string[]): Args {
@@ -58,6 +61,7 @@ function parseArgs(rest: string[]): Args {
   let debounce = 50;
   let noBabelCache = false;
   let verbose = false;
+  let debug = false;
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i];
     if (a === "--runtime" || a === "-r") runtimeOverride = rest[++i];
@@ -65,11 +69,12 @@ function parseArgs(rest: string[]): Args {
     else if (a === "--debounce") debounce = Number(rest[++i]);
     else if (a === "--no-babel-cache") noBabelCache = true;
     else if (a === "--verbose" || a === "-V") verbose = true;
+    else if (a === "--debug" || a === "-d") debug = true;
     // Resolve to absolute: a relative dir (`carbon dev .`) otherwise reaches
     // Bun.build plugins as a relative path, which Bun rejects.
     else if (!a.startsWith("-")) projectDir = resolve(a);
   }
-  return { projectDir, runtimeOverride, debounce, noBabelCache, verbose };
+  return { projectDir, runtimeOverride, debounce, noBabelCache, verbose, debug };
 }
 
 /**
@@ -95,7 +100,7 @@ function watchTree(
 }
 
 export async function devCommand(rest: string[]): Promise<number> {
-  const { projectDir, runtimeOverride, debounce, noBabelCache, verbose } = parseArgs(rest);
+  const { projectDir, runtimeOverride, debounce, noBabelCache, verbose, debug } = parseArgs(rest);
 
   const cfg = loadCarbonConfig(projectDir);
   const backend = runtimeOverride ?? cfg.runtime.backend;
@@ -111,6 +116,11 @@ export async function devCommand(rest: string[]): Promise<number> {
   // opts back into the full breakdown (and leaves any caller-set env alone).
   if (!verbose && process.env["CARBON_NO_TIMING"] === undefined) {
     process.env["CARBON_NO_TIMING"] = "1";
+  }
+
+  // --debug: see the matching block in run.command.ts.
+  if (debug && process.env["CARBON_MINI_DEBUG"] === undefined) {
+    process.env["CARBON_MINI_DEBUG"] = "1";
   }
 
   printBanner("dev server");
@@ -401,8 +411,9 @@ export class DevCommand extends Command {
     flags: [
       { name: "runtime", short: "r", placeholder: "<name>", description: "Override the carbon.toml [runtime] backend" },
       { name: "verbose", short: "V", boolean: true, description: "Show every install/build/runtime step instead of the collapsed status line" },
+      { name: "debug", short: "d", boolean: true, description: "Show the runtime's console.log/info/debug output and plugin-load trace (sets CARBON_MINI_DEBUG=1)" },
     ],
-    examples: ["carbon dev", "carbon dev ./my-app", "carbon dev --verbose"],
+    examples: ["carbon dev", "carbon dev ./my-app", "carbon dev --verbose", "carbon dev --debug"],
   };
 
   execute(ctx: CommandContext): Promise<ExitCode> {

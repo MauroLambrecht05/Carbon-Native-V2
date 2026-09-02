@@ -22,6 +22,7 @@ interface Args {
   noBabelCache: boolean;
   verbose: boolean;
   clean: boolean;
+  debug: boolean;
 }
 
 function parseArgs(rest: string[]): Args {
@@ -31,6 +32,7 @@ function parseArgs(rest: string[]): Args {
   let noBabelCache = false;
   let verbose = false;
   let clean = false;
+  let debug = false;
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i];
     if (a === "--runtime" || a === "-r") {
@@ -45,6 +47,8 @@ function parseArgs(rest: string[]): Args {
       verbose = true;
     } else if (a === "--clean") {
       clean = true;
+    } else if (a === "--debug" || a === "-d") {
+      debug = true;
     } else if (!a.startsWith("-")) {
       // Resolve to an absolute path: a relative dir (e.g. `carbon run .`)
       // otherwise flows into Bun.build plugins as a relative `path`, which
@@ -52,7 +56,7 @@ function parseArgs(rest: string[]): Args {
       projectDir = resolve(a);
     }
   }
-  return { projectDir, runtimeOverride, force, noBabelCache, verbose, clean };
+  return { projectDir, runtimeOverride, force, noBabelCache, verbose, clean, debug };
 }
 
 /**
@@ -83,7 +87,7 @@ function cleanAll(projectDir: string): void {
 }
 
 export async function runCommand(rest: string[]): Promise<number> {
-  const { projectDir, runtimeOverride, force, noBabelCache, verbose, clean } = parseArgs(rest);
+  const { projectDir, runtimeOverride, force, noBabelCache, verbose, clean, debug } = parseArgs(rest);
 
   // Before loadCarbonConfig: carbon.toml itself is never touched by clean,
   // but node_modules/dist/carbon/bin need to be gone before anything below
@@ -101,6 +105,19 @@ export async function runCommand(rest: string[]): Promise<number> {
   // Quiet by default — see the matching block in dev.command.ts.
   if (!verbose && process.env["CARBON_NO_TIMING"] === undefined) {
     process.env["CARBON_NO_TIMING"] = "1";
+  }
+
+  // --debug: the runtime's own console.log/info/debug output (scene.rs's
+  // console shim) and its plugin-loader trace (plugin_loader.rs) are both
+  // gated behind CARBON_MINI_DEBUG so a normal run stays quiet — apps tend
+  // to log a lot. console.warn/console.error and plugin load FAILURES
+  // already print unconditionally, so --debug only adds the routine trace,
+  // not the errors this command's own error handling already surfaces.
+  // Forwarded via process.env rather than a spawn `env:` override so it
+  // survives being inherited (start() defaults to inheriting the parent's
+  // env) without disturbing anything else already inherited.
+  if (debug && process.env["CARBON_MINI_DEBUG"] === undefined) {
+    process.env["CARBON_MINI_DEBUG"] = "1";
   }
 
   printBanner("run");
@@ -142,7 +159,18 @@ export async function runCommand(rest: string[]): Promise<number> {
       updater: cfg.updater?.enabled,
       network: cfg.runtime.network,
       svg: cfg.runtime.svg,
-    }, { quiet: !verbose });
+    }, {
+      quiet: !verbose,
+      // `force` used to reach buildProject's JS bundle cache only —
+      // ensureRuntime's own reuse check (any existing binary at
+      // TARGET_DIR/{dist,release}/carbon-<backend>, regardless of how old)
+      // ignored it entirely. So editing the Rust runtime itself and running
+      // `carbon run --force` still silently launched yesterday's binary —
+      // no error, no staleness warning, just old behavior with no visible
+      // sign anything was skipped. `--force`/`--no-cache` says "rebuild
+      // everything," and the compiled runtime is part of "everything."
+      force,
+    });
     // Huge delta here means cargo just compiled the runtime from scratch —
     // ensureRuntime's status text says so right before that happens ("first
     // run only"). Near-zero means the binary already existed.
@@ -301,8 +329,9 @@ export class RunCommand extends Command {
       { name: "runtime", short: "r", placeholder: "<name>", description: "Override the carbon.toml [runtime] backend" },
       { name: "verbose", short: "V", boolean: true, description: "Show every install/build/runtime step instead of the collapsed status line" },
       { name: "clean", boolean: true, description: "Wipe node_modules, the build cache, and staged plugins first, then reinstall/rebuild everything from scratch" },
+      { name: "debug", short: "d", boolean: true, description: "Show the runtime's console.log/info/debug output and plugin-load trace (sets CARBON_MINI_DEBUG=1). console.warn/error and load failures already print without this" },
     ],
-    examples: ["carbon run", "carbon run --runtime mini", "carbon run --verbose", "carbon run --clean"],
+    examples: ["carbon run", "carbon run --runtime mini", "carbon run --verbose", "carbon run --clean", "carbon run --debug"],
   };
 
   execute(ctx: CommandContext): Promise<ExitCode> {
