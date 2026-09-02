@@ -742,6 +742,81 @@ impl Scene {
         walk(self, self.root, target, 0.0, 0.0)
     }
 
+    /// Ancestor chain for `target`, DEEPEST-FIRST (`target` itself, then its
+    /// parent, ..., ending at `root`). Empty if `target` isn't in the tree.
+    /// `Node` has no parent pointer — children-only, same shape
+    /// `create_node`/`insert_node` already build — so this walks down from
+    /// the root once, recording the path taken, and returns it reversed the
+    /// moment `target` is found. O(n) worst case, same cost class as
+    /// `dump_tree`'s full scan; callers are event dispatch (bubbling one
+    /// click) and `scroll_into_view` (once per call), neither a per-frame
+    /// hot path.
+    pub fn ancestor_chain(&self, target: u32) -> Vec<u32> {
+        fn walk(nodes: &HashMap<u32, Node>, id: u32, target: u32, path: &mut Vec<u32>) -> bool {
+            path.push(id);
+            if id == target {
+                return true;
+            }
+            if let Some(n) = nodes.get(&id) {
+                for &cid in &n.children {
+                    if walk(nodes, cid, target, path) {
+                        return true;
+                    }
+                }
+            }
+            path.pop();
+            false
+        }
+        let mut path = Vec::new();
+        if self.root != 0 && walk(&self.nodes, self.root, target, &mut path) {
+            path.reverse();
+            path
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Scroll the nearest scrollable ancestor of `id` (walking up via
+    /// `ancestor_chain`) just enough to bring `id`'s box into that
+    /// ancestor's visible band — the native side of `ref.current.scrollIntoView()`.
+    /// No smooth animation, no block/inline alignment options: own-value
+    /// only, the same simplification this engine already accepts for
+    /// scroll-snap and sticky. A no-op if `id` has no scrollable ancestor or
+    /// is already visible. Only the nearest scrollport is considered — an
+    /// ancestor scrollport further up isn't adjusted, matching the
+    /// direct-parent-only simplification `sticky`/`absolute` already make.
+    pub fn scroll_into_view(&mut self, id: u32) {
+        let chain = self.ancestor_chain(id);
+        let scrollport = chain.iter().skip(1).find(|&&aid| {
+            self.nodes
+                .get(&aid)
+                .map(|n| n.props.overflow_y)
+                .unwrap_or(false)
+        });
+        let Some(&scrollport) = scrollport else {
+            return;
+        };
+        let (Some((_, target_y, _, target_h)), Some((_, port_y, _, port_h))) =
+            (self.absolute_box(id), self.absolute_box(scrollport))
+        else {
+            return;
+        };
+        // absolute_box is scroll-independent (reads raw taffy layout), so
+        // both boxes are already in the same unscrolled content space —
+        // target's offset within the scrollport's own content is just the
+        // difference of the two.
+        let rel_y = target_y - port_y;
+        let cur = self.scroll_y(scrollport);
+        let new_scroll = if rel_y < cur {
+            rel_y
+        } else if rel_y + target_h > cur + port_h {
+            rel_y + target_h - port_h
+        } else {
+            return; // already visible
+        };
+        self.set_scroll_y(scrollport, new_scroll);
+    }
+
     /// Expand `dirty_rect` to cover the given window-coord rect. Used by
     /// scroll / hover / focus paths to communicate damage scope to the
     /// paint loop without overpainting the entire window.

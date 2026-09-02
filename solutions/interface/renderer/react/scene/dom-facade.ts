@@ -260,10 +260,26 @@ export function decorateAsDomNode(node: CmNode, type: string): void {
   Object.defineProperty(node, "clientHeight", { get: () => measure().h, configurable: true });
   Object.defineProperty(node, "scrollWidth",  { get: () => measure().w, configurable: true });
   Object.defineProperty(node, "scrollHeight", { get: () => measure().h, configurable: true });
-  (node as any).focus = () => {};
-  (node as any).blur = () => {};
-  (node as any).click = () => {};
-  (node as any).scrollIntoView = () => {};
+  // Real, not shaped no-ops: the native focus/click/scrollIntoView paths
+  // already exist (they're what a real pointer event already drives) —
+  // these just make them reachable imperatively, which refs need for
+  // autofocus-on-mount, refocus-after-validation-error, and
+  // programmatic "scroll the invalid field into view" (all common
+  // React patterns that previously did nothing at all).
+  (node as any).focus = () => {
+    try { (globalThis as any).__cm_set_focus?.(node.id); } catch { /* pre-ready */ }
+  };
+  (node as any).blur = () => {
+    try { (globalThis as any).__cm_set_focus?.(-1); } catch { /* pre-ready */ }
+  };
+  (node as any).click = () => {
+    // Same dispatcher a real pointer-up already calls into (events.ts) —
+    // calling it directly in-process needs no round-trip through Rust.
+    try { (globalThis as any).__cm_dispatch_click?.(node.id); } catch { /* pre-ready */ }
+  };
+  (node as any).scrollIntoView = () => {
+    try { (globalThis as any).__cm_scroll_into_view?.(node.id); } catch { /* pre-ready */ }
+  };
   (node as any).querySelector = () => null;
   (node as any).querySelectorAll = () => [];
   Object.defineProperty(node, "parentNode", {

@@ -99,6 +99,8 @@ __cm_remove_node	carbon/runtime/mini.rs,carbon/runtime/blitz.rs
 __cm_request_paint	carbon/runtime/mini.rs,carbon/runtime/blitz.rs
 __cm_reset_paint_props	carbon/runtime/mini.rs,carbon/runtime/blitz.rs
 __cm_run_deferred_mount	carbon/runtime/mini.rs
+__cm_scroll_into_view	carbon/runtime/mini.rs
+__cm_set_focus	carbon/runtime/mini.rs
 __cm_set_prop	carbon/runtime/mini.rs,carbon/runtime/blitz.rs
 __cm_set_root	carbon/runtime/mini.rs,carbon/runtime/blitz.rs
 __cm_set_scroll_y	carbon/runtime/mini.rs,carbon/runtime/blitz.rs

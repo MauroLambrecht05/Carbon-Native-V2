@@ -298,6 +298,7 @@ pub fn paint_scene(scene: &Scene, pixmap: &mut Pixmap, scale: f32, text_engine: 
             false,
             false,
             false,
+            false,
         );
     }
     psub("nodes_painted", pt0);
@@ -397,6 +398,12 @@ fn paint_node(
     // the fully-rendered (opacity- and filter-applied) subtree against
     // the backdrop, so it has to be the outermost of the three.
     ignore_blend: bool,
+    // Same technique for real (path-based) `overflow:hidden` clipping on a
+    // rounded box, checked LAST of the four group effects so clip wraps
+    // the innermost — content is clipped to the curve, then that already-
+    // clipped result is what blend/opacity/filter (checked above, so
+    // outside this in the composite order) operate on.
+    ignore_clip: bool,
 ) {
     let node = match scene.nodes.get(&id) {
         Some(n) => n,
@@ -443,6 +450,7 @@ fn paint_node(
                     ignore_opacity,
                     ignore_filter,
                     true,
+                    ignore_clip,
                 );
                 let mut pp = PixmapPaint::default();
                 pp.blend_mode = mode;
@@ -481,6 +489,7 @@ fn paint_node(
                     true,
                     ignore_filter,
                     ignore_blend,
+                    ignore_clip,
                 );
                 let mut pp = PixmapPaint::default();
                 pp.opacity = op.clamp(0.0, 1.0);
@@ -518,6 +527,7 @@ fn paint_node(
                     ignore_opacity,
                     true,
                     ignore_blend,
+                    ignore_clip,
                 );
                 apply_filters(&mut layer, &filter_list.0, text_engine.scale);
                 pixmap.draw_pixmap(
@@ -532,6 +542,80 @@ fn paint_node(
             return;
         }
     }
+
+    // ── overflow:hidden + border-radius (group, real clip) ─────────────
+    // Same offscreen-layer technique as blend/opacity/filter above: render
+    // this node + subtree into a full-frame layer, then multiply it by a
+    // rounded-rect alpha mask (DestinationIn, the same technique
+    // `paint_conic_background` already uses for its own border-radius
+    // clip) before compositing back. Without this, overflow-hidden
+    // clipping below (`clip_top`/`clip_bottom`/`clip_left`/`clip_right`)
+    // is AABB-only — correct for a square box, but a rounded-corner
+    // container showed SQUARE corners for any content straddling the
+    // curve (most visibly mid-scroll), since nothing clipped to the
+    // actual curved edge. Gated on both overflow_y AND a non-zero radius
+    // so the (much cheaper) AABB-only path still handles the common
+    // square-corner case at zero extra cost. Doesn't account for the
+    // node's own `transform` — same accepted simplification as hit-testing
+    // and text under transform elsewhere in this file; narrow edge case,
+    // and strictly better than no real clip at all.
+    if !ignore_clip && node.props.overflow_y && node.props.border_radius > 0.0 {
+        let cx = parent_x + layout.location.x;
+        let cy = parent_y + layout.location.y;
+        let cw = layout.size.width;
+        let ch = layout.size.height;
+        if cw > 0.0 && ch > 0.0 {
+            if let Some(mut layer) = Pixmap::new(pixmap.width(), pixmap.height()) {
+                paint_node(
+                    scene,
+                    id,
+                    parent_x,
+                    parent_y,
+                    inherited_color,
+                    inherited_font_size,
+                    inherited_mono,
+                    inherited_family.clone(),
+                    inherited_weight,
+                    clip_top,
+                    clip_bottom,
+                    clip_left,
+                    clip_right,
+                    parent_transform,
+                    &mut layer,
+                    text_engine,
+                    ignore_opacity,
+                    ignore_filter,
+                    ignore_blend,
+                    true,
+                );
+                if let Some(path) = rounded_rect_path_shaped(
+                    cx,
+                    cy,
+                    cw,
+                    ch,
+                    node.props.border_radius,
+                    node.props.corner_shape,
+                ) {
+                    use tiny_skia::BlendMode;
+                    let mut mp = Paint::default();
+                    mp.set_color_rgba8(255, 255, 255, 255);
+                    mp.blend_mode = BlendMode::DestinationIn;
+                    mp.anti_alias = true;
+                    layer.fill_path(&path, &mp, FillRule::Winding, Transform::identity(), None);
+                }
+                pixmap.draw_pixmap(
+                    0,
+                    0,
+                    layer.as_ref(),
+                    &PixmapPaint::default(),
+                    Transform::identity(),
+                    None,
+                );
+            }
+            return;
+        }
+    }
+
     let x = parent_x + layout.location.x;
     let y = parent_y + layout.location.y;
     let w = layout.size.width;
@@ -1876,6 +1960,7 @@ fn paint_node(
             node_transform,
             pixmap,
             text_engine,
+            false,
             false,
             false,
             false,

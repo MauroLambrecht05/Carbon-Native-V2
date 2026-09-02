@@ -226,6 +226,8 @@ functions = [
   "__cm_request_paint",
   "__cm_reset_paint_props",
   "__cm_run_deferred_mount",
+  "__cm_scroll_into_view",
+  "__cm_set_focus",
   "__cm_set_prop",
   "__cm_set_root",
   "__cm_set_scroll_y",

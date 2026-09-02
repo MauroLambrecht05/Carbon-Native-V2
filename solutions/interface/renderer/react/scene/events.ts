@@ -56,14 +56,52 @@ export const CLICKABLE_EVENTS = new Set(["pointerdown", "pointerup", "mousedown"
 
 export interface ClickEvent {
   id: number;
+  target: CmNode | null;
+  currentTarget: CmNode | null;
+  bubbles: boolean;
+  cancelable: boolean;
+  defaultPrevented: boolean;
+  preventDefault(): void;
+  stopPropagation(): void;
+  stopImmediatePropagation(): void;
 }
 
 // Rust hit-test path → eval → this dispatcher → React click handler.
 // The setter trap in flush-sync wraps the function we assign here in
 // `flushSync` + `__cm_request_paint()`, so we just invoke the handler
 // — committed state and paint both happen automatically.
-(globalThis as any).__cm_dispatch_click = (id: number) => {
-  clickHandlers.get(id)?.({ id });
+//
+// `chain` is the hit node's id followed by every ancestor up to the
+// root (Rust's `Scene::ancestor_chain`, deepest-first) — real DOM
+// bubbling. Previously this only ever received the single hit id, so
+// `<div onClick={A}><button onClick={B}/></div>` fired B alone; A
+// (a container-level delegated handler, a common React pattern) never
+// ran. A bare number is still accepted for direct in-process callers
+// (dom-facade.ts's `ref.current.click()`) that have no ancestor chain
+// to walk — those don't bubble, matching a synthetic single-node click.
+(globalThis as any).__cm_dispatch_click = (chain: number | number[]) => {
+  const ids = Array.isArray(chain) ? chain : [chain];
+  if (ids.length === 0) return;
+  const target = nodeRegistry.get(ids[0]) ?? null;
+  let stopped = false;
+  for (const id of ids) {
+    if (stopped) break;
+    const handler = clickHandlers.get(id);
+    if (!handler) continue;
+    const event: ClickEvent = {
+      id,
+      target,
+      currentTarget: nodeRegistry.get(id) ?? null,
+      bubbles: true,
+      cancelable: true,
+      defaultPrevented: false,
+      preventDefault() { event.defaultPrevented = true; },
+      stopPropagation() { stopped = true; },
+      stopImmediatePropagation() { stopped = true; },
+    };
+    try { handler(event); }
+    catch (e) { (globalThis as any).console?.error?.("[react-mini] click handler threw:", e); }
+  }
 };
 
 // Rust input-edit path → eval → this dispatcher → React onChange. Builds
@@ -136,27 +174,51 @@ export interface ClickEvent {
     ev.nativeEvent = ev;
     return ev;
   };
+  // `cmIds` is the hit node's id followed by every ancestor up to the root
+  // (deepest-first) for down/up — real bubbling, same reasoning as
+  // `__cm_dispatch_click` above (Radix opens triggers on `onPointerDown`,
+  // so a delegated container-level listener needs this exactly as much as
+  // onClick does). `move` still only ever receives a single id (Rust's
+  // move-repeat path wasn't converted to a chain — high-frequency, lower
+  // stakes for the delegation pattern) — a bare number is accepted for
+  // that case and for any other single-id caller.
   g.__cm_dispatch_pointer = (
-    cmId: number, phase: string, x: number, y: number, button: number,
+    cmIds: number | number[], phase: string, x: number, y: number, button: number,
   ) => {
-    const handlers = eventHandlers.get(cmId);
-    if (handlers) {
-      const node = nodeRegistry.get(cmId) ?? null;
-      const types = phase === "down" ? ["pointerdown", "mousedown"]
-        : phase === "up" ? ["pointerup", "mouseup"]
-        : phase === "move" ? ["pointermove", "mousemove"]
-        : [];
-      for (const t of types) {
-        const fn = handlers.get(t);
-        if (typeof fn !== "function") continue;
-        try { fn(makePointerEvent(t, node, x, y, button)); }
-        catch (e) { (globalThis as any).console?.error?.("[react-mini] pointer handler threw:", e); }
+    const ids = Array.isArray(cmIds) ? cmIds : [cmIds];
+    const types = phase === "down" ? ["pointerdown", "mousedown"]
+      : phase === "up" ? ["pointerup", "mouseup"]
+      : phase === "move" ? ["pointermove", "mousemove"]
+      : [];
+    if (ids.length > 0 && types.length > 0) {
+      const target = nodeRegistry.get(ids[0]) ?? null;
+      let stopped = false;
+      outer: for (const id of ids) {
+        if (stopped) break;
+        const handlers = eventHandlers.get(id);
+        if (!handlers) continue;
+        const node = nodeRegistry.get(id) ?? null;
+        for (const t of types) {
+          const fn = handlers.get(t);
+          if (typeof fn !== "function") continue;
+          const ev = makePointerEvent(t, node, x, y, button);
+          ev.target = target;
+          const realStop = ev.stopPropagation;
+          const realStopImm = ev.stopImmediatePropagation;
+          ev.stopPropagation = () => { stopped = true; realStop(); };
+          ev.stopImmediatePropagation = () => { stopped = true; realStopImm(); };
+          try { fn(ev); }
+          catch (e) { (globalThis as any).console?.error?.("[react-mini] pointer handler threw:", e); }
+          if (stopped) break outer;
+        }
       }
     }
     // Chain to the DOM-shim dispatcher so its own nodes (xterm focus, portal
     // refs) still receive the press. No-ops for React ids it doesn't know.
-    if (typeof chainTo === "function") {
-      try { chainTo(cmId, phase, x, y, button); } catch { /* ignore */ }
+    // Uses the original (deepest) id only — the shim has its own,
+    // separate bubbling (node.ts's real capture/bubble dispatchEvent).
+    if (typeof chainTo === "function" && ids.length > 0) {
+      try { chainTo(ids[0], phase, x, y, button); } catch { /* ignore */ }
     }
   };
   g.__cm_dispatch_pointer.__cmIsPointerDispatch = true;

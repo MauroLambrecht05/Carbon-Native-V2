@@ -644,6 +644,53 @@ pub(crate) fn register_host_imports(
                 .map_err(|e| anyhow!("set __cm_layout_box: {e}"))?;
         }
 
+        // __cm_set_focus(id) — imperative focus, e.g. `ref.current.focus()`
+        // on the JS side (dom-facade.ts's CmNode wrapper). Mirrors exactly
+        // what a real click already does (see run_loop.rs's
+        // `s.focused = Some(node_id)`), just reachable without a physical
+        // pointer event. `id <= 0` blurs, so this one import covers
+        // `ref.current.blur()` too.
+        {
+            let scene = scene.clone();
+            let proxy = proxy.clone();
+            let f = Function::new(ctx.clone(), move |id: i64| -> Result<(), rquickjs::Error> {
+                let mut s = scene.lock().unwrap_or_else(|e| e.into_inner());
+                s.focused = if id > 0 { Some(id as u32) } else { None };
+                s.repaint_dirty = true;
+                let _ = proxy.send_event(UserEvent::RequestPaint);
+                Ok(())
+            })
+            .map_err(|e| anyhow!("set_focus: {e}"))?;
+            global
+                .set("__cm_set_focus", f)
+                .map_err(|e| anyhow!("set __cm_set_focus: {e}"))?;
+        }
+
+        // __cm_scroll_into_view(id) — native side of
+        // `ref.current.scrollIntoView()`. Triggers a synchronous layout
+        // pass first (same reasoning as __cm_set_scroll_y: content height
+        // must be current before computing where "visible" even is).
+        {
+            let scene = scene.clone();
+            let text_engine = text_engine.clone();
+            let proxy = proxy.clone();
+            let f = Function::new(ctx.clone(), move |id: u32| -> Result<(), rquickjs::Error> {
+                let mut s = scene.lock().unwrap_or_else(|e| e.into_inner());
+                let (w, h) = HOST_WINDOW_SIZE
+                    .lock()
+                    .map(|m| *m)
+                    .unwrap_or((1280.0, 800.0));
+                s.compute_layout(w, h, &mut text_engine.borrow_mut());
+                s.scroll_into_view(id);
+                let _ = proxy.send_event(UserEvent::RequestPaint);
+                Ok(())
+            })
+            .map_err(|e| anyhow!("scroll_into_view: {e}"))?;
+            global
+                .set("__cm_scroll_into_view", f)
+                .map_err(|e| anyhow!("set __cm_scroll_into_view: {e}"))?;
+        }
+
         // __cm_dump_tree() — DEBUG: print every node's id, tag, computed
         // box, parent, and a few key style props to stderr. Used during
         // bring-up to see why some elements render blank.
