@@ -164,6 +164,44 @@ describe("auth", () => {
   });
 });
 
+describe("GET /v1/auth/verify", () => {
+  // Exercises the SSO endpoint another product (carbon-database, carbon-
+  // registry) calls to accept the SAME token this control plane issued —
+  // see the route's own comment in routes.ts for why this exists.
+  test("an org token verifies as org scope, with the right orgId", async () => {
+    const { server, authed, orgId } = await harness();
+    const res = await authed("/v1/auth/verify");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { orgId: string; scope: string };
+    expect(body.orgId).toBe(orgId);
+    expect(body.scope).toBe("org");
+    server.stop(true);
+  });
+
+  test("a worker token verifies as worker scope", async () => {
+    const { server, asWorker } = await harness();
+    const res = await asWorker("/v1/auth/verify");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { scope: string };
+    expect(body.scope).toBe("worker");
+    server.stop(true);
+  });
+
+  test("no token is 401", async () => {
+    const { server, base } = await harness();
+    const res = await fetch(`${base}/v1/auth/verify`);
+    expect(res.status).toBe(401);
+    server.stop(true);
+  });
+
+  test("an invalid token is 401", async () => {
+    const { server, base } = await harness();
+    const res = await fetch(`${base}/v1/auth/verify`, { headers: { authorization: "Bearer nope" } });
+    expect(res.status).toBe(401);
+    server.stop(true);
+  });
+});
+
 describe("POST /v1/builds", () => {
   test("creates a queued build, owned by the token's org", async () => {
     const { server, authed } = await harness();
@@ -438,6 +476,62 @@ describe("POST /v1/billing/webhook", () => {
 
     const usage = (await (await authed("/v1/usage")).json()) as { includedMinutes: number };
     expect(usage.includedMinutes).toBe(60);
+    server.stop(true);
+  });
+
+  test("build logs and artifacts endpoints", async () => {
+    const { server, authed, asWorker } = await harness();
+
+    // Create a build
+    const buildRes = await authed("/v1/builds", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        repoUrl: "https://github.com/example/app.git",
+        commitSha: "a".repeat(40),
+        targets: ["deb"],
+      }),
+    });
+    const build = (await buildRes.json()) as { id: string };
+
+    // Append log from worker
+    const logRes = await asWorker(`/v1/builds/${build.id}/logs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ line: "Compiling Zig C-ABI extension..." }),
+    });
+    expect(logRes.status).toBe(200);
+
+    // Read logs from org token
+    const getLogsRes = await authed(`/v1/builds/${build.id}/logs`);
+    expect(getLogsRes.status).toBe(200);
+    const logs = (await getLogsRes.json()) as any[];
+    expect(logs.length).toBe(1);
+    expect(logs[0].line).toBe("Compiling Zig C-ABI extension...");
+
+    // Register artifact from worker
+    const artRes = await asWorker(`/v1/builds/${build.id}/artifacts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "app_1.0.0_amd64.deb",
+        target: "deb",
+        sizeBytes: 15420000,
+        downloadUrl: "https://storage.carbon.dev/builds/app_1.0.0_amd64.deb",
+        checksumSha256: "abc123sha",
+      }),
+    });
+    expect(artRes.status).toBe(201);
+    const art = (await artRes.json()) as any;
+    expect(art.name).toBe("app_1.0.0_amd64.deb");
+
+    // Read artifacts from org token
+    const getArtRes = await authed(`/v1/builds/${build.id}/artifacts`);
+    expect(getArtRes.status).toBe(200);
+    const artifacts = (await getArtRes.json()) as any[];
+    expect(artifacts.length).toBe(1);
+    expect(artifacts[0].name).toBe("app_1.0.0_amd64.deb");
+
     server.stop(true);
   });
 });

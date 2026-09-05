@@ -223,12 +223,29 @@ function BuildList({ token, refreshKey, onSelect }: { token: string; refreshKey:
 function StatusLookup({ token, selectedId }: { token: string; selectedId: string | null }) {
   const [buildId, setBuildId] = useState("");
   const [result, setResult] = useState<string | null>(null);
+  const [logs, setLogs] = useState<{ timestamp: string; stream: string; line: string }[]>([]);
+  const [artifacts, setArtifacts] = useState<{ name: string; target: string; sizeBytes: number; downloadUrl: string }[]>([]);
 
   async function lookup(id: string) {
     setResult("loading...");
+    setLogs([]);
+    setArtifacts([]);
     try {
-      const build = await apiFetch<BuildProps>(`/v1/builds/${encodeURIComponent(id.trim())}`, token);
+      const cleanId = encodeURIComponent(id.trim());
+      const build = await apiFetch<BuildProps>(`/v1/builds/${cleanId}`, token);
       setResult(JSON.stringify(build, null, 2));
+
+      // Fetch logs
+      try {
+        const buildLogs = await apiFetch<{ timestamp: string; stream: string; line: string }[]>(`/v1/builds/${cleanId}/logs`, token);
+        setLogs(buildLogs);
+      } catch {}
+
+      // Fetch artifacts
+      try {
+        const buildArtifacts = await apiFetch<{ name: string; target: string; sizeBytes: number; downloadUrl: string }[]>(`/v1/builds/${cleanId}/artifacts`, token);
+        setArtifacts(buildArtifacts);
+      } catch {}
     } catch (err) {
       setResult(err instanceof ApiError ? `${err.status}: ${err.message}` : String(err));
     }
@@ -245,12 +262,34 @@ function StatusLookup({ token, selectedId }: { token: string; selectedId: string
 
   return (
     <section>
-      <h2>Build status</h2>
+      <h2>Build status & details</h2>
       <form onSubmit={(e) => { e.preventDefault(); void lookup(buildId); }}>
         <input value={buildId} onChange={(e) => setBuildId(e.target.value)} placeholder="build id" required />
         <button type="submit">Check</button>
       </form>
-      {result && <pre style={{ background: "#f4f4f4", padding: "1rem", overflowX: "auto" }}>{result}</pre>}
+      {result && <pre style={{ background: "#f4f4f4", padding: "1rem", overflowX: "auto", borderRadius: "4px" }}>{result}</pre>}
+
+      {artifacts.length > 0 && (
+        <div style={{ marginTop: "1rem" }}>
+          <h3>📦 Build Artifacts</h3>
+          <ul>
+            {artifacts.map((a, i) => (
+              <li key={i}>
+                <a href={a.downloadUrl} target="_blank" rel="noopener noreferrer"><strong>{a.name}</strong></a> ({a.target}, {(a.sizeBytes / 1024 / 1024).toFixed(1)} MB)
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {logs.length > 0 && (
+        <div style={{ marginTop: "1rem" }}>
+          <h3>📋 Build Output & Compilation Logs</h3>
+          <pre style={{ background: "#0c0e12", color: "#38bdf8", padding: "1rem", overflowX: "auto", maxHeight: "250px", borderRadius: "6px", fontFamily: "monospace", fontSize: "12px" }}>
+            {logs.map((l) => `[${l.timestamp.slice(11, 19)}] ${l.line}`).join("\n")}
+          </pre>
+        </div>
+      )}
     </section>
   );
 }

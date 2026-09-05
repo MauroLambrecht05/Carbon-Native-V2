@@ -29,6 +29,7 @@ import {
   type PlanId,
   verifyStripeWebhookSignature,
 } from "@carbon/billing";
+import { BuildArtifactStore } from "../persistence/BuildArtifactStore.ts";
 
 export interface RouteDeps {
   readonly createBuild: CreateBuildUseCase;
@@ -124,6 +125,22 @@ export function buildRoutes(deps: RouteDeps) {
 
     "/dashboard.js": {
       GET: () => new Response(DASHBOARD_JS, { headers: { "content-type": "text/javascript" } }),
+    },
+
+    // Cross-product SSO: any other Carbon product/service (carbon-database,
+    // carbon-registry, ...) that wants to accept the SAME bearer token a
+    // developer got from THIS control plane's own signup flow calls this
+    // instead of keeping its own copy of organizations/api_tokens — one
+    // identity, owned here, everything else is a client of it. Same
+    // authenticate() helper every other route below uses, so the accept/
+    // reject behavior is identical to what carbon-cloud itself enforces —
+    // not a parallel, potentially-drifting auth path.
+    "/v1/auth/verify": {
+      GET: async (req: Bun.BunRequest) => {
+        const verified = await authenticate(req, deps.verifyToken, ["org", "worker"]);
+        if (verified instanceof Response) return verified;
+        return json({ orgId: verified.orgId, scope: verified.scope });
+      },
     },
 
     "/v1/orgs": {
@@ -254,6 +271,67 @@ export function buildRoutes(deps: RouteDeps) {
           }
 
           return json({ ok: true });
+        } catch (error) {
+          return errorResponse(error);
+        }
+      },
+    },
+
+    "/v1/builds/:id/logs": {
+      GET: async (req: Bun.BunRequest<"/v1/builds/:id/logs">) => {
+        const verified = await authenticate(req, deps.verifyToken, ["org", "worker"]);
+        if (verified instanceof Response) return verified;
+        try {
+          const logs = BuildArtifactStore.getInstance().getLogs(req.params.id);
+          return json(logs);
+        } catch (error) {
+          return errorResponse(error);
+        }
+      },
+      POST: async (req: Bun.BunRequest<"/v1/builds/:id/logs">) => {
+        const verified = await authenticate(req, deps.verifyToken, ["worker"]);
+        if (verified instanceof Response) return verified;
+        try {
+          const body = (await req.json()) as { line: string; stream?: "stdout" | "stderr" };
+          BuildArtifactStore.getInstance().appendLog(req.params.id, body.line, body.stream);
+          return json({ ok: true });
+        } catch (error) {
+          return errorResponse(error);
+        }
+      },
+    },
+
+    "/v1/builds/:id/artifacts": {
+      GET: async (req: Bun.BunRequest<"/v1/builds/:id/artifacts">) => {
+        const verified = await authenticate(req, deps.verifyToken, ["org", "worker"]);
+        if (verified instanceof Response) return verified;
+        try {
+          const artifacts = BuildArtifactStore.getInstance().getArtifacts(req.params.id);
+          return json(artifacts);
+        } catch (error) {
+          return errorResponse(error);
+        }
+      },
+      POST: async (req: Bun.BunRequest<"/v1/builds/:id/artifacts">) => {
+        const verified = await authenticate(req, deps.verifyToken, ["worker"]);
+        if (verified instanceof Response) return verified;
+        try {
+          const body = (await req.json()) as {
+            name: string;
+            target: string;
+            sizeBytes: number;
+            downloadUrl: string;
+            checksumSha256?: string;
+          };
+          const artifact = BuildArtifactStore.getInstance().registerArtifact(req.params.id, {
+            buildId: req.params.id,
+            name: body.name,
+            target: body.target,
+            sizeBytes: body.sizeBytes,
+            downloadUrl: body.downloadUrl,
+            checksumSha256: body.checksumSha256,
+          });
+          return json(artifact, 201);
         } catch (error) {
           return errorResponse(error);
         }
