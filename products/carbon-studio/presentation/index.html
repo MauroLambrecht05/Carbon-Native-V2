@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Carbon Studio — Visual Desktop App Builder & Playground</title>
+  <style>
+    :root {
+      --bg-base: #0a0b0e;
+      --bg-surface: #12141b;
+      --bg-panel: #171a23;
+      --border: #262b3a;
+      --border-focus: #3d455c;
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --brand: #00e599;
+      --brand-glow: rgba(0, 229, 153, 0.2);
+      --accent-blue: #38bdf8;
+      --accent-purple: #c084fc;
+      --danger: #f87171;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg-base);
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* Header */
+    header.topbar {
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border);
+      height: 52px;
+      padding: 0 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .brand-logo {
+      width: 28px;
+      height: 28px;
+      background: linear-gradient(135deg, var(--brand), #00a86b);
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 900;
+      color: #0c0e12;
+      font-size: 16px;
+    }
+    .brand-title {
+      font-weight: 800;
+      font-size: 16px;
+      letter-spacing: -0.01em;
+    }
+    .badge {
+      font-size: 11px;
+      background: rgba(0, 229, 153, 0.12);
+      color: var(--brand);
+      padding: 2px 7px;
+      border-radius: 999px;
+      font-weight: 700;
+      border: 1px solid rgba(0, 229, 153, 0.3);
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .btn {
+      background: var(--bg-panel);
+      color: var(--text-main);
+      border: 1px solid var(--border);
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 12.5px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s ease;
+    }
+    .btn:hover {
+      background: #1f2330;
+      border-color: var(--border-focus);
+    }
+    .btn-primary {
+      background: var(--brand);
+      color: #0c0e12;
+      border-color: var(--brand);
+    }
+    .btn-primary:hover {
+      background: #00ffaa;
+      box-shadow: 0 0 12px var(--brand-glow);
+    }
+
+    /* Workspace 3-column layout */
+    .workspace {
+      display: flex;
+      flex: 1;
+      height: calc(100vh - 52px);
+      overflow: hidden;
+    }
+
+    /* Left Sidebar: Palette & Tree */
+    .sidebar-left {
+      width: 260px;
+      background: var(--bg-surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+    .sidebar-header {
+      padding: 14px 16px;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .palette-list {
+      padding: 14px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      overflow-y: auto;
+    }
+    .palette-item {
+      background: var(--bg-panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px 8px;
+      text-align: center;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+    .palette-item:hover {
+      background: #232838;
+      border-color: var(--brand);
+      color: var(--brand);
+    }
+    .palette-icon { font-size: 16px; }
+
+    /* Center: Canvas Area */
+    .canvas-area {
+      flex: 1;
+      background: #07080b;
+      background-image: radial-gradient(rgba(255,255,255,0.06) 1px, transparent 1px);
+      background-size: 20px 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 30px;
+      overflow: auto;
+      position: relative;
+    }
+    .os-frame-switcher {
+      position: absolute;
+      top: 16px;
+      display: flex;
+      gap: 6px;
+      background: var(--bg-surface);
+      padding: 4px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      z-index: 10;
+    }
+    .os-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      padding: 5px 12px;
+      border-radius: 5px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .os-btn.active {
+      background: var(--bg-panel);
+      color: #fff;
+    }
+
+    /* Window mockup container */
+    .preview-window {
+      width: 760px;
+      min-height: 480px;
+      background: #111319;
+      border: 1px solid #31374a;
+      border-radius: 10px;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      transition: all 0.2s ease;
+    }
+    .preview-window.macos {
+      border-radius: 12px;
+    }
+    .preview-window.windows {
+      border-radius: 8px;
+      border-color: #2b3042;
+    }
+
+    /* Titlebar */
+    .window-titlebar {
+      height: 38px;
+      background: #161922;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 14px;
+      user-select: none;
+      justify-content: space-between;
+    }
+    .traffic-lights {
+      display: flex;
+      gap: 7px;
+    }
+    .traffic-dot {
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+    }
+    .dot-close { background: #ff5f56; }
+    .dot-min { background: #ffbd2e; }
+    .dot-max { background: #27c93f; }
+    .window-title-text {
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-align: center;
+      flex: 1;
+    }
+    .win-controls {
+      display: flex;
+      gap: 12px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    /* Canvas rendered nodes */
+    .window-content {
+      flex: 1;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      overflow-y: auto;
+    }
+    .ui-node {
+      border: 1px dashed transparent;
+      border-radius: 6px;
+      padding: 6px;
+      position: relative;
+      cursor: pointer;
+      transition: border-color 0.15s;
+    }
+    .ui-node:hover {
+      border-color: rgba(0, 229, 153, 0.4);
+    }
+    .ui-node.selected {
+      border-color: var(--brand) !important;
+      background: rgba(0, 229, 153, 0.04);
+    }
+
+    /* Right Sidebar: Inspector & Code */
+    .sidebar-right {
+      width: 320px;
+      background: var(--bg-surface);
+      border-left: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+    .tabs-header {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+    }
+    .tab-btn {
+      flex: 1;
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      padding: 12px;
+      color: var(--text-muted);
+      font-size: 12.5px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .tab-btn.active {
+      color: var(--brand);
+      border-color: var(--brand);
+    }
+
+    .tab-body {
+      flex: 1;
+      padding: 16px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .form-label {
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+    .form-input {
+      background: #090a0f;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 12px;
+      color: #fff;
+      font-size: 13px;
+    }
+    .form-input:focus {
+      outline: none;
+      border-color: var(--brand);
+    }
+
+    /* Code Preview */
+    pre.code-viewer {
+      background: #08090d;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 14px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: #7dd3fc;
+      line-height: 1.5;
+      overflow: auto;
+      flex: 1;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-logo">C</div>
+      <span class="brand-title">Carbon Studio</span>
+      <span class="badge">GUI BUILDER</span>
+    </div>
+    <div class="header-actions">
+      <button class="btn" onclick="loadTemplate('blank')">Template: Blank</button>
+      <button class="btn" onclick="loadTemplate('dashboard')">Template: Dashboard</button>
+      <button class="btn btn-primary" onclick="copyCtsxCode()">Copy .ctsx Code 📋</button>
+    </div>
+  </header>
+
+  <!-- Workspace -->
+  <div class="workspace">
+    <!-- Left Sidebar: Palette -->
+    <aside class="sidebar-left">
+      <div class="sidebar-header">
+        <span>Components</span>
+      </div>
+      <div class="palette-list">
+        <div class="palette-item" onclick="addComponent('Heading')">
+          <span class="palette-icon">H</span>
+          <span>Heading</span>
+        </div>
+        <div class="palette-item" onclick="addComponent('Text')">
+          <span class="palette-icon">T</span>
+          <span>Text</span>
+        </div>
+        <div class="palette-item" onclick="addComponent('Button')">
+          <span class="palette-icon">🔘</span>
+          <span>Button</span>
+        </div>
+        <div class="palette-item" onclick="addComponent('TextInput')">
+          <span class="palette-icon">⌨️</span>
+          <span>Input</span>
+        </div>
+        <div class="palette-item" onclick="addComponent('Badge')">
+          <span class="palette-icon">🏷️</span>
+          <span>Badge</span>
+        </div>
+        <div class="palette-item" onclick="addComponent('Card')">
+          <span class="palette-icon">🃏</span>
+          <span>Card</span>
+        </div>
+        <div class="palette-item" onclick="addComponent('VStack')">
+          <span class="palette-icon">☰</span>
+          <span>VStack</span>
+        </div>
+        <div class="palette-item" onclick="addComponent('HStack')">
+          <span class="palette-icon">☷</span>
+          <span>HStack</span>
+        </div>
+        <div class="palette-item" onclick="addComponent('Divider')">
+          <span class="palette-icon">―</span>
+          <span>Divider</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Center: Canvas Area -->
+    <main class="canvas-area">
+      <div class="os-frame-switcher">
+        <button class="os-btn active" id="btn-macos" onclick="setOsFrame('macos')">🍎 macOS</button>
+        <button class="os-btn" id="btn-windows" onclick="setOsFrame('windows')">🪟 Windows 11</button>
+        <button class="os-btn" id="btn-linux" onclick="setOsFrame('linux')">🐧 Linux</button>
+      </div>
+
+      <!-- Preview Window Mockup -->
+      <div class="preview-window macos" id="preview-window">
+        <div class="window-titlebar" id="window-titlebar">
+          <div class="traffic-lights" id="traffic-lights">
+            <div class="traffic-dot dot-close"></div>
+            <div class="traffic-dot dot-min"></div>
+            <div class="traffic-dot dot-max"></div>
+          </div>
+          <span class="window-title-text" id="window-title-display">Carbon Application</span>
+          <div class="win-controls" id="win-controls" style="display:none;">
+            <span>─</span>
+            <span>□</span>
+            <span>✕</span>
+          </div>
+        </div>
+        <div class="window-content" id="window-content">
+          <!-- Rendered Node Hierarchy -->
+        </div>
+      </div>
+    </main>
+
+    <!-- Right Sidebar: Inspector & Code -->
+    <aside class="sidebar-right">
+      <div class="tabs-header">
+        <button class="tab-btn active" id="tab-btn-inspector" onclick="switchRightTab('inspector')">Inspector</button>
+        <button class="tab-btn" id="tab-btn-code" onclick="switchRightTab('code')">Code Preview</button>
+      </div>
+
+      <div class="tab-body" id="tab-inspector">
+        <div id="inspector-content">
+          <p style="color:var(--text-muted);font-size:13px;text-align:center;padding:20px 0;">
+            Click an element on the canvas to inspect and edit its properties.
+          </p>
+        </div>
+      </div>
+
+      <div class="tab-body" id="tab-code" style="display:none;">
+        <pre class="code-viewer" id="code-preview">// Loading code...</pre>
+      </div>
+    </aside>
+  </div>
+
+  <script>
+    let currentOs = "macos";
+    let selectedNodeId = null;
+
+    // Default layout tree
+    let studioTree = {
+      id: "root-window",
+      type: "Window",
+      props: { title: "Carbon Application", width: 800, height: 600 },
+      children: [
+        {
+          id: "card-1",
+          type: "Card",
+          props: { padding: 20 },
+          children: [
+            { id: "heading-1", type: "Heading", props: { text: "Hello Carbon Studio!", level: 1 } },
+            { id: "text-1", type: "Text", props: { text: "Visually design desktop applications and generate .ctsx code." } },
+            { id: "btn-1", type: "Button", props: { label: "Click Me", variant: "primary" } }
+          ]
+        }
+      ]
+    };
+
+    function setOsFrame(os) {
+      currentOs = os;
+      document.querySelectorAll(".os-btn").forEach(b => b.classList.remove("active"));
+      document.getElementById(`btn-${os}`).classList.add("active");
+
+      const win = document.getElementById("preview-window");
+      win.className = `preview-window ${os}`;
+
+      const lights = document.getElementById("traffic-lights");
+      const winControls = document.getElementById("win-controls");
+
+      if (os === "macos") {
+        lights.style.display = "flex";
+        winControls.style.display = "none";
+      } else {
+        lights.style.display = "none";
+        winControls.style.display = "flex";
+      }
+      updateCodePreview();
+    }
+
+    function renderCanvas() {
+      const container = document.getElementById("window-content");
+      container.innerHTML = "";
+      document.getElementById("window-title-display").textContent = studioTree.props.title || "Carbon Application";
+
+      for (const child of studioTree.children || []) {
+        container.appendChild(renderElement(child));
+      }
+      updateCodePreview();
+    }
+
+    function renderElement(node) {
+      const el = document.createElement("div");
+      el.className = `ui-node ${selectedNodeId === node.id ? "selected" : ""}`;
+      el.id = `node-${node.id}`;
+      el.onclick = (e) => {
+        e.stopPropagation();
+        selectNode(node.id);
+      };
+
+      if (node.type === "Heading") {
+        const h = document.createElement("h" + (node.props.level || 2));
+        h.textContent = node.props.text || "Heading";
+        h.style.color = "#fff";
+        el.appendChild(h);
+      } else if (node.type === "Text") {
+        const p = document.createElement("p");
+        p.textContent = node.props.text || "Text paragraph";
+        p.style.color = "var(--text-muted)";
+        p.style.fontSize = "13.5px";
+        el.appendChild(p);
+      } else if (node.type === "Button") {
+        const b = document.createElement("button");
+        b.className = `btn ${node.props.variant === "primary" ? "btn-primary" : ""}`;
+        b.textContent = node.props.label || "Button";
+        el.appendChild(b);
+      } else if (node.type === "TextInput") {
+        const inp = document.createElement("input");
+        inp.className = "form-input";
+        inp.placeholder = node.props.placeholder || "Enter text...";
+        inp.disabled = true;
+        el.appendChild(inp);
+      } else if (node.type === "Badge") {
+        const bg = document.createElement("span");
+        bg.className = "badge";
+        bg.textContent = node.props.label || "Badge";
+        el.appendChild(bg);
+      } else if (node.type === "Divider") {
+        const hr = document.createElement("hr");
+        hr.style.borderColor = "var(--border)";
+        hr.style.margin = "8px 0";
+        el.appendChild(hr);
+      } else if (node.type === "Card") {
+        el.style.background = "var(--bg-panel)";
+        el.style.border = "1px solid var(--border)";
+        el.style.borderRadius = "8px";
+        el.style.padding = `${node.props.padding || 16}px`;
+        el.style.display = "flex";
+        el.style.flexDirection = "column";
+        el.style.gap = "10px";
+        for (const c of node.children || []) {
+          el.appendChild(renderElement(c));
+        }
+      } else if (node.type === "VStack" || node.type === "HStack") {
+        el.style.display = "flex";
+        el.style.flexDirection = node.type === "VStack" ? "column" : "row";
+        el.style.gap = `${node.props.gap || 12}px`;
+        el.style.padding = `${node.props.padding || 0}px`;
+        for (const c of node.children || []) {
+          el.appendChild(renderElement(c));
+        }
+      }
+
+      return el;
+    }
+
+    function selectNode(id) {
+      selectedNodeId = id;
+      document.querySelectorAll(".ui-node").forEach(n => n.classList.remove("selected"));
+      const target = document.getElementById(`node-${id}`);
+      if (target) target.classList.add("selected");
+
+      const node = findNodeById(studioTree, id);
+      if (node) renderInspector(node);
+    }
+
+    function findNodeById(root, id) {
+      if (root.id === id) return root;
+      for (const child of root.children || []) {
+        const found = findNodeById(child, id);
+        if (found) return found;
+      }
+      return null;
+    }
+
+    function renderInspector(node) {
+      const panel = document.getElementById("inspector-content");
+      panel.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <strong>${node.type}</strong>
+          <button class="btn" style="color:var(--danger);" onclick="deleteNode('${node.id}')">Delete ✕</button>
+        </div>
+        ${Object.entries(node.props).map(([k, v]) => `
+          <div class="form-group">
+            <label class="form-label">${k}</label>
+            <input class="form-input" value="${v}" oninput="updateProp('${node.id}', '${k}', this.value)">
+          </div>
+        `).join('')}
+      `;
+    }
+
+    function updateProp(id, key, value) {
+      const node = findNodeById(studioTree, id);
+      if (node) {
+        node.props[key] = value;
+        renderCanvas();
+      }
+    }
+
+    function deleteNode(id) {
+      function removeFrom(parent) {
+        if (!parent.children) return;
+        parent.children = parent.children.filter(c => c.id !== id);
+        for (const c of parent.children) removeFrom(c);
+      }
+      removeFrom(studioTree);
+      selectedNodeId = null;
+      document.getElementById("inspector-content").innerHTML = '<p style="color:var(--text-muted);font-size:13px;text-align:center;padding:20px 0;">Element deleted.</p>';
+      renderCanvas();
+    }
+
+    function addComponent(type) {
+      const id = `${type.toLowerCase()}-${Date.now().toString(36)}`;
+      const newNode = {
+        id,
+        type,
+        props: getDefaultProps(type),
+        children: (type === "Card" || type === "VStack" || type === "HStack") ? [] : undefined
+      };
+
+      // Add to selected node or root
+      let target = selectedNodeId ? findNodeById(studioTree, selectedNodeId) : null;
+      if (!target || !target.children) {
+        target = studioTree;
+      }
+
+      target.children = target.children || [];
+      target.children.push(newNode);
+      renderCanvas();
+      selectNode(id);
+    }
+
+    function getDefaultProps(type) {
+      switch (type) {
+        case "Heading": return { text: "New Heading", level: 2 };
+        case "Text": return { text: "Custom text description" };
+        case "Button": return { label: "Action Button", variant: "primary" };
+        case "TextInput": return { placeholder: "Type here..." };
+        case "Badge": return { label: "NEW" };
+        case "Card": return { padding: 16 };
+        case "VStack": return { gap: 12 };
+        case "HStack": return { gap: 12 };
+        case "Divider": return {};
+        default: return {};
+      }
+    }
+
+    async function updateCodePreview() {
+      try {
+        const res = await fetch("/api/v1/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ node: studioTree, appName: "MainApp", targetOs: currentOs })
+        });
+        const data = await res.json();
+        document.getElementById("code-preview").textContent = data.code;
+      } catch (err) {
+        document.getElementById("code-preview").textContent = "// Error generating code preview";
+      }
+    }
+
+    function switchRightTab(tab) {
+      if (tab === "inspector") {
+        document.getElementById("tab-inspector").style.display = "flex";
+        document.getElementById("tab-code").style.display = "none";
+        document.getElementById("tab-btn-inspector").classList.add("active");
+        document.getElementById("tab-btn-code").classList.remove("active");
+      } else {
+        document.getElementById("tab-inspector").style.display = "none";
+        document.getElementById("tab-code").style.display = "flex";
+        document.getElementById("tab-btn-inspector").classList.remove("active");
+        document.getElementById("tab-btn-code").classList.add("active");
+        updateCodePreview();
+      }
+    }
+
+    async function loadTemplate(name) {
+      try {
+        const res = await fetch("/api/v1/templates");
+        const templates = await res.json();
+        if (templates[name]) {
+          studioTree = templates[name];
+          selectedNodeId = null;
+          renderCanvas();
+        }
+      } catch (err) {
+        alert("Failed to load template");
+      }
+    }
+
+    function copyCtsxCode() {
+      const code = document.getElementById("code-preview").textContent;
+      navigator.clipboard.writeText(code);
+      alert("Copied .ctsx code to clipboard! 📋");
+    }
+
+    // Initialize
+    renderCanvas();
+  </script>
+</body>
+</html>
