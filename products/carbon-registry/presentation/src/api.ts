@@ -19,6 +19,7 @@ export interface PluginDetail extends PluginSummary {
   versions: Record<string, {
     version: string;
     checksumSha256: string;
+    signatureBase64: string;
     platforms: string[];
     abiVersion: string;
     permissions: string[];
@@ -77,6 +78,11 @@ export class CarbonRegistryClient {
     return this.request("/api/v1/categories");
   }
 
+  /** The Ed25519 public key (hex, 32 raw bytes) every publish's signature verifies against. */
+  async getTrustPublicKey(): Promise<{ publicKeyHex: string; algorithm: "ed25519" }> {
+    return this.request("/api/v1/trust/public-key");
+  }
+
   async listPlugins(params: {
     category?: string;
     search?: string;
@@ -102,6 +108,7 @@ export class CarbonRegistryClient {
   async downloadPlugin(name: string, version?: string): Promise<{
     tarballBase64: string;
     checksum: string;
+    signatureBase64: string;
     version: string;
   }> {
     const path = version ? `/api/v1/plugins/${name}/${version}/download` : `/api/v1/plugins/${name}/download`;
@@ -122,7 +129,7 @@ export class CarbonRegistryClient {
     tarballBase64: string;
     authorName?: string;
     tags?: string[];
-  }): Promise<{ success: boolean; name: string; version: string; checksum: string }> {
+  }): Promise<{ success: boolean; name: string; version: string; checksum: string; signatureBase64: string }> {
     return this.request("/api/v1/publish", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

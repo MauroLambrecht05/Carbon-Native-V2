@@ -8,6 +8,7 @@
 import { HttpIdentityClient } from "@carbon/identity";
 import { migrate, openDatabase } from "../infrastructure/persistence/Database.ts";
 import { RegistryEngine } from "../infrastructure/services/RegistryEngine.ts";
+import { TrustSigner } from "../infrastructure/services/TrustSigner.ts";
 import { buildRegistryRoutes } from "../infrastructure/http/routes.ts";
 import { startRegistryServer } from "../infrastructure/http/server.ts";
 
@@ -54,7 +55,25 @@ export async function buildRegistrySystem(config: CarbonRegistryConfig) {
   });
 
   const verifyToken = new HttpIdentityClient(config.controlPlaneUrl);
-  const registryEngine = new RegistryEngine(sql, s3);
+
+  // Undefined CARBON_TRUST_PRIVATE_KEY mints a random ephemeral signing
+  // key instead of refusing to start — same "loud fallback, not a hard
+  // failure" posture carbon-cloud's own FakeCheckoutSessionProvider takes
+  // for a missing STRIPE_SECRET_KEY. Fine for local dev/tests; a real
+  // deployment must set this (generate one with
+  // `carbon-plugin-sign keygen --out <path>`, then export its hex seed),
+  // or every restart re-signs every plugin under a NEW key and every
+  // previously-issued signature stops verifying.
+  if (!process.env.CARBON_TRUST_PRIVATE_KEY) {
+    console.warn(
+      "\n⚠️  CARBON_TRUST_PRIVATE_KEY not set — publishing under a random ephemeral signing key.\n" +
+        "   Fine for local dev; a real deployment must set this to a stable key\n" +
+        "   (generate one with `carbon-plugin-sign keygen`) or every restart\n" +
+        "   invalidates every previously-published plugin's signature.\n",
+    );
+  }
+  const signer = TrustSigner.fromHexSeed(process.env.CARBON_TRUST_PRIVATE_KEY);
+  const registryEngine = new RegistryEngine(sql, s3, signer);
   await registryEngine.seedIfEmpty();
 
   const deps = { sql, controlPlaneUrl: config.controlPlaneUrl, verifyToken, registryEngine };
@@ -70,6 +89,7 @@ export async function startRegistry(config: CarbonRegistryConfig = configFromEnv
   console.log(`\n🏪 Carbon Plugin Registry & Marketplace running at: http://localhost:${server.port}`);
   console.log(`📦 Native plugin search, semver resolution, and package publishing online`);
   console.log(`🛡️  Identity delegated to carbon-cloud at ${config.controlPlaneUrl}`);
+  console.log(`🔏 Signing publishes with Ed25519 public key: ${deps.registryEngine.getPublicKeyHex()}`);
 
   return { server, deps };
 }

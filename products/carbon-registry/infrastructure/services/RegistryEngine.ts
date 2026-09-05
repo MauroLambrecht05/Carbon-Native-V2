@@ -8,10 +8,12 @@
 // header comment for the general shape of the argument.
 
 import { SecurityVerifier, type PluginManifest } from "./SecurityVerifier.ts";
+import { TrustSigner } from "./TrustSigner.ts";
 
 export interface PluginVersionInfo {
   readonly version: string;
   readonly checksumSha256: string;
+  readonly signatureBase64: string;
   readonly platforms: string[];
   readonly abiVersion: string;
   readonly permissions: string[];
@@ -63,11 +65,16 @@ export interface RegistryStats {
 
 /** The port routes.ts depends on — lets tests inject a plain fake instead of a real Postgres/S3-backed instance. */
 export interface RegistryEnginePort {
-  publish(req: PublishRequest): Promise<{ name: string; version: string; checksum: string }>;
+  publish(req: PublishRequest): Promise<{ name: string; version: string; checksum: string; signatureBase64: string }>;
   getPlugin(name: string): Promise<PluginDetail | undefined>;
   listPlugins(filter?: RegistryFilter): Promise<{ plugins: PluginSummary[]; total: number }>;
-  download(name: string, version?: string): Promise<{ tarballBase64: string; checksum: string; version: string }>;
+  download(
+    name: string,
+    version?: string,
+  ): Promise<{ tarballBase64: string; checksum: string; signatureBase64: string; version: string }>;
   getStats(): Promise<RegistryStats>;
+  /** The Ed25519 public key (hex, 32 raw bytes) every publish's signature verifies against. */
+  getPublicKeyHex(): string;
 }
 
 const STANDARD_PLUGINS = [
@@ -151,7 +158,12 @@ export class RegistryEngine implements RegistryEnginePort {
   constructor(
     private readonly sql: Bun.SQL,
     private readonly s3: Bun.S3Client,
+    private readonly signer: TrustSigner,
   ) {}
+
+  getPublicKeyHex(): string {
+    return this.signer.publicKeyHex;
+  }
 
   private objectKey(name: string, version: string): string {
     return `${name}/${version}.tar.zst`;
@@ -180,7 +192,9 @@ export class RegistryEngine implements RegistryEnginePort {
     }
   }
 
-  async publish(req: PublishRequest): Promise<{ name: string; version: string; checksum: string }> {
+  async publish(
+    req: PublishRequest,
+  ): Promise<{ name: string; version: string; checksum: string; signatureBase64: string }> {
     const validation = this.verifier.validateManifest(req.manifest);
     if (!validation.valid) {
       throw new Error(`Manifest validation failed: ${validation.errors.join("; ")}`);
@@ -207,7 +221,12 @@ export class RegistryEngine implements RegistryEnginePort {
     }
 
     const tarballBytes = Buffer.from(req.tarballBase64, "base64");
-    const checksum = this.verifier.computeSha256(req.tarballBase64);
+    // Signed with Carbon's own key, never the author's — see
+    // TrustSigner.ts's own header comment. The checksum is the SAME
+    // SHA-256 digest that gets signed (of the raw decoded bytes, not the
+    // base64 text — the actual thing that lands in S3 and gets downloaded
+    // back), not a second, independent hash of the transport encoding.
+    const { signatureBase64, checksumSha256: checksum } = this.signer.sign(tarballBytes);
     const key = this.objectKey(name, version);
     await this.s3.write(key, tarballBytes, { type: "application/zstd" });
 
@@ -242,11 +261,11 @@ export class RegistryEngine implements RegistryEnginePort {
     }
 
     await this.sql`
-      INSERT INTO plugin_versions (plugin_name, version, readme, checksum_sha256, object_key, size_bytes, platforms, abi_version, permissions, published_at)
-      VALUES (${name}, ${version}, ${readme}, ${checksum}, ${key}, ${tarballBytes.byteLength}, ${platforms}::jsonb, ${abiVersion}, ${permissions}::jsonb, ${publishedAt})
+      INSERT INTO plugin_versions (plugin_name, version, readme, checksum_sha256, signature_base64, object_key, size_bytes, platforms, abi_version, permissions, published_at)
+      VALUES (${name}, ${version}, ${readme}, ${checksum}, ${signatureBase64}, ${key}, ${tarballBytes.byteLength}, ${platforms}::jsonb, ${abiVersion}, ${permissions}::jsonb, ${publishedAt})
     `;
 
-    return { name, version, checksum };
+    return { name, version, checksum, signatureBase64 };
   }
 
   async getPlugin(name: string): Promise<PluginDetail | undefined> {
@@ -259,12 +278,13 @@ export class RegistryEngine implements RegistryEnginePort {
         version: string;
         readme: string;
         checksum_sha256: string;
+        signature_base64: string;
         platforms: string[];
         abi_version: string;
         permissions: string[];
         published_at: Date;
       }>
-    >`SELECT version, readme, checksum_sha256, platforms, abi_version, permissions, published_at FROM plugin_versions WHERE plugin_name = ${name} ORDER BY published_at ASC`;
+    >`SELECT version, readme, checksum_sha256, signature_base64, platforms, abi_version, permissions, published_at FROM plugin_versions WHERE plugin_name = ${name} ORDER BY published_at ASC`;
 
     const versions: Record<string, PluginVersionInfo> = {};
     let latestReadme = "";
@@ -273,6 +293,7 @@ export class RegistryEngine implements RegistryEnginePort {
       versions[v.version] = {
         version: v.version,
         checksumSha256: v.checksum_sha256,
+        signatureBase64: v.signature_base64,
         platforms: v.platforms,
         abiVersion: v.abi_version,
         permissions: v.permissions,
@@ -351,7 +372,10 @@ export class RegistryEngine implements RegistryEnginePort {
     return { plugins: list.slice(offset, offset + limit), total };
   }
 
-  async download(name: string, version?: string): Promise<{ tarballBase64: string; checksum: string; version: string }> {
+  async download(
+    name: string,
+    version?: string,
+  ): Promise<{ tarballBase64: string; checksum: string; signatureBase64: string; version: string }> {
     const pluginRows = await this.sql<Array<{ latest_version: string }>>`
       SELECT latest_version FROM plugins WHERE name = ${name}
     `;
@@ -361,8 +385,8 @@ export class RegistryEngine implements RegistryEnginePort {
     }
 
     const targetVersion = version || plugin.latest_version;
-    const verRows = await this.sql<Array<{ object_key: string; checksum_sha256: string }>>`
-      SELECT object_key, checksum_sha256 FROM plugin_versions WHERE plugin_name = ${name} AND version = ${targetVersion}
+    const verRows = await this.sql<Array<{ object_key: string; checksum_sha256: string; signature_base64: string }>>`
+      SELECT object_key, checksum_sha256, signature_base64 FROM plugin_versions WHERE plugin_name = ${name} AND version = ${targetVersion}
     `;
     const verRow = verRows[0];
     if (!verRow) {
@@ -380,6 +404,7 @@ export class RegistryEngine implements RegistryEnginePort {
     return {
       tarballBase64: Buffer.from(bytes).toString("base64"),
       checksum: verRow.checksum_sha256,
+      signatureBase64: verRow.signature_base64,
       version: targetVersion,
     };
   }

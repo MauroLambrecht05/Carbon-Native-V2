@@ -51,11 +51,19 @@ function fakeEngine(): RegistryEnginePort {
     },
     async download(name: string) {
       if (name !== "clipboard") throw new Error(`Plugin "${name}" not found`);
-      return { tarballBase64: Buffer.from("bytes").toString("base64"), checksum: "abc123", version: "1.0.0" };
+      return {
+        tarballBase64: Buffer.from("bytes").toString("base64"),
+        checksum: "abc123",
+        signatureBase64: "fake-signature",
+        version: "1.0.0",
+      };
     },
     async publish(req: PublishRequest) {
       published.push(req);
-      return { name: req.manifest.name, version: req.manifest.version, checksum: "def456" };
+      return { name: req.manifest.name, version: req.manifest.version, checksum: "def456", signatureBase64: "fake-signature" };
+    },
+    getPublicKeyHex() {
+      return "fake-public-key-hex";
     },
   };
 }
@@ -126,6 +134,16 @@ describe("Carbon Registry HTTP Routes", () => {
     const data = (await res.json()) as any;
     expect(data.success).toBe(true);
     expect(data.name).toBe("webrtc-streamer");
+    expect(data.signatureBase64).toBeTruthy();
+  });
+
+  test("GET /api/v1/trust/public-key returns the signing key", async () => {
+    const handler = harness();
+    const res = await handler(new Request("http://localhost/api/v1/trust/public-key"));
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as any;
+    expect(data.algorithm).toBe("ed25519");
+    expect(data.publicKeyHex).toBeTruthy();
   });
 
   test("POST /api/v1/publish rejects a missing Authorization header", async () => {

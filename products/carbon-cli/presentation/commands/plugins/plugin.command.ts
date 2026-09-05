@@ -29,6 +29,7 @@ import {
   setManifestEnabled,
 } from "@carbon/lifecycle";
 import { PRODUCTS_DIR } from "@carbon/workspace";
+import { createHash, createPublicKey, verify as edVerify } from "node:crypto";
 import { join, resolve } from "node:path";
 import { executePluginSearchTui, fetchRegistryPlugins } from "./plugin-search-tui.ts";
 
@@ -76,6 +77,44 @@ async function reporting(
       return EXIT_FAILURE;
     }
     throw e;
+  }
+}
+
+/**
+ * Verifies a downloaded plugin tarball against the SAME registry's own
+ * advertised Ed25519 public key — the client-side half of
+ * carbon-registry's TrustSigner. Same scheme
+ * solutions/capabilities/plugin/trust/rust uses for locally-built
+ * plugins (SHA-256 of the raw bytes IS the signed message, raw 64-byte
+ * signature, raw 32-byte key), reimplemented here in TS via Node/Bun's
+ * built-in Ed25519 support rather than shelling out to a Rust binary
+ * this CLI has no reason to bundle.
+ *
+ * Returns false — never throws — for a network failure, a missing/
+ * malformed key, or a genuine signature mismatch: every one of those
+ * means "do not trust this download," and the caller's job is to refuse
+ * the install, not to distinguish why.
+ */
+async function verifyRegistrySignature(
+  registryUrl: string,
+  content: Buffer,
+  signatureBase64: string | undefined,
+): Promise<boolean> {
+  if (!signatureBase64) return false;
+  try {
+    const res = await fetch(`${registryUrl}/api/v1/trust/public-key`);
+    if (!res.ok) return false;
+    const { publicKeyHex } = (await res.json()) as { publicKeyHex?: string };
+    if (!publicKeyHex || !/^[0-9a-f]{64}$/i.test(publicKeyHex)) return false;
+
+    const digest = createHash("sha256").update(content).digest();
+    const publicKey = createPublicKey({
+      key: { kty: "OKP", crv: "Ed25519", x: Buffer.from(publicKeyHex, "hex").toString("base64url") } as any,
+      format: "jwk",
+    });
+    return edVerify(null, digest, publicKey, Buffer.from(signatureBase64, "base64"));
+  } catch {
+    return false;
   }
 }
 
@@ -221,16 +260,41 @@ class AddPluginCommand extends Command {
           return EXIT_FAILURE;
         }
 
-        const data = (await res.json()) as { tarballBase64: string; checksum: string; version: string };
+        const data = (await res.json()) as {
+          tarballBase64: string;
+          checksum: string;
+          signatureBase64: string;
+          version: string;
+        };
+        const tarballBytes = Buffer.from(data.tarballBase64, "base64");
+
+        // Carbon signs every publish (see carbon-registry's TrustSigner) —
+        // refuse to install a tarball whose signature doesn't verify
+        // against the SAME registry's own advertised key, exactly the
+        // "an unsigned or wrong-signer artifact does not load" guarantee
+        // solutions/capabilities/plugin/trust already enforces for
+        // locally-built plugins at runtime, extended to cover the
+        // download step too.
+        const verified = await verifyRegistrySignature(registryUrl, tarballBytes, data.signatureBase64);
+        if (!verified) {
+          ctx.io.error(
+            `Refusing to install "${cleanName}": signature verification failed.\n` +
+              `  Either the download was corrupted/tampered, or this registry's\n` +
+              `  signing key doesn't match what signed this tarball. Not writing\n` +
+              `  anything to disk.`,
+          );
+          return EXIT_FAILURE;
+        }
+
         const pluginDest = join(targetApp, "carbon", "plugins", "vendor", cleanName);
-        await Bun.write(join(pluginDest, "package.tar.zst"), Buffer.from(data.tarballBase64, "base64"));
+        await Bun.write(join(pluginDest, "package.tar.zst"), tarballBytes);
         await Bun.write(
           join(pluginDest, "carbon-plugin.toml"),
           `name = "${cleanName}"\nversion = "${data.version}"\nsource = "registry"\n`,
         );
 
         ctx.io.success(
-          `${ctx.io.c.bold(cleanName)} (v${data.version}) installed from registry → ${ctx.io.c.dim(forwardSlashes(pluginDest))}`,
+          `${ctx.io.c.bold(cleanName)} (v${data.version}) installed from registry → ${ctx.io.c.dim(forwardSlashes(pluginDest))} (signature verified)`,
         );
         return EXIT_OK;
       }

@@ -85,6 +85,12 @@ services:
       OBJECT_STORE_ACCESS_KEY_ID: ${OBJECT_STORE_ACCESS_KEY_ID:-carbon_registry}
       OBJECT_STORE_SECRET_ACCESS_KEY: ${OBJECT_STORE_SECRET_ACCESS_KEY:-carbon_registry_dev_secret}
       OBJECT_STORE_BUCKET: carbon-registry
+      # Unset by default: entrypoint.ts mints a random ephemeral Ed25519
+      # signing key instead, loud-warns about it, and every restart
+      # invalidates every previously-published plugin's signature. Set to
+      # a real 64-hex-char seed (generate one with `carbon-plugin-sign
+      # keygen`) for anything beyond local dev.
+      CARBON_TRUST_PRIVATE_KEY: ${CARBON_TRUST_PRIVATE_KEY:-}
     extra_hosts:
       # host.docker.internal is native on Docker Desktop (Windows/Mac);
       # Linux needs this explicit mapping to reach carbon-cloud's compose

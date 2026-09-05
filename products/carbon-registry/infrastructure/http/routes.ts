@@ -67,6 +67,14 @@ export function buildRegistryRoutes(deps: RegistryRouteDeps) {
         return json((await engine.getStats()).categories);
       }
 
+      // 3b. Trust anchor: the Ed25519 public key every publish's signature
+      // verifies against (see TrustSigner.ts). A downloader fetches this
+      // and checks it against the signature returned alongside a tarball
+      // before trusting the bytes — see carbon-cli's AddPluginCommand.
+      if (path === "/api/v1/trust/public-key" && method === "GET") {
+        return json({ publicKeyHex: engine.getPublicKeyHex(), algorithm: "ed25519" });
+      }
+
       // 4. List / Search Plugins: GET /api/v1/plugins
       if (path === "/api/v1/plugins" && method === "GET") {
         const category = url.searchParams.get("category") || undefined;
@@ -128,7 +136,16 @@ export function buildRegistryRoutes(deps: RegistryRouteDeps) {
         };
 
         const result = await engine.publish(publishReq);
-        return json({ success: true, name: result.name, version: result.version, checksum: result.checksum }, 201);
+        return json(
+          {
+            success: true,
+            name: result.name,
+            version: result.version,
+            checksum: result.checksum,
+            signatureBase64: result.signatureBase64,
+          },
+          201,
+        );
       }
 
       return json({ error: `Not found: ${method} ${path}` }, 404);
