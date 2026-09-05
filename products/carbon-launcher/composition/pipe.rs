@@ -28,7 +28,10 @@ use windows_sys::Win32::System::Pipes::{
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
 fn wide(s: &str) -> Vec<u16> {
-    OsStr::new(s).encode_wide().chain(std::iter::once(0)).collect()
+    OsStr::new(s)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
 }
 
 /// The current process's user SID, as its canonical `S-1-5-...` string form
@@ -46,7 +49,13 @@ fn current_user_sid_string() -> Result<String> {
         // First call with a zero-size buffer to learn how much space
         // TokenUser actually needs — the standard two-call GetTokenInformation
         // pattern.
-        let _ = GetTokenInformation(token, windows_sys::Win32::Security::TokenUser, null_mut(), 0, &mut needed);
+        let _ = GetTokenInformation(
+            token,
+            windows_sys::Win32::Security::TokenUser,
+            null_mut(),
+            0,
+            &mut needed,
+        );
         if needed == 0 {
             CloseHandle(token);
             return Err(anyhow!("GetTokenInformation(TokenUser) returned no size"));
@@ -61,13 +70,19 @@ fn current_user_sid_string() -> Result<String> {
         );
         CloseHandle(token);
         if ok == 0 {
-            return Err(anyhow!("GetTokenInformation(TokenUser) failed: {}", GetLastError()));
+            return Err(anyhow!(
+                "GetTokenInformation(TokenUser) failed: {}",
+                GetLastError()
+            ));
         }
         let token_user = &*(buf.as_ptr() as *const TOKEN_USER);
         let sid = token_user.User.Sid;
 
         let mut sid_str_ptr: *mut u16 = null_mut();
-        let ok = windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW(sid, &mut sid_str_ptr);
+        let ok = windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW(
+            sid,
+            &mut sid_str_ptr,
+        );
         if ok == 0 || sid_str_ptr.is_null() {
             return Err(anyhow!("ConvertSidToStringSidW failed: {}", GetLastError()));
         }
@@ -182,7 +197,10 @@ impl PipeServer {
                 return Err(anyhow!("ConnectNamedPipe failed: {err}"));
             }
         }
-        Ok(PipeConnection { handle: self.handle, owns_handle: false })
+        Ok(PipeConnection {
+            handle: self.handle,
+            owns_handle: false,
+        })
     }
 }
 
@@ -218,7 +236,8 @@ impl PipeConnection {
         let handle = unsafe {
             CreateFileW(
                 name_wide.as_ptr(),
-                windows_sys::Win32::Foundation::GENERIC_READ | windows_sys::Win32::Foundation::GENERIC_WRITE,
+                windows_sys::Win32::Foundation::GENERIC_READ
+                    | windows_sys::Win32::Foundation::GENERIC_WRITE,
                 FILE_SHARE_NONE,
                 null_mut(),
                 OPEN_EXISTING,
@@ -227,9 +246,14 @@ impl PipeConnection {
             )
         };
         if handle == INVALID_HANDLE_VALUE {
-            return Err(anyhow!("connecting to {full_name} failed: {}", unsafe { GetLastError() }));
+            return Err(anyhow!("connecting to {full_name} failed: {}", unsafe {
+                GetLastError()
+            }));
         }
-        Ok(Self { handle, owns_handle: true })
+        Ok(Self {
+            handle,
+            owns_handle: true,
+        })
     }
 
     /// Explicit server-side teardown — see the `owns_handle` doc comment.

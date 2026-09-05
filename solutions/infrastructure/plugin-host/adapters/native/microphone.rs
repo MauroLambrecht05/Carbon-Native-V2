@@ -46,7 +46,8 @@
 use anyhow::{anyhow, Result};
 
 #[cfg(target_os = "windows")]
-static GRAPH: std::sync::Mutex<Option<windows::Media::Audio::AudioGraph>> = std::sync::Mutex::new(None);
+static GRAPH: std::sync::Mutex<Option<windows::Media::Audio::AudioGraph>> =
+    std::sync::Mutex::new(None);
 
 #[cfg(target_os = "windows")]
 pub fn start() -> Result<()> {
@@ -74,27 +75,36 @@ pub fn start() -> Result<()> {
                 .map_err(|e| anyhow!("AudioGraph::CreateAsync failed: {e}"))?
                 .get()
                 .map_err(|e| anyhow!("AudioGraph creation failed: {e}"))?;
-            let graph = graph.Graph().map_err(|e| anyhow!("CreateAudioGraphResult::Graph failed: {e}"))?;
+            let graph = graph
+                .Graph()
+                .map_err(|e| anyhow!("CreateAudioGraphResult::Graph failed: {e}"))?;
 
             let input_result = graph
                 .CreateDeviceInputNodeAsync(MediaCategory::Other)
                 .map_err(|e| anyhow!("CreateDeviceInputNodeAsync failed: {e}"))?
                 .get()
                 .map_err(|e| anyhow!("device input node creation failed: {e}"))?;
-            let input_node = input_result.DeviceInputNode().map_err(|e| anyhow!("DeviceInputNode() failed: {e}"))?;
+            let input_node = input_result
+                .DeviceInputNode()
+                .map_err(|e| anyhow!("DeviceInputNode() failed: {e}"))?;
 
-            let encoding = input_node.EncodingProperties().map_err(|e| anyhow!("EncodingProperties() failed: {e}"))?;
+            let encoding = input_node
+                .EncodingProperties()
+                .map_err(|e| anyhow!("EncodingProperties() failed: {e}"))?;
             let sample_rate = encoding.SampleRate().unwrap_or(0);
             let channels = encoding.ChannelCount().unwrap_or(0);
 
-            let output_node: AudioFrameOutputNode =
-                graph.CreateFrameOutputNode().map_err(|e| anyhow!("CreateFrameOutputNode failed: {e}"))?;
+            let output_node: AudioFrameOutputNode = graph
+                .CreateFrameOutputNode()
+                .map_err(|e| anyhow!("CreateFrameOutputNode failed: {e}"))?;
             input_node
                 .AddOutgoingConnection(&output_node)
                 .map_err(|e| anyhow!("AddOutgoingConnection failed: {e}"))?;
 
             install_quantum_handler(&graph, &output_node)?;
-            graph.Start().map_err(|e| anyhow!("AudioGraph::Start failed: {e}"))?;
+            graph
+                .Start()
+                .map_err(|e| anyhow!("AudioGraph::Start failed: {e}"))?;
 
             Ok((graph, sample_rate, channels))
         })();
@@ -133,7 +143,9 @@ fn install_quantum_handler(
     let output_node = output_node.clone();
     graph
         .QuantumStarted(&TypedEventHandler::new(
-            move |_sender: &Option<AudioGraph>, _args: &Option<windows::core::IInspectable>| -> windows::core::Result<()> {
+            move |_sender: &Option<AudioGraph>,
+                  _args: &Option<windows::core::IInspectable>|
+                  -> windows::core::Result<()> {
                 let frame = output_node.GetFrame()?;
                 let buffer = frame.LockBuffer(AudioBufferAccessMode::Read)?;
                 let reference = buffer.CreateReference()?;
@@ -145,7 +157,10 @@ fn install_quantum_handler(
                 }
                 if !ptr.is_null() && len > 0 {
                     let bytes = unsafe { core::slice::from_raw_parts(ptr, len as usize) }.to_vec();
-                    crate::host_exports::push_plugin_binary_event("microphone.frame".to_string(), bytes);
+                    crate::host_exports::push_plugin_binary_event(
+                        "microphone.frame".to_string(),
+                        bytes,
+                    );
                 }
                 Ok(())
             },
@@ -179,9 +194,13 @@ pub fn stop() -> Result<()> {
 
 #[cfg(not(target_os = "windows"))]
 pub fn start() -> Result<()> {
-    Err(anyhow!("microphone capture is not yet implemented on this platform"))
+    Err(anyhow!(
+        "microphone capture is not yet implemented on this platform"
+    ))
 }
 #[cfg(not(target_os = "windows"))]
 pub fn stop() -> Result<()> {
-    Err(anyhow!("microphone capture is not yet implemented on this platform"))
+    Err(anyhow!(
+        "microphone capture is not yet implemented on this platform"
+    ))
 }

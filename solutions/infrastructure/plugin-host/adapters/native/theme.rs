@@ -75,7 +75,9 @@ pub struct ThemePrefs {
 pub fn query() -> Result<ThemePrefs> {
     #[cfg(not(target_os = "windows"))]
     {
-        Err(anyhow::anyhow!("theme preference detection not yet implemented on this platform"))
+        Err(anyhow::anyhow!(
+            "theme preference detection not yet implemented on this platform"
+        ))
     }
 
     #[cfg(target_os = "windows")]
@@ -128,6 +130,10 @@ pub fn query() -> Result<ThemePrefs> {
             ok != 0 && animations_enabled == 0
         };
 
-        Ok(ThemePrefs { accent_color, high_contrast, reduced_motion })
+        Ok(ThemePrefs {
+            accent_color,
+            high_contrast,
+            reduced_motion,
+        })
     }
 }

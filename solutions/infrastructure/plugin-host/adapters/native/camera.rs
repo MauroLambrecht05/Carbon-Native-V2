@@ -49,7 +49,8 @@
 use anyhow::{anyhow, Result};
 
 #[cfg(target_os = "windows")]
-static STOP_SENDER: std::sync::Mutex<Option<std::sync::mpsc::Sender<()>>> = std::sync::Mutex::new(None);
+static STOP_SENDER: std::sync::Mutex<Option<std::sync::mpsc::Sender<()>>> =
+    std::sync::Mutex::new(None);
 
 #[cfg(target_os = "windows")]
 pub fn start() -> Result<()> {
@@ -90,8 +91,12 @@ pub fn start() -> Result<()> {
 fn run_capture_session(stop_rx: &std::sync::mpsc::Receiver<()>) -> Result<()> {
     use windows::Foundation::TypedEventHandler;
     use windows::Graphics::Imaging::{BitmapBufferAccessMode, BitmapPixelFormat, SoftwareBitmap};
-    use windows::Media::Capture::Frames::{MediaFrameReader, MediaFrameSourceGroup, MediaFrameSourceKind};
-    use windows::Media::Capture::{MediaCapture, MediaCaptureInitializationSettings, MediaCaptureMemoryPreference};
+    use windows::Media::Capture::Frames::{
+        MediaFrameReader, MediaFrameSourceGroup, MediaFrameSourceKind,
+    };
+    use windows::Media::Capture::{
+        MediaCapture, MediaCaptureInitializationSettings, MediaCaptureMemoryPreference,
+    };
     use windows::Win32::System::WinRT::IMemoryBufferByteAccess;
 
     // ── Find the first color source across every frame-source group ──────
@@ -103,10 +108,14 @@ fn run_capture_session(stop_rx: &std::sync::mpsc::Receiver<()>) -> Result<()> {
     let mut chosen: Option<(MediaFrameSourceGroup, windows::core::HSTRING)> = None;
     for i in 0..groups.Size().unwrap_or(0) {
         let Ok(group) = groups.GetAt(i) else { continue };
-        let Ok(infos) = group.SourceInfos() else { continue };
+        let Ok(infos) = group.SourceInfos() else {
+            continue;
+        };
         for j in 0..infos.Size().unwrap_or(0) {
             let Ok(info) = infos.GetAt(j) else { continue };
-            if info.SourceKind().unwrap_or(MediaFrameSourceKind::Custom) == MediaFrameSourceKind::Color {
+            if info.SourceKind().unwrap_or(MediaFrameSourceKind::Custom)
+                == MediaFrameSourceKind::Color
+            {
                 if let Ok(id) = info.Id() {
                     chosen = Some((group, id));
                     break;
@@ -120,10 +129,13 @@ fn run_capture_session(stop_rx: &std::sync::mpsc::Receiver<()>) -> Result<()> {
     let (group, source_id) = chosen.ok_or_else(|| anyhow!("no color camera found"))?;
 
     // ── Initialize MediaCapture against that group, CPU-accessible frames ─
-    let media_capture = MediaCapture::new().map_err(|e| anyhow!("MediaCapture::new failed: {e}"))?;
-    let settings =
-        MediaCaptureInitializationSettings::new().map_err(|e| anyhow!("MediaCaptureInitializationSettings::new failed: {e}"))?;
-    settings.SetSourceGroup(&group).map_err(|e| anyhow!("SetSourceGroup failed: {e}"))?;
+    let media_capture =
+        MediaCapture::new().map_err(|e| anyhow!("MediaCapture::new failed: {e}"))?;
+    let settings = MediaCaptureInitializationSettings::new()
+        .map_err(|e| anyhow!("MediaCaptureInitializationSettings::new failed: {e}"))?;
+    settings
+        .SetSourceGroup(&group)
+        .map_err(|e| anyhow!("SetSourceGroup failed: {e}"))?;
     settings
         .SetMemoryPreference(MediaCaptureMemoryPreference::Cpu)
         .map_err(|e| anyhow!("SetMemoryPreference failed: {e}"))?;
@@ -133,8 +145,12 @@ fn run_capture_session(stop_rx: &std::sync::mpsc::Receiver<()>) -> Result<()> {
         .get()
         .map_err(|e| anyhow!("camera initialization failed: {e}"))?;
 
-    let sources = media_capture.FrameSources().map_err(|e| anyhow!("FrameSources() failed: {e}"))?;
-    let source = sources.Lookup(&source_id).map_err(|e| anyhow!("frame source lookup failed: {e}"))?;
+    let sources = media_capture
+        .FrameSources()
+        .map_err(|e| anyhow!("FrameSources() failed: {e}"))?;
+    let source = sources
+        .Lookup(&source_id)
+        .map_err(|e| anyhow!("frame source lookup failed: {e}"))?;
 
     let reader: MediaFrameReader = media_capture
         .CreateFrameReaderAsync(&source)
@@ -147,42 +163,63 @@ fn run_capture_session(stop_rx: &std::sync::mpsc::Receiver<()>) -> Result<()> {
     let started_sent_cb = started_sent.clone();
 
     reader
-        .FrameArrived(&TypedEventHandler::new(move |reader: &Option<MediaFrameReader>, _args| -> windows::core::Result<()> {
-            let Some(reader) = reader else { return Ok(()) };
-            let Ok(frame_ref) = reader.TryAcquireLatestFrame() else { return Ok(()) };
-            let Ok(video_frame) = frame_ref.VideoMediaFrame() else { return Ok(()) };
-            let Ok(bitmap) = video_frame.SoftwareBitmap() else { return Ok(()) };
-            let Ok(rgba) = SoftwareBitmap::Convert(&bitmap, BitmapPixelFormat::Rgba8) else { return Ok(()) };
+        .FrameArrived(&TypedEventHandler::new(
+            move |reader: &Option<MediaFrameReader>, _args| -> windows::core::Result<()> {
+                let Some(reader) = reader else { return Ok(()) };
+                let Ok(frame_ref) = reader.TryAcquireLatestFrame() else {
+                    return Ok(());
+                };
+                let Ok(video_frame) = frame_ref.VideoMediaFrame() else {
+                    return Ok(());
+                };
+                let Ok(bitmap) = video_frame.SoftwareBitmap() else {
+                    return Ok(());
+                };
+                let Ok(rgba) = SoftwareBitmap::Convert(&bitmap, BitmapPixelFormat::Rgba8) else {
+                    return Ok(());
+                };
 
-            let width = rgba.PixelWidth().unwrap_or(0);
-            let height = rgba.PixelHeight().unwrap_or(0);
-            if !started_sent_cb.swap(true, std::sync::atomic::Ordering::SeqCst) {
-                crate::host_exports::push_plugin_event(
-                    "camera.started".to_string(),
-                    format!("{{\"width\":{width},\"height\":{height}}}"),
-                );
-            }
+                let width = rgba.PixelWidth().unwrap_or(0);
+                let height = rgba.PixelHeight().unwrap_or(0);
+                if !started_sent_cb.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                    crate::host_exports::push_plugin_event(
+                        "camera.started".to_string(),
+                        format!("{{\"width\":{width},\"height\":{height}}}"),
+                    );
+                }
 
-            if let Ok(buffer) = rgba.LockBuffer(BitmapBufferAccessMode::Read) {
-                if let Ok(reference) = buffer.CreateReference() {
-                    use windows::core::Interface;
-                    if let Ok(byte_access) = reference.cast::<IMemoryBufferByteAccess>() {
-                        let mut ptr: *mut u8 = core::ptr::null_mut();
-                        let mut len: u32 = 0;
-                        unsafe {
-                            if byte_access.GetBuffer(&mut ptr, &mut len).is_ok() && !ptr.is_null() && len > 0 {
-                                let bytes = core::slice::from_raw_parts(ptr, len as usize).to_vec();
-                                crate::host_exports::push_plugin_binary_event("camera.frame".to_string(), bytes);
+                if let Ok(buffer) = rgba.LockBuffer(BitmapBufferAccessMode::Read) {
+                    if let Ok(reference) = buffer.CreateReference() {
+                        use windows::core::Interface;
+                        if let Ok(byte_access) = reference.cast::<IMemoryBufferByteAccess>() {
+                            let mut ptr: *mut u8 = core::ptr::null_mut();
+                            let mut len: u32 = 0;
+                            unsafe {
+                                if byte_access.GetBuffer(&mut ptr, &mut len).is_ok()
+                                    && !ptr.is_null()
+                                    && len > 0
+                                {
+                                    let bytes =
+                                        core::slice::from_raw_parts(ptr, len as usize).to_vec();
+                                    crate::host_exports::push_plugin_binary_event(
+                                        "camera.frame".to_string(),
+                                        bytes,
+                                    );
+                                }
                             }
                         }
                     }
                 }
-            }
-            Ok(())
-        }))
+                Ok(())
+            },
+        ))
         .map_err(|e| anyhow!("FrameArrived registration failed: {e}"))?;
 
-    reader.StartAsync().map_err(|e| anyhow!("MediaFrameReader::StartAsync failed: {e}"))?.get().map_err(|e| anyhow!("starting the frame reader failed: {e}"))?;
+    reader
+        .StartAsync()
+        .map_err(|e| anyhow!("MediaFrameReader::StartAsync failed: {e}"))?
+        .get()
+        .map_err(|e| anyhow!("starting the frame reader failed: {e}"))?;
 
     // Block this dedicated thread until camera_stop() signals it — the
     // capture objects above must stay alive (and on this same thread)
@@ -207,9 +244,13 @@ pub fn stop() -> Result<()> {
 
 #[cfg(not(target_os = "windows"))]
 pub fn start() -> Result<()> {
-    Err(anyhow!("camera capture is not yet implemented on this platform"))
+    Err(anyhow!(
+        "camera capture is not yet implemented on this platform"
+    ))
 }
 #[cfg(not(target_os = "windows"))]
 pub fn stop() -> Result<()> {
-    Err(anyhow!("camera capture is not yet implemented on this platform"))
+    Err(anyhow!(
+        "camera capture is not yet implemented on this platform"
+    ))
 }

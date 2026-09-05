@@ -33,11 +33,15 @@
 
 use anyhow::{anyhow, Result};
 use std::cell::{Cell, RefCell};
-use windows::Win32::Foundation::HWND;
-use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED};
-use windows::Win32::UI::Shell::{ITaskbarList3, TaskbarList, TBPF_NOPROGRESS, TBPF_NORMAL};
-use windows::Win32::UI::WindowsAndMessaging::{CreateIconFromResourceEx, DestroyIcon, HICON, LR_DEFAULTCOLOR};
 use windows::core::PCWSTR;
+use windows::Win32::Foundation::HWND;
+use windows::Win32::System::Com::{
+    CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED,
+};
+use windows::Win32::UI::Shell::{ITaskbarList3, TaskbarList, TBPF_NOPROGRESS, TBPF_NORMAL};
+use windows::Win32::UI::WindowsAndMessaging::{
+    CreateIconFromResourceEx, DestroyIcon, HICON, LR_DEFAULTCOLOR,
+};
 
 thread_local! {
     static COM_READY: Cell<bool> = const { Cell::new(false) };
@@ -66,9 +70,11 @@ fn with_taskbar_list<T>(f: impl FnOnce(&ITaskbarList3) -> Result<T>) -> Result<T
         let mut slot = cell.borrow_mut();
         if slot.is_none() {
             let list: ITaskbarList3 = unsafe {
-                let list: ITaskbarList3 = CoCreateInstance(&TaskbarList, None, CLSCTX_INPROC_SERVER)
-                    .map_err(|e| anyhow!("CoCreateInstance(TaskbarList) failed: {e}"))?;
-                list.HrInit().map_err(|e| anyhow!("ITaskbarList3::HrInit failed: {e}"))?;
+                let list: ITaskbarList3 =
+                    CoCreateInstance(&TaskbarList, None, CLSCTX_INPROC_SERVER)
+                        .map_err(|e| anyhow!("CoCreateInstance(TaskbarList) failed: {e}"))?;
+                list.HrInit()
+                    .map_err(|e| anyhow!("ITaskbarList3::HrInit failed: {e}"))?;
                 list
             };
             *slot = Some(list);
@@ -80,7 +86,10 @@ fn with_taskbar_list<T>(f: impl FnOnce(&ITaskbarList3) -> Result<T>) -> Result<T
 fn wide(s: &str) -> Vec<u16> {
     use std::ffi::OsStr;
     use std::os::windows::ffi::OsStrExt;
-    OsStr::new(s).encode_wide().chain(std::iter::once(0)).collect()
+    OsStr::new(s)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
 }
 
 /// `total == 0` clears the progress overlay (TBPF_NOPROGRESS); otherwise
@@ -88,8 +97,13 @@ fn wide(s: &str) -> Vec<u16> {
 pub fn set_progress(hwnd: isize, completed: u64, total: u64) -> Result<()> {
     let hwnd = HWND(hwnd as *mut core::ffi::c_void);
     with_taskbar_list(|list| unsafe {
-        let state = if total == 0 { TBPF_NOPROGRESS } else { TBPF_NORMAL };
-        list.SetProgressState(hwnd, state).map_err(|e| anyhow!("SetProgressState failed: {e}"))?;
+        let state = if total == 0 {
+            TBPF_NOPROGRESS
+        } else {
+            TBPF_NORMAL
+        };
+        list.SetProgressState(hwnd, state)
+            .map_err(|e| anyhow!("SetProgressState failed: {e}"))?;
         if total != 0 {
             list.SetProgressValue(hwnd, completed, total)
                 .map_err(|e| anyhow!("SetProgressValue failed: {e}"))?;
@@ -111,7 +125,7 @@ pub fn set_badge(hwnd: isize, icon_path: &str, description: &str) -> Result<()> 
         unsafe {
             CreateIconFromResourceEx(
                 raw.as_mut_slice(),
-                true, // fIcon: an icon, not a cursor
+                true,        // fIcon: an icon, not a cursor
                 0x0003_0000, // dwVersion — 3.0, the documented required value
                 width as i32,
                 height as i32,

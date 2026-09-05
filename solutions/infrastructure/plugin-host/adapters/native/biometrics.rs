@@ -41,7 +41,9 @@ use anyhow::Result;
 pub fn verify(message: String) -> Result<()> {
     std::thread::spawn(move || {
         use windows::core::HSTRING;
-        use windows::Security::Credentials::UI::{UserConsentVerificationResult, UserConsentVerifier};
+        use windows::Security::Credentials::UI::{
+            UserConsentVerificationResult, UserConsentVerifier,
+        };
         use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
 
         unsafe {
@@ -50,7 +52,11 @@ pub fn verify(message: String) -> Result<()> {
             let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
         }
 
-        let prompt = if message.is_empty() { "Verify your identity".to_string() } else { message };
+        let prompt = if message.is_empty() {
+            "Verify your identity".to_string()
+        } else {
+            message
+        };
         let hstring_prompt = HSTRING::from(prompt);
 
         let outcome = (|| -> windows::core::Result<UserConsentVerificationResult> {
@@ -59,11 +65,19 @@ pub fn verify(message: String) -> Result<()> {
 
         let (verified, label) = match outcome {
             Ok(r) if r == UserConsentVerificationResult::Verified => (true, "verified"),
-            Ok(r) if r == UserConsentVerificationResult::DeviceNotPresent => (false, "deviceNotPresent"),
-            Ok(r) if r == UserConsentVerificationResult::NotConfiguredForUser => (false, "notConfigured"),
-            Ok(r) if r == UserConsentVerificationResult::DisabledByPolicy => (false, "disabledByPolicy"),
+            Ok(r) if r == UserConsentVerificationResult::DeviceNotPresent => {
+                (false, "deviceNotPresent")
+            }
+            Ok(r) if r == UserConsentVerificationResult::NotConfiguredForUser => {
+                (false, "notConfigured")
+            }
+            Ok(r) if r == UserConsentVerificationResult::DisabledByPolicy => {
+                (false, "disabledByPolicy")
+            }
             Ok(r) if r == UserConsentVerificationResult::DeviceBusy => (false, "deviceBusy"),
-            Ok(r) if r == UserConsentVerificationResult::RetriesExhausted => (false, "retriesExhausted"),
+            Ok(r) if r == UserConsentVerificationResult::RetriesExhausted => {
+                (false, "retriesExhausted")
+            }
             Ok(r) if r == UserConsentVerificationResult::Canceled => (false, "canceled"),
             Ok(_) => (false, "error"),
             Err(_) => (false, "error"),
@@ -79,5 +93,7 @@ pub fn verify(message: String) -> Result<()> {
 
 #[cfg(not(target_os = "windows"))]
 pub fn verify(_message: String) -> Result<()> {
-    Err(anyhow::anyhow!("biometric verification not yet implemented on this platform"))
+    Err(anyhow::anyhow!(
+        "biometric verification not yet implemented on this platform"
+    ))
 }

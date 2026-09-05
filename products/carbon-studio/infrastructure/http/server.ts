@@ -7,7 +7,7 @@ export interface ServerConfig {
   readonly staticDir?: string;
 }
 
-export function startStudioServer(config: ServerConfig): Server {
+export function startStudioServer(config: ServerConfig): Server<undefined> {
   const staticRoot = config.staticDir || join(import.meta.dir, "../../presentation");
 
   const server = Bun.serve({

@@ -37,7 +37,10 @@ const SW_HIDE: i32 = 0;
 fn wide(s: &str) -> Vec<u16> {
     use std::ffi::OsStr;
     use std::os::windows::ffi::OsStrExt;
-    OsStr::new(s).encode_wide().chain(std::iter::once(0)).collect()
+    OsStr::new(s)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
 }
 
 pub fn print_file(path: &str) -> Result<()> {
@@ -65,7 +68,10 @@ pub fn print_file(path: &str) -> Result<()> {
             )
         };
         if (result as usize) <= 32 {
-            return Err(anyhow!("ShellExecuteW(\"print\") failed: code {}", result as usize));
+            return Err(anyhow!(
+                "ShellExecuteW(\"print\") failed: code {}",
+                result as usize
+            ));
         }
         Ok(())
     }

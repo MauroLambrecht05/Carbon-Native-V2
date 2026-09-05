@@ -52,7 +52,11 @@ pub fn ensure_started() {
             while let Ok(event) = receiver.recv() {
                 let id = event.id.0;
                 let id_json = serde_json::to_string(&id).unwrap_or_else(|_| "\"\"".to_string());
-                let event_name = if is_window_menu_id(&id) { "menu.click" } else { "tray.menu" };
+                let event_name = if is_window_menu_id(&id) {
+                    "menu.click"
+                } else {
+                    "tray.menu"
+                };
                 crate::host_exports::push_plugin_event(
                     event_name.to_string(),
                     format!("{{\"id\":{id_json}}}"),

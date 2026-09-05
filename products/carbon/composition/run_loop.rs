@@ -104,7 +104,10 @@ fn binary_dispatch(js_ctx: &JsContext, name: String, data: Vec<u8>) {
         let array = rquickjs::TypedArray::<u8>::new(ctx.clone(), data)?;
         handler.call::<_, ()>((name.as_str(), array)).map_err(|e| {
             if matches!(e, rquickjs::Error::Exception) {
-                anyhow!("plugin binary event `{name}` dispatch failed: {}", describe_js_exception(&ctx))
+                anyhow!(
+                    "plugin binary event `{name}` dispatch failed: {}",
+                    describe_js_exception(&ctx)
+                )
             } else {
                 anyhow!("plugin binary event `{name}` dispatch failed: {e}")
             }
@@ -553,8 +556,11 @@ impl State {
                     // container instead of one per row/item.
                     let chain_json = {
                         let s = self.scene.lock().unwrap_or_else(|e| e.into_inner());
-                        let ids: Vec<String> =
-                            s.ancestor_chain(node_id).iter().map(u32::to_string).collect();
+                        let ids: Vec<String> = s
+                            .ancestor_chain(node_id)
+                            .iter()
+                            .map(u32::to_string)
+                            .collect();
                         format!("[{}]", ids.join(","))
                     };
                     let script = format!(
@@ -1191,7 +1197,11 @@ impl State {
                 // the JS thread, then drain_and_flush_react, exactly what
                 // the WindowEvent::MouseInput(Pressed) arm above does after
                 // its own __cm_dispatch_click eval.
-                eval_dispatch(&self.js_ctx, "CARBON_TEST_EVAL_AFTER_MS script", script.as_bytes());
+                eval_dispatch(
+                    &self.js_ctx,
+                    "CARBON_TEST_EVAL_AFTER_MS script",
+                    script.as_bytes(),
+                );
                 drain_and_flush_react(&self.js_rt, &self.js_ctx);
             }
             Event::UserEvent(UserEvent::PluginEvent { name, payload }) => {
@@ -1208,7 +1218,11 @@ impl State {
                 let script = format!(
                     "globalThis.__carbon_on_event && globalThis.__carbon_on_event(\"{escaped_name}\", \"{payload_for_eval}\");"
                 );
-                eval_dispatch(&self.js_ctx, &format!("plugin event `{name}`"), script.as_bytes());
+                eval_dispatch(
+                    &self.js_ctx,
+                    &format!("plugin event `{name}`"),
+                    script.as_bytes(),
+                );
             }
             Event::UserEvent(UserEvent::PluginBinaryEvent { name, data }) => {
                 binary_dispatch(&self.js_ctx, name, data);

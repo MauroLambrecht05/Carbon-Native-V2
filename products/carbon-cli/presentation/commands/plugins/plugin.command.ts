@@ -554,7 +554,7 @@ class PublishPluginCommand extends Command {
       });
 
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: res.statusText }));
+        const err = (await res.json().catch(() => ({ error: res.statusText }))) as { error?: string };
         ctx.io.error(`Publish failed: ${err.error || res.statusText}`);
         return EXIT_FAILURE;
       }

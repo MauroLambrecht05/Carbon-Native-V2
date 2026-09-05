@@ -71,7 +71,9 @@ fn ensure_com_initialized() {
 }
 
 #[cfg(target_os = "windows")]
-fn ensure_manager(hwnd: isize) -> Result<windows::ApplicationModel::DataTransfer::DataTransferManager> {
+fn ensure_manager(
+    hwnd: isize,
+) -> Result<windows::ApplicationModel::DataTransfer::DataTransferManager> {
     use windows::core::HSTRING;
     use windows::ApplicationModel::DataTransfer::{DataRequestedEventArgs, DataTransferManager};
     use windows::Foundation::TypedEventHandler;
@@ -85,35 +87,49 @@ fn ensure_manager(hwnd: isize) -> Result<windows::ApplicationModel::DataTransfer
             return Ok(existing.clone());
         }
 
-        let interop: IDataTransferManagerInterop = windows::core::factory::<DataTransferManager, IDataTransferManagerInterop>()
-            .map_err(|e| anyhow::anyhow!("activating IDataTransferManagerInterop failed: {e}"))?;
+        let interop: IDataTransferManagerInterop =
+            windows::core::factory::<DataTransferManager, IDataTransferManagerInterop>().map_err(
+                |e| anyhow::anyhow!("activating IDataTransferManagerInterop failed: {e}"),
+            )?;
         let win = HWND(hwnd as *mut core::ffi::c_void);
         let manager: DataTransferManager = unsafe {
-            interop.GetForWindow(win).map_err(|e| anyhow::anyhow!("IDataTransferManagerInterop::GetForWindow failed: {e}"))?
+            interop.GetForWindow(win).map_err(|e| {
+                anyhow::anyhow!("IDataTransferManagerInterop::GetForWindow failed: {e}")
+            })?
         };
 
         manager
             .DataRequested(&TypedEventHandler::new(
-                move |_sender: &Option<DataTransferManager>, args: &Option<DataRequestedEventArgs>| -> windows::core::Result<()> {
+                move |_sender: &Option<DataTransferManager>,
+                      args: &Option<DataRequestedEventArgs>|
+                      -> windows::core::Result<()> {
                     let Some(args) = args else { return Ok(()) };
-                    let Some(payload) = PENDING.with(|p| p.borrow_mut().take()) else { return Ok(()) };
+                    let Some(payload) = PENDING.with(|p| p.borrow_mut().take()) else {
+                        return Ok(());
+                    };
                     let request = args.Request()?;
                     let package = request.Data()?;
                     if !payload.title.is_empty() {
-                        let _ = package.Properties()?.SetTitle(&HSTRING::from(payload.title.as_str()));
+                        let _ = package
+                            .Properties()?
+                            .SetTitle(&HSTRING::from(payload.title.as_str()));
                     }
                     if !payload.text.is_empty() {
                         package.SetText(&HSTRING::from(payload.text.as_str()))?;
                     }
                     if !payload.url.is_empty() {
-                        if let Ok(uri) = windows::Foundation::Uri::CreateUri(&HSTRING::from(payload.url.as_str())) {
+                        if let Ok(uri) = windows::Foundation::Uri::CreateUri(&HSTRING::from(
+                            payload.url.as_str(),
+                        )) {
                             let _ = package.SetWebLink(&uri);
                         }
                     }
                     Ok(())
                 },
             ))
-            .map_err(|e| anyhow::anyhow!("DataTransferManager::DataRequested registration failed: {e}"))?;
+            .map_err(|e| {
+                anyhow::anyhow!("DataTransferManager::DataRequested registration failed: {e}")
+            })?;
 
         map.insert(hwnd, manager.clone());
         Ok(manager)
@@ -127,8 +143,11 @@ pub fn share(hwnd: isize, title: &str, text: &str, url: &str) -> Result<()> {
 
     let manager = ensure_manager(hwnd)?;
     PENDING.with(|p| {
-        *p.borrow_mut() =
-            Some(SharePayload { title: title.to_string(), text: text.to_string(), url: url.to_string() })
+        *p.borrow_mut() = Some(SharePayload {
+            title: title.to_string(),
+            text: text.to_string(),
+            url: url.to_string(),
+        })
     });
 
     let interop: IDataTransferManagerInterop = windows::core::factory::<
@@ -138,7 +157,9 @@ pub fn share(hwnd: isize, title: &str, text: &str, url: &str) -> Result<()> {
     .map_err(|e| anyhow::anyhow!("activating IDataTransferManagerInterop failed: {e}"))?;
     let win = HWND(hwnd as *mut core::ffi::c_void);
     unsafe {
-        interop.ShowShareUIForWindow(win).map_err(|e| anyhow::anyhow!("ShowShareUIForWindow failed: {e}"))?;
+        interop
+            .ShowShareUIForWindow(win)
+            .map_err(|e| anyhow::anyhow!("ShowShareUIForWindow failed: {e}"))?;
     }
     let _ = manager; // kept alive in MANAGERS; this local is just proof ensure_manager succeeded
     Ok(())
@@ -146,5 +167,7 @@ pub fn share(hwnd: isize, title: &str, text: &str, url: &str) -> Result<()> {
 
 #[cfg(not(target_os = "windows"))]
 pub fn share(_hwnd: isize, _title: &str, _text: &str, _url: &str) -> Result<()> {
-    Err(anyhow::anyhow!("the native share sheet is not yet implemented on this platform"))
+    Err(anyhow::anyhow!(
+        "the native share sheet is not yet implemented on this platform"
+    ))
 }

@@ -87,7 +87,7 @@ async function dbSql(url: string, token: string, project: string, args: string[]
   });
 
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
+    const err = (await res.json().catch(() => ({ error: res.statusText }))) as { error?: string };
     log.error(`SQL execution failed: ${err.error || res.statusText}`);
     return 1;
   }
@@ -111,7 +111,7 @@ async function dbExport(url: string, token: string, project: string, args: strin
 
   const res = await fetch(`${url}/api/projects/${project}/export`, { headers });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
+    const err = (await res.json().catch(() => ({ error: res.statusText }))) as { error?: string };
     log.error(`Export failed: ${err.error || res.statusText}`);
     return 1;
   }

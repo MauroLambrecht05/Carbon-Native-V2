@@ -45,13 +45,20 @@ use anyhow::{anyhow, Result};
 
 #[cfg(target_os = "windows")]
 fn parse_uuid(s: &str) -> Result<windows::core::GUID> {
-    let hex: String = s.trim().trim_start_matches('{').trim_end_matches('}').chars().filter(|c| *c != '-').collect();
+    let hex: String = s
+        .trim()
+        .trim_start_matches('{')
+        .trim_end_matches('}')
+        .chars()
+        .filter(|c| *c != '-')
+        .collect();
     if hex.len() != 32 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
         return Err(anyhow!("invalid UUID: {s}"));
     }
     let mut bytes = [0u8; 16];
     for i in 0..16 {
-        bytes[i] = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).map_err(|_| anyhow!("invalid UUID: {s}"))?;
+        bytes[i] = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16)
+            .map_err(|_| anyhow!("invalid UUID: {s}"))?;
     }
     let data1 = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
     let data2 = u16::from_be_bytes([bytes[4], bytes[5]]);
@@ -73,7 +80,10 @@ fn parse_address(s: &str) -> Result<u64> {
 #[cfg(target_os = "windows")]
 fn format_address(addr: u64) -> String {
     let b = addr.to_be_bytes();
-    format!("{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}", b[2], b[3], b[4], b[5], b[6], b[7])
+    format!(
+        "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+        b[2], b[3], b[4], b[5], b[6], b[7]
+    )
 }
 
 #[cfg(target_os = "windows")]
@@ -96,7 +106,8 @@ thread_local! {
 #[cfg(target_os = "windows")]
 pub fn scan_start() -> Result<()> {
     use windows::Devices::Bluetooth::Advertisement::{
-        BluetoothLEAdvertisementReceivedEventArgs, BluetoothLEAdvertisementWatcher, BluetoothLEScanningMode,
+        BluetoothLEAdvertisementReceivedEventArgs, BluetoothLEAdvertisementWatcher,
+        BluetoothLEScanningMode,
     };
     use windows::Foundation::TypedEventHandler;
 
@@ -113,8 +124,8 @@ pub fn scan_start() -> Result<()> {
     WATCHER.with(|cell| -> Result<()> {
         let mut slot = cell.borrow_mut();
         if slot.is_none() {
-            let watcher =
-                BluetoothLEAdvertisementWatcher::new().map_err(|e| anyhow!("BluetoothLEAdvertisementWatcher::new failed: {e}"))?;
+            let watcher = BluetoothLEAdvertisementWatcher::new()
+                .map_err(|e| anyhow!("BluetoothLEAdvertisementWatcher::new failed: {e}"))?;
             let _ = watcher.SetScanningMode(BluetoothLEScanningMode::Active);
             watcher
                 .Received(&TypedEventHandler::new(
@@ -132,17 +143,29 @@ pub fn scan_start() -> Result<()> {
                         let json = format!(
                             "{{\"address\":\"{}\",\"name\":{},\"rssi\":{}}}",
                             format_address(address),
-                            if name.is_empty() { "null".to_string() } else { format!("{:?}", name) },
+                            if name.is_empty() {
+                                "null".to_string()
+                            } else {
+                                format!("{name:?}")
+                            },
                             rssi
                         );
-                        crate::host_exports::push_plugin_event("bluetooth.device".to_string(), json);
+                        crate::host_exports::push_plugin_event(
+                            "bluetooth.device".to_string(),
+                            json,
+                        );
                         Ok(())
                     },
                 ))
-                .map_err(|e| anyhow!("BluetoothLEAdvertisementWatcher::Received registration failed: {e}"))?;
+                .map_err(|e| {
+                    anyhow!("BluetoothLEAdvertisementWatcher::Received registration failed: {e}")
+                })?;
             *slot = Some(watcher);
         }
-        slot.as_ref().expect("just set or already present").Start().map_err(|e| anyhow!("watcher Start failed: {e}"))?;
+        slot.as_ref()
+            .expect("just set or already present")
+            .Start()
+            .map_err(|e| anyhow!("watcher Start failed: {e}"))?;
         Ok(())
     })
 }
@@ -151,7 +174,9 @@ pub fn scan_start() -> Result<()> {
 pub fn scan_stop() -> Result<()> {
     WATCHER.with(|cell| -> Result<()> {
         if let Some(watcher) = cell.borrow().as_ref() {
-            watcher.Stop().map_err(|e| anyhow!("watcher Stop failed: {e}"))?;
+            watcher
+                .Stop()
+                .map_err(|e| anyhow!("watcher Stop failed: {e}"))?;
         }
         Ok(())
     })
@@ -160,13 +185,16 @@ pub fn scan_stop() -> Result<()> {
 // ── Connected-device cache (shared across background threads) ───────────
 
 #[cfg(target_os = "windows")]
-static DEVICES: std::sync::Mutex<Option<std::collections::HashMap<u64, windows::Devices::Bluetooth::BluetoothLEDevice>>> =
-    std::sync::Mutex::new(None);
+static DEVICES: std::sync::Mutex<
+    Option<std::collections::HashMap<u64, windows::Devices::Bluetooth::BluetoothLEDevice>>,
+> = std::sync::Mutex::new(None);
 
 #[cfg(target_os = "windows")]
 fn cache_device(addr: u64, device: windows::Devices::Bluetooth::BluetoothLEDevice) {
     let mut guard = DEVICES.lock().unwrap_or_else(|e| e.into_inner());
-    guard.get_or_insert_with(std::collections::HashMap::new).insert(addr, device);
+    guard
+        .get_or_insert_with(std::collections::HashMap::new)
+        .insert(addr, device);
 }
 
 #[cfg(target_os = "windows")]
@@ -181,22 +209,32 @@ fn find_characteristic(
     service_uuid: windows::core::GUID,
     char_uuid: windows::core::GUID,
 ) -> Result<windows::Devices::Bluetooth::GenericAttributeProfile::GattCharacteristic> {
-    let services_result =
-        device.GetGattServicesForUuidAsync(service_uuid).map_err(|e| anyhow!("GetGattServicesForUuidAsync failed: {e}"))?.get()?;
-    let services = services_result.Services().map_err(|e| anyhow!("Services() failed: {e}"))?;
+    let services_result = device
+        .GetGattServicesForUuidAsync(service_uuid)
+        .map_err(|e| anyhow!("GetGattServicesForUuidAsync failed: {e}"))?
+        .get()?;
+    let services = services_result
+        .Services()
+        .map_err(|e| anyhow!("Services() failed: {e}"))?;
     if services.Size().unwrap_or(0) == 0 {
         return Err(anyhow!("no matching GATT service found"));
     }
-    let service = services.GetAt(0).map_err(|e| anyhow!("service GetAt(0) failed: {e}"))?;
+    let service = services
+        .GetAt(0)
+        .map_err(|e| anyhow!("service GetAt(0) failed: {e}"))?;
     let chars_result = service
         .GetCharacteristicsForUuidAsync(char_uuid)
         .map_err(|e| anyhow!("GetCharacteristicsForUuidAsync failed: {e}"))?
         .get()?;
-    let chars = chars_result.Characteristics().map_err(|e| anyhow!("Characteristics() failed: {e}"))?;
+    let chars = chars_result
+        .Characteristics()
+        .map_err(|e| anyhow!("Characteristics() failed: {e}"))?;
     if chars.Size().unwrap_or(0) == 0 {
         return Err(anyhow!("no matching GATT characteristic found"));
     }
-    chars.GetAt(0).map_err(|e| anyhow!("characteristic GetAt(0) failed: {e}"))
+    chars
+        .GetAt(0)
+        .map_err(|e| anyhow!("characteristic GetAt(0) failed: {e}"))
 }
 
 // ── Connect (background MTA thread) ─────────────────────────────────────
@@ -227,7 +265,10 @@ pub fn connect(address: &str) -> Result<()> {
             Err(e) => {
                 crate::host_exports::push_plugin_event(
                     "bluetooth.connect_error".to_string(),
-                    format!("{{\"address\":\"{address}\",\"error\":{:?}}}", e.to_string()),
+                    format!(
+                        "{{\"address\":\"{address}\",\"error\":{:?}}}",
+                        e.to_string()
+                    ),
                 );
             }
         }
@@ -240,7 +281,8 @@ pub fn connect(address: &str) -> Result<()> {
 #[cfg(target_os = "windows")]
 pub fn subscribe(address: &str, service_uuid: &str, characteristic_uuid: &str) -> Result<()> {
     use windows::Devices::Bluetooth::GenericAttributeProfile::{
-        GattCharacteristic, GattClientCharacteristicConfigurationDescriptorValue, GattValueChangedEventArgs,
+        GattCharacteristic, GattClientCharacteristicConfigurationDescriptorValue,
+        GattValueChangedEventArgs,
     };
     use windows::Foundation::TypedEventHandler;
     use windows::Security::Cryptography::CryptographicBuffer;
@@ -254,24 +296,34 @@ pub fn subscribe(address: &str, service_uuid: &str, characteristic_uuid: &str) -
     std::thread::spawn(move || {
         ensure_mta_initialized();
         let outcome = (|| -> Result<()> {
-            let device = cached_device(addr).ok_or_else(|| anyhow!("not connected — call connect() first"))?;
+            let device = cached_device(addr)
+                .ok_or_else(|| anyhow!("not connected — call connect() first"))?;
             let characteristic = find_characteristic(&device, svc_uuid, char_uuid)?;
             let event_name = format!("bluetooth.notify.{char_uuid_str}");
             characteristic
                 .ValueChanged(&TypedEventHandler::new(
-                    move |_sender: &Option<GattCharacteristic>, args: &Option<GattValueChangedEventArgs>| -> windows::core::Result<()> {
+                    move |_sender: &Option<GattCharacteristic>,
+                          args: &Option<GattValueChangedEventArgs>|
+                          -> windows::core::Result<()> {
                         let Some(args) = args else { return Ok(()) };
                         let buffer = args.CharacteristicValue()?;
                         let mut out = windows::core::Array::<u8>::default();
                         CryptographicBuffer::CopyToByteArray(&buffer, &mut out)?;
-                        crate::host_exports::push_plugin_binary_event(event_name.clone(), out.as_slice().to_vec());
+                        crate::host_exports::push_plugin_binary_event(
+                            event_name.clone(),
+                            out.as_slice().to_vec(),
+                        );
                         Ok(())
                     },
                 ))
                 .map_err(|e| anyhow!("ValueChanged registration failed: {e}"))?;
             characteristic
-                .WriteClientCharacteristicConfigurationDescriptorAsync(GattClientCharacteristicConfigurationDescriptorValue::Notify)
-                .map_err(|e| anyhow!("WriteClientCharacteristicConfigurationDescriptorAsync failed: {e}"))?
+                .WriteClientCharacteristicConfigurationDescriptorAsync(
+                    GattClientCharacteristicConfigurationDescriptorValue::Notify,
+                )
+                .map_err(|e| {
+                    anyhow!("WriteClientCharacteristicConfigurationDescriptorAsync failed: {e}")
+                })?
                 .get()
                 .map_err(|e| anyhow!("enabling notifications failed: {e}"))?;
             Ok(())
@@ -280,16 +332,17 @@ pub fn subscribe(address: &str, service_uuid: &str, characteristic_uuid: &str) -
             Ok(()) => {
                 crate::host_exports::push_plugin_event(
                     "bluetooth.subscribed".to_string(),
-                    format!("{{\"address\":\"{address}\",\"characteristicUuid\":{:?}}}", char_uuid_str),
+                    format!(
+                        "{{\"address\":\"{address}\",\"characteristicUuid\":{char_uuid_str:?}}}"
+                    ),
                 );
             }
             Err(e) => {
+                let err = e.to_string();
                 crate::host_exports::push_plugin_event(
                     "bluetooth.subscribe_error".to_string(),
                     format!(
-                        "{{\"address\":\"{address}\",\"characteristicUuid\":{:?},\"error\":{:?}}}",
-                        char_uuid_str,
-                        e.to_string()
+                        "{{\"address\":\"{address}\",\"characteristicUuid\":{char_uuid_str:?},\"error\":{err:?}}}"
                     ),
                 );
             }
@@ -301,7 +354,12 @@ pub fn subscribe(address: &str, service_uuid: &str, characteristic_uuid: &str) -
 // ── Write characteristic (background MTA thread) ─────────────────────────
 
 #[cfg(target_os = "windows")]
-pub fn write_characteristic(address: &str, service_uuid: &str, characteristic_uuid: &str, data: Vec<u8>) -> Result<()> {
+pub fn write_characteristic(
+    address: &str,
+    service_uuid: &str,
+    characteristic_uuid: &str,
+    data: Vec<u8>,
+) -> Result<()> {
     use windows::Security::Cryptography::CryptographicBuffer;
 
     let addr = parse_address(address)?;
@@ -312,10 +370,11 @@ pub fn write_characteristic(address: &str, service_uuid: &str, characteristic_uu
     std::thread::spawn(move || {
         ensure_mta_initialized();
         let outcome = (|| -> Result<()> {
-            let device = cached_device(addr).ok_or_else(|| anyhow!("not connected — call connect() first"))?;
+            let device = cached_device(addr)
+                .ok_or_else(|| anyhow!("not connected — call connect() first"))?;
             let characteristic = find_characteristic(&device, svc_uuid, char_uuid)?;
-            let buffer =
-                CryptographicBuffer::CreateFromByteArray(&data).map_err(|e| anyhow!("CreateFromByteArray failed: {e}"))?;
+            let buffer = CryptographicBuffer::CreateFromByteArray(&data)
+                .map_err(|e| anyhow!("CreateFromByteArray failed: {e}"))?;
             let status = characteristic
                 .WriteValueAsync(&buffer)
                 .map_err(|e| anyhow!("WriteValueAsync failed: {e}"))?
@@ -330,7 +389,7 @@ pub fn write_characteristic(address: &str, service_uuid: &str, characteristic_uu
         let ok = outcome.is_ok();
         crate::host_exports::push_plugin_event(
             "bluetooth.write_result".to_string(),
-            format!("{{\"characteristicUuid\":{:?},\"ok\":{}}}", char_uuid_str, ok),
+            format!("{{\"characteristicUuid\":{char_uuid_str:?},\"ok\":{ok}}}"),
         );
     });
     Ok(())
@@ -353,6 +412,11 @@ pub fn subscribe(_address: &str, _service_uuid: &str, _characteristic_uuid: &str
     Err(anyhow!("Bluetooth is not yet implemented on this platform"))
 }
 #[cfg(not(target_os = "windows"))]
-pub fn write_characteristic(_address: &str, _service_uuid: &str, _characteristic_uuid: &str, _data: Vec<u8>) -> Result<()> {
+pub fn write_characteristic(
+    _address: &str,
+    _service_uuid: &str,
+    _characteristic_uuid: &str,
+    _data: Vec<u8>,
+) -> Result<()> {
     Err(anyhow!("Bluetooth is not yet implemented on this platform"))
 }

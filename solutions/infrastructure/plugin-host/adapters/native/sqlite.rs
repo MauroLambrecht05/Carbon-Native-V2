@@ -94,8 +94,10 @@ pub fn exec(db_path: &str, sql: &str, params_json: &str) -> Result<String> {
 
     with_connection(db_path, |conn| {
         let mut stmt = conn.prepare(sql)?;
-        let param_refs: Vec<&dyn rusqlite::ToSql> =
-            sql_params.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
+        let param_refs: Vec<&dyn rusqlite::ToSql> = sql_params
+            .iter()
+            .map(|p| p as &dyn rusqlite::ToSql)
+            .collect();
 
         if stmt.column_count() == 0 {
             // No result columns — a mutation, not a query.

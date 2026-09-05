@@ -33,9 +33,16 @@ extern "system" {
 extern "system" {
     fn CreateCompatibleDC(hdc: *mut core::ffi::c_void) -> *mut core::ffi::c_void;
     fn DeleteDC(hdc: *mut core::ffi::c_void) -> i32;
-    fn CreateCompatibleBitmap(hdc: *mut core::ffi::c_void, w: i32, h: i32) -> *mut core::ffi::c_void;
+    fn CreateCompatibleBitmap(
+        hdc: *mut core::ffi::c_void,
+        w: i32,
+        h: i32,
+    ) -> *mut core::ffi::c_void;
     fn DeleteObject(obj: *mut core::ffi::c_void) -> i32;
-    fn SelectObject(hdc: *mut core::ffi::c_void, obj: *mut core::ffi::c_void) -> *mut core::ffi::c_void;
+    fn SelectObject(
+        hdc: *mut core::ffi::c_void,
+        obj: *mut core::ffi::c_void,
+    ) -> *mut core::ffi::c_void;
     fn BitBlt(
         hdc_dest: *mut core::ffi::c_void,
         x: i32,
@@ -119,18 +126,29 @@ pub fn capture(target: &str, hwnd: isize, out_path: &str) -> Result<()> {
     #[cfg(not(target_os = "windows"))]
     {
         let _ = (target, hwnd, out_path);
-        Err(anyhow!("screen capture not yet implemented on this platform"))
+        Err(anyhow!(
+            "screen capture not yet implemented on this platform"
+        ))
     }
 
     #[cfg(target_os = "windows")]
     {
         unsafe {
-            let capture_hwnd = if target == "screen" { core::ptr::null_mut() } else { hwnd as *mut core::ffi::c_void };
+            let capture_hwnd = if target == "screen" {
+                core::ptr::null_mut()
+            } else {
+                hwnd as *mut core::ffi::c_void
+            };
 
             let (width, height) = if target == "screen" {
                 (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN))
             } else {
-                let mut rect = Rect { left: 0, top: 0, right: 0, bottom: 0 };
+                let mut rect = Rect {
+                    left: 0,
+                    top: 0,
+                    right: 0,
+                    bottom: 0,
+                };
                 if GetWindowRect(capture_hwnd, &mut rect) == 0 {
                     return Err(anyhow!("GetWindowRect failed"));
                 }
@@ -144,7 +162,10 @@ pub fn capture(target: &str, hwnd: isize, out_path: &str) -> Result<()> {
             if src_dc_raw.is_null() {
                 return Err(anyhow!("GetDC failed"));
             }
-            let src_dc = ScopedDc { hwnd: capture_hwnd, hdc: src_dc_raw };
+            let src_dc = ScopedDc {
+                hwnd: capture_hwnd,
+                hdc: src_dc_raw,
+            };
 
             let mem_dc = CreateCompatibleDC(src_dc.hdc);
             if mem_dc.is_null() {
@@ -205,8 +226,9 @@ pub fn capture(target: &str, hwnd: isize, out_path: &str) -> Result<()> {
                 px.swap(0, 2);
             }
 
-            let img: image::RgbaImage = image::ImageBuffer::from_raw(width as u32, height as u32, pixels)
-                .ok_or_else(|| anyhow!("pixel buffer size mismatch"))?;
+            let img: image::RgbaImage =
+                image::ImageBuffer::from_raw(width as u32, height as u32, pixels)
+                    .ok_or_else(|| anyhow!("pixel buffer size mismatch"))?;
             img.save(out_path)?;
             Ok(())
         }

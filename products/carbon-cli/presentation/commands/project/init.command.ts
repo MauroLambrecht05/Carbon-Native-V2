@@ -14,6 +14,7 @@ import {
   Command,
   EXIT_OK,
   EXIT_USAGE,
+  EXIT_FAILURE,
   type CommandMeta,
   type CommandContext,
   type ExitCode,

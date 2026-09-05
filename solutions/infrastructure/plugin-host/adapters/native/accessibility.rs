@@ -29,7 +29,9 @@ const SPI_GETSCREENREADER: u32 = 0x0046;
 pub fn screen_reader_active() -> Result<bool> {
     #[cfg(not(target_os = "windows"))]
     {
-        Err(anyhow::anyhow!("screen-reader detection not yet implemented on this platform"))
+        Err(anyhow::anyhow!(
+            "screen-reader detection not yet implemented on this platform"
+        ))
     }
 
     #[cfg(target_os = "windows")]

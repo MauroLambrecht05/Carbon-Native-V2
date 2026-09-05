@@ -485,9 +485,9 @@ pub fn compute_cache_key(
 
     // Layer 2: try to skip the walk itself first.
     let sidecar = read_stat_sidecar(project_dir);
-    let can_skip_walk = sidecar
-        .as_ref()
-        .is_some_and(|s| dirs_unchanged(&s.dirs) && structural_files_unchanged(project_dir, &s.stat));
+    let can_skip_walk = sidecar.as_ref().is_some_and(|s| {
+        dirs_unchanged(&s.dirs) && structural_files_unchanged(project_dir, &s.stat)
+    });
 
     struct Tracked {
         t: char,
@@ -518,10 +518,7 @@ pub fn compute_cache_key(
 
         let mut tracked = Vec::new();
         for abs in &files_w.files {
-            let rel = abs
-                .strip_prefix(project_dir)
-                .unwrap_or(abs)
-                .to_path_buf();
+            let rel = abs.strip_prefix(project_dir).unwrap_or(abs).to_path_buf();
             tracked.push(Tracked {
                 t: 'F',
                 p: to_forward_slash(&rel),
@@ -550,7 +547,9 @@ pub fn compute_cache_key(
             .chain(dep_w.dirs.iter())
             .chain(alias_w.dirs.iter())
         {
-            dir_map.entry(d.clone()).or_insert_with(|| safe_dir_mtime(d));
+            dir_map
+                .entry(d.clone())
+                .or_insert_with(|| safe_dir_mtime(d));
         }
         let mut current_dirs: Vec<DirEntry> = dir_map
             .into_iter()
@@ -571,10 +570,7 @@ pub fn compute_cache_key(
         .map(|f| safe_stat_entry(f.t, &f.p, &f.abs))
         .collect();
 
-    let source_hash = if sidecar
-        .as_ref()
-        .is_some_and(|s| s.stat == current_stat)
-    {
+    let source_hash = if sidecar.as_ref().is_some_and(|s| s.stat == current_stat) {
         sidecar.unwrap().source_hash
     } else {
         let mut sh = Sha256::new();

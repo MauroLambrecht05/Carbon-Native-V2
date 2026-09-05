@@ -180,7 +180,8 @@ fn host_alloc_free_round_trip() {
     // freeing memory the host allocated is the single most dangerous thing in
     // the ABI, so the round trip is asserted rather than assumed.
     use host_exports::{HostCarbonApp, HostCarbonAppStorage};
-    let mut storage = HostCarbonAppStorage::new("t", "0.0.1", "/tmp", 100, 100, "mini", "{}", false);
+    let mut storage =
+        HostCarbonAppStorage::new("t", "0.0.1", "/tmp", 100, 100, "mini", "{}", false);
     let app: *mut HostCarbonApp = storage.raw();
     unsafe {
         let alloc_fn = (*app).alloc.expect("alloc set");

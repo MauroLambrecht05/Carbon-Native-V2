@@ -61,7 +61,9 @@ pub fn setup(hwnd: isize, menu_json: &str) -> Result<()> {
     #[cfg(not(target_os = "windows"))]
     {
         let _ = (hwnd, menu_json);
-        return Err(anyhow!("native menu bar not yet implemented on this platform"));
+        return Err(anyhow!(
+            "native menu bar not yet implemented on this platform"
+        ));
     }
 
     #[cfg(target_os = "windows")]
@@ -82,7 +84,11 @@ pub fn setup(hwnd: isize, menu_json: &str) -> Result<()> {
                             .append(&PredefinedMenuItem::separator())
                             .map_err(|e| anyhow!(e.to_string()))?;
                     }
-                    ItemSpec::Item { id, label, accelerator } => {
+                    ItemSpec::Item {
+                        id,
+                        label,
+                        accelerator,
+                    } => {
                         let accel = match accelerator {
                             Some(s) => {
                                 Some(Accelerator::from_str(s).map_err(|e| anyhow!(e.to_string()))?)
@@ -90,7 +96,9 @@ pub fn setup(hwnd: isize, menu_json: &str) -> Result<()> {
                             None => None,
                         };
                         let menu_item = MenuItem::with_id(id.clone(), label, true, accel);
-                        submenu.append(&menu_item).map_err(|e| anyhow!(e.to_string()))?;
+                        submenu
+                            .append(&menu_item)
+                            .map_err(|e| anyhow!(e.to_string()))?;
                         ids.push(id.clone());
                     }
                 }
@@ -103,7 +111,8 @@ pub fn setup(hwnd: isize, menu_json: &str) -> Result<()> {
         // the JS/event-loop thread per this file's own THREAD CONSTRAINT
         // note.
         unsafe {
-            menu.init_for_hwnd(hwnd).map_err(|e| anyhow!(e.to_string()))?;
+            menu.init_for_hwnd(hwnd)
+                .map_err(|e| anyhow!(e.to_string()))?;
         }
         // Win32's SetMenu (which init_for_hwnd calls internally) replaces
         // whatever menu was already attached — no explicit remove needed

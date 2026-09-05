@@ -25,7 +25,8 @@ static HIT: OnceLock<AtomicBool> = OnceLock::new();
 /// all on a backend with no frame cache (blitz) — `stats()` then reports
 /// `hit: false` by simple absence, which is the correct answer there too.
 pub fn record_hit(hit: bool) {
-    HIT.get_or_init(|| AtomicBool::new(false)).store(hit, Ordering::SeqCst);
+    HIT.get_or_init(|| AtomicBool::new(false))
+        .store(hit, Ordering::SeqCst);
 }
 
 pub fn stats() -> Result<String> {
@@ -34,7 +35,9 @@ pub fn stats() -> Result<String> {
 }
 
 pub fn clear(project_dir: &str) -> Result<()> {
-    let dir = std::path::Path::new(project_dir).join("dist").join(".carbon-frame-cache");
+    let dir = std::path::Path::new(project_dir)
+        .join("dist")
+        .join(".carbon-frame-cache");
     // Not-found is success (nothing to clear), matching frame_cache.rs's
     // own "a miss/failure here is never a correctness problem" posture.
     match std::fs::remove_dir_all(&dir) {

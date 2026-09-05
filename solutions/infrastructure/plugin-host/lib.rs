@@ -84,13 +84,11 @@ pub mod camera;
 // above: no external dependency to opt out of, and manifest_read needs
 // carbon-core, which is already a mandatory (non-optional) dependency of
 // this crate.
-#[path = "adapters/native/carbon_manifest.rs"]
-pub mod carbon_manifest;
-#[path = "adapters/native/framecache.rs"]
-pub mod framecache;
 #[cfg(feature = "bluetooth")]
 #[path = "adapters/native/bluetooth.rs"]
 pub mod bluetooth;
+#[path = "adapters/native/carbon_manifest.rs"]
+pub mod carbon_manifest;
 #[cfg(feature = "clipboard")]
 #[path = "adapters/native/clipboard.rs"]
 pub mod clipboard;
@@ -100,6 +98,8 @@ pub mod deeplink;
 #[cfg(feature = "dialog")]
 #[path = "adapters/native/dialog.rs"]
 pub mod dialog;
+#[path = "adapters/native/framecache.rs"]
+pub mod framecache;
 #[cfg(feature = "shortcuts")]
 #[path = "adapters/native/global_shortcuts.rs"]
 pub mod global_shortcuts;
@@ -118,12 +118,12 @@ pub mod logging;
 #[cfg(feature = "media")]
 #[path = "adapters/native/media.rs"]
 pub mod media;
-#[cfg(feature = "microphone")]
-#[path = "adapters/native/microphone.rs"]
-pub mod microphone;
 #[cfg(feature = "menu")]
 #[path = "adapters/native/menu.rs"]
 pub mod menu;
+#[cfg(feature = "microphone")]
+#[path = "adapters/native/microphone.rs"]
+pub mod microphone;
 // Shared MenuEvent-channel dispatcher for tray.rs and menu.rs — see its own
 // header comment for why this can't just live inside either one.
 #[cfg(any(feature = "tray", feature = "menu"))]

@@ -87,7 +87,9 @@ fn kill_pid(pid: u32) {
     #[cfg(windows)]
     unsafe {
         use windows_sys::Win32::Foundation::CloseHandle;
-        use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+        use windows_sys::Win32::System::Threading::{
+            OpenProcess, TerminateProcess, PROCESS_TERMINATE,
+        };
         let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
         if !handle.is_null() {
             TerminateProcess(handle, 1);
@@ -155,7 +157,9 @@ fn spawn_pooled_instance(runtime_exe: &Path) -> Result<PooledInstance> {
 /// Tops the pool up to `POOL_TARGET`, discarding (and killing) any entry
 /// that's sat unclaimed past `UNCLAIMED_TIMEOUT`.
 fn refill(pool: &Mutex<VecDeque<PooledInstance>>, runtime_exe: Option<&Path>) {
-    let Some(runtime_exe) = runtime_exe else { return };
+    let Some(runtime_exe) = runtime_exe else {
+        return;
+    };
     let mut pool = pool.lock().unwrap_or_else(|e| e.into_inner());
     let now = Instant::now();
     let mut i = 0;
@@ -217,7 +221,8 @@ fn handle_connection(
         match (popped, &runtime_exe) {
             (Some(inst), Some(exe)) => match std::fs::metadata(exe) {
                 Ok(meta)
-                    if meta.len() == inst.runtime_size && mtime_ms(&meta) == inst.runtime_mtime_ms =>
+                    if meta.len() == inst.runtime_size
+                        && mtime_ms(&meta) == inst.runtime_mtime_ms =>
                 {
                     Some(inst)
                 }
@@ -355,7 +360,9 @@ pub fn ensure_daemon() -> i32 {
     if PipeConnection::connect(&name).is_ok() {
         return 0; // already running
     }
-    let Ok(self_exe) = std::env::current_exe() else { return 0 };
+    let Ok(self_exe) = std::env::current_exe() else {
+        return 0;
+    };
     let _ = Command::new(&self_exe)
         .arg("daemon")
         .stdin(Stdio::null())
@@ -373,7 +380,13 @@ pub fn ensure_daemon() -> i32 {
 /// moment the SAME `window-visible` marker `spawn.rs` watches for on a
 /// direct spawn arrives, relayed live) and the process should exit with
 /// `code`.
-pub fn try_daemon(project_dir: &Path, backend: &str, dev_mode: bool, t0: Instant, app_name: &str) -> Option<i32> {
+pub fn try_daemon(
+    project_dir: &Path,
+    backend: &str,
+    dev_mode: bool,
+    t0: Instant,
+    app_name: &str,
+) -> Option<i32> {
     let name = pipe_name();
     let mut conn = PipeConnection::connect(&name).ok()?;
     let req = serde_json::json!({
@@ -398,7 +411,10 @@ pub fn try_daemon(project_dir: &Path, backend: &str, dev_mode: bool, t0: Instant
                 if line.trim() == crate::spawn::WINDOW_VISIBLE_MARKER {
                     if !printed_ready {
                         printed_ready = true;
-                        eprintln!("\u{2713} {app_name} ready in {}ms", t0.elapsed().as_millis());
+                        eprintln!(
+                            "\u{2713} {app_name} ready in {}ms",
+                            t0.elapsed().as_millis()
+                        );
                     }
                     continue; // don't also echo the raw marker line itself
                 }

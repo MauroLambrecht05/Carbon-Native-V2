@@ -34,7 +34,9 @@ use std::sync::OnceLock;
 use windows::core::GUID;
 use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
 use windows::Win32::Media::Audio::{eConsole, eRender, IMMDeviceEnumerator, MMDeviceEnumerator};
-use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_ALL, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED};
+use windows::Win32::System::Com::{
+    CoCreateInstance, CoInitializeEx, CLSCTX_ALL, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED,
+};
 
 thread_local! {
     static COM_READY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -83,7 +85,8 @@ pub fn get_volume() -> Result<f32> {
 pub fn set_volume(level: f32) -> Result<()> {
     let level = level.clamp(0.0, 1.0);
     with_endpoint_volume(|v| unsafe {
-        v.SetMasterVolumeLevelScalar(level, &GUID::zeroed()).map_err(|e| anyhow!("{e}"))
+        v.SetMasterVolumeLevelScalar(level, &GUID::zeroed())
+            .map_err(|e| anyhow!("{e}"))
     })
 }
 
@@ -92,7 +95,10 @@ pub fn get_mute() -> Result<bool> {
 }
 
 pub fn set_mute(muted: bool) -> Result<()> {
-    with_endpoint_volume(|v| unsafe { v.SetMute(muted, &GUID::zeroed()).map_err(|e| anyhow!("{e}")) })
+    with_endpoint_volume(|v| unsafe {
+        v.SetMute(muted, &GUID::zeroed())
+            .map_err(|e| anyhow!("{e}"))
+    })
 }
 
 // ── Media keys ───────────────────────────────────────────────────────────
@@ -170,7 +176,8 @@ pub fn ensure_media_key_listener() {
                     }
                     if msg.message == WM_HOTKEY {
                         let id = msg.wparam as i32;
-                        if let Some((_, _, name)) = HOTKEY_IDS.iter().find(|(hid, _, _)| *hid == id) {
+                        if let Some((_, _, name)) = HOTKEY_IDS.iter().find(|(hid, _, _)| *hid == id)
+                        {
                             crate::host_exports::push_plugin_event(
                                 "media.key".to_string(),
                                 format!("{{\"key\":\"{name}\"}}"),

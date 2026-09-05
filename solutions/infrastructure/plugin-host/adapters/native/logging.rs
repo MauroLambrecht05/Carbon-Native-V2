@@ -41,7 +41,9 @@ fn open_for_append(path: &str) -> Result<(File, u64)> {
 /// RFC3339 UTC timestamp, hand-formatted — not worth a `time`/`chrono`
 /// dependency for one line of arithmetic on `SystemTime`.
 fn rfc3339_now() -> String {
-    let dur = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    let dur = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
     let secs = dur.as_secs();
     let millis = dur.subsec_millis();
     // Days since epoch -> proleptic Gregorian date. Standard civil-from-days

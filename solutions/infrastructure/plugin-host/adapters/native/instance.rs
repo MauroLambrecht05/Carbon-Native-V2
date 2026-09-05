@@ -50,7 +50,9 @@ pub fn acquire(app_id: &str) -> Result<()> {
     #[cfg(not(target_os = "windows"))]
     {
         let _ = app_id;
-        Err(anyhow!("single-instance lock not yet implemented on this platform"))
+        Err(anyhow!(
+            "single-instance lock not yet implemented on this platform"
+        ))
     }
 
     #[cfg(target_os = "windows")]

@@ -130,21 +130,16 @@ fn key_input(vk: u16, key_up: bool) -> Input {
 fn mouse_input(dx: i32, dy: i32, flags: u32) -> Input {
     Input {
         input_type: INPUT_MOUSE,
-        u: InputUnion { mi: MouseInput { dx, dy, mouse_data: 0, dw_flags: flags, time: 0, dw_extra_info: 0 } },
-    }
-}
-
-#[cfg(target_os = "windows")]
-#[cfg(test)]
-mod layout_tests {
-    use super::*;
-
-    // Verified against the real Win32 INPUT struct: 8 (type + padding) +
-    // 32 (union, MOUSEINPUT-dominated: 20 bytes of u32 fields + 4 bytes
-    // padding to 8-align dwExtraInfo + 8-byte dwExtraInfo) = 40 on x64.
-    #[test]
-    fn input_struct_matches_win32_size_on_x64() {
-        assert_eq!(core::mem::size_of::<Input>(), 40);
+        u: InputUnion {
+            mi: MouseInput {
+                dx,
+                dy,
+                mouse_data: 0,
+                dw_flags: flags,
+                time: 0,
+                dw_extra_info: 0,
+            },
+        },
     }
 }
 
@@ -193,7 +188,13 @@ pub fn modifier_state() -> ModifierState {
     }
     #[cfg(not(target_os = "windows"))]
     {
-        ModifierState { shift: false, ctrl: false, alt: false, caps_lock: false, num_lock: false }
+        ModifierState {
+            shift: false,
+            ctrl: false,
+            alt: false,
+            caps_lock: false,
+            num_lock: false,
+        }
     }
 }
 
@@ -201,7 +202,9 @@ pub fn send_key(vk: u16, key_down: bool) -> Result<()> {
     #[cfg(not(target_os = "windows"))]
     {
         let _ = (vk, key_down);
-        Err(anyhow!("synthetic input not yet implemented on this platform"))
+        Err(anyhow!(
+            "synthetic input not yet implemented on this platform"
+        ))
     }
     #[cfg(target_os = "windows")]
     {
@@ -221,7 +224,9 @@ pub fn move_mouse(x: i32, y: i32) -> Result<()> {
     #[cfg(not(target_os = "windows"))]
     {
         let _ = (x, y);
-        Err(anyhow!("synthetic input not yet implemented on this platform"))
+        Err(anyhow!(
+            "synthetic input not yet implemented on this platform"
+        ))
     }
     #[cfg(target_os = "windows")]
     {
@@ -239,7 +244,9 @@ pub fn click_mouse(button: i32, is_down: bool) -> Result<()> {
     #[cfg(not(target_os = "windows"))]
     {
         let _ = (button, is_down);
-        Err(anyhow!("synthetic input not yet implemented on this platform"))
+        Err(anyhow!(
+            "synthetic input not yet implemented on this platform"
+        ))
     }
     #[cfg(target_os = "windows")]
     {
@@ -268,7 +275,9 @@ pub fn click_mouse(button: i32, is_down: bool) -> Result<()> {
 pub fn keyboard_layout_name() -> Result<String> {
     #[cfg(not(target_os = "windows"))]
     {
-        Err(anyhow!("keyboard layout detection not yet implemented on this platform"))
+        Err(anyhow!(
+            "keyboard layout detection not yet implemented on this platform"
+        ))
     }
     #[cfg(target_os = "windows")]
     {
@@ -283,5 +292,19 @@ pub fn keyboard_layout_name() -> Result<String> {
         }
         let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
         Ok(String::from_utf16_lossy(&buf[..len]))
+    }
+}
+
+#[cfg(target_os = "windows")]
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+
+    // Verified against the real Win32 INPUT struct: 8 (type + padding) +
+    // 32 (union, MOUSEINPUT-dominated: 20 bytes of u32 fields + 4 bytes
+    // padding to 8-align dwExtraInfo + 8-byte dwExtraInfo) = 40 on x64.
+    #[test]
+    fn input_struct_matches_win32_size_on_x64() {
+        assert_eq!(core::mem::size_of::<Input>(), 40);
     }
 }

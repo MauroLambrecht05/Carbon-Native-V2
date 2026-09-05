@@ -319,10 +319,9 @@ fn plugins_current(project_dir: &Path) -> bool {
         .join(host_arch_name());
     let ext = host_ext();
 
-    let vendor_staged = manifest
-        .plugins
-        .iter()
-        .all(|(name, e)| !(e.enabled && e.source == "vendor") || bin_dir.join(format!("{name}.{ext}")).exists());
+    let vendor_staged = manifest.plugins.iter().all(|(name, e)| {
+        !(e.enabled && e.source == "vendor") || bin_dir.join(format!("{name}.{ext}")).exists()
+    });
     if !vendor_staged {
         return false;
     }
@@ -331,10 +330,9 @@ fn plugins_current(project_dir: &Path) -> bool {
         return true;
     }
 
-    let local_present = manifest
-        .plugins
-        .iter()
-        .all(|(name, e)| !(e.enabled && e.source == "local") || bin_dir.join(format!("{name}.{ext}")).exists());
+    let local_present = manifest.plugins.iter().all(|(name, e)| {
+        !(e.enabled && e.source == "local") || bin_dir.join(format!("{name}.{ext}")).exists()
+    });
     if !local_present {
         return false;
     }
@@ -352,7 +350,8 @@ fn bundle_current(
     dev: bool,
     runtime_exe: Option<&Path>,
 ) -> bool {
-    let key = carbon_build_cache::compute_cache_key(project_dir, backend, bytecode, dev, runtime_exe);
+    let key =
+        carbon_build_cache::compute_cache_key(project_dir, backend, bytecode, dev, runtime_exe);
     let Some(cache) = carbon_build_cache::read_cache(project_dir) else {
         return false;
     };
@@ -423,10 +422,12 @@ fn run_or_dev(rest: &[String], t0: Instant, dev_mode: bool) -> i32 {
         let subcommand = if dev_mode { "dev" } else { "run" };
         return delegate_to_ts(subcommand, rest);
     };
-    let backend = args
-        .runtime_override
-        .clone()
-        .unwrap_or_else(|| cfg.runtime.backend.clone().unwrap_or_else(|| "mini".to_string()));
+    let backend = args.runtime_override.clone().unwrap_or_else(|| {
+        cfg.runtime
+            .backend
+            .clone()
+            .unwrap_or_else(|| "mini".to_string())
+    });
     let bytecode = cfg.runtime.bytecode;
 
     let runtime_exe = resolve_runtime_binary(&backend);
@@ -435,7 +436,13 @@ fn run_or_dev(rest: &[String], t0: Instant, dev_mode: bool) -> i32 {
         && node_modules_current(&args.project_dir)
         && runtime_exe.is_some()
         && plugins_current(&args.project_dir)
-        && bundle_current(&args.project_dir, &backend, bytecode, dev_mode, runtime_exe.as_deref());
+        && bundle_current(
+            &args.project_dir,
+            &backend,
+            bytecode,
+            dev_mode,
+            runtime_exe.as_deref(),
+        );
 
     if !take_fast_path {
         let subcommand = if dev_mode { "dev" } else { "run" };
@@ -452,8 +459,13 @@ fn run_or_dev(rest: &[String], t0: Instant, dev_mode: bool) -> i32 {
     // optimization on top of the fast path, never a dependency of it.
     #[cfg(windows)]
     {
-        let app_name = if cfg.app.name.is_empty() { "app" } else { cfg.app.name.as_str() };
-        if let Some(code) = daemon::try_daemon(&args.project_dir, &backend, dev_mode, t0, app_name) {
+        let app_name = if cfg.app.name.is_empty() {
+            "app"
+        } else {
+            cfg.app.name.as_str()
+        };
+        if let Some(code) = daemon::try_daemon(&args.project_dir, &backend, dev_mode, t0, app_name)
+        {
             return code;
         }
     }

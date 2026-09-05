@@ -5,7 +5,7 @@ export interface ServerConfig {
   readonly handler: (req: Request) => Promise<Response>;
 }
 
-export function startUpdaterServer(config: ServerConfig): Server {
+export function startUpdaterServer(config: ServerConfig): Server<undefined> {
   return Bun.serve({
     port: config.port,
     fetch(req: Request): Promise<Response> {
