@@ -1,0 +1,98 @@
+# Carbon Registry — self-hosted, v1.
+#
+# `docker compose up` from this directory brings up everything this
+# product needs on its own: Postgres (plugin/version metadata) and MinIO
+# (tarball bytes). Identity is NOT brought up here — this product has
+# none of its own; it verifies tokens against a running carbon-cloud
+# instance instead (see HttpIdentityClient and entrypoint.ts). Point
+# CONTROL_PLANE_URL at wherever that is; the default below reaches a
+# `docker compose up` in ../carbon-cloud running on the same host via
+# Docker Desktop's host.docker.internal.
+#
+# Build context is the repo root (`../..`), same reasoning as carbon-
+# database's own compose file: `@carbon/*` path aliases only resolve from
+# the workspace root's node_modules junction.
+#
+# Ports are offset from carbon-cloud's (9000/9001) and carbon-database's
+# (9010/9011) own compose files so all three stacks can run side by side
+# on one machine without a collision.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: carbon_registry
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-carbon_registry_dev}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${OBJECT_STORE_ACCESS_KEY_ID:-carbon_registry}
+      MINIO_ROOT_PASSWORD: ${OBJECT_STORE_SECRET_ACCESS_KEY:-carbon_registry_dev_secret}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9020:9000"
+      - "9021:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Same reasoning as carbon-database's own minio-init: MinIO starts with
+  # no bucket, and Bun's S3Client only does object operations, not bucket
+  # management — without this every publish's tarball upload 404s.
+  # `mc anonymous set download` matches how the download route reads
+  # bytes straight back through the S3 client rather than a signed URL,
+  # but the bucket still needs to exist regardless.
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${OBJECT_STORE_ACCESS_KEY_ID:-carbon_registry} ${OBJECT_STORE_SECRET_ACCESS_KEY:-carbon_registry_dev_secret} &&
+      mc mb --ignore-existing local/carbon-registry &&
+      mc anonymous set download local/carbon-registry
+      "
+
+  control-plane:
+    build:
+      context: ../..
+      dockerfile: products/carbon-registry/composition/docker/control-plane.Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-carbon_registry_dev}@postgres:5432/carbon_registry
+      PORT: "54323"
+      CONTROL_PLANE_URL: ${CONTROL_PLANE_URL:-http://host.docker.internal:8080}
+      OBJECT_STORE_ENDPOINT: http://minio:9000
+      OBJECT_STORE_ACCESS_KEY_ID: ${OBJECT_STORE_ACCESS_KEY_ID:-carbon_registry}
+      OBJECT_STORE_SECRET_ACCESS_KEY: ${OBJECT_STORE_SECRET_ACCESS_KEY:-carbon_registry_dev_secret}
+      OBJECT_STORE_BUCKET: carbon-registry
+    extra_hosts:
+      # host.docker.internal is native on Docker Desktop (Windows/Mac);
+      # Linux needs this explicit mapping to reach carbon-cloud's compose
+      # running on the same host.
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "54323:54323"
+
+volumes:
+  postgres_data:
+  minio_data:
