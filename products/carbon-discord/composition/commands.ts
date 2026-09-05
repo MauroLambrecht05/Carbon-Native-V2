@@ -31,5 +31,41 @@ export function buildCommandRegistry(): CommandRegistry {
       { name: "download", description: "Get Carbon: installer or source" },
       async () => new (await import("../presentation/commands/release/download.command.ts")).DownloadCommand(),
     ),
+    defineCommand(
+      { name: "setup-verification", description: "Post the Carbon Native verification and onboarding panel to this channel" },
+      async () => new (await import("../presentation/commands/onboarding/setup-verification.command.ts")).SetupVerificationCommand(),
+    ),
+    defineCommand(
+      { name: "ticket-panel", description: "Deploy the Carbon Native support ticket panel to this channel" },
+      async () => new (await import("../presentation/commands/ticketing/ticket-panel.command.ts")).TicketPanelCommand(),
+    ),
+    defineCommand(
+      { name: "suggest", description: "Submit a proposal or feature suggestion for the Carbon Native community to vote on" },
+      async () => new (await import("../presentation/commands/community/suggest.command.ts")).SuggestCommand(),
+    ),
+    defineCommand(
+      { name: "announce", description: "Broadcast an official announcement to a designated channel" },
+      async () => new (await import("../presentation/commands/broadcast/announce.command.ts")).AnnounceCommand(),
+    ),
+    defineCommand(
+      { name: "release", description: "Publish a Carbon Native release announcement card" },
+      async () => new (await import("../presentation/commands/release/release.command.ts")).ReleaseCommand(),
+    ),
+    defineCommand(
+      { name: "issue", description: "Report or search community bug reports and issues" },
+      async () => new (await import("../presentation/commands/community/issue.command.ts")).IssueCommand(),
+    ),
+    defineCommand(
+      { name: "event", description: "Create or view scheduled community events and meetups" },
+      async () => new (await import("../presentation/commands/community/event.command.ts")).EventCommand(),
+    ),
+    defineCommand(
+      { name: "setup-roles", description: "Deploy the self-service role & notification picker panel" },
+      async () => new (await import("../presentation/commands/community/setup-roles.command.ts")).SetupRolesCommand(),
+    ),
+    defineCommand(
+      { name: "resolve", description: "Mark this help thread as resolved, rename with [SOLVED], and archive" },
+      async () => new (await import("../presentation/commands/community/resolve-thread.command.ts")).ResolveThreadCommand(),
+    ),
   );
 }

@@ -11,5 +11,20 @@ export function buildEventRegistry(): EventRegistry {
       { name: Events.ClientReady, once: true },
       async () => new (await import("../presentation/events/diagnostics/ready.event.ts")).ReadyEvent(),
     ),
+    defineEvent(
+      { name: Events.GuildMemberAdd },
+      async () =>
+        new (await import("../presentation/events/onboarding/guild-member-add.event.ts")).GuildMemberAddEvent(),
+    ),
+    defineEvent(
+      { name: Events.MessageReactionAdd },
+      async () =>
+        new (await import("../presentation/events/community/starboard.event.ts")).StarboardEvent(),
+    ),
+    defineEvent(
+      { name: Events.ThreadCreate },
+      async () =>
+        new (await import("../presentation/events/community/thread-create.event.ts")).ThreadCreateEvent(),
+    ),
   );
 }

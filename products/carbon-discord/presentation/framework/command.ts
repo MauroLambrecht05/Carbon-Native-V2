@@ -1,6 +1,6 @@
 // The Command contract every slash command implements.
 
-import type { ChatInputCommandInteraction } from "discord.js";
+import type { ChatInputCommandInteraction, SlashCommandBuilder } from "discord.js";
 
 export interface CommandMeta {
   /** The slash command name, as registered with Discord and typed by a user. */
@@ -11,6 +11,9 @@ export interface CommandMeta {
 
 export abstract class Command {
   abstract readonly meta: CommandMeta;
+
+  /** Optional hook to add options, arguments, or subcommands to the slash command. */
+  configureBuilder?(builder: SlashCommandBuilder): void;
 
   /** Do the work. Reply (or defer, then follow up) on `interaction` yourself:
    * discord.js has no return-a-response-object shape the way the raw

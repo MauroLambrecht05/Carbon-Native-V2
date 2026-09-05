@@ -32,11 +32,18 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): DeployConfi
 }
 
 export async function deployCommands(config: DeployConfig): Promise<void> {
-  const commands = buildCommandRegistry()
-    .all()
-    .map((descriptor) =>
-      new SlashCommandBuilder().setName(descriptor.meta.name).setDescription(descriptor.meta.description).toJSON(),
-    );
+  const commands = await Promise.all(
+    buildCommandRegistry()
+      .all()
+      .map(async (descriptor) => {
+        const command = await descriptor.load();
+        const builder = new SlashCommandBuilder()
+          .setName(descriptor.meta.name)
+          .setDescription(descriptor.meta.description);
+        command.configureBuilder?.(builder);
+        return builder.toJSON();
+      }),
+  );
 
   const rest = new REST().setToken(config.botToken);
   const route = config.guildId

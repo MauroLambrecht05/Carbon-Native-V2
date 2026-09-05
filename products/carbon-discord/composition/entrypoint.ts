@@ -5,8 +5,16 @@
 
 import { Client, Events, GatewayIntentBits } from "discord.js";
 import { CommandRouter } from "../presentation/framework/command-router.ts";
+import { ComponentRouter } from "../presentation/framework/component-router.ts";
+import { ModalRouter } from "../presentation/framework/modal-router.ts";
+import { AutocompleteRouter } from "../presentation/framework/autocomplete-router.ts";
+import { ContextMenuRouter } from "../presentation/framework/context-menu-router.ts";
 import { buildCommandRegistry } from "./commands.ts";
 import { buildEventRegistry } from "./events.ts";
+import { buildComponentRegistry } from "./components.ts";
+import { buildModalRegistry } from "./modals.ts";
+import { buildAutocompleteRegistry } from "./autocompletes.ts";
+import { buildContextMenuRegistry } from "./context-menus.ts";
 
 export interface CarbonDiscordConfig {
   readonly botToken: string;
@@ -19,7 +27,13 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): CarbonDisco
 }
 
 export function startBot(config: CarbonDiscordConfig): Client {
-  const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+  const client = new Client({
+    intents: [
+      GatewayIntentBits.Guilds,
+      GatewayIntentBits.GuildMembers,
+      GatewayIntentBits.GuildMessageReactions,
+    ],
+  });
 
   for (const descriptor of buildEventRegistry().all()) {
     const attach = descriptor.meta.once ? client.once.bind(client) : client.on.bind(client);
@@ -46,10 +60,24 @@ export function startBot(config: CarbonDiscordConfig): Client {
     );
   }
 
-  const router = new CommandRouter(buildCommandRegistry());
+  const commandRouter = new CommandRouter(buildCommandRegistry());
+  const componentRouter = new ComponentRouter(buildComponentRegistry());
+  const modalRouter = new ModalRouter(buildModalRegistry());
+  const autocompleteRouter = new AutocompleteRouter(buildAutocompleteRegistry());
+  const contextMenuRouter = new ContextMenuRouter(buildContextMenuRegistry());
+
   client.on(Events.InteractionCreate, async (interaction) => {
-    if (!interaction.isChatInputCommand()) return;
-    await router.route(interaction);
+    if (interaction.isChatInputCommand()) {
+      await commandRouter.route(interaction);
+    } else if (interaction.isAutocomplete()) {
+      await autocompleteRouter.route(interaction);
+    } else if (interaction.isMessageComponent()) {
+      await componentRouter.route(interaction);
+    } else if (interaction.isModalSubmit()) {
+      await modalRouter.route(interaction);
+    } else if (interaction.isContextMenuCommand()) {
+      await contextMenuRouter.route(interaction);
+    }
   });
 
   client.login(config.botToken);
