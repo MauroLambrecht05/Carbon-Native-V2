@@ -11,7 +11,10 @@
 //   application/ports/    IdentityRepository
 //   application/usecases/ create an org (+ its first org token), issue a
 //                         worker token for an org, verify a token
-//   infrastructure/       InMemory (tests), Postgres (real)
+//   infrastructure/       InMemory (tests), Postgres (real — carbon-cloud's
+//                         own), Http (every OTHER product/service, verifying
+//                         against carbon-cloud's identity over the network
+//                         instead of keeping a second copy)
 
 export { Organization, type OrganizationProps } from "./domain/entities/Organization.ts";
 export { ApiToken, type ApiTokenProps, type TokenScope } from "./domain/entities/ApiToken.ts";
@@ -28,3 +31,4 @@ export {
 export { VerifyTokenUseCase, type VerifiedToken } from "./application/usecases/VerifyTokenUseCase.ts";
 export { InMemoryIdentityRepository } from "./infrastructure/InMemoryIdentityRepository.ts";
 export { PostgresIdentityRepository } from "./infrastructure/PostgresIdentityRepository.ts";
+export { HttpIdentityClient } from "./infrastructure/HttpIdentityClient.ts";
