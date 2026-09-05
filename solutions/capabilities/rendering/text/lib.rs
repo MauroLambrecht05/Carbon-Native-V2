@@ -71,6 +71,16 @@ pub struct TextEngine {
     pending_user_bytes: Vec<Vec<u8>>,
     /// True once the embedded default has been appended to `fonts`.
     default_loaded: bool,
+    /// Set by `preload()`: a background thread decompressing + parsing the
+    /// embedded default stack (5 fontdue::Font parses, ~100ms measured —
+    /// real CPU work, not I/O, so overlapping it with JS-runtime init is a
+    /// genuine wall-clock win, not just hidden latency). `ensure_loaded`
+    /// joins it transparently the first time any font is actually needed
+    /// (typically during the first layout pass, well after JS init has
+    /// already been running for a while) — by then the join is often a
+    /// no-op. Falls back to loading synchronously, right there, if
+    /// `ensure_loaded` is ever reached without `preload()` having run first.
+    default_fonts_handle: Option<std::thread::JoinHandle<Vec<(Font, u16)>>>,
     /// Parallel to `fonts`: true if the font at this index is monospace
     /// (advance of 'i' ≈ advance of 'M'). Lets text honor CSS font-family
     /// intent (sans vs mono) instead of blindly using the first font in the
@@ -135,6 +145,7 @@ impl TextEngine {
             weights: Vec::new(),
             pending_user_bytes: Vec::new(),
             default_loaded: false,
+            default_fonts_handle: None,
             mono_flags: Vec::new(),
             family_names: Vec::new(),
             cache: HashMap::new(),
@@ -239,20 +250,35 @@ impl TextEngine {
                 self.family_names.push(None);
             }
         }
-        // 2. Append the embedded Inter weight stack + Roboto backstop once.
+        // 2. Append the embedded Inter weight stack + Roboto backstop once —
+        //    either by joining the background load `preload()` kicked off
+        //    (the common case: JS runtime init has been running in the
+        //    meantime, so this join is often already-finished/instant), or,
+        //    if `preload()` was never called, by loading synchronously right
+        //    here as a correctness fallback.
         if !self.default_loaded {
-            for (bytes, weight) in [
-                (inter_regular(), 400u16),
-                (inter_medium(), 500),
-                (inter_semibold(), 600),
-                (inter_bold(), 700),
-                (fallback_font_bytes(), 400),
-            ] {
-                if let Ok(font) = Font::from_bytes(bytes, FontSettings::default()) {
-                    self.fonts.push(font);
-                    self.weights.push(weight);
-                    self.family_names.push(None);
+            let loaded = match self.default_fonts_handle.take() {
+                Some(handle) => handle.join().unwrap_or_default(),
+                None => {
+                    let mut out = Vec::with_capacity(5);
+                    for (bytes, weight) in [
+                        (inter_regular(), 400u16),
+                        (inter_medium(), 500),
+                        (inter_semibold(), 600),
+                        (inter_bold(), 700),
+                        (fallback_font_bytes(), 400),
+                    ] {
+                        if let Ok(font) = Font::from_bytes(bytes, FontSettings::default()) {
+                            out.push((font, weight));
+                        }
+                    }
+                    out
                 }
+            };
+            for (font, weight) in loaded {
+                self.fonts.push(font);
+                self.weights.push(weight);
+                self.family_names.push(None);
             }
             self.default_loaded = true;
         }
@@ -394,9 +420,29 @@ impl TextEngine {
         None
     }
 
-    /// Preload (so the cost is paid before first paint).
+    /// Kick off the embedded default stack's decompress+parse on a
+    /// background thread rather than paying it inline before first paint —
+    /// see `default_fonts_handle`'s doc comment for why this is a real
+    /// overlap win, not just a reordering. Idempotent.
     pub fn preload(&mut self) {
-        self.ensure_loaded();
+        if self.default_loaded || self.default_fonts_handle.is_some() {
+            return;
+        }
+        self.default_fonts_handle = Some(std::thread::spawn(|| {
+            let mut out = Vec::with_capacity(5);
+            for (bytes, weight) in [
+                (inter_regular(), 400u16),
+                (inter_medium(), 500),
+                (inter_semibold(), 600),
+                (inter_bold(), 700),
+                (fallback_font_bytes(), 400),
+            ] {
+                if let Ok(font) = Font::from_bytes(bytes, FontSettings::default()) {
+                    out.push((font, weight));
+                }
+            }
+            out
+        }));
     }
 
     /// (ascent, descent_abs) at the given size, or None before any font
