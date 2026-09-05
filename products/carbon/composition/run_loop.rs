@@ -32,6 +32,11 @@ pub(crate) struct State {
     pub(crate) reload_path: Option<PathBuf>,
     pub(crate) reload_scene: Arc<Mutex<Scene>>,
     pub(crate) t0: Instant,
+    /// The app's project root — needed so the real first paint can save
+    /// itself into frame_cache.rs's on-disk cache for the NEXT launch. See
+    /// that module's doc comment and this file's own first-paint save-site
+    /// comment for the full design.
+    pub(crate) project_dir: PathBuf,
     /// Momentum/inertia scroll: per-scrollport y velocity (px/frame),
     /// keyed by node id. Set (overwritten, not accumulated — a new
     /// wheel event supersedes whatever momentum was left) on each
@@ -70,6 +75,38 @@ fn eval_dispatch(js_ctx: &JsContext, label: &str, script: &[u8]) {
                 anyhow!("{label} dispatch failed: {}", describe_js_exception(&ctx))
             } else {
                 anyhow!("{label} dispatch failed: {e}")
+            }
+        })?;
+        Ok(())
+    });
+    if let Err(e) = result {
+        eprintln!("[carbon-mini] {e}");
+    }
+}
+
+/// `PluginBinaryEvent`'s counterpart to `eval_dispatch` above — calls
+/// `globalThis.__carbon_on_binary_event(name, data)` as a real function
+/// call with a real `Uint8Array` argument (built via rquickjs'
+/// `TypedArray<u8>::new`, the same zero/low-copy bridge the imaging
+/// capability's `CarbonImage` already uses), not textual `eval`: a
+/// `Uint8Array` has no source-text representation to embed in a script
+/// the way a JSON string does. Silently a no-op if no plugin has
+/// installed the shim (`__carbon_on_binary_event` absent from globals),
+/// mirroring the `globalThis.__carbon_on_event &&` guard in eval_dispatch's
+/// own call site.
+fn binary_dispatch(js_ctx: &JsContext, name: String, data: Vec<u8>) {
+    let result = js_ctx.with(|ctx| -> Result<()> {
+        let globals = ctx.globals();
+        let handler: rquickjs::Function = match globals.get("__carbon_on_binary_event") {
+            Ok(f) => f,
+            Err(_) => return Ok(()),
+        };
+        let array = rquickjs::TypedArray::<u8>::new(ctx.clone(), data)?;
+        handler.call::<_, ()>((name.as_str(), array)).map_err(|e| {
+            if matches!(e, rquickjs::Error::Exception) {
+                anyhow!("plugin binary event `{name}` dispatch failed: {}", describe_js_exception(&ctx))
+            } else {
+                anyhow!("plugin binary event `{name}` dispatch failed: {e}")
             }
         })?;
         Ok(())
@@ -1173,6 +1210,9 @@ impl State {
                 );
                 eval_dispatch(&self.js_ctx, &format!("plugin event `{name}`"), script.as_bytes());
             }
+            Event::UserEvent(UserEvent::PluginBinaryEvent { name, data }) => {
+                binary_dispatch(&self.js_ctx, name, data);
+            }
             Event::UserEvent(UserEvent::ReloadBundle) => {
                 let t_reload = Instant::now();
                 if let Some(path) = &self.reload_path {
@@ -1573,6 +1613,32 @@ impl State {
                             self.first_paint_done = true;
                             timing_log("first_paint_visible", self.t0);
                             timing_done("startup → first paint", self.t0);
+                            // Same control signal as mini.rs's frame-cache-hit
+                            // call site — unconditional, not CARBON_NO_TIMING
+                            // gated, because the CLI's "ready" print is
+                            // waiting on it. On a cache HIT this is the
+                            // second time it fires in one launch (harmless —
+                            // the CLI only acts on the first); on a MISS this
+                            // is the only time, and it's the real moment
+                            // content first hits the screen.
+                            eprintln!("[carbon-mini] window-visible");
+                            // Save this exact frame for the NEXT launch — see
+                            // frame_cache.rs's module doc and mini.rs's
+                            // load-site comment for the full design. Off the
+                            // paint thread: LZ4-compressing a multi-MB RGBA
+                            // buffer + a file write has no reason to share a
+                            // thread with drain_and_flush_react below, which
+                            // is what actually gates content-ready. Needs an
+                            // owned copy of the pixels (a thread can't borrow
+                            // `canvas`) — one clone, off the critical path.
+                            {
+                                let project_dir = self.project_dir.clone();
+                                let theme = os_theme::current();
+                                let rgba = canvas.pixmap.data().to_vec();
+                                std::thread::spawn(move || {
+                                    frame_cache::save(&project_dir, w, h, scale_f, &theme, &rgba);
+                                });
+                            }
                             // Now run the deferred React effect drain (useEffect,
                             // async data loads, terminal spawn, …). The shell is
                             // already visible; this fills in the content and then

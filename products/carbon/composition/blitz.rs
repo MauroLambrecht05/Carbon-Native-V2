@@ -15,6 +15,12 @@
 //! adds `class` + registered Tailwind CSS (so stylo cascades it), and pulls in
 //! mini's `native/*` OS layer.
 
+// `windows_subsystem = "windows"` (no-op outside Windows) — see mini.rs's
+// matching attribute for the full reasoning: without it, Windows
+// auto-allocates a visible console window for this GUI app on every launch,
+// regardless of the caller's stdio configuration.
+#![windows_subsystem = "windows"]
+
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -783,6 +789,14 @@ fn main() -> Result<()> {
                     let pj = if payload.is_empty() { "null".to_string() } else { json_escape(&payload) };
                     let s = format!("globalThis.__carbon_on_event&&__carbon_on_event(\"{en}\",\"{pj}\");");
                     let _ = js_ctx.with(|ctx| ctx.eval::<(), _>(s.as_bytes()));
+                }
+                UserEvent::PluginBinaryEvent { name, data } => {
+                    let _ = js_ctx.with(|ctx| -> Result<()> {
+                        let handler: Function = ctx.globals().get("__carbon_on_binary_event")?;
+                        let array = rquickjs::TypedArray::<u8>::new(ctx.clone(), data)?;
+                        handler.call::<_, ()>((name.as_str(), array))?;
+                        Ok(())
+                    });
                 }
                 UserEvent::ReloadBundle => {}
                 UserEvent::TestEval(script) => {

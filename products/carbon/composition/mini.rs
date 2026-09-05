@@ -6,6 +6,20 @@
 //
 // Solid (or any framework) drives the scene graph through host imports
 // implemented in rquickjs. Layout is Taffy. No Skia/ICU.
+//
+// `windows_subsystem = "windows"` (no-op outside Windows): this is a GUI
+// app, not a console tool — without this, Windows treats it as a console
+// app by default and auto-allocates a real, visible console window for it
+// on every launch, REGARDLESS of the caller's stdio configuration.
+// Confirmed directly: even a bare `spawn(exe, args, { stdio: "inherit" })`
+// from Bun (no CLI pipeline, no piping, nothing else involved) produced a
+// brand-new conhost.exe every time. `stdio:"inherit"`/`Stdio::inherit()`
+// from a real caller (carbon run/dev's own terminal, or a piped daemon
+// handoff) pass real OS handles explicitly, which this app can still write
+// diagnostic/timing eprintln! output through — that path doesn't depend on
+// a console WINDOW existing, only on having a valid handle, which explicit
+// redirection already provides regardless of subsystem.
+#![windows_subsystem = "windows"]
 
 use anyhow::{anyhow, Context, Result};
 use rquickjs::context::intrinsic;
@@ -74,6 +88,8 @@ use carbon_runtime_contract::{UserEvent, WindowOp};
 mod bundle;
 mod cli;
 mod features;
+// First-frame screenshot cache — see its own header comment.
+mod frame_cache;
 mod manifest;
 // Named updater_bg (not `updater`) to stay unambiguous beside the
 // carbon_updater crate this module is the only caller of.
@@ -135,6 +151,58 @@ use scene::{PaintProps, Scene};
 // Extracted to its own crate (no dependency on carbon-mini) — aliased so
 // every existing `text::TextEngine` call site is unchanged.
 use carbon_text_renderer as text;
+
+/// Force `hwnd` to the foreground, bypassing Windows' normal foreground-lock
+/// protection — which otherwise silently no-ops a plain `SetForegroundWindow`
+/// call from a process that Windows doesn't consider "privileged" to steal
+/// focus (the caller wasn't itself the foreground app, and the OS gives no
+/// error, just quietly ignores the request). Confirmed directly: tao's own
+/// cross-platform `Window::set_focus()` did NOT bring the window to front in
+/// exactly this scenario (another real app, e.g. an IDE, holding focus) — so
+/// this hand-rolls the standard, well-documented Win32 workaround instead of
+/// trusting that tao's implementation does it: temporarily attach this
+/// thread's input queue to whatever thread currently owns the foreground
+/// window (`AttachThreadInput`), which grants this thread the same
+/// foreground-setting rights for as long as it stays attached, call
+/// `SetForegroundWindow` + `BringWindowToTop` while attached, then detach.
+///
+/// Needed regardless of WHO created the window: a directly-spawned
+/// `carbon-mini.exe` usually inherits temporary foreground rights from its
+/// parent terminal automatically (though not always — explains "sometimes"),
+/// but a daemon-pre-warmed instance (products/carbon-launcher's pool) never
+/// had any such rights to inherit — it was created by a background process
+/// that was never itself the foreground app.
+#[cfg(windows)]
+fn force_foreground(hwnd: isize) {
+    extern "system" {
+        fn GetForegroundWindow() -> isize;
+        fn GetWindowThreadProcessId(hwnd: isize, pid: *mut u32) -> u32;
+        fn GetCurrentThreadId() -> u32;
+        fn AttachThreadInput(id_attach: u32, id_attach_to: u32, attach: i32) -> i32;
+        fn SetForegroundWindow(hwnd: isize) -> i32;
+        fn BringWindowToTop(hwnd: isize) -> i32;
+    }
+    unsafe {
+        let fg = GetForegroundWindow();
+        if fg == hwnd {
+            return; // already foreground — nothing to do
+        }
+        let cur_thread = GetCurrentThreadId();
+        let fg_thread = if fg != 0 {
+            GetWindowThreadProcessId(fg, std::ptr::null_mut())
+        } else {
+            0
+        };
+        let attached = fg_thread != 0
+            && fg_thread != cur_thread
+            && AttachThreadInput(cur_thread, fg_thread, 1) != 0;
+        SetForegroundWindow(hwnd);
+        BringWindowToTop(hwnd);
+        if attached {
+            AttachThreadInput(cur_thread, fg_thread, 0);
+        }
+    }
+}
 
 fn main() -> Result<()> {
     prof_zone!("main");
@@ -322,6 +390,102 @@ fn main() -> Result<()> {
         .map_err(|e| anyhow!("softbuffer surface: {e}"))?;
     timing_log("softbuffer_ready", t0);
 
+    // First-frame cache: if a previous launch of THIS EXACT bundle, at this
+    // exact window size/DPI/theme, already painted a first frame, blit it
+    // straight into the surface and show the window right now — before any
+    // font/JS/layout/paint work happens at all. See frame_cache.rs's module
+    // doc for the cache-key/storage design.
+    //
+    // Deliberately the ONLY thing this does. Everything below (scene/text-
+    // engine/JS-runtime setup, the real first-paint sequence further down,
+    // RedrawRequested in run_loop.rs) is completely unmodified: its own
+    // `!scene_dirty && !repaint_dirty && self.first_paint_done` skip guard
+    // (run_loop.rs) can never fire on the real first frame because
+    // `first_paint_done` starts false regardless of what happened here —
+    // so the real pipeline runs exactly as it always has, and the moment
+    // its first real paint lands, it overwrites this cached bitmap on the
+    // surface with live content. No swap-in logic needed anywhere else. A
+    // miss (first-ever launch, an edited bundle, a resized/moved window,
+    // no dist/.carbon-cache.json yet) just means this block does nothing.
+    // Recorded here (not deeper in the nested if-lets below) — a
+    // carbon-framecache stats query cares about "was there a matching
+    // cache entry on disk", not the much rarer case where a real hit is
+    // found but a later, unrelated step (surface resize, buffer alloc)
+    // also happens to fail.
+    let frame_cache_loaded = {
+        let size = window.inner_size();
+        let scale = window.scale_factor() as f32;
+        let theme_str = match window.theme() {
+            tao::window::Theme::Dark => "dark",
+            _ => "light",
+        };
+        frame_cache::load(&project_dir, size.width, size.height, scale, theme_str)
+    };
+    carbon_plugin_host::framecache::record_hit(frame_cache_loaded.is_some());
+    if let Some(rgba) = frame_cache_loaded {
+        let size = window.inner_size();
+        if let (Some(nw), Some(nh)) = (
+            NonZeroU32::new(size.width.max(1)),
+            NonZeroU32::new(size.height.max(1)),
+        ) {
+            if surface.resize(nw, nh).is_ok() {
+                if let Some(mut cached_canvas) = carbon_paint::Canvas::new(size.width, size.height)
+                {
+                    cached_canvas.as_bytes_mut().copy_from_slice(&rgba);
+                    if let Ok(mut buffer) = surface.buffer_mut() {
+                        carbon_paint::blit_to_buffer(
+                            &cached_canvas.pixmap,
+                            &mut buffer,
+                            size.width,
+                            size.height,
+                        );
+                        let _ = buffer.present();
+                        // Same non-blocking show as the real first-paint
+                        // sequence further down (see its own comment for why
+                        // ShowWindowAsync over ShowWindow on Windows) — this
+                        // is allowed to run twice; the second call (once the
+                        // real content is ready) is a harmless no-op show
+                        // plus the InvalidateRect that actually delivers the
+                        // swap-in repaint.
+                        #[cfg(windows)]
+                        {
+                            use tao::platform::windows::WindowExtWindows;
+                            let hwnd = window.hwnd() as isize;
+                            extern "system" {
+                                fn ShowWindowAsync(hwnd: isize, ncmdshow: i32) -> i32;
+                            }
+                            unsafe {
+                                ShowWindowAsync(hwnd, 5);
+                            }
+                            // ShowWindowAsync only makes the window visible —
+                            // it does NOT bring it to the foreground or give it
+                            // input focus. See force_foreground's own doc
+                            // comment for why this is needed regardless of
+                            // whether this process was directly spawned or
+                            // handed off from the daemon's pre-warmed pool.
+                            force_foreground(hwnd);
+                        }
+                        #[cfg(not(windows))]
+                        {
+                            window.set_visible(true);
+                        }
+                        timing_log("frame_cache_hit_shown", t0);
+                        // Unconditional (not gated behind CARBON_NO_TIMING —
+                        // unlike timing_log's phase trace, this is a control
+                        // signal the CLI actually parses, not a debug print):
+                        // `carbon run`/`carbon dev` wait for this exact line
+                        // on stderr before printing "ready" — see
+                        // startAndWaitForWindowVisible's doc comment
+                        // (solutions/infrastructure/process). Content is now
+                        // genuinely on screen, so "ready" finally means what
+                        // it says instead of "the process was spawned".
+                        eprintln!("[carbon-mini] window-visible");
+                    }
+                }
+            }
+        }
+    }
+
     // Scene graph (shared between JS host imports and the paint thread).
     let scene = Arc::new(Mutex::new(Scene::new()));
     timing_log("scene_created", t0);
@@ -333,6 +497,12 @@ fn main() -> Result<()> {
     // embedded Latin subset baked in at build time.
     text_engine.borrow_mut().try_load_user_font(&project_dir);
     timing_log("font_user_resolved", t0);
+    // Kicks off the embedded default fonts' decompress+parse on a
+    // background thread rather than doing it inline here — see
+    // TextEngine::preload's doc comment. This phase now marks "load
+    // started", not "load finished"; the actual join happens transparently
+    // inside TextEngine on first real use (first layout pass), by which
+    // point JS runtime init below has usually already absorbed the cost.
     text_engine.borrow_mut().preload();
     timing_log("font_preloaded", t0);
 
@@ -467,12 +637,30 @@ fn main() -> Result<()> {
     // (with empty strings) and the loader simply finds no plugins to load.
     let (cfg_app_name, cfg_app_version) = read_app_metadata(&project_dir);
     crate::native::app::set_metadata(&cfg_app_name, &cfg_app_version);
+    // Carbon self-introspection (ABI 1.23) — this binary's own compiled-in
+    // Cargo features, read via cfg! so the list can never drift out of
+    // sync with what this binary actually is (see host_exports.rs's own
+    // doc comment on why plugin-host itself doesn't hardcode this list).
+    let runtime_features_json = format!(
+        "{{\"network\":{},\"svg\":{},\"image\":{},\"audio\":{},\"updater\":{},\"snapshot\":{},\"gpu\":{},\"profiling\":{}}}",
+        cfg!(feature = "network"),
+        cfg!(feature = "svg"),
+        cfg!(feature = "image"),
+        cfg!(feature = "audio"),
+        cfg!(feature = "updater"),
+        cfg!(feature = "snapshot"),
+        cfg!(feature = "gpu"),
+        cfg!(feature = "profiling"),
+    );
     let mut host_app = host_exports::HostCarbonAppStorage::new(
         &cfg_app_name,
         &cfg_app_version,
         &project_dir.to_string_lossy(),
         initial_size.width.max(1),
         initial_size.height.max(1),
+        "mini",
+        &runtime_features_json,
+        restored,
     );
     // The QuickJS JSContext* serves as the opaque CarbonJSContext*.
     let js_ctx_raw = js_ctx.with(|ctx| ctx.as_raw().as_ptr());
@@ -717,6 +905,10 @@ fn main() -> Result<()> {
                 ShowWindowAsync(hwnd, 5);
                 InvalidateRect(hwnd, std::ptr::null(), 0);
             }
+            // Same foreground-activation fix as the frame-cache-hit path
+            // above — see force_foreground's doc comment for why
+            // ShowWindowAsync alone isn't enough.
+            force_foreground(hwnd);
         }
         #[cfg(not(windows))]
         {
@@ -875,6 +1067,7 @@ fn main() -> Result<()> {
         reload_scene,
         t0,
         scroll_velocity: std::collections::HashMap::new(),
+        project_dir: project_dir.clone(),
     };
 
     event_loop.run(move |event, _target, control_flow| {
