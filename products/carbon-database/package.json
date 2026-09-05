@@ -1,0 +1,14 @@
+{
+  "name": "carbon-database",
+  "version": "0.1.0",
+  "description": "Carbon Database: All-in-one open-source database platform with SQL, vectors, graphs, edge functions, and storage.",
+  "type": "module",
+  "scripts": {
+    "start": "bun ./main.ts",
+    "dev": "bun ./main.ts",
+    "test": "bun test"
+  },
+  "engines": {
+    "bun": ">=1.3.0"
+  }
+}

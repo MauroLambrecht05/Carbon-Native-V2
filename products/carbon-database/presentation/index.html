@@ -1,0 +1,993 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Carbon Database Studio</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-base: #0c0e12;
+      --bg-surface: #14171f;
+      --bg-elevated: #1b202c;
+      --border: #262d3d;
+      --border-focus: #00e599;
+      --text-main: #f3f4f6;
+      --text-muted: #9ca3af;
+      --brand: #00e599;
+      --brand-glow: rgba(0, 229, 153, 0.15);
+      --accent-blue: #38bdf8;
+      --accent-purple: #c084fc;
+      --danger: #f87171;
+      --warning: #fbbf24;
+      --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg-base);
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* Sidebar */
+    .sidebar {
+      width: 260px;
+      background: var(--bg-surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+    .brand-header {
+      padding: 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .brand-logo {
+      width: 32px;
+      height: 32px;
+      background: linear-gradient(135deg, var(--brand), #059669);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      color: #0c0e12;
+      font-size: 18px;
+    }
+    .brand-title {
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .brand-tag {
+      font-size: 10px;
+      background: var(--brand-glow);
+      color: var(--brand);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: var(--font-mono);
+      font-weight: 600;
+    }
+
+    .nav-list {
+      list-style: none;
+      padding: 16px 12px;
+      flex: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      color: var(--text-muted);
+      font-size: 13.5px;
+      font-weight: 500;
+      transition: all 0.15s ease;
+    }
+    .nav-item:hover {
+      background: var(--bg-elevated);
+      color: var(--text-main);
+    }
+    .nav-item.active {
+      background: var(--brand-glow);
+      color: var(--brand);
+      font-weight: 600;
+    }
+    .nav-icon {
+      font-size: 16px;
+    }
+
+    .sidebar-footer {
+      padding: 16px;
+      border-top: 1px solid var(--border);
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .org-badge {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--bg-elevated);
+      padding: 8px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+    }
+
+    /* Main Content */
+    .main-area {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .topbar {
+      height: 60px;
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      flex-shrink: 0;
+    }
+    .project-selector {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .project-pill {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      background: var(--brand);
+      border-radius: 50%;
+      box-shadow: 0 0 8px var(--brand);
+    }
+    .topbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .btn {
+      background: var(--bg-elevated);
+      color: var(--text-main);
+      border: 1px solid var(--border);
+      padding: 8px 14px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s ease;
+      font-family: var(--font-sans);
+    }
+    .btn:hover {
+      background: #232b3b;
+      border-color: #3b4459;
+    }
+    .btn-primary {
+      background: var(--brand);
+      color: #0c0e12;
+      border-color: var(--brand);
+    }
+    .btn-primary:hover {
+      background: #00ffaa;
+      border-color: #00ffaa;
+      box-shadow: 0 0 12px var(--brand-glow);
+    }
+
+    /* Content view */
+    .content-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    .panel-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 24px;
+    }
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 18px;
+    }
+    .panel-title {
+      font-size: 17px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+    .panel-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    /* Stats Grid */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+    }
+    .stat-box {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 18px;
+      position: relative;
+      overflow: hidden;
+    }
+    .stat-label {
+      font-size: 12.5px;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+    .stat-value {
+      font-size: 26px;
+      font-weight: 700;
+      margin-top: 8px;
+      letter-spacing: -0.02em;
+    }
+    .stat-tag {
+      position: absolute;
+      top: 18px;
+      right: 18px;
+      font-size: 18px;
+    }
+
+    /* Tables & Grids */
+    table.data-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    table.data-table th, table.data-table td {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+    }
+    table.data-table th {
+      background: var(--bg-elevated);
+      color: var(--text-muted);
+      font-weight: 600;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    table.data-table tr:hover td {
+      background: rgba(255,255,255,0.02);
+    }
+
+    /* Code editor / SQL */
+    .sql-editor-container {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    textarea.code-area {
+      width: 100%;
+      height: 140px;
+      background: #090a0f;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: #7dd3fc;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      padding: 14px;
+      resize: vertical;
+    }
+    textarea.code-area:focus {
+      outline: none;
+      border-color: var(--border-focus);
+    }
+    .query-results {
+      background: #090a0f;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 14px;
+      max-height: 250px;
+      overflow: auto;
+      font-family: var(--font-mono);
+      font-size: 12px;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 14px;
+    }
+    .form-group label {
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+    .form-input {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 9px 12px;
+      color: var(--text-main);
+      font-size: 13.5px;
+    }
+    .form-input:focus {
+      outline: none;
+      border-color: var(--border-focus);
+    }
+  </style>
+</head>
+<body>
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="brand-header">
+      <div class="brand-logo">C</div>
+      <div>
+        <div class="brand-title">Carbon Database</div>
+        <span class="brand-tag">Studio v0.1.0</span>
+      </div>
+    </div>
+    <ul class="nav-list">
+      <li class="nav-item active" onclick="switchTab('overview')">
+        <span class="nav-icon">📊</span> Overview
+      </li>
+      <li class="nav-item" onclick="switchTab('tables')">
+        <span class="nav-icon">🗄️</span> Table Editor
+      </li>
+      <li class="nav-item" onclick="switchTab('sql')">
+        <span class="nav-icon">⚡</span> SQL Editor
+      </li>
+      <li class="nav-item" onclick="switchTab('vectors')">
+        <span class="nav-icon">🧠</span> Vector Search
+      </li>
+      <li class="nav-item" onclick="switchTab('graph')">
+        <span class="nav-icon">🕸️</span> Knowledge Graph
+      </li>
+      <li class="nav-item" onclick="switchTab('functions')">
+        <span class="nav-icon">λ</span> Edge Functions
+      </li>
+      <li class="nav-item" onclick="switchTab('storage')">
+        <span class="nav-icon">📦</span> Storage Buckets
+      </li>
+      <li class="nav-item" onclick="switchTab('realtime')">
+        <span class="nav-icon">📡</span> Realtime Streams
+      </li>
+      <li class="nav-item" onclick="switchTab('billing')">
+        <span class="nav-icon">💳</span> Identity & Billing
+      </li>
+    </ul>
+    <div class="sidebar-footer">
+      <div class="org-badge">
+        <span id="org-name-display">Carbon Org</span>
+        <span id="plan-badge" class="brand-tag">FREE</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main View -->
+  <main class="main-area">
+    <header class="topbar">
+      <div class="project-selector">
+        <div class="project-pill">
+          <span class="status-dot"></span>
+          <span id="active-project-name">Default Project</span>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <button class="btn" onclick="initSampleData()">Seed Sample Data</button>
+        <button class="btn btn-primary" onclick="switchTab('sql')">New SQL Query</button>
+      </div>
+    </header>
+
+    <div class="content-body" id="tab-content">
+      <!-- Injected via JavaScript -->
+    </div>
+  </main>
+
+  <script>
+    const API_BASE = window.location.origin;
+    let authToken = localStorage.getItem("carbon_token") || "";
+    let currentProjectId = localStorage.getItem("carbon_project_id") || "default";
+    let activeTab = "overview";
+
+    async function api(path, options = {}) {
+      const headers = {
+        "Content-Type": "application/json",
+        ...(authToken ? { "Authorization": `Bearer ${authToken}` } : {}),
+        ...options.headers,
+      };
+      const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+      return res.json();
+    }
+
+    async function initAuth() {
+      if (!authToken) {
+        // Auto-register a default development session
+        const reg = await api("/api/auth/register", {
+          method: "POST",
+          body: JSON.stringify({ organizationName: "Carbon Engineering" }),
+        });
+        authToken = reg.apiToken;
+        currentProjectId = reg.defaultProjectId;
+        localStorage.setItem("carbon_token", authToken);
+        localStorage.setItem("carbon_project_id", currentProjectId);
+      }
+      renderTab();
+    }
+
+    function switchTab(tab) {
+      activeTab = tab;
+      document.querySelectorAll(".nav-item").forEach(item => item.classList.remove("active"));
+      event?.currentTarget?.classList.add("active");
+      renderTab();
+    }
+
+    async function renderTab() {
+      const container = document.getElementById("tab-content");
+      container.innerHTML = `<div style="color:var(--text-muted);">Loading ${activeTab}...</div>`;
+
+      if (activeTab === "overview") {
+        const [tables, vectors, funcs, billing] = await Promise.all([
+          api(`/api/projects/${currentProjectId}/tables`),
+          api(`/api/projects/${currentProjectId}/vectors/collections`),
+          api(`/api/projects/${currentProjectId}/functions`),
+          api(`/api/projects/${currentProjectId}/billing`),
+        ]);
+
+        document.getElementById("plan-badge").textContent = (billing.plan || "FREE").toUpperCase();
+
+        container.innerHTML = `
+          <div class="stats-grid">
+            <div class="stat-box">
+              <div class="stat-label">Relational Tables</div>
+              <div class="stat-value">${tables.length || 0}</div>
+              <div class="stat-tag">🗄️</div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-label">Vector Collections</div>
+              <div class="stat-value">${vectors.length || 0}</div>
+              <div class="stat-tag">🧠</div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-label">Edge Functions</div>
+              <div class="stat-value">${funcs.length || 0}</div>
+              <div class="stat-tag">⚡</div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-label">Current Plan</div>
+              <div class="stat-value" style="color:var(--brand);">${(billing.plan || 'Free').toUpperCase()}</div>
+              <div class="stat-tag">💳</div>
+            </div>
+          </div>
+
+          <div class="panel-card">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">System Infrastructure & Capabilities</div>
+                <div class="panel-desc">All-in-one high-performance engine for Carbon Native apps</div>
+              </div>
+            </div>
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Engine</th>
+                  <th>Status</th>
+                  <th>Capabilities</th>
+                  <th>Backend</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>Relational Database</strong></td>
+                  <td><span style="color:var(--brand);">● Online</span></td>
+                  <td>SQL Parser, Schemas, Primary Keys, CRUD, Indexing</td>
+                  <td>In-Memory ACID Engine</td>
+                </tr>
+                <tr>
+                  <td><strong>Vector Search</strong></td>
+                  <td><span style="color:var(--brand);">● Online</span></td>
+                  <td>High-dim vectors, Cosine similarity, Top-k search</td>
+                  <td>Optimized Float64 SIMD Dot-Product</td>
+                </tr>
+                <tr>
+                  <td><strong>Knowledge Graph</strong></td>
+                  <td><span style="color:var(--brand);">● Online</span></td>
+                  <td>Property Graph, Directed Edges, Dijkstra Path Finder</td>
+                  <td>Adjacency Graph Engine</td>
+                </tr>
+                <tr>
+                  <td><strong>Edge Functions</strong></td>
+                  <td><span style="color:var(--brand);">● Online</span></td>
+                  <td>Serverless TypeScript execution, Telemetry, Env vars</td>
+                  <td>Isolated Async V8 Runner</td>
+                </tr>
+                <tr>
+                  <td><strong>Object Storage</strong></td>
+                  <td><span style="color:var(--brand);">● Online</span></td>
+                  <td>Buckets, File uploads, Public CDN URLs</td>
+                  <td>High-throughput Object Store</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        `;
+      } else if (activeTab === "tables") {
+        const tables = await api(`/api/projects/${currentProjectId}/tables`);
+        container.innerHTML = `
+          <div class="panel-card">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">Relational Tables</div>
+                <div class="panel-desc">Manage schemas and inspect records</div>
+              </div>
+              <button class="btn btn-primary" onclick="createSampleTable()">+ Create Table</button>
+            </div>
+            ${tables.length === 0 ? '<p style="color:var(--text-muted);">No tables created yet. Click "+ Create Table" or Seed Sample Data.</p>' : `
+              <table class="data-table">
+                <thead>
+                  <tr><th>Table Name</th><th>Columns</th><th>Row Count</th><th>Created At</th><th>Actions</th></tr>
+                </thead>
+                <tbody>
+                  ${tables.map(t => `
+                    <tr>
+                      <td><strong>${t.name}</strong></td>
+                      <td>${t.columnCount} columns</td>
+                      <td>${t.rowCount} rows</td>
+                      <td>${new Date(t.createdAt).toLocaleDateString()}</td>
+                      <td><button class="btn" style="padding:4px 8px;font-size:11px;" onclick="viewRows('${t.name}')">View Rows</button></td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            `}
+          </div>
+          <div id="table-rows-view"></div>
+        `;
+      } else if (activeTab === "sql") {
+        container.innerHTML = `
+          <div class="panel-card">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">SQL Query Runner</div>
+                <div class="panel-desc">Execute queries against your relational tables</div>
+              </div>
+              <button class="btn btn-primary" onclick="runSql()">Run Query ⚡</button>
+            </div>
+            <div class="sql-editor-container">
+              <textarea id="sql-input" class="code-area">SELECT * FROM users;</textarea>
+              <div id="sql-output" class="query-results">Query results will appear here...</div>
+            </div>
+          </div>
+        `;
+      } else if (activeTab === "vectors") {
+        const collections = await api(`/api/projects/${currentProjectId}/vectors/collections`);
+        container.innerHTML = `
+          <div class="panel-card">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">Vector Embeddings & Similarity Search</div>
+                <div class="panel-desc">Index high-dimensional vector representations and run k-NN search</div>
+              </div>
+              <button class="btn btn-primary" onclick="createSampleVectors()">Create Collection & Vectors</button>
+            </div>
+            ${collections.length === 0 ? '<p style="color:var(--text-muted);">No collections yet. Click "Create Collection & Vectors".</p>' : `
+              <div style="margin-bottom:20px;">
+                <label style="font-size:13px;color:var(--text-muted);">Select Collection:</label>
+                <select id="vec-col-select" class="form-input" style="width:200px;margin-left:10px;">
+                  ${collections.map(c => `<option value="${c.name}">${c.name} (${c.dimension} dims, ${c.pointCount} points)</option>`).join('')}
+                </select>
+                <button class="btn btn-primary" style="margin-left:10px;" onclick="searchVectors()">Run Similarity Search</button>
+              </div>
+              <div id="vec-search-output" class="query-results">Click "Run Similarity Search" to test k-NN retrieval.</div>
+            `}
+          </div>
+        `;
+      } else if (activeTab === "graph") {
+        const nodes = await api(`/api/projects/${currentProjectId}/graph/nodes`);
+        const edges = await api(`/api/projects/${currentProjectId}/graph/edges`);
+        container.innerHTML = `
+          <div class="panel-card">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">Knowledge Graph Engine</div>
+                <div class="panel-desc">Entities, relationships, and shortest path graph exploration</div>
+              </div>
+              <button class="btn btn-primary" onclick="seedSampleGraph()">Seed Graph Network</button>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+              <div>
+                <h4 style="margin-bottom:10px;">Nodes (${nodes.length})</h4>
+                <div class="query-results" style="max-height:180px;">${JSON.stringify(nodes, null, 2)}</div>
+              </div>
+              <div>
+                <h4 style="margin-bottom:10px;">Relationships / Edges (${edges.length})</h4>
+                <div class="query-results" style="max-height:180px;">${JSON.stringify(edges, null, 2)}</div>
+              </div>
+            </div>
+            <div style="margin-top:20px;">
+              <button class="btn" onclick="testShortestPath()">Find Shortest Path (Alice -> Charlie)</button>
+              <div id="graph-path-output" style="margin-top:10px;font-family:var(--font-mono);font-size:12px;color:var(--accent-blue);"></div>
+            </div>
+          </div>
+        `;
+      } else if (activeTab === "functions") {
+        const funcs = await api(`/api/projects/${currentProjectId}/functions`);
+        container.innerHTML = `
+          <div class="panel-card">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">Serverless Edge Functions</div>
+                <div class="panel-desc">Deploy and invoke edge handlers with isolated runtime context</div>
+              </div>
+              <button class="btn btn-primary" onclick="deploySampleFunction()">Deploy Function</button>
+            </div>
+            ${funcs.length === 0 ? '<p style="color:var(--text-muted);">No edge functions deployed yet.</p>' : `
+              <table class="data-table">
+                <thead><tr><th>Name</th><th>Invocations</th><th>Updated</th><th>Action</th></tr></thead>
+                <tbody>
+                  ${funcs.map(f => `
+                    <tr>
+                      <td><strong>${f.name}</strong></td>
+                      <td>${f.invocations}</td>
+                      <td>${new Date(f.updatedAt).toLocaleTimeString()}</td>
+                      <td><button class="btn" onclick="invokeFunction('${f.name}')">Invoke 🚀</button></td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+              <div id="fn-output" class="query-results" style="margin-top:16px;">Function invocation results will appear here...</div>
+            `}
+          </div>
+        `;
+      } else if (activeTab === "storage") {
+        const buckets = await api(`/api/projects/${currentProjectId}/storage/buckets`);
+        container.innerHTML = `
+          <div class="panel-card">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">Object Storage Buckets</div>
+                <div class="panel-desc">Store images, assets, and binaries with public CDN links</div>
+              </div>
+              <button class="btn btn-primary" onclick="createSampleBucket()">Create Bucket & Upload File</button>
+            </div>
+            ${buckets.length === 0 ? '<p style="color:var(--text-muted);">No buckets yet.</p>' : `
+              <table class="data-table">
+                <thead><tr><th>Bucket Name</th><th>Access</th><th>File Count</th><th>Created At</th></tr></thead>
+                <tbody>
+                  ${buckets.map(b => `
+                    <tr>
+                      <td><strong>${b.name}</strong></td>
+                      <td>${b.isPublic ? '<span style="color:var(--brand);">Public</span>' : 'Private'}</td>
+                      <td>${b.fileCount} files</td>
+                      <td>${new Date(b.createdAt).toLocaleDateString()}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            `}
+          </div>
+        `;
+      } else if (activeTab === "realtime") {
+        container.innerHTML = `
+          <div class="panel-card">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">📡 Realtime Change Data Capture (CDC) Stream</div>
+                <div class="panel-desc">Sub-millisecond WebSocket stream broadcasting table mutations live</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:10px;">
+                <span class="status-dot"></span>
+                <span style="font-size:12px;color:var(--brand);font-weight:600;" id="ws-status">CONNECTING...</span>
+              </div>
+            </div>
+            <div style="margin-bottom:16px;display:flex;gap:10px;">
+              <button class="btn btn-primary" onclick="triggerTestEvent()">Trigger Test Row Insert</button>
+              <button class="btn" onclick="clearLiveEvents()">Clear Log</button>
+            </div>
+            <div id="realtime-log" class="query-results" style="max-height:450px;min-height:220px;">
+              <div style="color:var(--text-muted);">Listening on ws://${window.location.host}/realtime/v1/websocket for database changes...</div>
+            </div>
+          </div>
+        `;
+        connectRealtimeWs();
+      } else if (activeTab === "billing") {
+        const billing = await api(`/api/projects/${currentProjectId}/billing`);
+        container.innerHTML = `
+          <div class="panel-card">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">Carbon Cloud Identity & Plan Management</div>
+                <div class="panel-desc">Linked organization credentials and resource quotas</div>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px;">
+              <div class="stat-box">
+                <div class="stat-label">Active Plan</div>
+                <div class="stat-value" style="color:var(--brand);">${(billing.plan || 'Free').toUpperCase()}</div>
+                <p style="font-size:12px;color:var(--text-muted);margin-top:8px;">
+                  ${billing.plan === 'pro' ? 'Unlimited database queries, 100k vector embeddings, dedicated edge workers.' : 'Up to 500 queries/mo, 1,000 vectors, shared edge tier.'}
+                </p>
+              </div>
+              <div class="stat-box">
+                <div class="stat-label">API Token (Carbon Identity)</div>
+                <div style="font-family:var(--font-mono);font-size:13px;word-break:break-all;margin-top:12px;color:var(--accent-blue);">
+                  ${authToken ? authToken.slice(0, 20) + '...' : 'Not Connected'}
+                </div>
+              </div>
+            </div>
+            ${billing.plan === 'free' ? `
+              <button class="btn btn-primary" onclick="upgradePlan()">Upgrade to Pro Plan 🚀</button>
+            ` : `
+              <button class="btn" disabled style="opacity:0.6;">Pro Plan Active ✅</button>
+            `}
+          </div>
+        `;
+      }
+    }
+
+    let realtimeWs = null;
+
+    function connectRealtimeWs() {
+      if (realtimeWs && realtimeWs.readyState === WebSocket.OPEN) return;
+
+      const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const wsUrl = `${wsProtocol}//${window.location.host}/realtime/v1/websocket`;
+
+      realtimeWs = new WebSocket(wsUrl);
+
+      realtimeWs.onopen = () => {
+        const statusEl = document.getElementById("ws-status");
+        if (statusEl) statusEl.textContent = "CONNECTED ● LIVE";
+        realtimeWs.send(JSON.stringify({ type: "subscribe", topic: `realtime:${currentProjectId}:*` }));
+      };
+
+      realtimeWs.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === "broadcast" && msg.payload) {
+            appendRealtimeLog(msg.payload);
+          }
+        } catch {}
+      };
+
+      realtimeWs.onclose = () => {
+        const statusEl = document.getElementById("ws-status");
+        if (statusEl) statusEl.textContent = "DISCONNECTED";
+      };
+    }
+
+    function appendRealtimeLog(payload) {
+      const logEl = document.getElementById("realtime-log");
+      if (!logEl) return;
+
+      const color = payload.event === "INSERT" ? "var(--brand)" : payload.event === "UPDATE" ? "var(--accent-blue)" : "var(--danger)";
+      const entry = document.createElement("div");
+      entry.style.marginBottom = "10px";
+      entry.style.padding = "8px 12px";
+      entry.style.background = "#14171f";
+      entry.style.borderLeft = `3px solid ${color}`;
+      entry.style.borderRadius = "4px";
+
+      entry.innerHTML = `
+        <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px;">
+          <strong style="color:${color};">${payload.event}</strong>
+          <span style="color:var(--text-muted);">${payload.table} • ${new Date(payload.commitTimestamp).toLocaleTimeString()}</span>
+        </div>
+        <pre style="margin:0;font-size:11.5px;color:#cbd5e1;">${JSON.stringify(payload.new || payload.old, null, 2)}</pre>
+      `;
+
+      logEl.prepend(entry);
+    }
+
+    async function triggerTestEvent() {
+      await api(`/api/projects/${currentProjectId}/tables/users/rows`, {
+        method: "POST",
+        body: JSON.stringify({ email: `dev_${Date.now()}@carbon.dev`, name: "Live Stream Dev" })
+      });
+    }
+
+    function clearLiveEvents() {
+      const logEl = document.getElementById("realtime-log");
+      if (logEl) logEl.innerHTML = "";
+    }
+
+    async function initSampleData() {
+      await createSampleTable();
+      await createSampleVectors();
+      await seedSampleGraph();
+      await deploySampleFunction();
+      await createSampleBucket();
+      renderTab();
+    }
+
+    async function createSampleTable() {
+      await api(`/api/projects/${currentProjectId}/tables`, {
+        method: "POST",
+        body: JSON.stringify({
+          name: "users",
+          columns: [
+            { name: "id", type: "string", primaryKey: true },
+            { name: "email", type: "string" },
+            { name: "name", type: "string" },
+            { name: "tier", type: "string" },
+          ]
+        })
+      });
+      await api(`/api/projects/${currentProjectId}/tables/users/rows`, {
+        method: "POST",
+        body: JSON.stringify({ email: "alice@carbon.dev", name: "Alice Developer", tier: "pro" })
+      });
+      await api(`/api/projects/${currentProjectId}/tables/users/rows`, {
+        method: "POST",
+        body: JSON.stringify({ email: "bob@carbon.dev", name: "Bob Systems", tier: "free" })
+      });
+      renderTab();
+    }
+
+    async function viewRows(tableName) {
+      const res = await api(`/api/projects/${currentProjectId}/tables/${tableName}/rows`);
+      const container = document.getElementById("table-rows-view");
+      container.innerHTML = `
+        <div class="panel-card" style="margin-top:20px;">
+          <div class="panel-header">
+            <div class="panel-title">Rows: ${tableName} (${res.total})</div>
+          </div>
+          <div class="query-results">${JSON.stringify(res.rows, null, 2)}</div>
+        </div>
+      `;
+    }
+
+    async function runSql() {
+      const query = document.getElementById("sql-input").value;
+      const res = await api(`/api/projects/${currentProjectId}/sql`, {
+        method: "POST",
+        body: JSON.stringify({ query })
+      });
+      document.getElementById("sql-output").textContent = JSON.stringify(res, null, 2);
+    }
+
+    async function createSampleVectors() {
+      await api(`/api/projects/${currentProjectId}/vectors/collections`, {
+        method: "POST",
+        body: JSON.stringify({ name: "docs_embeddings", dimension: 4 })
+      });
+      await api(`/api/projects/${currentProjectId}/vectors/collections/docs_embeddings/insert`, {
+        method: "POST",
+        body: JSON.stringify({
+          points: [
+            { id: "vec-1", values: [0.1, 0.8, 0.4, 0.2], metadata: { title: "C++ SIMD Vectorization Guide" } },
+            { id: "vec-2", values: [0.9, 0.1, 0.2, 0.0], metadata: { title: "Zig Dynamic Linker Specs" } },
+            { id: "vec-3", values: [0.15, 0.75, 0.35, 0.25], metadata: { title: "Carbon Native Architecture" } },
+          ]
+        })
+      });
+      renderTab();
+    }
+
+    async function searchVectors() {
+      const res = await api(`/api/projects/${currentProjectId}/vectors/collections/docs_embeddings/search`, {
+        method: "POST",
+        body: JSON.stringify({
+          queryVector: [0.12, 0.78, 0.38, 0.22],
+          topK: 3
+        })
+      });
+      document.getElementById("vec-search-output").textContent = JSON.stringify(res, null, 2);
+    }
+
+    async function seedSampleGraph() {
+      await api(`/api/projects/${currentProjectId}/graph/nodes`, {
+        method: "POST",
+        body: JSON.stringify({ id: "alice", label: "Developer", properties: { lang: "C++" } })
+      });
+      await api(`/api/projects/${currentProjectId}/graph/nodes`, {
+        method: "POST",
+        body: JSON.stringify({ id: "bob", label: "Maintainer", properties: { lang: "Zig" } })
+      });
+      await api(`/api/projects/${currentProjectId}/graph/nodes`, {
+        method: "POST",
+        body: JSON.stringify({ id: "charlie", label: "Architect", properties: { lang: "Rust" } })
+      });
+      await api(`/api/projects/${currentProjectId}/graph/edges`, {
+        method: "POST",
+        body: JSON.stringify({ sourceId: "alice", targetId: "bob", relationship: "COLLABORATES_WITH", weight: 1 })
+      });
+      await api(`/api/projects/${currentProjectId}/graph/edges`, {
+        method: "POST",
+        body: JSON.stringify({ sourceId: "bob", targetId: "charlie", relationship: "REVIEWS_PR", weight: 2 })
+      });
+      renderTab();
+    }
+
+    async function testShortestPath() {
+      const res = await api(`/api/projects/${currentProjectId}/graph/path`, {
+        method: "POST",
+        body: JSON.stringify({ sourceId: "alice", targetId: "charlie" })
+      });
+      document.getElementById("graph-path-output").textContent =
+        `Path Found: ${res.path.map(n => n.id).join(" -> ")} (Total Weight: ${res.totalWeight})`;
+    }
+
+    async function deploySampleFunction() {
+      await api(`/api/projects/${currentProjectId}/functions`, {
+        method: "POST",
+        body: JSON.stringify({
+          name: "calculate_tax",
+          code: "const amount = req.body.amount || 100; return { original: amount, tax: amount * 0.2, total: amount * 1.2 };"
+        })
+      });
+      renderTab();
+    }
+
+    async function invokeFunction(name) {
+      const res = await api(`/api/projects/${currentProjectId}/functions/${name}/invoke`, {
+        method: "POST",
+        body: JSON.stringify({ amount: 250 })
+      });
+      document.getElementById("fn-output").textContent = JSON.stringify(res, null, 2);
+    }
+
+    async function createSampleBucket() {
+      await api(`/api/projects/${currentProjectId}/storage/buckets`, {
+        method: "POST",
+        body: JSON.stringify({ name: "public-assets", isPublic: true })
+      });
+      await api(`/api/projects/${currentProjectId}/storage/buckets/public-assets/upload`, {
+        method: "POST",
+        body: JSON.stringify({
+          path: "readme.txt",
+          content: "Welcome to Carbon Database Object Storage!",
+          contentType: "text/plain"
+        })
+      });
+      renderTab();
+    }
+
+    async function upgradePlan() {
+      await api(`/api/projects/${currentProjectId}/billing/confirm`, {
+        method: "POST",
+        body: JSON.stringify({ planId: "pro" })
+      });
+      alert("Upgraded to Pro Plan!");
+      renderTab();
+    }
+
+    // Startup
+    initAuth();
+  </script>
+</body>
+</html>
