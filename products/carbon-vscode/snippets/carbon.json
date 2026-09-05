@@ -1,0 +1,86 @@
+{
+  "Carbon App Boilerplate": {
+    "prefix": "carbon-app",
+    "body": [
+      "import { Window, Titlebar, VStack, Heading, Text, Button } from \"@carbon/native\";",
+      "",
+      "export default function ${1:App}() {",
+      "  return (",
+      "    <Window title=\"${2:Carbon Application}\" width={${3:800}} height={${4:600}}>",
+      "      <Titlebar title=\"${2:Carbon Application}\" showControls={true} />",
+      "      <VStack padding={20} gap={16}>",
+      "        <Heading text=\"${5:Welcome to Carbon}\" level={1} />",
+      "        <Text text=\"${6:Fast, zero-overhead desktop applications.}\" />",
+      "        <Button label=\"${7:Click Me}\" variant=\"primary\" />",
+      "      </VStack>",
+      "    </Window>",
+      "  );",
+      "}"
+    ],
+    "description": "Scaffold a new Carbon Native desktop application (.ctsx)"
+  },
+  "Carbon Window": {
+    "prefix": "carbon-window",
+    "body": [
+      "<Window title=\"${1:App Window}\" width={${2:800}} height={${3:600}}>",
+      "  $0",
+      "</Window>"
+    ],
+    "description": "Create a Carbon desktop window"
+  },
+  "Carbon Titlebar": {
+    "prefix": "carbon-titlebar",
+    "body": [
+      "<Titlebar title=\"${1:App Title}\" showControls={true} />"
+    ],
+    "description": "Cross-platform native window titlebar"
+  },
+  "Carbon VStack": {
+    "prefix": "carbon-vstack",
+    "body": [
+      "<VStack padding={${1:16}} gap={${2:12}}>",
+      "  $0",
+      "</VStack>"
+    ],
+    "description": "Vertical flex container"
+  },
+  "Carbon HStack": {
+    "prefix": "carbon-hstack",
+    "body": [
+      "<HStack padding={${1:16}} gap={${2:12}}>",
+      "  $0",
+      "</HStack>"
+    ],
+    "description": "Horizontal flex container"
+  },
+  "Carbon Card": {
+    "prefix": "carbon-card",
+    "body": [
+      "<Card padding={${1:16}}>",
+      "  $0",
+      "</Card>"
+    ],
+    "description": "Surface card container"
+  },
+  "Carbon Button": {
+    "prefix": "carbon-button",
+    "body": [
+      "<Button label=\"${1:Submit}\" variant=\"${2|primary,secondary,ghost,danger|}\" />"
+    ],
+    "description": "Native UI button"
+  },
+  "Carbon TextInput": {
+    "prefix": "carbon-input",
+    "body": [
+      "<TextInput placeholder=\"${1:Enter value...}\" />"
+    ],
+    "description": "Text input field"
+  },
+  "Carbon Badge": {
+    "prefix": "carbon-badge",
+    "body": [
+      "<Badge label=\"${1:PRO}\" variant=\"${2|success,info,warning,danger|}\" />"
+    ],
+    "description": "Status badge"
+  }
+}

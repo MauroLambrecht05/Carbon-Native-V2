@@ -10,9 +10,40 @@
     "vscode": "^1.70.0"
   },
   "categories": [
-    "Programming Languages"
+    "Programming Languages",
+    "Snippets"
+  ],
+  "main": "./src/extension.ts",
+  "scripts": {
+    "test": "bun test"
+  },
+  "activationEvents": [
+    "onLanguage:ctsx",
+    "onCommand:carbon.openStudio",
+    "onCommand:carbon.openDatabase",
+    "onCommand:carbon.searchPlugins"
   ],
   "contributes": {
+    "commands": [
+      {
+        "command": "carbon.openStudio",
+        "title": "Carbon: Open Visual Studio GUI Builder"
+      },
+      {
+        "command": "carbon.openDatabase",
+        "title": "Carbon: Open Database Studio"
+      },
+      {
+        "command": "carbon.searchPlugins",
+        "title": "Carbon: Search Plugin Registry"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "ctsx",
+        "path": "./snippets/carbon.json"
+      }
+    ],
     "languages": [
       {
         "id": "ctsx",
