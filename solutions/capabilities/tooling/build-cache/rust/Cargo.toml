@@ -1,0 +1,35 @@
+# carbon-build-cache — Rust port of solutions/capabilities/tooling/bundling's
+# BuildCache.ts, for products/carbon-launcher (see its own README for why the
+# native launcher exists). Reads and writes the EXACT SAME files
+# (dist/.carbon-cache.json, dist/.carbon-cache-stat.json) the TypeScript CLI's
+# `carbon build`/`carbon plugin` commands already use — a native `carbon run`
+# and the TS pipeline must agree on cache hit/miss for the same project state,
+# or every switch between them forces a needless rebuild.
+#
+# `rust/` follows distribution/updating's precedent (and plugin/trust/rust's
+# restatement of it) for a capability whose implementation is Rust — see
+# solutions/capabilities/plugin/trust/rust/Cargo.toml's own header.
+
+[package]
+name = "carbon-build-cache"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+description = "Rust port of BuildCache.ts's two-layer (content-hash-skip, directory-walk-skip) bundle cache key computation, for products/carbon-launcher."
+workspace = "../../../../../.tools/orchestration/bazel/cargo"
+
+[lib]
+name = "carbon_build_cache"
+path = "lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = "0.10"
+hex = "0.4"
+
+[dev-dependencies]
+tempfile = "3"

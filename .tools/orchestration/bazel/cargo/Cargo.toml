@@ -51,6 +51,12 @@ members = [
   # nothing in the tree, and plugin-host depends on it (see Phase 4), so it has
   # to be listed before the host it is a precondition of.
   "../../../../solutions/capabilities/plugin/trust/rust",
+  # products/carbon-launcher's cache-key/plugin-cache logic — leaves, no
+  # runtime dependency, ported 1:1 from BuildCache.ts / PluginBuildCache.ts
+  # so a native `carbon run`/`carbon dev` and the TS CLI agree on cache
+  # hit/miss for the same project. See products/carbon-launcher/README.md.
+  "../../../../solutions/capabilities/tooling/build-cache/rust",
+  "../../../../solutions/capabilities/plugin/build-cache/rust",
   #
   # Phase 3 — engines:
   "../../../../solutions/capabilities/rendering/layout",
@@ -66,6 +72,9 @@ members = [
   #
   # Phase 5 — the binaries:
   "../../../../products/carbon",
+  # Native `carbon run`/`carbon dev` — bypasses Bun's ~130-280ms interpreter
+  # boot for exactly these two hot commands. See its own README.
+  "../../../../products/carbon-launcher",
   #
   # No plugin members. Plugins are Zig now — see
   # solutions/capabilities/plugins/domain/value-objects/PluginLanguage.ts —

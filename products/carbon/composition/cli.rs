@@ -68,6 +68,31 @@ pub(crate) fn resolve() -> Result<Outcome> {
         }
     }
 
+    // Pool-wait mode: `products/carbon-launcher`'s daemon (see its own
+    // README) pre-spawns a carbon-mini process ahead of any real `carbon
+    // run` request specifically to pre-pay the OS process-creation +
+    // binary-load cost — measured directly at ~65-83ms on Windows, ALL of
+    // it incurred before any Rust code (this function included) starts
+    // running at all. That means simply being an already-running process,
+    // waiting right here, already captures nearly the whole win — no need
+    // to also pre-create the window with a placeholder size and resize
+    // later, which would need restructuring main()'s flow for a much
+    // smaller marginal gain (window creation is only ~15-30ms of the
+    // total). So: block HERE, before anything else (including the
+    // build-time-mode dispatch above — a pooled process is never a
+    // build-time invocation), polling `handoff_file` for the daemon to
+    // drop the real args in — a plain JSON file, not a socket, the same
+    // "poll a file, act when it appears" shape this file's own --dev
+    // bundle-reload watcher already uses elsewhere in this codebase. Once
+    // found, this becomes an ordinary launch: the handoff's fields are
+    // exactly `ParsedArgs`'s fields, so everything downstream in main()
+    // is completely unaware this process didn't start with them on argv.
+    if let Some(pos) = args.iter().position(|a| a == "--pool-wait") {
+        if let Some(handoff_file) = args.get(pos + 1).cloned() {
+            return Ok(Outcome::Run(wait_for_pool_handoff(&handoff_file)?));
+        }
+    }
+
     // Test hook: auto-exit after N ms so a launched app exits cleanly (and its
     // stderr/timing logs flush) without needing a force-kill.
     if let Some(ms) = std::env::var("CARBON_TEST_EXIT_MS")
@@ -130,4 +155,50 @@ pub(crate) fn resolve() -> Result<Outcome> {
         project_dir,
         window_opts_json,
     }))
+}
+
+/// Poll `handoff_file` until `products/carbon-launcher`'s daemon writes it —
+/// a plain JSON object `{"project_dir": "...", "dev_mode": bool,
+/// "window_opts_json": "..."}`, deliberately the exact same fields
+/// `ParsedArgs` has, so a pooled instance becomes an ordinary launch the
+/// moment this returns. No timeout: an unclaimed pooled instance is meant to
+/// wait indefinitely — the daemon's OWN idle-timeout is what reclaims an
+/// abandoned one (by killing this process outright), not this loop giving up
+/// on its own.
+fn wait_for_pool_handoff(handoff_file: &str) -> Result<ParsedArgs> {
+    #[derive(serde::Deserialize)]
+    struct Handoff {
+        project_dir: String,
+        #[serde(default)]
+        dev_mode: bool,
+        #[serde(default = "default_window_opts")]
+        window_opts_json: String,
+    }
+    fn default_window_opts() -> String {
+        "{}".to_string()
+    }
+
+    let path = std::path::Path::new(handoff_file);
+    loop {
+        // Delete AFTER a successful parse, not before: deleting first would
+        // risk losing a good write that races with the daemon still in the
+        // middle of writing it — a partial read here just fails to parse
+        // and we try again next tick instead.
+        if let Ok(text) = std::fs::read_to_string(path) {
+            if let Ok(handoff) = serde_json::from_str::<Handoff>(&text) {
+                let _ = std::fs::remove_file(path);
+                let project_dir = std::path::PathBuf::from(&handoff.project_dir)
+                    .canonicalize()
+                    .with_context(|| format!("pool handoff project dir {}", handoff.project_dir))?;
+                crate::native::window::set_window_label("main".to_string());
+                crate::native::window::set_window_opts_json(handoff.window_opts_json.clone());
+                return Ok(ParsedArgs {
+                    dev_mode: handoff.dev_mode,
+                    project_dir,
+                    window_opts_json: handoff.window_opts_json,
+                });
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
 }

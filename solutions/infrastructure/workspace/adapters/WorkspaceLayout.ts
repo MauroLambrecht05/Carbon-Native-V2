@@ -320,11 +320,32 @@ export function distBinaryPath(projectDir: string, backend: BackendName, exeName
  * without breaking an existing per-app binary built before `exeName`
  * existed (still named `carbon-mini`/`carbon-blitz`, and still found via
  * the crate-named check right after). Falls back to the shared-workspace
- * `BINARY_PROFILES` search either way, which is the ONLY place a
- * dynamic-plugin build's binary ever lives, so every existing caller
- * that never passes `projectDir`/`exeName` sees no behavior change at all.
+ * `profiles` search either way (default `BINARY_PROFILES`, dist-then-
+ * release), which is the ONLY place a dynamic-plugin build's binary ever
+ * lives, so every existing caller that never passes `projectDir`/`exeName`/
+ * `profiles` sees no behavior change at all.
+ *
+ * `profiles`: override the shared-workspace search order/set. `ensureRuntime`
+ * passes exactly ONE profile — the one IT would itself build (`dist` for
+ * `flags.staticPlugins`, `release` otherwise) — instead of the default
+ * dist-then-release preference. Without this, `carbon run`/`carbon dev`
+ * (which only ever write `target/release/`) would silently keep reusing a
+ * `target/dist/` binary FOREVER once one existed anywhere on the machine
+ * (e.g. from an earlier `carbon build`) — reproduced directly: a `dist`
+ * binary from a build 90+ seconds earlier kept getting launched by a plain
+ * `carbon run` even after several fresh `release` rebuilds, because
+ * dist-then-release only ever checks which exists, never which is actually
+ * newer or which command is asking. Every other caller (`resolveDeltaTool`'s
+ * same reasoning, and `backendBinaryExists`'s default) keeps the original
+ * dist-then-release preference — this is a targeted fix for the one caller
+ * that has a specific profile in mind, not a change to the general rule.
  */
-export function resolveBackendBinary(backend: BackendName, projectDir?: string, exeName?: string): string | null {
+export function resolveBackendBinary(
+  backend: BackendName,
+  projectDir?: string,
+  exeName?: string,
+  profiles: readonly (typeof BINARY_PROFILES)[number][] = BINARY_PROFILES,
+): string | null {
   if (projectDir) {
     if (exeName) {
       const named = distBinaryPath(projectDir, backend, exeName);
@@ -333,7 +354,7 @@ export function resolveBackendBinary(backend: BackendName, projectDir?: string, 
     const distPath = distBinaryPath(projectDir, backend);
     if (existsSync(distPath)) return distPath;
   }
-  for (const profile of BINARY_PROFILES) {
+  for (const profile of profiles) {
     const p = backendBinaryPath(backend, profile);
     if (existsSync(p)) return p;
   }

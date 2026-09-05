@@ -8,10 +8,10 @@ import { rmSync, existsSync } from "node:fs";
 import { loadCarbonConfig } from "@carbon/workspace";
 import { log, c } from "@carbon/logging";
 import { isBackend, VALID_BACKENDS } from "@carbon/contracts/app/backend";
-import { start } from "@carbon/process";
+import { start, tryDaemonRun } from "@carbon/process";
 import { buildProject, ensureNodeModules, ensureRuntime } from "@carbon/bundling";
 import { NoHostAppError, pluginUseCases } from "@carbon/lifecycle";
-import { PRODUCTS_DIR } from "@carbon/workspace";
+import { PRODUCTS_DIR, TARGET_DIR } from "@carbon/workspace";
 import { StatusLine } from "../../ui/status-line.ts";
 import { printBanner, printReadySummary } from "../../ui/brand.ts";
 
@@ -71,6 +71,16 @@ function parseArgs(rest: string[]): Args {
  * also left alone — it's cheap, tracked metadata, not a build artifact, and
  * syncPlugins already re-fetches it if missing. Only the compiled/staged
  * output (carbon/bin/) actually needs wiping to force a real re-fetch.
+ *
+ * `--clean` means clean — node_modules included, unconditionally, even
+ * though a fresh install is the most expensive single step here (measured:
+ * ~10.5s on this machine, all link/copy time against an already-fully-cached
+ * dependency set, not a network fetch). `ensureNodeModules`'s own content-hash
+ * staleness check (InstallState.ts) is a SEPARATE, faster mechanism for the
+ * common case where nothing asked for a clean rebuild — it is not a
+ * substitute for what `--clean` promises: a verified rebuild with nothing
+ * left over from before, node_modules included. Skipping it here would make
+ * `--clean` a partial clean that still trusts old installed state.
  */
 function cleanAll(projectDir: string): void {
   const targets = [
@@ -221,6 +231,45 @@ export async function runCommand(rest: string[]): Promise<number> {
     const runtimeArgs = backend === "blitz"
       ? [join(projectDir, "dist", "bundle.js")]
       : [projectDir];
+
+    // Daemon first: a pre-warmed carbon-mini instance (products/carbon-launcher's
+    // `daemon` subcommand) skips the OS process-creation cost the direct spawn
+    // below still pays. Any daemon failure — unreachable, pool empty, stale —
+    // falls straight through to that direct spawn; this is a pure optimization,
+    // never a dependency of `carbon run` working at all. On a miss this also
+    // warms the daemon in the background for next time (see
+    // DaemonClient.ts's module doc for why that's a native `ensure-daemon`
+    // call rather than spawning the daemon directly from here). One accepted
+    // gap: Ctrl-C can't gracefully close a daemon-served window, since it
+    // isn't attached to this CLI's console.
+    const daemonCode = await tryDaemonRun({
+      projectDir,
+      backend,
+      devMode: false,
+      launcherExe: join(TARGET_DIR, "release", "carbon-launcher.exe"),
+      onWindowVisible: () => {
+        stage("window_visible");
+        status.succeed();
+        printReadySummary({
+          appName: cfg.app.name,
+          version: cfg.app.version,
+          backend,
+          elapsedMs: performance.now() - tPipelineStart,
+        });
+      },
+    });
+    if (daemonCode !== null) {
+      return daemonCode;
+    }
+
+    // Plain, fully-inherited spawn — NOT startAndWaitForWindowVisible (see
+    // NodeProcessRunner.ts's WINDOW_VISIBLE_MARKER doc comment for why that
+    // was removed): on this machine, Bun's Windows child_process.spawn
+    // allocated a brand-new visible console window for carbon-mini.exe the
+    // moment ANY stdio stream was set to "pipe", even with the other two
+    // left as "inherit" — confirmed directly via conhost.exe process counts.
+    // "ready" prints immediately after spawn again, same as before that
+    // feature — not a window-visible timestamp, but no stray console either.
     const child = start(exe, runtimeArgs);
     stage("spawn");
     if (verbose) {
@@ -273,7 +322,7 @@ export async function runCommand(rest: string[]): Promise<number> {
 async function syncPlugins(projectDir: string): Promise<void> {
   const { staged } = await pluginUseCases(
     join(PRODUCTS_DIR, "carbon-ext"),
-    join(PRODUCTS_DIR, "carbon-sdk"),
+    join(PRODUCTS_DIR, "carbon-sdk", "plugins"),
   ).sync.execute(projectDir, { release: true, logger: log });
   for (const file of staged) {
     log.step(c.dim(`plugin: staged ./carbon/bin/.../${file}`));

@@ -5,4 +5,11 @@
 // toolchain installed.
 
 export type { ProcessRunner, ProcessResult, ProcessOptions } from "./ports/ProcessRunner.ts";
-export { run, start, nodeProcessRunner, type SpawnResult } from "./adapters/NodeProcessRunner.ts";
+export {
+  run,
+  start,
+  WINDOW_VISIBLE_MARKER,
+  nodeProcessRunner,
+  type SpawnResult,
+} from "./adapters/NodeProcessRunner.ts";
+export { tryDaemonRun } from "./adapters/DaemonClient.ts";

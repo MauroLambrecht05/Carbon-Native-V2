@@ -1,0 +1,78 @@
+# products/carbon-launcher — native `carbon run`/`carbon dev`.
+#
+# Bun's own interpreter boot costs ~130-280ms on this machine (measured
+# directly: a trivial one-line bun script pays almost the same cost as the
+# full CLI, both source-mode and `bun build --compile`'s embedded-runtime
+# mode — this is Bun's own runtime init, not module resolution). That cost
+# sits in front of EVERY `carbon run`/`carbon dev` invocation, invisible to
+# every internal timing measurement because it happens before any
+# instrumented JS code starts running.
+#
+# This binary reimplements exactly the hot-path logic those two commands
+# need (cache-key checks, plugin-build cache, spawning the runtime) natively,
+# so launching it costs a few ms instead of Bun's interpreter boot. Every
+# other `carbon` subcommand (scaffold, plugin, publish, build, …) stays
+# exactly as it is today, in TypeScript — this is not a CLI rewrite, it's a
+# native fast path for the two commands that are launched constantly during
+# a dev loop.
+#
+# Reusable logic lives in solutions/capabilities/* Rust crates
+# (carbon-build-cache, carbon-plugin-build-cache) so this crate's own code
+# stays a thin composition layer — the same pattern products/carbon
+# (carbon-mini) already follows.
+
+[package]
+name = "carbon-launcher"
+version = "0.1.0"
+edition = "2021"
+rust-version.workspace = true
+description = "Native launcher for `carbon run`/`carbon dev` — bypasses Bun's interpreter boot for the two hot dev-loop commands."
+workspace = "../../.tools/orchestration/bazel/cargo"
+
+[[bin]]
+name = "carbon-launcher"
+path = "composition/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+# basic-toml, not the workspace's `toml` — same reasoning products/carbon's
+# own Cargo.toml gives: this crate only ever DESERIALIZES carbon.toml, never
+# writes one, so the smaller deserialize-only crate is the right fit. Same
+# crate carbon-mini itself already reads carbon.toml with
+# (products/carbon/composition/manifest.rs), kept consistent deliberately.
+basic-toml = "0.1"
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = "0.10"
+hex = "0.4"
+carbon-build-cache = { path = "../../solutions/capabilities/tooling/build-cache/rust" }
+carbon-plugin-build-cache = { path = "../../solutions/capabilities/plugin/build-cache/rust" }
+
+# Named-pipe IPC for the daemon (Phase B) — CreateNamedPipeW with an
+# explicit security descriptor restricting the pipe to the current user's
+# SID + SYSTEM. Deliberately windows-sys (official Microsoft bindings, no
+# runtime, no abstraction layer) rather than: `interprocess` (its own
+# README asks LLM assistants specifically not to use it — see
+# solutions/infrastructure/plugin-host/adapters/native/deeplink.rs's header
+# for where that was already found and respected once), or `tokio` (an
+# async runtime would be a real, unwanted weight increase on a binary whose
+# whole point is a near-instant `run`/`dev` fast path that never touches
+# this code at all), or hand-rolled `extern "system"` blocks the way
+# mini.rs's two trivial `ShowWindowAsync`/`InvalidateRect` calls do — those
+# are safe to hand-roll because they're primitive-typed; a security
+# descriptor is a non-trivial struct layout, and getting one wrong by hand
+# is a memory-safety bug in security-critical code, not just a logic bug.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+  "Win32_Foundation",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Pipes",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_System_Memory",
+  "Win32_System_Threading",
+  "Win32_System_IO",
+] }

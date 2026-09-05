@@ -136,10 +136,17 @@ export async function ensureRuntime(
     );
   }
 
-  // Search dist before release (resolveBackendBinary's order) rather than
-  // hardcoding runtimeBinaryPath's "release" default — a dist-only build
-  // (no release binary at all) must still resolve to the binary that
-  // actually exists, not a path nothing was ever written to.
+  // Search ONLY the profile THIS call would itself build — not the shared
+  // dist-then-release default `resolveBackendBinary` otherwise uses. `run`/
+  // `dev` never set `flags.staticPlugins` and only ever write `release/`;
+  // searching `dist` too meant that once ANY `dist` binary existed anywhere
+  // on the machine (e.g. one earlier `carbon build`), every later `carbon
+  // run`/`carbon dev` silently kept launching that stale binary forever,
+  // never noticing however many times `release/` got freshly rebuilt — a
+  // real bug, reproduced directly (a 90-second-old `dist` binary kept being
+  // picked over binaries rebuilt seconds ago). See resolveBackendBinary's
+  // own doc comment for why this is a targeted override, not a change to
+  // its default search order.
   //
   // `opts.force` skips this reuse check entirely. Needed for
   // `flags.staticPlugins`: unlike every other flag here, WHICH plugins are
@@ -148,7 +155,10 @@ export async function ensureRuntime(
   // cache key (backend + feature list, implicitly, via cargo's own
   // incremental state) does not capture at all. A cached binary from an
   // earlier plugin set on this same app would otherwise be silently reused.
-  const existing = opts.force ? null : resolveBackendBinary(backend, opts.projectDir, opts.exeName);
+  const preferredProfile = flags.staticPlugins ? "dist" : "release";
+  const existing = opts.force
+    ? null
+    : resolveBackendBinary(backend, opts.projectDir, opts.exeName, [preferredProfile]);
   if (existing) return existing;
   // The shared path is still where CARGO itself writes and caches — that
   // part is unaffected either way, and reusing it keeps cargo's own
@@ -171,10 +181,10 @@ export async function ensureRuntime(
   // this function shipped `release` unconditionally until now. `run`/`dev`
   // never set `staticPlugins`, so their `ensureRuntime` calls are completely
   // unaffected — they keep using `release` for fast rebuilds, same as
-  // before. `BINARY_PROFILES` (used by `resolveBackendBinary`'s shared-path
-  // fallback) already searches "dist" before "release", so this fix needed
-  // no change on the resolution side — only the build side was ever wrong.
-  const cargoProfile = flags.staticPlugins ? "dist" : "release";
+  // before. Same value as `preferredProfile` above, by construction — one
+  // variable, used for both "which binary do we already have" and "which
+  // profile do we build" so those two questions can never disagree again.
+  const cargoProfile = preferredProfile;
   const exe = runtimeBinaryPath(backend, cargoProfile);
 
   logger.step(`compiling native runtime for ${backend} (first run only — this can take a few minutes)…`);

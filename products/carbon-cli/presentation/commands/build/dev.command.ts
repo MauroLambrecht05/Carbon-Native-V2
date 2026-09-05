@@ -16,7 +16,7 @@ import type { CommandContext } from "@carbon/cli";
 // kill+respawn dance. Detection: HMR_BACKENDS set below. When a new
 // runtime gains --dev support, add it to the set.
 
-import { spawn, type ChildProcess } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { watch as fsWatch } from "node:fs";
 import { emitKeypressEvents, type Key } from "node:readline";
 import { join, resolve } from "node:path";
@@ -25,8 +25,9 @@ import { loadCarbonConfig } from "@carbon/workspace";
 import { log, c } from "@carbon/logging";
 import { isBackend, VALID_BACKENDS } from "@carbon/contracts/app/backend";
 import { buildProject, ensureNodeModules, ensureRuntime } from "@carbon/bundling";
+import { start, tryDaemonRun } from "@carbon/process";
 import { pluginUseCases } from "@carbon/lifecycle";
-import { PRODUCTS_DIR } from "@carbon/workspace";
+import { PRODUCTS_DIR, TARGET_DIR } from "@carbon/workspace";
 import { StatusLine } from "../../ui/status-line.ts";
 import { printBanner, printReadySummary, printRebuildLine } from "../../ui/brand.ts";
 
@@ -198,20 +199,28 @@ export async function devCommand(rest: string[]): Promise<number> {
     // tells us whether anything that affects the output actually changed.
     let lastKey = computeCacheKey(projectDir, backend, DEV_BYTECODE, true);
 
-    const launch = () => {
-      const args = useHmr ? [projectDir, "--dev"] : [projectDir];
-      log.step(useHmr ? "launching runtime (in-process HMR enabled)…" : "launching runtime…");
-      // CARBON_ALLOW_UNSIGNED_PLUGINS: `carbon dev` builds an app's own
-      // carbon/plugins/local/<name>/ source locally (SyncPluginsUseCase),
-      // with no manual sign step — that flow was never meant to require
-      // Carbon's signing key, only `carbon run`'s and a distributed build's
-      // ever should. See the matching comment in plugin_loader.rs's
-      // load_one — this is the one place that env var gets set, deliberately
-      // never in run.command.ts.
-      proc = spawn(exe, args, {
-        stdio: "inherit",
+    // CARBON_ALLOW_UNSIGNED_PLUGINS: `carbon dev` builds an app's own
+    // carbon/plugins/local/<name>/ source locally (SyncPluginsUseCase),
+    // with no manual sign step — that flow was never meant to require
+    // Carbon's signing key, only `carbon run`'s and a distributed build's
+    // ever should. See the matching comment in plugin_loader.rs's
+    // load_one — this is the one place that env var gets set, deliberately
+    // never in run.command.ts.
+    //
+    // Plain, fully-inherited spawn — NOT startAndWaitForWindowVisible (see
+    // NodeProcessRunner.ts's WINDOW_VISIBLE_MARKER doc comment for why that
+    // was removed): on this machine, Bun's Windows child_process.spawn
+    // allocated a brand-new visible console window for carbon-mini.exe the
+    // moment ANY stdio stream was set to "pipe", even with the other two
+    // left as "inherit" — confirmed directly via conhost.exe process counts.
+    // The returned promise resolves immediately after spawn, same as before
+    // that feature — "ready" is a process-spawn timestamp again, not a
+    // window-visible one, but no stray console either.
+    const directLaunch = (args: string[]): Promise<void> => {
+      const child = start(exe, args, {
         env: { ...process.env, CARBON_ALLOW_UNSIGNED_PLUGINS: "1" },
       });
+      proc = child;
       proc.on("close", (code, sig) => {
         // If the user manually closed the window we'll exit cleanly here too,
         // unless we're in the middle of an intentional reload-respawn.
@@ -220,6 +229,47 @@ export async function devCommand(rest: string[]): Promise<number> {
           process.exit(code ?? 0);
         }
       });
+      return Promise.resolve();
+    };
+
+    const launch = (): Promise<void> => {
+      const args = useHmr ? [projectDir, "--dev"] : [projectDir];
+      log.step(useHmr ? "launching runtime (in-process HMR enabled)…" : "launching runtime…");
+
+      // Daemon first — HMR backends (mini) call launch() exactly once per
+      // session: HMR reloads never respawn (see the `if (!useHmr)` branch in
+      // reload() below), only rebuild in place, so `proc === null` here means
+      // this IS that one call, not "the first of several". Non-HMR backends
+      // skip the daemon entirely and always go straight to directLaunch,
+      // because their reload loop needs a real, killable ChildProcess to
+      // respawn — the daemon hands off a pooled process this CLI has no way
+      // to signal a kill to yet. See run.command.ts's matching block and
+      // DaemonClient.ts's doc comment for the protocol and the one accepted
+      // gap: Ctrl-C can't gracefully close a daemon-served window.
+      if (useHmr && proc === null) {
+        return new Promise<void>((resolveVisible) => {
+          tryDaemonRun({
+            projectDir,
+            backend,
+            devMode: true,
+            launcherExe: join(TARGET_DIR, "release", "carbon-launcher.exe"),
+            onWindowVisible: resolveVisible,
+          }).then((daemonCode) => {
+            if (daemonCode !== null) {
+              if (!reloadInFlight) {
+                log.info(`runtime exited (code=${daemonCode})`);
+                process.exit(daemonCode);
+              }
+              return;
+            }
+            // No daemon reachable (or it declined) — fall back exactly as
+            // run.command.ts does.
+            directLaunch(args).then(resolveVisible);
+          });
+        });
+      }
+
+      return directLaunch(args);
     };
 
     const reload = async (opts: { force?: boolean } = {}) => {
@@ -283,7 +333,7 @@ export async function devCommand(rest: string[]): Promise<number> {
             proc.once("close", () => resolve(undefined));
           });
         }
-        launch();
+        void launch(); // not awaited here — printRebuildLine above is this path's own feedback
       }
       reloadInFlight = false;
 
@@ -302,7 +352,7 @@ export async function devCommand(rest: string[]): Promise<number> {
       reload();
     });
 
-    launch();
+    const initialVisible = launch();
     stage("spawn");
     if (verbose) {
       log.info(
@@ -311,6 +361,9 @@ export async function devCommand(rest: string[]): Promise<number> {
         ),
       );
     }
+
+    await initialVisible;
+    stage("window_visible");
 
     status.succeed();
     printReadySummary({
@@ -391,7 +444,7 @@ export async function devCommand(rest: string[]): Promise<number> {
 async function syncPlugins(projectDir: string): Promise<void> {
   const { staged } = await pluginUseCases(
     join(PRODUCTS_DIR, "carbon-ext"),
-    join(PRODUCTS_DIR, "carbon-sdk"),
+    join(PRODUCTS_DIR, "carbon-sdk", "plugins"),
   ).sync.execute(projectDir, { logger: log });
   for (const file of staged) {
     log.step(c.dim(`plugin: staged ./carbon/bin/.../${file}`));
