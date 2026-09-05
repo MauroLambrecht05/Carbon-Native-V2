@@ -18,6 +18,12 @@ import {
   VerifyTokenUseCase,
 } from "@carbon/identity";
 import {
+  ConsumeMagicLinkUseCase,
+  PostgresAuthRepository,
+  RequestMagicLinkUseCase,
+  VerifyEndUserSessionUseCase,
+} from "@carbon/auth";
+import {
   CheckUsageLimitUseCase,
   PostgresBillingRepository,
   RecordBuildUsageUseCase,
@@ -87,6 +93,7 @@ export async function startServer(config: CarbonCloudConfig) {
   const builds = new PostgresBuildRepository(sql);
   const identity = new PostgresIdentityRepository(sql);
   const billing = new PostgresBillingRepository(sql);
+  const auth = new PostgresAuthRepository(sql);
 
   const checkoutProvider: CheckoutSessionProvider = config.stripe
     ? new StripeCheckoutProvider({ secretKey: config.stripe.secretKey, priceIds: config.stripe.priceIds })
@@ -101,6 +108,9 @@ export async function startServer(config: CarbonCloudConfig) {
     createOrganization: new CreateOrganizationUseCase(identity),
     issueWorkerToken: new IssueWorkerTokenUseCase(identity),
     verifyToken: new VerifyTokenUseCase(identity),
+    requestMagicLink: new RequestMagicLinkUseCase(auth),
+    consumeMagicLink: new ConsumeMagicLinkUseCase(auth),
+    verifyEndUserSession: new VerifyEndUserSessionUseCase(auth),
     checkUsageLimit: new CheckUsageLimitUseCase(billing, billing),
     recordBuildUsage: new RecordBuildUsageUseCase(billing),
     startPlanUpgrade: new StartPlanUpgradeUseCase(checkoutProvider),

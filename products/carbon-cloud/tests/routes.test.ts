@@ -22,6 +22,12 @@ import {
   VerifyTokenUseCase,
 } from "@carbon/identity";
 import {
+  ConsumeMagicLinkUseCase,
+  InMemoryAuthRepository,
+  RequestMagicLinkUseCase,
+  VerifyEndUserSessionUseCase,
+} from "@carbon/auth";
+import {
   CheckUsageLimitUseCase,
   InMemoryBillingRepository,
   RecordBuildUsageUseCase,
@@ -36,8 +42,11 @@ async function harness() {
   const builds = new InMemoryBuildRepository();
   const identity = new InMemoryIdentityRepository();
   const billing = new InMemoryBillingRepository();
+  const auth = new InMemoryAuthRepository();
   const createOrganization = new CreateOrganizationUseCase(identity);
   const issueWorkerToken = new IssueWorkerTokenUseCase(identity);
+  const requestMagicLink = new RequestMagicLinkUseCase(auth);
+  const consumeMagicLink = new ConsumeMagicLinkUseCase(auth);
   const routes = buildRoutes({
     createBuild: new CreateBuildUseCase(builds),
     getBuild: new GetBuildUseCase(builds),
@@ -47,6 +56,9 @@ async function harness() {
     createOrganization,
     issueWorkerToken,
     verifyToken: new VerifyTokenUseCase(identity),
+    requestMagicLink,
+    consumeMagicLink,
+    verifyEndUserSession: new VerifyEndUserSessionUseCase(auth),
     checkUsageLimit: new CheckUsageLimitUseCase(billing, billing),
     recordBuildUsage: new RecordBuildUsageUseCase(billing),
     startPlanUpgrade: new StartPlanUpgradeUseCase(new FakeCheckoutSessionProvider()),
@@ -77,6 +89,8 @@ async function harness() {
     billing,
     createOrganization,
     issueWorkerToken,
+    requestMagicLink,
+    consumeMagicLink,
     withToken,
   };
 }
@@ -99,6 +113,97 @@ describe("POST /v1/orgs", () => {
     const { server, base } = await harness();
     const res = await fetch(`${base}/v1/orgs`, { method: "POST", body: JSON.stringify({}) });
     expect(res.status).toBe(400);
+    server.stop(true);
+  });
+});
+
+describe("End-user (magic-link) auth", () => {
+  test("full lifecycle: request a link, consume it, verify the resulting session", async () => {
+    const { server, base, orgId } = await harness();
+
+    const linkRes = await fetch(`${base}/v1/end-users/magic-link`, {
+      method: "POST",
+      body: JSON.stringify({ orgId, email: "customer@example.com" }),
+    });
+    expect(linkRes.status).toBe(201);
+    const link = (await linkRes.json()) as { endUserId: string; devMagicLink: string };
+    expect(link.devMagicLink).toStartWith("ml_");
+
+    const sessionRes = await fetch(`${base}/v1/end-users/session`, {
+      method: "POST",
+      body: JSON.stringify({ magicLinkToken: link.devMagicLink }),
+    });
+    expect(sessionRes.status).toBe(201);
+    const session = (await sessionRes.json()) as { sessionToken: string; endUserId: string; orgId: string };
+    expect(session.sessionToken).toStartWith("es_");
+    expect(session.endUserId).toBe(link.endUserId);
+    expect(session.orgId).toBe(orgId);
+
+    const meRes = await fetch(`${base}/v1/end-users/me`, {
+      headers: { authorization: `Bearer ${session.sessionToken}` },
+    });
+    expect(meRes.status).toBe(200);
+    expect(await meRes.json()).toEqual({ endUserId: link.endUserId, orgId });
+
+    server.stop(true);
+  });
+
+  test("a magic link can only be consumed once", async () => {
+    const { server, base, orgId } = await harness();
+    const linkRes = await fetch(`${base}/v1/end-users/magic-link`, {
+      method: "POST",
+      body: JSON.stringify({ orgId, email: "once@example.com" }),
+    });
+    const { devMagicLink } = (await linkRes.json()) as { devMagicLink: string };
+
+    const first = await fetch(`${base}/v1/end-users/session`, {
+      method: "POST",
+      body: JSON.stringify({ magicLinkToken: devMagicLink }),
+    });
+    expect(first.status).toBe(201);
+
+    const second = await fetch(`${base}/v1/end-users/session`, {
+      method: "POST",
+      body: JSON.stringify({ magicLinkToken: devMagicLink }),
+    });
+    expect(second.status).toBe(400);
+
+    server.stop(true);
+  });
+
+  test("GET /v1/end-users/me rejects a missing or garbage bearer token", async () => {
+    const { server, base } = await harness();
+
+    const noAuth = await fetch(`${base}/v1/end-users/me`);
+    expect(noAuth.status).toBe(401);
+
+    const garbage = await fetch(`${base}/v1/end-users/me`, { headers: { authorization: "Bearer not-a-real-session" } });
+    expect(garbage.status).toBe(401);
+
+    server.stop(true);
+  });
+
+  test("an org/worker API token does NOT verify as an end-user session — the two namespaces don't cross", async () => {
+    const { server, base, apiToken } = await harness();
+    const res = await fetch(`${base}/v1/end-users/me`, { headers: { authorization: `Bearer ${apiToken}` } });
+    expect(res.status).toBe(401);
+    server.stop(true);
+  });
+
+  test("missing orgId or email is refused", async () => {
+    const { server, base, orgId } = await harness();
+    const missingEmail = await fetch(`${base}/v1/end-users/magic-link`, {
+      method: "POST",
+      body: JSON.stringify({ orgId }),
+    });
+    expect(missingEmail.status).toBe(400);
+
+    const missingOrg = await fetch(`${base}/v1/end-users/magic-link`, {
+      method: "POST",
+      body: JSON.stringify({ email: "x@example.com" }),
+    });
+    expect(missingOrg.status).toBe(400);
+
     server.stop(true);
   });
 });

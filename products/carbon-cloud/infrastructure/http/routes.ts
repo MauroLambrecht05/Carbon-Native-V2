@@ -22,6 +22,11 @@ import {
   type TokenScope,
 } from "@carbon/identity";
 import {
+  type RequestMagicLinkUseCase,
+  type ConsumeMagicLinkUseCase,
+  type VerifyEndUserSessionUseCase,
+} from "@carbon/auth";
+import {
   type CheckUsageLimitUseCase,
   type RecordBuildUsageUseCase,
   type StartPlanUpgradeUseCase,
@@ -40,6 +45,9 @@ export interface RouteDeps {
   readonly createOrganization: CreateOrganizationUseCase;
   readonly issueWorkerToken: IssueWorkerTokenUseCase;
   readonly verifyToken: VerifyTokenUseCase;
+  readonly requestMagicLink: RequestMagicLinkUseCase;
+  readonly consumeMagicLink: ConsumeMagicLinkUseCase;
+  readonly verifyEndUserSession: VerifyEndUserSessionUseCase;
   readonly checkUsageLimit: CheckUsageLimitUseCase;
   readonly recordBuildUsage: RecordBuildUsageUseCase;
   readonly startPlanUpgrade: StartPlanUpgradeUseCase;
@@ -165,6 +173,63 @@ export function buildRoutes(deps: RouteDeps) {
         } catch (error) {
           return errorResponse(error);
         }
+      },
+    },
+
+    // ── End-user (magic-link) auth — @carbon/auth ─────────────────────────
+    // Distinct token namespace from cc_/wk_ org/worker tokens: an end user
+    // is an app's OWN customer, not the app developer. None of these
+    // three routes take an org/worker bearer token — an anonymous visitor
+    // requesting/consuming a magic link has neither.
+
+    "/v1/end-users/magic-link": {
+      POST: async (req: Bun.BunRequest) => {
+        try {
+          const body = (await req.json()) as { orgId: string; email: string };
+          if (!body.orgId || !body.email) return json({ error: "orgId and email are required" }, 400);
+          const result = await deps.requestMagicLink.execute(body.orgId, body.email);
+          // devMagicLink, not a generic "token" field name: NO real email
+          // transport exists yet (carbon-email is unbuilt — see the
+          // roadmap's own phase 5). Handing the usable token straight
+          // back in this response is a deliberate self-hosted-dev
+          // shortcut, not the real security model — a real deployment
+          // must send this over email instead and never return it here.
+          // See RequestMagicLinkUseCase's own header comment.
+          return json(
+            {
+              endUserId: result.endUserId,
+              expiresAt: result.expiresAt,
+              devMagicLink: result.plaintextToken,
+            },
+            201,
+          );
+        } catch (error) {
+          return errorResponse(error);
+        }
+      },
+    },
+
+    "/v1/end-users/session": {
+      POST: async (req: Bun.BunRequest) => {
+        try {
+          const body = (await req.json()) as { magicLinkToken: string };
+          if (!body.magicLinkToken) return json({ error: "magicLinkToken is required" }, 400);
+          const result = await deps.consumeMagicLink.execute(body.magicLinkToken);
+          return json(result, 201);
+        } catch (error) {
+          return errorResponse(error);
+        }
+      },
+    },
+
+    "/v1/end-users/me": {
+      GET: async (req: Bun.BunRequest) => {
+        const header = req.headers.get("authorization") ?? "";
+        const token = header.startsWith("Bearer ") ? header.slice("Bearer ".length) : null;
+        if (!token) return json({ error: "missing bearer token" }, 401);
+        const verified = await deps.verifyEndUserSession.execute(token);
+        if (!verified) return json({ error: "invalid or expired session" }, 401);
+        return json(verified);
       },
     },
 

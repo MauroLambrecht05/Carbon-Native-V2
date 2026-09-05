@@ -169,10 +169,20 @@ authenticates and bills against.
 The plane every later phase stores its rows in or authenticates its callers
 against.
 
-1. **carbon-auth**, extended — magic-link/OAuth sign-in and session issuance
-   for an app's OWN end users (distinct from carbon-identity's
-   developer/org accounts). New `end_users`/`sessions` tables, new
-   `solutions/capabilities/cloud/auth` bounded context.
+1. **carbon-auth**, extended — magic-link sign-in and session issuance for
+   an app's OWN end users (distinct from carbon-identity's developer/org
+   accounts). **Magic-link half done 2026-09-05**: real
+   `solutions/capabilities/cloud/auth` bounded context
+   (`RequestMagicLinkUseCase`/`ConsumeMagicLinkUseCase`/
+   `VerifyEndUserSessionUseCase`, `InMemoryAuthRepository`/
+   `PostgresAuthRepository`), wired into carbon-cloud's own
+   `/v1/end-users/{magic-link,session,me}` routes and `0004_auth.sql`
+   (`end_users`/`magic_link_tokens`/`end_user_sessions`) — verified against
+   a real Docker Postgres, not just tests over fakes. OAuth (Google/
+   GitHub/etc.) is still not built — real, separate per-provider scope,
+   not a variant of the same code; see carbon-cloud's own README for the
+   full list of what's real vs. not here (no email transport yet, no
+   session revocation endpoint, no rate limiting on the request route).
 2. **carbon-database** — provisions an isolated Postgres schema (or
    database) per app, exposes row-level policies, and is itself the
    thing every phase-2+ service's tables live in from here on.

@@ -1,0 +1,23 @@
+# Carbon Native V2 - @carbon/auth
+#
+# Capability: end-user (magic-link) identity for an app's own customers.
+
+package(default_visibility = ["//visibility:public"])
+
+load("//.tools/orchestration/bazel/bun:defs.bzl", "bun_test")
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["**/*.ts"], exclude = ["**/*.test.ts"], allow_empty = True),
+)
+
+filegroup(
+    name = "tests",
+    srcs = glob(["**/*.test.ts"], allow_empty = True),
+)
+
+bun_test(
+    name = "auth_test",
+    entry = "tests/auth.test.ts",
+    srcs = [":srcs", ":tests"],
+)

@@ -162,3 +162,57 @@ fixed. What's *not* verified: actual Stripe API calls — no Stripe account
 or test API key in this environment, so `StripeCheckoutProvider` and the
 signature verifier are real, correct code against Stripe's documented
 contracts, checked as far as a sandbox with no Stripe access can check them.
+
+## End-user (magic-link) auth — `@carbon/auth`
+
+Distinct from everything above: `organizations`/`api_tokens` are the app
+**developer's** account (what `carbon-cli` authenticates as); `end_users`/
+`end_user_sessions` are an app's **own customers** — someone the app's
+frontend needs to sign in, who never touches `carbon-cli` at all. Three
+routes, no bearer token required on the first two (an anonymous visitor
+requesting a sign-in link has none yet):
+
+```sh
+# 1. Request a link for an email, scoped to your own org.
+curl -X POST http://localhost:8080/v1/end-users/magic-link \
+  -d '{"orgId":"<your-org-id>","email":"customer@example.com"}'
+# -> {"endUserId":"...","expiresAt":"...","devMagicLink":"ml_..."}
+
+# 2. Exchange it for a session (normally the link a real email pointed at).
+curl -X POST http://localhost:8080/v1/end-users/session -d '{"magicLinkToken":"ml_..."}'
+# -> {"endUserId":"...","orgId":"...","sessionToken":"es_...","expiresAt":"..."}
+
+# 3. Verify a session — what an authenticated end-user request checks.
+curl http://localhost:8080/v1/end-users/me -H "authorization: Bearer es_..."
+# -> {"endUserId":"...","orgId":"..."}
+```
+
+**`devMagicLink` is not how this works with real email** — there is no
+email transport yet (`carbon-email` is unbuilt; see the roadmap's own
+phase 5), so the route hands the usable token straight back in its own
+response instead of pretending a delivery step happened. That is a
+deliberate, visible self-hosted-dev shortcut, not the real security
+model — the field name says so on purpose, the same way
+`FakeCheckoutSessionProvider` is named `Fake` rather than silently
+standing in for Stripe. A real deployment sends this over email and never
+returns it here.
+
+**What's real**: the full magic-link → session → verify round trip, real
+Postgres tables (`0004_auth.sql`), single-use token consumption (a second
+exchange attempt with the same plaintext is refused even before it would
+have expired), 15-minute link / 30-day session TTLs, and — the one actual
+security bug this caught in its own design, not from review — the session
+an exchange produces is scoped to the token's **own** end user's org,
+looked up server-side, never accepted as a caller-supplied parameter (see
+`ConsumeMagicLinkUseCase`'s own comment for why that distinction matters:
+accepting it would let anyone holding a valid magic link for their own
+account claim a session in a *different* org just by naming one).
+
+**What's not built**: OAuth (Google/GitHub/etc. sign-in) — real, separate
+scope per provider, not a variant of this same code, and the roadmap
+groups it with this capability only because both answer "how does an end
+user prove who they are." No session revocation/logout endpoint yet
+(`DELETE /v1/end-users/session` — a real gap, not a decision). No rate
+limiting on `/v1/end-users/magic-link`, so nothing here stops repeated
+requests for the same email from piling up (harmless today since nothing
+actually emails anyone yet, but a real gap once `carbon-email` exists).

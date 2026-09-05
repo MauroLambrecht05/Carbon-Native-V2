@@ -105,6 +105,9 @@
       "@carbon/identity": [
         "../solutions/capabilities/cloud/identity/index.ts"
       ],
+      "@carbon/auth": [
+        "../solutions/capabilities/cloud/auth/index.ts"
+      ],
       "@carbon/contracts/app": [
         "../solutions/contracts/app/types/CarbonManifest.ts"
       ],

@@ -1,0 +1,13 @@
+{
+  "name": "@carbon/auth",
+  "version": "0.1.0",
+  "private": true,
+  "description": "End-user (magic-link) identity for an app's own customers — distinct from @carbon/identity's developer/org accounts.",
+  "type": "module",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "carbon": {
+    "kind": "service"
+  }
+}
