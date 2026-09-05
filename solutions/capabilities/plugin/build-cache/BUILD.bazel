@@ -1,0 +1,23 @@
+# Carbon Native V2 - @carbon/plugin-build-cache
+#
+# Rust port of PluginBuildCache.ts's zig-build cache key computation, for
+# products/carbon-launcher — see that crate's own Cargo.toml header. Rust-only,
+# so everything is under rust/, the same layout plugin/trust/rust uses.
+
+package(default_visibility = ["//visibility:public"])
+
+load("//.tools/orchestration/bazel/cargo:defs.bzl", "cargo_library")
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["rust/**/*.rs", "rust/Cargo.toml"], allow_empty = True),
+)
+
+# No unit tests yet (see lib.rs) — this target exists so `bazel build //...`
+# actually compiles this crate on its own, not only transitively the moment
+# something builds carbon-launcher.
+cargo_library(
+    name = "plugin_build_cache",
+    package = "carbon-plugin-build-cache",
+    srcs = [":srcs"],
+)

@@ -67,16 +67,23 @@ test-gaming hack) or revert it before it's committed.
   confirm the TS interface filenames are a deliberately stable public API
   independent of internal Zig/Rust naming (if so, worth a comment saying
   so — nothing currently explains the mismatch).
-- **`products/carbon-launcher` has no `BUILD.bazel`**, unlike
-  `products/carbon` (the other hand-written Rust binary in `products/`,
-  which has both a `BUILD.bazel` and a `build.rs`). CI's real entrypoint is
-  `bazel build //...`/`bazel test //...` — if Bazel's Rust rules here don't
-  auto-generate targets from `Cargo.toml` alone, this crate silently never
-  gets built or tested by CI even though it's now pushed. Worth confirming
-  before calling it shipped.
-- **`products/carbon-launcher/Cargo.toml`'s own header comment references
-  `products/carbon-launcher/README.md`**, which does not exist anywhere in
-  this changeset.
+- ~~`products/carbon-launcher` has no `BUILD.bazel`~~ — **fixed 2026-09-05**:
+  confirmed for real (`bazel query 'kind(.... //products/carbon-launcher/...)'`
+  returned nothing), meaning `bazel build //...`/`bazel test //...` — this
+  repo's actual CI entrypoint — silently never touched it. Same gap existed
+  for its two path-dependency crates, `solutions/capabilities/tooling/
+  build-cache` and `solutions/capabilities/plugin/build-cache` (no BUILD.bazel
+  either, though those at least got compiled transitively whenever something
+  built carbon-launcher — carbon-launcher itself had nothing depending on it
+  at all). Added a `cargo_binary` target for carbon-launcher and a
+  `cargo_library` target for each build-cache crate (matching
+  `plugin/trust`'s "library, not binary" naming); verified with a real
+  `bazel build //...` (156 targets now, binary confirmed present on disk at
+  `target/{debug,release}/carbon-launcher.exe`) and a full structure/clippy/
+  fmt re-run.
+- ~~`products/carbon-launcher/Cargo.toml`'s own header comment references
+  `products/carbon-launcher/README.md`, which does not exist~~ — **fixed
+  2026-09-05**: wrote it.
 - **`products/carbon-cloud/infrastructure/persistence/BuildArtifactStore.ts`**
   is a static in-memory Map singleton — every other store this product owns
   (`PostgresBuildRepository`/`PostgresIdentityRepository`/

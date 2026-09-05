@@ -1,0 +1,21 @@
+# Carbon Native V2 - carbon-launcher
+#
+# One binary, subcommand-dispatched (run/dev/daemon/ensure-daemon — see
+# composition/main.rs). No [[bin]] feature gating the way products/carbon's
+# mini/blitz split needs, so this is one cargo_binary target, not two.
+
+package(default_visibility = ["//visibility:public"])
+
+load("//.tools/orchestration/bazel/cargo:defs.bzl", "cargo_binary")
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["composition/**/*.rs", "*.rs", "Cargo.toml"], allow_empty = True),
+)
+
+cargo_binary(
+    name = "carbon-launcher",
+    package = "carbon-launcher",
+    bin = "carbon-launcher",
+    srcs = [":srcs"],
+)
