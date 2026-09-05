@@ -30,6 +30,7 @@ import {
 } from "@carbon/lifecycle";
 import { PRODUCTS_DIR } from "@carbon/workspace";
 import { join, resolve } from "node:path";
+import { executePluginSearchTui, fetchRegistryPlugins } from "./plugin-search-tui.ts";
 
 /**
  * Where the plugin SDK lives.
@@ -43,14 +44,19 @@ import { join, resolve } from "node:path";
 const SDK_ROOT = join(PRODUCTS_DIR, "carbon-ext");
 
 /**
- * Where the STANDARD plugins live — one subdirectory per plugin, each a
- * normal buildable+installable plugin like any other (see `fonts/`). This is
- * a separate product from `carbon-ext` on purpose: carbon-ext is the SDK
- * (what a plugin AUTHOR builds against), carbon-sdk is the curated
- * collection `carbon plugin add <name>` (and SyncPluginsUseCase's auto-heal)
- * resolves names against — a user never sees carbon-ext's path at all.
+ * Where the STANDARD plugins live — `plugins/<category>/<name>/`, one
+ * category folder per area (carbon-desktop, carbon-security, ...) grouping
+ * the plugins for that area, each an ordinary buildable+installable plugin
+ * like any other (see `plugins/carbon-security/keychain/` for the simplest
+ * real example). `carbon plugin add <name>` still takes just the plugin's
+ * own name, not the category — resolveStandardPluginDir searches every
+ * category folder for it. This is a separate product from `carbon-ext` on
+ * purpose: carbon-ext is the SDK (what a plugin AUTHOR builds against),
+ * carbon-sdk is the curated collection `carbon plugin add <name>` (and
+ * SyncPluginsUseCase's auto-heal) resolves names against — a user never
+ * sees carbon-ext's path at all.
  */
-const STANDARD_PLUGINS_ROOT = join(PRODUCTS_DIR, "carbon-sdk");
+const STANDARD_PLUGINS_ROOT = join(PRODUCTS_DIR, "carbon-sdk", "plugins");
 
 /**
  * Runs `body`, turning the capability's own refusals into a usage error.
@@ -183,23 +189,54 @@ class AddPluginCommand extends Command {
     name: "add",
     summary: "Build + sign + install a standard plugin from carbon-sdk into this app",
     usage: "plugin add <name> [project-dir]",
-    examples: ["carbon plugin add fonts", "carbon plugin add fonts ./my-app"],
+    examples: [
+      "carbon plugin add clipboard",
+      "carbon plugin add @std/clipboard",
+      "carbon plugin add @registry/bluetooth",
+      "carbon plugin add registry:audio-player",
+    ],
   };
 
   validate(ctx: CommandContext): string | null {
-    return ctx.first ? null : "plugin add requires a name. Try: carbon plugin add fonts";
+    return ctx.first ? null : "plugin add requires a name. Try: carbon plugin add clipboard";
   }
 
   execute(ctx: CommandContext): Promise<ExitCode> {
     return reporting(ctx, async () => {
-      const name = ctx.first!;
-      // Second positional, like `carbon dev [project-dir]` — which app to
-      // install into. Defaults to cwd (run `carbon plugin add fonts` from
-      // inside the app, same as `plugin install`).
+      const rawName = ctx.first!;
+      const isRegistry = rawName.startsWith("@registry/") || rawName.startsWith("registry:");
+      const cleanName = isRegistry
+        ? rawName.replace(/^(@registry\/|registry:)/, "")
+        : rawName.replace(/^@std\//, "");
+
       const targetApp = ctx.args[1] ? resolve(ctx.cwd, ctx.args[1]) : ctx.cwd;
 
+      if (isRegistry) {
+        const registryUrl = process.env.CARBON_REGISTRY_URL || "http://localhost:54323";
+        ctx.io.info(`Resolving registry plugin ${ctx.io.c.bold(cleanName)} from ${registryUrl}...`);
+
+        const res = await fetch(`${registryUrl}/api/v1/plugins/${cleanName}/download`);
+        if (!res.ok) {
+          ctx.io.error(`Plugin "${cleanName}" not found on Carbon Registry`);
+          return EXIT_FAILURE;
+        }
+
+        const data = (await res.json()) as { tarballBase64: string; checksum: string; version: string };
+        const pluginDest = join(targetApp, "carbon", "plugins", "vendor", cleanName);
+        await Bun.write(join(pluginDest, "package.tar.zst"), Buffer.from(data.tarballBase64, "base64"));
+        await Bun.write(
+          join(pluginDest, "carbon-plugin.toml"),
+          `name = "${cleanName}"\nversion = "${data.version}"\nsource = "registry"\n`,
+        );
+
+        ctx.io.success(
+          `${ctx.io.c.bold(cleanName)} (v${data.version}) installed from registry → ${ctx.io.c.dim(forwardSlashes(pluginDest))}`,
+        );
+        return EXIT_OK;
+      }
+
       const { addStandard } = pluginUseCases(SDK_ROOT, STANDARD_PLUGINS_ROOT);
-      const result = await addStandard.execute({ name, targetApp, logger: ctx.io });
+      const result = await addStandard.execute({ name: cleanName, targetApp, logger: ctx.io });
 
       ctx.io.success(
         `${ctx.io.c.bold(result.name.slug)} added → ${ctx.io.c.dim(forwardSlashes(result.installedAt))}`,
@@ -399,17 +436,158 @@ class DevKeyCommand extends Command {
   }
 }
 
+async function executeDirectSearch(
+  ctx: CommandContext,
+  query: string,
+  registryUrl: string,
+): Promise<ExitCode> {
+  const { plugins } = await fetchRegistryPlugins(registryUrl);
+  const q = query.toLowerCase();
+  const matched = plugins.filter(
+    (p) =>
+      p.name.toLowerCase().includes(q) ||
+      p.description.toLowerCase().includes(q) ||
+      p.category.toLowerCase().includes(q) ||
+      p.tags.some((t) => t.toLowerCase().includes(q)),
+  );
+
+  if (matched.length === 0) {
+    ctx.io.info(`No plugins found matching "${query}" on Carbon Registry`);
+    return EXIT_OK;
+  }
+
+  ctx.io.raw(`\nFound ${matched.length} plugin(s) on Carbon Registry:\n`);
+  for (const p of matched) {
+    const verifiedBadge = p.verified ? ctx.io.c.green("✓") : "";
+    ctx.io.raw(
+      `  ${ctx.io.c.bold(`@registry/${p.name}`)} ${verifiedBadge} ${ctx.io.c.dim(`(v${p.latestVersion} · ${p.category} · ⬇ ${p.downloads})`)}`,
+    );
+    ctx.io.raw(`    ${p.description}`);
+    ctx.io.raw(`    ${ctx.io.c.dim(`Install: carbon plugin add @registry/${p.name}`)}\n`);
+  }
+
+  return EXIT_OK;
+}
+
+class SearchPluginCommand extends Command {
+  readonly meta: CommandMeta = {
+    name: "search",
+    summary: "Search and browse plugins on the Carbon Plugin Registry marketplace",
+    usage: "plugin search [query]",
+    examples: [
+      "carbon plugin search",
+      "carbon plugin search audio",
+      "carbon plugin search desktop",
+    ],
+  };
+
+  validate(_ctx: CommandContext): string | null {
+    return null;
+  }
+
+  async execute(ctx: CommandContext): Promise<ExitCode> {
+    const registryUrl = process.env.CARBON_REGISTRY_URL || "http://localhost:54323";
+
+    if (ctx.first && ctx.first.trim().length > 0) {
+      return await executeDirectSearch(ctx, ctx.first.trim(), registryUrl);
+    }
+
+    return await executePluginSearchTui(ctx, registryUrl);
+  }
+}
+
+class PublishPluginCommand extends Command {
+  readonly meta: CommandMeta = {
+    name: "publish",
+    summary: "Publish a native plugin to the Carbon Registry",
+    usage: "plugin publish [dir]",
+    examples: ["carbon plugin publish", "carbon plugin publish ./my-plugin"],
+  };
+
+  async execute(ctx: CommandContext): Promise<ExitCode> {
+    const dir = ctx.first ? resolve(ctx.cwd, ctx.first) : ctx.cwd;
+    const registryUrl = process.env.CARBON_REGISTRY_URL || "http://localhost:54323";
+    const token = process.env.CARBON_REGISTRY_TOKEN || process.env.CARBON_DB_TOKEN || "";
+
+    if (!token) {
+      ctx.io.error("Missing Carbon Identity token for publishing. Set CARBON_REGISTRY_TOKEN=cc_...");
+      return EXIT_FAILURE;
+    }
+
+    const manifestPath = join(dir, "carbon-plugin.toml");
+    const file = Bun.file(manifestPath);
+    if (!(await file.exists())) {
+      ctx.io.error(`No carbon-plugin.toml found at ${dir}`);
+      return EXIT_FAILURE;
+    }
+
+    try {
+      const manifestText = await file.text();
+      const nameMatch = manifestText.match(/name\s*=\s*"([^"]+)"/);
+      const verMatch = manifestText.match(/version\s*=\s*"([^"]+)"/);
+      const descMatch = manifestText.match(/description\s*=\s*"([^"]+)"/);
+      const catMatch = manifestText.match(/category\s*=\s*"([^"]+)"/);
+
+      const name = nameMatch ? nameMatch[1] : "unnamed";
+      const version = verMatch ? verMatch[1] : "1.0.0";
+      const description = descMatch ? descMatch[1] : "Carbon plugin";
+      const category = catMatch ? catMatch[1] : "carbon-dev";
+
+      const dummyTarball = Buffer.from(manifestText).toString("base64");
+
+      const res = await fetch(`${registryUrl}/api/v1/publish`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          manifest: {
+            name,
+            version,
+            category,
+            description,
+            platforms: ["windows-x86_64", "macos-arm64", "linux-x86_64"],
+          },
+          tarballBase64: dummyTarball,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }));
+        ctx.io.error(`Publish failed: ${err.error || res.statusText}`);
+        return EXIT_FAILURE;
+      }
+
+      ctx.io.success(`Plugin ${ctx.io.c.bold(name)}@${version} published to Carbon Registry!`);
+      return EXIT_OK;
+    } catch (err: any) {
+      ctx.io.error(`Publish failed: ${err.message}`);
+      return EXIT_FAILURE;
+    }
+  }
+}
+
 export class PluginCommand extends CommandGroup {
   readonly meta: CommandMeta = {
     name: "plugin",
-    summary: "Manage native plugins (new / add / build / check / install / enable / disable / list / info / dev-key)",
+    summary: "Manage native plugins (new / add / search / publish / build / check / install / enable / disable / list / info / dev-key)",
     usage: "plugin <subcommand> [options]",
-    examples: ["carbon plugin add fonts", "carbon plugin new my-plugin", "carbon plugin list"],
+    examples: [
+      "carbon plugin add clipboard",
+      "carbon plugin add @registry/bluetooth",
+      "carbon plugin search",
+      "carbon plugin search audio",
+      "carbon plugin new my-plugin",
+      "carbon plugin list",
+    ],
   };
 
   readonly subcommands = [
     new NewPluginCommand(),
     new AddPluginCommand(),
+    new SearchPluginCommand(),
+    new PublishPluginCommand(),
     new BuildPluginCommand(),
     new CheckPluginCommand(),
     new InstallPluginCommand(),

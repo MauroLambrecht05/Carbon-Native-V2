@@ -616,13 +616,15 @@ describe("syncing plugins", () => {
     return { workspace, runner, useCase };
   }
 
-  /** Seeds STANDARD_ROOT/<name>/ with a buildable source + fake build output,
-   *  the same fixture shape `withLocalSource` used before this rewrite. */
-  function seedStandardPlugin(workspace: MemoryWorkspace, name: string) {
-    workspace.put(`${STANDARD_ROOT}/${name}/build.zig`);
-    workspace.put(`${STANDARD_ROOT}/${name}/carbon-plugin.toml`, `name = "${name}"\nlanguage = "zig"\n`);
+  /** Seeds STANDARD_ROOT/<category>/<name>/ with a buildable source + fake
+   *  build output — the real two-level shape (a category folder grouping
+   *  plugins for an area, each plugin an independently buildable
+   *  subdirectory) resolveStandardPluginDir searches by name across. */
+  function seedStandardPlugin(workspace: MemoryWorkspace, category: string, name: string) {
+    workspace.put(`${STANDARD_ROOT}/${category}/${name}/build.zig`);
+    workspace.put(`${STANDARD_ROOT}/${category}/${name}/carbon-plugin.toml`, `name = "${name}"\nlanguage = "zig"\n`);
     const lib = PluginName.from(name).libraryFilename();
-    workspace.put(`${STANDARD_ROOT}/${name}/zig-out/lib/${lib}`, "ELF");
+    workspace.put(`${STANDARD_ROOT}/${category}/${name}/zig-out/lib/${lib}`, "ELF");
   }
 
   test("no carbon/manifest.toml at all is not an error", async () => {
@@ -685,14 +687,14 @@ describe("syncing plugins", () => {
     const { workspace, runner, useCase } = withApp(
       `[plugins.fonts]\nsource = "vendor"\nenabled = true\n`,
     );
-    seedStandardPlugin(workspace, "fonts");
+    seedStandardPlugin(workspace, "carbon-dev", "fonts");
 
     await useCase.execute(`${ROOT}/app`);
 
     expect(workspace.exists(`${ROOT}/app/carbon/bin/${hostOsName()}/${hostArchName()}/fonts.${hostExt()}`)).toBe(true);
     // Auto-heal's build call happened before the final orchestrating build.
     const cwds = runner.calls.map((c) => forwardSlashes(c.options?.cwd ?? ""));
-    expect(cwds).toEqual([`${STANDARD_ROOT}/fonts`, `${ROOT}/app/carbon`]);
+    expect(cwds).toEqual([`${STANDARD_ROOT}/carbon-dev/fonts`, `${ROOT}/app/carbon`]);
   });
 
   test("an already-present vendor artifact is not re-fetched", async () => {

@@ -7,7 +7,6 @@
 // human is expected to run a command for that). Same build, same sign, same
 // install; only who triggers it differs.
 
-import { join } from "node:path";
 import type { Logger } from "@carbon/logging";
 import { MemoryLogger } from "@carbon/logging";
 import { UnknownStandardPluginError } from "../../domain/errors/PluginError.ts";
@@ -16,6 +15,7 @@ import type { PluginName } from "../../domain/value-objects/PluginName.ts";
 import type { PluginWorkspace } from "../ports/PluginWorkspace.ts";
 import type { BuildPluginUseCase } from "./BuildPluginUseCase.ts";
 import type { InstallPluginUseCase } from "./InstallPluginUseCase.ts";
+import { listStandardPluginNames, resolveStandardPluginDir } from "./resolveStandardPluginDir.ts";
 
 export interface AddStandardPluginRequest {
   readonly name: string;
@@ -40,11 +40,11 @@ export class AddStandardPluginUseCase {
   ) {}
 
   async execute(request: AddStandardPluginRequest): Promise<AddStandardPluginResult> {
-    const directory = join(this.standardPluginsRoot, request.name);
-    if (!this.workspace.exists(directory)) {
+    const directory = resolveStandardPluginDir(this.workspace, this.standardPluginsRoot, request.name);
+    if (!directory) {
       throw new UnknownStandardPluginError(
         request.name,
-        this.workspace.listDirectories(this.standardPluginsRoot),
+        listStandardPluginNames(this.workspace, this.standardPluginsRoot),
       );
     }
 

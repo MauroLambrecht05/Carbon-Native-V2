@@ -74,38 +74,53 @@ export class SyncPluginsUseCase {
     const binDir = join(carbonDir, "bin", hostOsName(), hostArchName());
     const ext = hostExt();
 
-    for (const [name, entry] of manifest.plugins) {
-      if (!entry.enabled || entry.source !== "vendor") continue;
-      const artifactPath = join(binDir, `${name}.${ext}`);
-      if (this.workspace.exists(artifactPath)) continue;
-
-      logger.step(`fetching vendor plugin "${name}" (declared in manifest.toml, not yet on disk)…`);
-      await this.addStandard.execute({ name, targetApp: projectDir, logger });
-    }
+    // Every missing vendor plugin is built + signed + installed
+    // CONCURRENTLY, not one at a time — each one is a fully independent zig
+    // build (its own source directory, its own zig-cache) and a separate
+    // signing subprocess, with nothing shared until the very last step
+    // (`InstallPluginUseCase.execute`, which read-modify-writes THIS app's
+    // carbon/manifest.toml). That step is plain synchronous fs I/O with no
+    // `await` inside it, so even though several plugins' async flows race
+    // to reach it, JS's run-to-completion semantics mean no two calls can
+    // ever interleave mid-write — each one's manifest upsert fully applies
+    // before the next gets a turn, in whatever order they happen to finish.
+    // Measured directly: 3 vendor plugins (clipboard, dialog, notification)
+    // on a clean `carbon/bin/` cost 3.5s sequentially; the slow part
+    // (zig build + sign per plugin) is what this parallelizes.
+    const missing = [...manifest.plugins].filter(
+      ([name, entry]) =>
+        entry.enabled && entry.source === "vendor" && !this.workspace.exists(join(binDir, `${name}.${ext}`)),
+    );
+    await Promise.all(
+      missing.map(([name]) => {
+        logger.step(`fetching vendor plugin "${name}" (declared in manifest.toml, not yet on disk)…`);
+        return this.addStandard.execute({ name, targetApp: projectDir, logger });
+      }),
+    );
 
     if (!this.workspace.exists(join(carbonDir, "build.zig"))) return { staged: [] };
 
-    const zig = await this.resolveZig(logger);
-
-    // Skip the `zig build` subprocess entirely when nothing that affects a
-    // local plugin's output has changed since the last successful build —
-    // see PluginBuildCache.ts's header comment for why this matters: the
-    // process-spawn + build-graph re-evaluation overhead (~600-800ms,
-    // measured) is paid even when zig itself has nothing to do, on EVERY
-    // `carbon run`/`carbon dev` for any app with a local plugin. Only trusted
-    // when every enabled local plugin's artifact is still actually on disk —
-    // a `--clean` or manual `carbon/bin/` wipe must still force a rebuild
-    // even if the cache file alone (same directory) somehow survived.
+    // Skip the `zig build` subprocess — AND resolving zig at all — when
+    // nothing that affects a local plugin's output has changed since the
+    // last successful build. See PluginBuildCache.ts's header comment for
+    // why the cache key check happens BEFORE `resolveZig`: resolving zig is
+    // itself a real cost (two probe subprocesses, ~180-190ms measured on
+    // Windows) that has no reason to run at all when the answer is going to
+    // be "nothing to do." Only trusted when every enabled local plugin's
+    // artifact is still actually on disk — a `--clean` or manual
+    // `carbon/bin/` wipe must still force a rebuild even if the cache file
+    // alone (same directory) somehow survived.
     const release = !!opts?.release;
     const localEntries = [...manifest.plugins].filter(([, e]) => e.enabled && e.source === "local");
     const localArtifactsPresent = localEntries.every(
       ([name]) => this.workspace.exists(join(binDir, `${name}.${ext}`)),
     );
-    const buildKey = computePluginBuildKey(carbonDir, zig, release);
+    const buildKey = computePluginBuildKey(carbonDir, release);
     const cached = readPluginBuildCache(binDir);
     const cacheHit = localArtifactsPresent && cached?.key === buildKey;
 
     if (!cacheHit) {
+      const zig = await this.resolveZig(logger);
       const args = ["build", "--prefix", "."];
       if (release) args.push("-Drelease=true");
 

@@ -233,13 +233,13 @@ fn jsonArray(comptime items: []const []const u8) []const u8 {
 }
 
 test "a manifest with no points" {
-    const got = std.mem.span(build(.{ .name = "hello", .version = "0.1.0" }));
+    const got = std.mem.span(comptime build(.{ .name = "hello", .version = "0.1.0" }));
     try std.testing.expect(std.mem.indexOf(u8, got, "\"name\":\"hello\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, got, "\"extension_points\":[]") != null);
 }
 
 test "a point's capability lands in required without being asked for" {
-    const got = std.mem.span(build(.{
+    const got = std.mem.span(comptime build(.{
         .name = "painter",
         .version = "0.1.0",
         .points = &.{"paint.before"},
@@ -250,7 +250,7 @@ test "a point's capability lands in required without being asked for" {
 }
 
 test "an author-declared capability is not duplicated by the point that implies it" {
-    const got = std.mem.span(build(.{
+    const got = std.mem.span(comptime build(.{
         .name = "painter",
         .version = "0.1.0",
         .points = &.{"paint.before"},

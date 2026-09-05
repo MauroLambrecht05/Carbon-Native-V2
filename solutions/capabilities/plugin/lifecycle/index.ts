@@ -158,7 +158,7 @@ import { SdkTemplateSource } from "./infrastructure/SdkTemplateSource.ts";
  *
  * `sdkRoot`/`standardPluginsRoot` are parameters rather than something this
  * derives: the SDK is `products/carbon-ext` and the standard-plugin
- * collection is `products/carbon-sdk`, and a solution may not name a path
+ * collection is `products/carbon-sdk/plugins`, and a solution may not name a path
  * inside a product. The caller — carbon-cli — knows where its own products
  * are. `standardPluginsRoot` defaults to `sdkRoot` only as a degenerate
  * fallback for callers that never touch `add`/auto-heal; real callers always

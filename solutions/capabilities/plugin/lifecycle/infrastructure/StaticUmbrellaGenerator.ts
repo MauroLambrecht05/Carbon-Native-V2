@@ -49,9 +49,11 @@ export interface UmbrellaPlugin {
    *     artifact + carbon-plugin.toml into `carbon/plugins/vendor/<name>/`
    *     (see its own header comment). Static linking needs real Zig
    *     source, so a vendor plugin's `mainZigPath` must point at its
-   *     canonical location instead: `<standardPluginsRoot>/<name>/src/
-   *     main.zig` — the exact directory AddStandardPluginUseCase already
-   *     builds FROM for the dynamic path, never a per-app copy.
+   *     canonical location instead: `<standardPluginsRoot>/<category>/<name>/
+   *     src/main.zig` (resolved by name across category folders via
+   *     resolveStandardPluginDir) — the exact directory
+   *     AddStandardPluginUseCase already builds FROM for the dynamic path,
+   *     never a per-app copy.
    */
   readonly mainZigPath: string;
   /** Extension-point ids this plugin declares AND the registry recognizes

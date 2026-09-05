@@ -46,7 +46,7 @@ extern "C" {
  * ⇒ register but skip features the runtime doesn't advertise.
  */
 #define CARBON_PLUGIN_ABI_VERSION_MAJOR 1u
-#define CARBON_PLUGIN_ABI_VERSION_MINOR 6u
+#define CARBON_PLUGIN_ABI_VERSION_MINOR 23u
 
 /* --------------------------------------------------------------------------
  * Status codes returned by host-provided helpers
@@ -362,6 +362,447 @@ struct CarbonApp {
      * "not supported on this platform").
      */
     int32_t (*deeplink_register)(CarbonApp* app, const char* scheme);
+
+    /* --- ABI 1.7: native application menu bar -----------------------------
+     * Sets (or replaces) the window's native menu bar — backs the `menu`
+     * carbon-sdk plugin. `menu_json` is a JSON array of top-level menus:
+     *
+     *   [{"label":"File","items":[
+     *      {"id":"open","label":"Open"},
+     *      {"separator":true},
+     *      {"id":"quit","label":"Quit","accelerator":"Ctrl+Q"}
+     *   ]}]
+     *
+     * An item is either `{"id","label"}` (`"accelerator"` optional, a
+     * muda/tray-icon-style accelerator string) or `{"separator":true}`.
+     * Selecting an item fires push_event("menu.click",
+     * "{\"id\":\"<id>\"}"). No submenu-within-submenu nesting in this first
+     * version — items are flat under each top-level menu.
+     *
+     * Replaces any previously-set menu (unlike tray_setup, a second call is
+     * NOT a no-op) — a plugin's re-installed globals after HMR
+     * (carbon_plugin_after_reload) re-applying the same menu_json is
+     * therefore idempotent in effect, not just safe to call.
+     *
+     * Returns CARBON_OK on success, CARBON_ERR_INVALID for a null/malformed
+     * `menu_json`, CARBON_ERR_GENERIC if the OS refused to attach the menu.
+     */
+    int32_t (*menu_setup)(CarbonApp* app, const char* menu_json);
+
+    /* --- ABI 1.8: single-instance lock -------------------------------------
+     * Acquires a process-wide named lock keyed by `app_id` (use the app's
+     * own name/bundle id — the SAME value across every launch of the same
+     * app, distinct across different apps).
+     *
+     * If another instance already holds the lock, THIS FUNCTION DOES NOT
+     * RETURN — the calling process exits immediately, same "may not return
+     * at all" contract as deeplink_register. Held for the entire process
+     * lifetime; there is no "release" verb — the OS releases it
+     * automatically on process exit, including a crash.
+     *
+     * Returns CARBON_OK if this is the first/only instance (the normal
+     * case an app actually observes — the alternative doesn't return).
+     * CARBON_ERR_INVALID for a null `app_id`. CARBON_ERR_GENERIC if the OS
+     * lock primitive itself couldn't be created — best-effort: the app
+     * still starts in this case rather than being blocked from launching
+     * by a lock-creation failure.
+     */
+    int32_t (*instance_acquire)(CarbonApp* app, const char* app_id);
+
+    /* --- ABI 1.9: embedded SQLite storage ---------------------------------
+     * Opens (or reuses an already-open connection to) the SQLite database
+     * at `db_path`, runs `sql` with positional parameters from
+     * `params_json` (a JSON array — null/bool/number/string only; empty
+     * string or "[]" for none), and returns:
+     *
+     *   - a SELECT: a JSON array of row objects, e.g.
+     *     `[{"id":1,"name":"a"}]`.
+     *   - an INSERT/UPDATE/DELETE: `{"changes":N,"lastInsertRowid":N}`.
+     *
+     * A blob COLUMN in a result row comes back as a base64 string; there
+     * is no blob PARAM binding yet (v1 scope — see the plugin's own
+     * main.zig header for why). Connections are opened lazily and kept
+     * for the process lifetime, keyed by `db_path` — there is no "close"
+     * verb.
+     *
+     * The caller owns the returned string and must free it via
+     * `app->free`, same as dialog_open_file/dialog_open_files. `*out_status`
+     * receives CARBON_OK, CARBON_ERR_INVALID (null/malformed arguments),
+     * or CARBON_ERR_GENERIC (open failed, `sql` failed to prepare/execute,
+     * or malformed params_json) — on anything but CARBON_OK the return
+     * value is NULL, not a partial result.
+     */
+    char* (*sqlite_exec)(CarbonApp* app, const char* db_path, const char* sql, const char* params_json, int32_t* out_status);
+
+    /* --- ABI 1.10: taskbar badge and progress (Windows only) --------------
+     * `taskbar_set_progress`: sets (or clears, when `total` is 0) a
+     * progress overlay on the app's taskbar button. `completed`/`total`
+     * are arbitrary units — only their ratio matters.
+     *
+     * `taskbar_set_badge`: sets (or clears, when `icon_path` is empty) a
+     * small overlay icon on the taskbar button — the closest Windows
+     * equivalent to a numeric badge. `icon_path` is a PNG file, decoded
+     * the same way tray_setup's `icon_path` is; the app supplies its own
+     * pre-rendered badge image (e.g. a numbered circle) rather than this
+     * call rendering text into one itself — v1 scope, see the taskbar
+     * plugin's own main.zig for the reasoning. `description` is the
+     * accessible tooltip text for the overlay (may be empty).
+     *
+     * Both return CARBON_OK on success, CARBON_ERR_GENERIC on any
+     * platform/COM failure, and CARBON_ERR_GENERIC (not a crash) on a
+     * non-Windows platform, where neither is implemented yet.
+     */
+    int32_t (*taskbar_set_progress)(CarbonApp* app, uint64_t completed, uint64_t total);
+    int32_t (*taskbar_set_badge)(CarbonApp* app, const char* icon_path, const char* description);
+
+    /* --- ABI 1.11: theme preferences (accent color, high contrast, ------
+     * reduced motion; Windows only) --------------------------------------
+     * Returns a JSON object: `{"accentColor":"#RRGGBB","highContrast":
+     * bool,"reducedMotion":bool}`. Live light/dark theme changes and
+     * window-focus changes are NOT part of this call — they're already
+     * ambient (see the Solid renderer's onThemeChange/onWindowFocus) and
+     * don't need a plugin. This is a point-in-time query, not a
+     * subscription — call it again after a WM_SETTINGCHANGE-driven
+     * `window.theme_changed` dispatch if you want to react live.
+     *
+     * The caller owns the returned string and must free it via
+     * `app->free`. `*out_status` receives CARBON_OK or CARBON_ERR_GENERIC
+     * (unimplemented on this platform — the return value is NULL in that
+     * case, not a partial result).
+     */
+    char* (*theme_query)(CarbonApp* app, int32_t* out_status);
+
+    /* --- ABI 1.12: structured file logging --------------------------------
+     * Appends one JSONL line (`{"ts":"<RFC3339>","level":"<level>","msg":
+     * "<message>"}`) to `path`, rotating to `<path>.1` (one backup, not a
+     * numbered chain) when the file would exceed 5 MiB. `level` is a
+     * free-form string (`"info"`, `"warn"`, `"error"`, ...) — not
+     * validated against a fixed set. The file is opened lazily on first
+     * use and kept open for the process lifetime, keyed by `path` — no
+     * "close" verb.
+     *
+     * Returns CARBON_OK, CARBON_ERR_INVALID (null path/level/message), or
+     * CARBON_ERR_GENERIC (the file couldn't be opened/written/rotated).
+     */
+    int32_t (*log_write)(CarbonApp* app, const char* path, const char* level, const char* message);
+
+    /* --- ABI 1.13: screen-reader detection (Windows only) -----------------
+     * `*out_active` is set to 1 if Windows reports a screen-reader-class
+     * assistive technology (Narrator, JAWS, NVDA, ...) as currently
+     * registered/running, 0 otherwise. Best-effort, not a guarantee
+     * something is actively speaking right now — the same signal
+     * browsers use for this same purpose.
+     *
+     * Returns CARBON_OK or CARBON_ERR_GENERIC (unimplemented on this
+     * platform — `*out_active` is left at 0, not written garbage).
+     */
+    int32_t (*accessibility_query)(CarbonApp* app, int32_t* out_active);
+
+    /* --- ABI 1.14: printing (Windows only) ---------------------------------
+     * Sends `path` (an existing file — PDF, image, text, ...) to the
+     * system print job via ShellExecute's "print" verb, using whatever
+     * the OS has associated as that file type's print handler. Does NOT
+     * render arbitrary content itself — the app supplies a printable
+     * file, same "app supplies the asset" shape as taskbar_set_badge.
+     *
+     * Returns CARBON_OK, CARBON_ERR_INVALID (null path), or
+     * CARBON_ERR_GENERIC (no print handler for that file type, or
+     * unimplemented on this platform).
+     */
+    int32_t (*print_file)(CarbonApp* app, const char* path);
+
+    /* --- ABI 1.15: screen capture (Windows only) ---------------------------
+     * Captures a still image via GDI BitBlt and encodes it as a PNG at
+     * `out_path`. `target` is `"screen"` (the full primary display) or
+     * `"window"` (this app's own window's current client area). No
+     * recording, no cross-app window targeting — captures this app's own
+     * window or the whole screen, nothing else.
+     *
+     * Returns CARBON_OK, CARBON_ERR_INVALID (null path), or
+     * CARBON_ERR_GENERIC (a GDI call failed, or unimplemented on this
+     * platform).
+     */
+    int32_t (*screen_capture)(CarbonApp* app, const char* target, const char* out_path);
+
+    /* --- ABI 1.16: system audio volume/mute and media-key handling ---------
+     * (Windows only) ---------------------------------------------------------
+     * `media_get_volume`/`media_set_volume`: the default audio-render
+     * endpoint's master volume, 0.0..=1.0 (`media_set_volume` clamps).
+     * `media_get_mute`/`media_set_mute`: its mute state.
+     *
+     * `media_listen_keys` starts (idempotently — safe to call more than
+     * once) a background listener for the hardware play/pause, next,
+     * previous, and stop media keys, delivered via
+     * push_event("media.key", "{\"key\":\"playpause\"|\"next\"|
+     * \"previous\"|\"stop\"}"). There is no "stop listening" call.
+     *
+     * NOT covered here: now-playing metadata in the OS media overlay
+     * (needs WinRT SystemMediaTransportControls) and a hardware-
+     * accelerated video decode surface (needs Media Foundation) — both
+     * separate, larger pieces of work, not yet built.
+     *
+     * The volume getters return CARBON_OK/CARBON_ERR_GENERIC via
+     * `*out_status`/`*out_muted` the way theme_query's siblings do;
+     * `media_listen_keys` returns CARBON_OK once the thread is running
+     * (or already was) and CARBON_ERR_GENERIC only if this platform
+     * doesn't implement it at all.
+     */
+    int32_t (*media_get_volume)(CarbonApp* app, float* out_level);
+    int32_t (*media_set_volume)(CarbonApp* app, float level);
+    int32_t (*media_get_mute)(CarbonApp* app, int32_t* out_muted);
+    int32_t (*media_set_mute)(CarbonApp* app, int32_t muted);
+    int32_t (*media_listen_keys)(CarbonApp* app);
+
+    /* --- ABI 1.17: input — modifier state, synthetic input, keyboard ------
+     * layout (Windows only) --------------------------------------------------
+     * `input_modifier_state` returns a JSON object: `{"shift":bool,
+     * "ctrl":bool,"alt":bool,"capsLock":bool,"numLock":bool}` (caller
+     * owns the string, frees via `app->free`; `*out_status` as usual).
+     *
+     * `input_send_key(vk, key_down)` sends a synthetic key press/release
+     * for a Win32 virtual-key code. `input_move_mouse(x, y)` moves the
+     * cursor to normalized 0..=65535 absolute screen coordinates (Win32's
+     * own MOUSEEVENTF_ABSOLUTE convention — the caller maps real pixel
+     * coordinates onto that range). `input_click_mouse(button, is_down)`
+     * presses/releases a button (0 = left, 1 = right, 2 = middle).
+     *
+     * `input_keyboard_layout` returns the active layout's Windows locale
+     * identifier as an 8-hex-digit string (e.g. `"00000409"` for US
+     * English) — not further parsed into a BCP-47 tag, a distinct value
+     * from `os.locale()`.
+     *
+     * NOT covered here: multi-touch trackpad gestures, Force Touch, pen/
+     * stylus pressure curves, on-screen keyboard control, and keyboard-
+     * layout CHANGE events (this is a point-in-time query) — each a
+     * separate, materially larger piece of work, not yet built.
+     */
+    char* (*input_modifier_state)(CarbonApp* app, int32_t* out_status);
+    int32_t (*input_send_key)(CarbonApp* app, uint16_t vk, int32_t key_down);
+    int32_t (*input_move_mouse)(CarbonApp* app, int32_t x, int32_t y);
+    int32_t (*input_click_mouse)(CarbonApp* app, int32_t button, int32_t is_down);
+    char* (*input_keyboard_layout)(CarbonApp* app, int32_t* out_status);
+
+    /* --- ABI 1.18: biometrics — Windows Hello user-consent verification --
+     * (Windows only) ---------------------------------------------------------
+     * `biometric_verify(message)` starts an OS-native Windows Hello
+     * verification prompt (fingerprint / face / PIN, whatever the device
+     * and user have configured) and returns immediately with CARBON_OK
+     * once the request has been dispatched — `message` is empty-safe (a
+     * default prompt is used) and NOT the eventual answer. It is
+     * deliberately NOT synchronous: the underlying WinRT call can only be
+     * awaited with a blocking, non-message-pumping wait, and this app's
+     * JS/event-loop thread is a single-threaded apartment whose own async
+     * completions are marshaled back through that same thread's message
+     * queue — blocking it on its own pending callback is a guaranteed
+     * deadlock, not a hypothetical one. The verification therefore always
+     * runs on a dedicated background thread, and the outcome arrives as a
+     * `biometrics.result` event: `{"verified":bool,"result":
+     * "verified"|"deviceNotPresent"|"notConfigured"|"disabledByPolicy"|
+     * "deviceBusy"|"retriesExhausted"|"canceled"|"error"}` — deliverable
+     * the same way tray/menu/media's click/key events are, via the shared
+     * `carbon.on`/`carbon.off` JS shim.
+     *
+     * Returns CARBON_ERR_GENERIC if this platform doesn't implement
+     * biometric verification at all (dispatch failure, not a verification
+     * failure — those only ever arrive via the event).
+     *
+     * NOT covered here: macOS Touch ID / Face ID (LAContext) and a Linux
+     * equivalent, and any lower-level enrollment/management API — each a
+     * separate, materially larger piece of work, not yet built.
+     */
+    int32_t (*biometric_verify)(CarbonApp* app, const char* message);
+
+    /* --- ABI 1.19: sharing — the native OS share sheet (Windows only) -----
+     * `share_content(title, text, url)` shows Windows' native Share flyout
+     * for the app's own window and populates whatever of the three
+     * (each empty-safe — pass "" for any not used) is non-empty. Unlike
+     * biometric_verify, this IS synchronous and safe to call directly on
+     * the JS/event-loop thread: `GetForWindow`/`ShowShareUIForWindow`
+     * don't block on a WinRT async operation the way
+     * RequestVerificationAsync does — they return immediately, and the
+     * later `DataRequested` callback is delivered through the same
+     * message pump already driving that thread's own window, the same
+     * reentrancy-safe pattern taskbar_set_progress/menu_setup already
+     * rely on. Returns CARBON_OK once the share flyout has been shown —
+     * NOT an indication of whether the user completed or cancelled the
+     * share, which this deliberately doesn't track (the OS shell handles
+     * that UI itself; an app that needs a completion signal is a
+     * separate, larger piece of work, not built here).
+     *
+     * NOT covered here: sharing files (needs a native IStorageItem
+     * wrapper around an app-owned path — a separate, larger piece of
+     * work), and any equivalent on macOS (NSSharingServicePicker) or
+     * Linux (no OS-native equivalent exists).
+     */
+    int32_t (*share_content)(CarbonApp* app, const char* title, const char* text, const char* url);
+
+    /* --- ABI 1.20: bluetooth — BLE scan, connect, notify-subscribe, ------
+     * write (Windows only) -----------------------------------------------
+     * `bluetooth_scan_start`/`bluetooth_scan_stop` start/stop watching for
+     * BLE advertisements. Each discovered device delivers a
+     * `bluetooth.device` event: `{"address":"AA:BB:CC:DD:EE:FF",
+     * "name":string|null,"rssi":int}`.
+     *
+     * `bluetooth_connect(address)` (same colon-hex address form) connects
+     * on a dedicated background thread and returns immediately once
+     * DISPATCHED, not once connected — the outcome arrives as
+     * `bluetooth.connected` or `bluetooth.connect_error`
+     * `{"address":...,"error"?:string}`. Every call below that touches
+     * GATT has this same "returns once dispatched" contract, for the same
+     * reason biometric_verify does: the underlying WinRT calls can only be
+     * awaited with a blocking, non-message-pumping wait.
+     *
+     * `bluetooth_subscribe(address, service_uuid, characteristic_uuid)`
+     * (UUIDs as standard `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` strings)
+     * enables GATT notifications for that characteristic on an ALREADY
+     * connected device. Delivers `bluetooth.subscribed`/
+     * `bluetooth.subscribe_error` once enabled, then every value-changed
+     * notification after that arrives as a BINARY event (see
+     * push_plugin_binary_event's own doc comment) named
+     * `"bluetooth.notify." + characteristic_uuid` — raw bytes, no base64/
+     * JSON. NOTE: the event name does not include the device address —
+     * subscribing to the same characteristic UUID on two different
+     * connected devices at once isn't distinguishable in v1, a known,
+     * documented limitation.
+     *
+     * `bluetooth_write_characteristic(address, service_uuid,
+     * characteristic_uuid, data, data_len)` writes to a characteristic;
+     * delivers `bluetooth.write_result` `{"characteristicUuid":...,
+     * "ok":bool}`.
+     *
+     * NOT covered here: a one-shot GATT read (needs a request-id
+     * correlation scheme across the async boundary that notify's fire-
+     * and-forget shape doesn't need — a separable, larger piece of work),
+     * full service/characteristic enumeration (the app is expected to
+     * already know the UUIDs it targets), pairing/bonding UI, and any
+     * macOS/Linux equivalent.
+     */
+    int32_t (*bluetooth_scan_start)(CarbonApp* app);
+    int32_t (*bluetooth_scan_stop)(CarbonApp* app);
+    int32_t (*bluetooth_connect)(CarbonApp* app, const char* address);
+    int32_t (*bluetooth_subscribe)(CarbonApp* app, const char* address, const char* service_uuid, const char* characteristic_uuid);
+    int32_t (*bluetooth_write_characteristic)(
+        CarbonApp* app,
+        const char* address,
+        const char* service_uuid,
+        const char* characteristic_uuid,
+        const uint8_t* data,
+        size_t data_len
+    );
+
+    /* --- ABI 1.21: microphone — live PCM capture (Windows only) -----------
+     * `microphone_start()` dispatches setup on a background thread (same
+     * "can't block the JS thread on a WinRT IAsyncOperation" reason as
+     * biometric_verify) and returns once DISPATCHED — the outcome arrives
+     * as `microphone.started` `{"sampleRate":int,"channels":int}` or
+     * `microphone.start_error` `{"error":string}`. Once started, every
+     * audio quantum (device-dependent, commonly ~10ms) delivers a BINARY
+     * event (see push_plugin_binary_event's own doc comment) named
+     * `"microphone.frame"` — interleaved 32-bit float PCM, the format
+     * WinRT's AudioGraph always normalizes to regardless of the source
+     * device's native format; use the sample rate/channel count from
+     * `microphone.started` to interpret it.
+     *
+     * `microphone_stop()` stops and releases the capture graph; safe to
+     * call synchronously (unlike start, this is not a WinRT async call).
+     *
+     * NOT covered here: device enumeration/selection (uses the system
+     * default capture device only), gain control, voice-activity
+     * detection, system-audio loopback capture (the render side of
+     * AudioGraph, not the capture side this uses — a separate, larger
+     * piece of work), and any macOS/Linux equivalent.
+     */
+    int32_t (*microphone_start)(CarbonApp* app);
+    int32_t (*microphone_stop)(CarbonApp* app);
+
+    /* --- ABI 1.22: camera — live video frame capture (Windows only) -------
+     * `camera_start()` dispatches setup on a background thread (same
+     * "can't block the JS thread on a WinRT IAsyncOperation" reason as
+     * biometric_verify) and returns once DISPATCHED. Once the first frame
+     * arrives, `camera.started` fires once: `{"width":int,"height":int}`
+     * (resolution isn't queried up front — reported from the first
+     * decoded frame instead). Every frame after that (and the first)
+     * delivers a BINARY event (see push_plugin_binary_event's own doc
+     * comment) named `"camera.frame"` — raw RGBA8 bytes, `width *
+     * height * 4` of them, the same byte order browser `<canvas>`
+     * `ImageData`/`putImageData` already expects (no channel-swizzle
+     * needed app-side even though most cameras are natively BGRA/NV12/
+     * YUY2 — this call converts before delivery). A `camera.start_error`
+     * `{"error":string}` event fires if no color camera is found or
+     * initialization fails.
+     *
+     * `camera_stop()` stops and releases the capture session.
+     *
+     * NOT covered here: device enumeration/selection (uses the first
+     * available color camera only), resolution/format negotiation
+     * (accepts the device's default format, converted after the fact),
+     * still-photo capture, publishing this stream as a virtual/system
+     * camera source, and any macOS/Linux equivalent. No OS permission
+     * model is implemented here either — a plain Win32 desktop process
+     * isn't gated by the camera-privacy toggle the way a packaged app
+     * is; this relies on the OS's own behavior, not a Carbon-side prompt.
+     */
+    int32_t (*camera_start)(CarbonApp* app);
+    int32_t (*camera_stop)(CarbonApp* app);
+
+    /* --- ABI 1.23: Carbon self-introspection (backend/runtime/manifest/ --
+     * framecache/snapshot) --------------------------------------------------
+     * Backs carbon-manifest, carbon-runtime, carbon-framecache, and
+     * carbon-snapshot — read-only introspection of Carbon's OWN state,
+     * not an OS or hosted-cloud capability. Three of these are plain
+     * data fields (computed once at process startup, static for the
+     * whole run — the same reasoning `app_name`/`app_version`/
+     * `project_dir` above are plain fields, not trampolines):
+     *
+     * `backend_name` — "mini" or "blitz", which carbon-runtime binary
+     * this is.
+     *
+     * `runtime_features_json` — a JSON object of this binary's OWN
+     * compiled-in Cargo feature flags, e.g.
+     * `{"network":true,"svg":true,"image":false,"audio":false,
+     * "updater":false,"snapshot":true,"gpu":false,"profiling":false}`.
+     * Composed by the composition root (mini.rs/blitz.rs) from its own
+     * `cfg!(feature = "...")` checks — plugin-host itself has no
+     * visibility into carbon-runtime's Cargo.toml and never hardcodes
+     * this list, so it can't drift out of sync with the real feature set.
+     *
+     * `snapshot_restored` — 1 if this session's JS runtime was restored
+     * from a pre-built QuickJS heap snapshot (cold-start optimization,
+     * `--snapshot-build`/spike path) rather than freshly evaluating the
+     * bundle from scratch, 0 otherwise. NOTE: despite the "snapshot"
+     * name suggesting pixels, this is a JS-heap snapshot, unrelated to
+     * screen capture — the capability catalog's original description
+     * assumed the wrong mechanism; corrected here to match what
+     * actually exists (`solutions/capabilities/rendering/snapshot`).
+     *
+     * `manifest_read(out_status)` re-parses the app's own carbon.toml
+     * (fresh on every call — this is cheap, and the file can change
+     * under `carbon dev`) and returns a JSON object: `{"app":{"name",
+     * "version","displayName","window":{...}},"runtime":{"backend",
+     * "bytecode","image","audio"},"capabilities":{"fsRead","fsWrite",
+     * "netFetch","systemNotify","imageRead"},"plugins":{"<name>":
+     * {"capabilities":[...]},...}}`. Deliberately does NOT include
+     * `[dev-signing] trusted_keys` — a build-time trust anchor, not
+     * something app code has a legitimate runtime reason to read.
+     *
+     * `framecache_stats(out_status)` returns
+     * `{"hit":bool}` — whether THIS launch's first frame was served from
+     * the on-disk warm-start cache (`dist/.carbon-frame-cache/`,
+     * `products/carbon/composition/frame_cache.rs`) rather than waiting
+     * for a full cold-start render. `false` on the blitz backend, which
+     * doesn't use this cache at all — not a failure, just not
+     * applicable.
+     *
+     * `framecache_clear()` deletes the on-disk warm-start cache for the
+     * current project, forcing the next launch to rebuild it. Returns
+     * CARBON_OK even if there was nothing to clear.
+     */
+    const char* backend_name;
+    const char* runtime_features_json;
+    int32_t     snapshot_restored;
+    char* (*manifest_read)(CarbonApp* app, int32_t* out_status);
+    char* (*framecache_stats)(CarbonApp* app, int32_t* out_status);
+    int32_t (*framecache_clear)(CarbonApp* app);
 };
 
 /* --------------------------------------------------------------------------

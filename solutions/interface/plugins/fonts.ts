@@ -13,7 +13,7 @@
 //
 // ── WHY THIS CAN'T CALL `carbon:fonts`' `loadFont` DIRECTLY, ALWAYS ────────
 // `carbon:fonts` exports a bare `loadFont(path, family?, weight?)` function
-// (see products/carbon-sdk/fonts and @carbon/vite/imports' lazy-wrapper
+// (see products/carbon-sdk/plugins/carbon-dev/fonts and @carbon/vite/imports' lazy-wrapper
 // codegen for manifest-declared plugin exports). Calling it directly throws
 // if the call happens too early: `carbon_plugin_register` (which installs
 // `loadFont` onto globalThis) runs strictly AFTER the bundle evaluates —

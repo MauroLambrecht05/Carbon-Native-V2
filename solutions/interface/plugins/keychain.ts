@@ -6,7 +6,7 @@
 // set("my-app", "openai-api-key", token);
 //
 // `remove`, not `delete`: `delete` is a reserved word and can't be a
-// function declaration's name — see carbon-sdk/keychain's carbon-plugin.toml
+// function declaration's name — see carbon-sdk/plugins/carbon-security/keychain's carbon-plugin.toml
 // for the export-name/global-name split this required.
 //
 // No requestAnimationFrame-deferral needed — see clipboard.ts's module doc

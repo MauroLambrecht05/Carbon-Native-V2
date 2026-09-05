@@ -65,14 +65,23 @@ function walkFiles(root: string): string[] {
  * Sha256 over everything that can change what `zig build --prefix .` would
  * produce: manifest.toml (source/enabled flags — a plugin toggled off should
  * re-trigger), build.zig/build.zig.zon themselves, every local plugin's full
- * source tree, the release/debug flag, and the resolved zig binary's own
- * fingerprint (a toolchain upgrade must invalidate too).
+ * source tree, and the release/debug flag.
+ *
+ * Deliberately does NOT include the resolved zig binary's own fingerprint.
+ * It used to — but computing that fingerprint means RESOLVING zig first
+ * (`ensureZig`'s `zig version` + `where zig` probe subprocesses), which
+ * measured at ~180-190ms on Windows and was being paid on every single
+ * `carbon run`/`carbon dev` just to answer a cache-key question, even when
+ * the answer was going to be "cache hit, do nothing." A zig toolchain
+ * upgrade between two otherwise-unchanged launches not re-triggering a
+ * rebuild is a real but vanishingly rare edge case (nothing else in this
+ * cache's design tries to survive a toolchain change either — the compiled
+ * plugin artifacts a prior zig version produced keep working); it doesn't
+ * justify a ~190ms tax on every unchanged launch. `SyncPluginsUseCase` now
+ * only resolves zig at all on an actual cache miss, when it's about to spend
+ * real build time anyway.
  */
-export function computePluginBuildKey(
-  carbonDir: string,
-  zigPath: string,
-  release: boolean,
-): string {
+export function computePluginBuildKey(carbonDir: string, release: boolean): string {
   const h = createHash("sha256");
   h.update(`release=${release ? "1" : "0"}\n`);
 
@@ -92,16 +101,6 @@ export function computePluginBuildKey(
       h.update(readFileSync(abs));
       h.update("\n");
     }
-  }
-
-  // Not fatal if unresolvable (e.g. a test double resolveZig returning a bare
-  // "zig" string with nothing on disk at that path) — the key is just missing
-  // one input in that case, same posture as BuildCache.ts's runtime-binary stat.
-  try {
-    const st = statSync(zigPath);
-    h.update(`ZIG\t${st.size}\t${st.mtimeMs.toFixed(0)}\n`);
-  } catch {
-    /* ignore */
   }
 
   return h.digest("hex").slice(0, 32);

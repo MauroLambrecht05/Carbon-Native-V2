@@ -25,7 +25,7 @@ use serde::Deserialize;
 use std::cell::RefCell;
 use std::sync::OnceLock;
 use tray_icon::{
-    menu::{Menu, MenuEvent, MenuItem},
+    menu::{Menu, MenuItem},
     Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent,
 };
 
@@ -79,9 +79,13 @@ pub fn setup(icon_path: &str, tooltip: &str, menu_items_json: &str) -> Result<()
     Ok(())
 }
 
-/// One background thread per event source (tray click, menu selection) —
-/// same shape as global_shortcuts.rs's single listener thread, just two of
-/// them since tray-icon exposes two independent channels rather than one.
+/// One background thread for the tray-click channel — same shape as
+/// global_shortcuts.rs's single listener thread. The menu-selection
+/// channel (`MenuEvent`) is NOT listened to here: it's a single process-
+/// wide channel shared with the native window menu bar (the `menu`
+/// plugin), so exactly one shared thread drains it — see
+/// `crate::menu_events::ensure_started`, called below instead of spawning
+/// a second competing consumer.
 static LISTENERS_STARTED: OnceLock<()> = OnceLock::new();
 
 fn ensure_listener_threads() {
@@ -106,16 +110,6 @@ fn ensure_listener_threads() {
                 }
             }
         });
-        std::thread::spawn(|| {
-            let receiver = MenuEvent::receiver();
-            while let Ok(event) = receiver.recv() {
-                let id_json =
-                    serde_json::to_string(&event.id.0).unwrap_or_else(|_| "\"\"".to_string());
-                crate::host_exports::push_plugin_event(
-                    "tray.menu".to_string(),
-                    format!("{{\"id\":{id_json}}}"),
-                );
-            }
-        });
+        crate::menu_events::ensure_started();
     });
 }

@@ -1,0 +1,28 @@
+// The SDK is referenced by path, not fetched: it lives in this workspace and
+// a plugin built against a downloaded copy would be built against a different
+// extension-point registry than the runtime it loads into.
+.{
+    // Zig's own internal package identifier — unrelated to the plugin's
+    // carbon-plugin.toml `name` ("fonts") or the library filename build.zig
+    // produces; nothing outside Zig's package manager reads this one.
+    // Left as carbon_fonts rather than renamed to match: renaming it would
+    // invalidate the fingerprint below (Zig ties fingerprints to package
+    // identity) for zero externally-visible benefit.
+    .name = .carbon_fonts,
+    // Real, zig-suggested value from a real `zig build` error, not guessed
+    // — see the sibling comment on every other first-party plugin's .zon.
+    .fingerprint = 0xafd1ed83265bf69d,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.13.0",
+    .dependencies = .{
+        .@"carbon-plugin-sdk" = .{
+            .path = "../../../../carbon-ext/composition",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "carbon-plugin.toml",
+    },
+}

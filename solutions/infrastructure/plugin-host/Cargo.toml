@@ -45,7 +45,7 @@ workspace = true
 # `dev`/`run`/`build`, not just the release path — since this is a
 # compile-time Cargo feature regardless of how a plugin's own code gets
 # loaded later).
-default = ["clipboard", "dialog", "notification", "keychain", "global-shortcuts", "tray", "deep-link"]
+default = ["clipboard", "dialog", "notify", "keychain", "shortcuts", "tray", "deeplink", "menu", "instance", "theme", "logging", "accessibility", "printing", "screencapture", "media", "input", "biometrics", "sharing", "bluetooth", "microphone", "camera"]
 
 # Off by default: today's dlopen/dlsym/Ed25519 loader (adapters/
 # plugin_loader.rs), unconditionally correct for `carbon dev` and a
@@ -72,11 +72,78 @@ static-plugins = []
 # own comment for the release-vs-dev distinction.
 clipboard = ["dep:arboard"]
 dialog = ["dep:rfd"]
-notification = ["dep:notify-rust"]
+# Renamed from "notification"/"global-shortcuts"/"deep-link" to match the
+# carbon-sdk plugin rename (notification->notify, global-shortcuts->
+# shortcuts, deep-link->deeplink) — kept in lockstep per this block's own
+# "keyed to the SAME name as the carbon-sdk plugin it backs" rule.
+notify = ["dep:notify-rust"]
 keychain = ["dep:keyring"]
-"global-shortcuts" = ["dep:global-hotkey"]
+shortcuts = ["dep:global-hotkey"]
 tray = ["dep:tray-icon", "dep:image"]
-"deep-link" = ["dep:winreg"]
+deeplink = ["dep:winreg"]
+# Native app menu bar (muda, via tray-icon's re-export — see the doc
+# comment on the `tray-icon` dependency below for why no separate `muda`
+# dependency is declared).
+menu = ["dep:tray-icon"]
+# Single-instance lock — no dependency of its own, hand-rolled Win32 FFI
+# (see instance.rs's own header comment for why).
+instance = []
+# Embedded SQLite storage — backs the `sqlite` carbon-sdk plugin. NOT in
+# `default` (unlike every other entry above): rusqlite's bundled SQLite
+# amalgamation is real compiled-C weight (~1 MiB+), the exact
+# unconditional-cost-on-every-app-binary problem this whole feature-gate
+# block exists to avoid — an app that doesn't add the sqlite plugin
+# shouldn't pay for it just because it's in this crate's dependency graph.
+sqlite = ["dep:rusqlite", "dep:base64"]
+# Taskbar badge/progress — not in `default` (Windows-only, and the icon
+# decode reuses the `image` feature's dependency; a build that wants it
+# opts in explicitly, same reasoning as `sqlite`).
+taskbar = ["dep:windows", "dep:image"]
+# Theme preferences (accent color/high contrast/reduced motion) — no
+# dependency of its own, hand-rolled Win32 FFI (see theme.rs's own header
+# comment for why).
+theme = []
+# Structured file logging — no dependency of its own (see logging.rs).
+logging = []
+# Screen-reader detection — no dependency of its own (see accessibility.rs).
+accessibility = []
+# Printing — no dependency of its own (see printing.rs).
+printing = []
+# Screen capture — reuses the `image` crate (already pulled in by `taskbar`
+# for the same PNG-encode purpose).
+screencapture = ["dep:image"]
+# System audio volume/mute + media-key handling — shares the `windows`
+# dependency with `taskbar` (Core Audio COM interfaces).
+media = ["dep:windows"]
+# Input — no dependency of its own, hand-rolled Win32 FFI (see input.rs).
+input = []
+# Windows Hello biometric verification — not in `default` (Windows-only,
+# and a WinRT rather than Win32 surface — see biometrics.rs's own header
+# comment for the dedicated-thread requirement this one has that no other
+# plugin here does). Shares the `windows` dependency with `taskbar`/`media`.
+biometrics = ["dep:windows"]
+# The native OS share sheet — also WinRT (DataTransferManager), but unlike
+# biometrics doesn't need a dedicated thread (see sharing.rs's own header
+# comment for why it's safe to call synchronously on the JS thread).
+sharing = ["dep:windows"]
+# BLE scan/connect/notify-subscribe/write — also WinRT
+# (Devices.Bluetooth/GenericAttributeProfile). Scanning is safe on the JS
+# thread like sharing; connect/subscribe/write need biometrics' dedicated-
+# thread treatment (see bluetooth.rs's own header comment for exactly
+# which calls and why).
+bluetooth = ["dep:windows"]
+# Live microphone PCM capture — also WinRT (Media.Audio.AudioGraph). Setup
+# needs biometrics' dedicated-thread treatment; once running, delivery
+# runs on AudioGraph's own real-time thread, not the JS thread (see
+# microphone.rs's own header comment).
+microphone = ["dep:windows"]
+# Live camera frame capture — also WinRT (Media.Capture's frame-reader
+# pipeline). Setup needs biometrics' dedicated-thread treatment, but
+# unlike every other WinRT feature here, the capture objects themselves
+# are NOT `Send` (confirmed against the `windows` crate's own bindings —
+# see camera.rs's own header comment for the full reasoning and how that
+# changes this file's threading shape versus bluetooth.rs/microphone.rs).
+camera = ["dep:windows"]
 
 [dependencies]
 carbon-runtime-contract = { path = "../../contracts/runtime/rust" }
@@ -124,6 +191,12 @@ global-hotkey = { version = "0.8", optional = true }
 # incompatible types for TrayIconBuilder::menu().
 tray-icon = { version = "0.24", optional = true }
 image = { version = "0.25", default-features = false, features = ["png"], optional = true }
+# Blob-column encoding for sqlite.rs's query results — already resolved in
+# this workspace's lockfile as a transitive dependency of other crates
+# (reqwest et al.), so declaring it directly costs nothing extra. Not in
+# `[workspace.dependencies]`, so a plain version pin rather than
+# `workspace = true`.
+base64 = { version = "0.22", optional = true }
 # Deep-linking (Phase 4) — self-registers a custom URL scheme at runtime
 # (Windows: user-scope registry; Linux: ~/.local/share/applications
 # .desktop + xdg-mime) and forwards a second launch's URL to the first
@@ -132,6 +205,93 @@ image = { version = "0.25", default-features = false, features = ["png"], option
 # crate instead).
 [target.'cfg(windows)'.dependencies]
 winreg = { version = "0.56", optional = true }
+# ITaskbarList3 is a real COM interface (vtable dispatch, IUnknown
+# ref-counting, CoCreateInstance by GUID) — genuinely not primitive-typed,
+# unlike instance.rs's hand-rolled CreateMutexW/GetLastError, which is why
+# this ISN'T windows-sys despite that being carbon-launcher/pipe.rs's own
+# precedent for non-trivial Win32 surface elsewhere in this repo: checked
+# directly against the downloaded 0.59 source
+# (windows-sys-0.59.0/src/Windows/Win32/UI/Shell/mod.rs) and confirmed it
+# generates zero COM interface wrapper types there at all — only raw
+# constants/structs/free functions, "sys" in the literal sense. The
+# `windows` crate is specifically the layer that adds real COM interface
+# types (`ITaskbarList3::SetProgressValue` etc. as actual safe-ish
+# methods, not a hand-rolled vtable struct this crate would otherwise have
+# to define and verify byte-for-byte against Microsoft's own headers) —
+# used here for that reason alone, not a casual swap.
+windows = { version = "0.58", features = [
+  "Win32_Foundation",
+  "Win32_System_Com",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+  # Core Audio (IMMDeviceEnumerator/IAudioEndpointVolume) — media.rs's
+  # volume control. Same crate, same "real COM interface, not
+  # primitive-typed" reasoning as ITaskbarList3 above.
+  "Win32_Media_Audio",
+  "Win32_Media_Audio_Endpoints",
+  # Windows Hello — biometrics.rs. `Foundation` for IAsyncOperation<T>,
+  # `Security_Credentials_UI` for UserConsentVerifier itself. Unlike every
+  # other feature in this list, this is a WinRT (not classic Win32) surface
+  # — same crate, different projection, no separate dependency needed.
+  "Foundation",
+  "Security_Credentials_UI",
+  # Share sheet — sharing.rs. `ApplicationModel_DataTransfer` for
+  # DataTransferManager/DataPackage/DataRequestedEventArgs (also WinRT);
+  # `IDataTransferManagerInterop` — the desktop-app entry point into it —
+  # is, unusually, filed under Win32_UI_Shell (already enabled above for
+  # ITaskbarList3), not under this WinRT namespace itself.
+  "ApplicationModel_DataTransfer",
+  # Bluetooth LE — bluetooth.rs. `Devices_Bluetooth`/
+  # `Devices_Bluetooth_Advertisement`/
+  # `Devices_Bluetooth_GenericAttributeProfile` for scan/connect/GATT;
+  # `Foundation_Collections` for the `IVectorView<T>` GATT service/
+  # characteristic results come back as; `Security_Cryptography` for
+  # `CryptographicBuffer`, the WinRT `IBuffer`<->byte-array conversion
+  # `WriteValueAsync`/`GattValueChangedEventArgs::CharacteristicValue`
+  # require (there is no direct `&[u8]` overload).
+  "Devices_Bluetooth",
+  "Devices_Bluetooth_Advertisement",
+  "Devices_Bluetooth_GenericAttributeProfile",
+  "Foundation_Collections",
+  "Security_Cryptography",
+  # CryptographicBuffer's byte-array conversions and WriteValueAsync are
+  # themselves gated behind this — they're defined in terms of
+  # Storage::Streams::IBuffer.
+  "Storage_Streams",
+  # Microphone capture — microphone.rs. `Media_Audio` for AudioGraph
+  # itself; `Media_Capture` for the `MediaCategory` enum
+  # CreateDeviceInputNodeAsync takes; `Media_Render` for the
+  # `AudioRenderCategory` enum AudioGraphSettings::Create takes (even
+  # though this file only captures, never renders — WinRT's own
+  # constructor still requires one); `Media_MediaProperties` for
+  # `AudioEncodingProperties`, what `EncodingProperties()` returns;
+  # `Win32_System_WinRT` for `IMemoryBufferByteAccess`, the raw-pointer
+  # escape hatch out of a locked `AudioBuffer` (there's no safe `&[u8]`
+  # accessor on it otherwise).
+  "Media_Audio",
+  "Media_Capture",
+  "Media_Render",
+  "Media_MediaProperties",
+  "Win32_System_WinRT",
+  # Camera capture — camera.rs. `Media_Capture_Frames` for
+  # MediaFrameSourceGroup/MediaFrameReader (Media_Capture alone, already
+  # enabled above for microphone, only covers the base MediaCapture
+  # class); `Graphics_Imaging` for SoftwareBitmap/BitmapBuffer, the pixel-
+  # data side of a captured frame.
+  "Media_Capture_Frames",
+  "Graphics_Imaging",
+], optional = true }
+
+# rusqlite, "bundled" feature: compiles SQLite's own C amalgamation as part
+# of this crate's build (via libsqlite3-sys's build script, cc-compiled),
+# not a system sqlite3.dll — Windows doesn't ship one, so a system-library
+# link would be a broken dependency on most machines. Same
+# "vendored/pinned, not fetched-at-runtime" posture the rest of this repo's
+# native deps already take.
+[dependencies.rusqlite]
+version = "0.32"
+features = ["bundled"]
+optional = true
 
 # An integration test under tests/ links the crate from outside, so it sees only
 # the public API plus what is declared here — the [dependencies] above are not

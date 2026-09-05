@@ -17,7 +17,7 @@ import { printBanner } from "../../ui/brand.ts";
 // that file's own comment for why @carbon/lifecycle cannot name these
 // itself (a solution may not name a path inside a product).
 const SDK_ROOT = join(PRODUCTS_DIR, "carbon-ext");
-const STANDARD_PLUGINS_ROOT = join(PRODUCTS_DIR, "carbon-sdk");
+const STANDARD_PLUGINS_ROOT = join(PRODUCTS_DIR, "carbon-sdk", "plugins");
 
 export async function buildCommand(rest: string[]): Promise<number> {
   let projectDir = process.cwd();

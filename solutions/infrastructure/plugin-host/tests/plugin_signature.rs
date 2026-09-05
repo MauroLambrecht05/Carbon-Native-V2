@@ -102,7 +102,7 @@ fn load_count(project_dir: &Path) -> usize {
     let manifest = AppManifest { plugins };
     let grants: BTreeMap<String, CapabilityGrant> = BTreeMap::new();
 
-    let mut storage = HostCarbonAppStorage::new("sig-test", "0.0.1", ".", 100, 100);
+    let mut storage = HostCarbonAppStorage::new("sig-test", "0.0.1", ".", 100, 100, "mini", "{}", false);
     let app: *mut HostCarbonApp = storage.raw();
     let registry = PluginRegistry::load_from_config(&manifest, &grants, &[], project_dir, app)
         .expect("load_from_config never fails as a whole; it skips");

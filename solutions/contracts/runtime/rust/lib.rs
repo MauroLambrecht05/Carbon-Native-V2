@@ -55,6 +55,19 @@ pub enum UserEvent {
         name: String,
         payload: String,
     },
+    /// Same delivery as `PluginEvent`, but for a raw byte buffer (camera
+    /// frames, audio PCM, BLE notification bytes) instead of a JSON
+    /// string — pushed via `push_plugin_binary_event` (Rust-internal
+    /// only, no C-ABI trampoline; see that function's own doc comment for
+    /// why). The main loop builds a real `Uint8Array` (rquickjs
+    /// `TypedArray<u8>`, zero/low-copy, no base64/JSON) and calls
+    /// `globalThis.__carbon_on_binary_event(name, data)` directly rather
+    /// than through `eval`, since a `Uint8Array` can't be embedded in an
+    /// eval'd script the way a JSON string can.
+    PluginBinaryEvent {
+        name: String,
+        data: Vec<u8>,
+    },
     // ── Networking events (from native/net.rs's tokio runtime) ──
     /// HTTP response headers received. Resolves the fetch() Promise.
     FetchHeaders {

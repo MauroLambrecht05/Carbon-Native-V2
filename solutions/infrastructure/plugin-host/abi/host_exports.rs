@@ -49,12 +49,28 @@ pub const CARBON_ERR_NO_CTX: i32 = -4;
 pub const CARBON_NOT_FOUND: i32 = -5;
 
 pub const CARBON_PLUGIN_ABI_VERSION_MAJOR: u32 = 1;
-// 6, not 5: ABI 1.6 appended deeplink_register. (1.5 appended tray_setup;
-// 1.4 appended global_shortcut_register/unregister; 1.3 appended
-// clipboard_*/dialog_*/notification_send/keychain_*; 1.2 appended
-// load_font_path/load_font_bytes; 1.1 appended set_global_string/
-// set_global_number/set_global_function/eval before that.)
-pub const CARBON_PLUGIN_ABI_VERSION_MINOR: u32 = 6;
+// 23, not 22: ABI 1.23 appended backend_name/runtime_features_json/
+// snapshot_restored/manifest_read/framecache_stats/framecache_clear —
+// Carbon self-introspection, not an OS/cloud capability. (1.22 appended
+// camera_start/camera_stop; 1.21 appended
+// microphone_start/microphone_stop; 1.20
+// appended bluetooth_scan_start/bluetooth_scan_stop/
+// bluetooth_connect/bluetooth_subscribe/bluetooth_write_characteristic;
+// 1.19 appended share_content; 1.18 appended
+// biometric_verify; 1.17 appended
+// input_modifier_state/input_send_key/input_move_mouse/input_click_mouse/
+// input_keyboard_layout; 1.16 appended media_get_volume/media_set_volume/media_get_mute/
+// media_set_mute/media_listen_keys; 1.15 appended screen_capture; 1.14
+// appended print_file; 1.13 appended accessibility_query; 1.12 appended
+// log_write; 1.11 appended theme_query;
+// 1.10 appended taskbar_set_progress/taskbar_set_badge; 1.9 appended
+// sqlite_exec; 1.8 appended instance_acquire; 1.7 appended menu_setup;
+// 1.6 appended deeplink_register; 1.5 appended tray_setup; 1.4 appended
+// global_shortcut_register/unregister; 1.3 appended clipboard_*/dialog_*/
+// notification_send/keychain_*; 1.2 appended load_font_path/
+// load_font_bytes; 1.1 appended set_global_string/set_global_number/
+// set_global_function/eval before that.)
+pub const CARBON_PLUGIN_ABI_VERSION_MINOR: u32 = 23;
 
 // ── CarbonJSContext — opaque to plugins ───────────────────────────────────
 //
@@ -290,6 +306,153 @@ pub struct HostCarbonApp {
     // APPEND-ONLY ZONE.
     pub deeplink_register:
         Option<unsafe extern "C" fn(app: *mut HostCarbonApp, scheme: *const c_char) -> i32>,
+
+    // ABI 1.7. Native application menu bar — see the matching note in
+    // carbon_plugin.h's APPEND-ONLY ZONE.
+    pub menu_setup:
+        Option<unsafe extern "C" fn(app: *mut HostCarbonApp, menu_json: *const c_char) -> i32>,
+
+    // ABI 1.8. Single-instance lock — see the matching note in
+    // carbon_plugin.h's APPEND-ONLY ZONE.
+    pub instance_acquire:
+        Option<unsafe extern "C" fn(app: *mut HostCarbonApp, app_id: *const c_char) -> i32>,
+
+    // ABI 1.9. Embedded SQLite storage — see the matching note in
+    // carbon_plugin.h's APPEND-ONLY ZONE.
+    pub sqlite_exec: Option<
+        unsafe extern "C" fn(
+            app: *mut HostCarbonApp,
+            db_path: *const c_char,
+            sql: *const c_char,
+            params_json: *const c_char,
+            out_status: *mut i32,
+        ) -> *mut c_char,
+    >,
+
+    // ABI 1.10. Taskbar badge and progress — see the matching note in
+    // carbon_plugin.h's APPEND-ONLY ZONE.
+    pub taskbar_set_progress:
+        Option<unsafe extern "C" fn(app: *mut HostCarbonApp, completed: u64, total: u64) -> i32>,
+    pub taskbar_set_badge: Option<
+        unsafe extern "C" fn(
+            app: *mut HostCarbonApp,
+            icon_path: *const c_char,
+            description: *const c_char,
+        ) -> i32,
+    >,
+
+    // ABI 1.11. Theme preferences — see the matching note in
+    // carbon_plugin.h's APPEND-ONLY ZONE.
+    pub theme_query:
+        Option<unsafe extern "C" fn(app: *mut HostCarbonApp, out_status: *mut i32) -> *mut c_char>,
+
+    // ABI 1.12. Structured file logging — see the matching note in
+    // carbon_plugin.h's APPEND-ONLY ZONE.
+    pub log_write: Option<
+        unsafe extern "C" fn(
+            app: *mut HostCarbonApp,
+            path: *const c_char,
+            level: *const c_char,
+            message: *const c_char,
+        ) -> i32,
+    >,
+
+    // ABI 1.13. Screen-reader detection — see the matching note in
+    // carbon_plugin.h's APPEND-ONLY ZONE.
+    pub accessibility_query:
+        Option<unsafe extern "C" fn(app: *mut HostCarbonApp, out_active: *mut i32) -> i32>,
+
+    // ABI 1.14. Printing — see the matching note in carbon_plugin.h's
+    // APPEND-ONLY ZONE.
+    pub print_file: Option<unsafe extern "C" fn(app: *mut HostCarbonApp, path: *const c_char) -> i32>,
+
+    // ABI 1.15. Screen capture — see the matching note in
+    // carbon_plugin.h's APPEND-ONLY ZONE.
+    pub screen_capture: Option<
+        unsafe extern "C" fn(app: *mut HostCarbonApp, target: *const c_char, out_path: *const c_char) -> i32,
+    >,
+
+    // ABI 1.16. System audio volume/mute and media-key handling — see the
+    // matching note in carbon_plugin.h's APPEND-ONLY ZONE.
+    pub media_get_volume: Option<unsafe extern "C" fn(app: *mut HostCarbonApp, out_level: *mut f32) -> i32>,
+    pub media_set_volume: Option<unsafe extern "C" fn(app: *mut HostCarbonApp, level: f32) -> i32>,
+    pub media_get_mute: Option<unsafe extern "C" fn(app: *mut HostCarbonApp, out_muted: *mut i32) -> i32>,
+    pub media_set_mute: Option<unsafe extern "C" fn(app: *mut HostCarbonApp, muted: i32) -> i32>,
+    pub media_listen_keys: Option<unsafe extern "C" fn(app: *mut HostCarbonApp) -> i32>,
+
+    // ABI 1.17. Input — see the matching note in carbon_plugin.h's
+    // APPEND-ONLY ZONE.
+    pub input_modifier_state:
+        Option<unsafe extern "C" fn(app: *mut HostCarbonApp, out_status: *mut i32) -> *mut c_char>,
+    pub input_send_key: Option<unsafe extern "C" fn(app: *mut HostCarbonApp, vk: u16, key_down: i32) -> i32>,
+    pub input_move_mouse: Option<unsafe extern "C" fn(app: *mut HostCarbonApp, x: i32, y: i32) -> i32>,
+    pub input_click_mouse:
+        Option<unsafe extern "C" fn(app: *mut HostCarbonApp, button: i32, is_down: i32) -> i32>,
+    pub input_keyboard_layout:
+        Option<unsafe extern "C" fn(app: *mut HostCarbonApp, out_status: *mut i32) -> *mut c_char>,
+
+    // ABI 1.18. Windows Hello biometric verification — see the matching
+    // note in carbon_plugin.h's APPEND-ONLY ZONE.
+    pub biometric_verify:
+        Option<unsafe extern "C" fn(app: *mut HostCarbonApp, message: *const c_char) -> i32>,
+
+    // ABI 1.19. The native OS share sheet — see the matching note in
+    // carbon_plugin.h's APPEND-ONLY ZONE.
+    pub share_content: Option<
+        unsafe extern "C" fn(
+            app: *mut HostCarbonApp,
+            title: *const c_char,
+            text: *const c_char,
+            url: *const c_char,
+        ) -> i32,
+    >,
+
+    // ABI 1.20. BLE scan/connect/notify-subscribe/write — see the matching
+    // note in carbon_plugin.h's APPEND-ONLY ZONE.
+    pub bluetooth_scan_start: Option<unsafe extern "C" fn(app: *mut HostCarbonApp) -> i32>,
+    pub bluetooth_scan_stop: Option<unsafe extern "C" fn(app: *mut HostCarbonApp) -> i32>,
+    pub bluetooth_connect: Option<unsafe extern "C" fn(app: *mut HostCarbonApp, address: *const c_char) -> i32>,
+    pub bluetooth_subscribe: Option<
+        unsafe extern "C" fn(
+            app: *mut HostCarbonApp,
+            address: *const c_char,
+            service_uuid: *const c_char,
+            characteristic_uuid: *const c_char,
+        ) -> i32,
+    >,
+    pub bluetooth_write_characteristic: Option<
+        unsafe extern "C" fn(
+            app: *mut HostCarbonApp,
+            address: *const c_char,
+            service_uuid: *const c_char,
+            characteristic_uuid: *const c_char,
+            data: *const u8,
+            data_len: usize,
+        ) -> i32,
+    >,
+
+    // ABI 1.21. Microphone PCM capture — see the matching note in
+    // carbon_plugin.h's APPEND-ONLY ZONE.
+    pub microphone_start: Option<unsafe extern "C" fn(app: *mut HostCarbonApp) -> i32>,
+    pub microphone_stop: Option<unsafe extern "C" fn(app: *mut HostCarbonApp) -> i32>,
+
+    // ABI 1.22. Camera frame capture — see the matching note in
+    // carbon_plugin.h's APPEND-ONLY ZONE.
+    pub camera_start: Option<unsafe extern "C" fn(app: *mut HostCarbonApp) -> i32>,
+    pub camera_stop: Option<unsafe extern "C" fn(app: *mut HostCarbonApp) -> i32>,
+
+    // ABI 1.23. Carbon self-introspection — see the matching note in
+    // carbon_plugin.h's APPEND-ONLY ZONE. The first three are plain data
+    // (composed once at startup by the composition root, static for the
+    // process lifetime), not trampolines — same reasoning app_name/
+    // app_version/project_dir above are plain fields.
+    pub backend_name: *const c_char,
+    pub runtime_features_json: *const c_char,
+    pub snapshot_restored: i32,
+    pub manifest_read: Option<unsafe extern "C" fn(app: *mut HostCarbonApp, out_status: *mut i32) -> *mut c_char>,
+    pub framecache_stats:
+        Option<unsafe extern "C" fn(app: *mut HostCarbonApp, out_status: *mut i32) -> *mut c_char>,
+    pub framecache_clear: Option<unsafe extern "C" fn(app: *mut HostCarbonApp) -> i32>,
 }
 
 /// Owns the heap allocation backing the strings inside `HostCarbonApp` plus
@@ -306,6 +469,8 @@ pub struct HostCarbonAppStorage {
     _app_name: CString,
     _app_version: CString,
     _project_dir: CString,
+    _backend_name: CString,
+    _runtime_features_json: CString,
 }
 
 // ── Event-loop proxy shared across all host_* trampolines ─────────────────
@@ -335,6 +500,21 @@ pub fn push_plugin_event(name: String, payload: String) {
     let proxy = PROXY.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(p) = proxy.as_ref() {
         let _ = p.send_event(UserEvent::PluginEvent { name, payload });
+    }
+}
+
+/// Same as `push_plugin_event`, but for a raw byte buffer instead of a
+/// JSON string — camera frames, audio PCM, BLE notification bytes.
+/// Rust-internal only, no C-ABI trampoline: every capability that needs
+/// this (camera.rs, microphone.rs, bluetooth.rs) already lives in this
+/// crate as a native adapter called from a Zig plugin's ABI trampoline
+/// the normal way, exactly like media.rs calls `push_plugin_event`
+/// directly today — there's no plugin author writing raw Rust here that
+/// would need a C-ABI-exposed version of this, so one isn't added.
+pub fn push_plugin_binary_event(name: String, data: Vec<u8>) {
+    let proxy = PROXY.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(p) = proxy.as_ref() {
+        let _ = p.send_event(UserEvent::PluginBinaryEvent { name, data });
     }
 }
 
@@ -698,7 +878,7 @@ unsafe extern "C" fn host_dialog_confirm(
     }
 }
 
-#[cfg(feature = "notification")]
+#[cfg(feature = "notify")]
 unsafe extern "C" fn host_notification_send(
     _app: *mut HostCarbonApp,
     title: *const c_char,
@@ -777,7 +957,7 @@ unsafe extern "C" fn host_keychain_delete(
 
 // ── Global keyboard shortcuts (ABI 1.4) ────────────────────────────────────
 
-#[cfg(feature = "global-shortcuts")]
+#[cfg(feature = "shortcuts")]
 unsafe extern "C" fn host_global_shortcut_register(
     _app: *mut HostCarbonApp,
     accelerator: *const c_char,
@@ -797,7 +977,7 @@ unsafe extern "C" fn host_global_shortcut_register(
     }
 }
 
-#[cfg(feature = "global-shortcuts")]
+#[cfg(feature = "shortcuts")]
 unsafe extern "C" fn host_global_shortcut_unregister(
     _app: *mut HostCarbonApp,
     accelerator: *const c_char,
@@ -833,7 +1013,7 @@ unsafe extern "C" fn host_tray_setup(
 
 // ── Deep linking (ABI 1.6) ──────────────────────────────────────────────
 
-#[cfg(feature = "deep-link")]
+#[cfg(feature = "deeplink")]
 unsafe extern "C" fn host_deeplink_register(app: *mut HostCarbonApp, scheme: *const c_char) -> i32 {
     let Some(scheme) = cstr_arg(scheme) else {
         return CARBON_ERR_INVALID;
@@ -844,6 +1024,473 @@ unsafe extern "C" fn host_deeplink_register(app: *mut HostCarbonApp, scheme: *co
         cstr_arg((*app).app_name).unwrap_or("")
     };
     match crate::deeplink::register(app_name, scheme) {
+        Ok(()) => CARBON_OK,
+        Err(_) => CARBON_ERR_GENERIC,
+    }
+}
+
+// ── Native application menu bar (ABI 1.7) ──────────────────────────────────
+
+#[cfg(feature = "menu")]
+unsafe extern "C" fn host_menu_setup(app: *mut HostCarbonApp, menu_json: *const c_char) -> i32 {
+    let Some(menu_json) = cstr_arg(menu_json) else {
+        return CARBON_ERR_INVALID;
+    };
+    if app.is_null() {
+        return CARBON_ERR_INVALID;
+    }
+    let hwnd = (*app).raw_window_handle as isize;
+    match crate::menu::setup(hwnd, menu_json) {
+        Ok(()) => CARBON_OK,
+        Err(_) => CARBON_ERR_GENERIC,
+    }
+}
+
+// ── Single-instance lock (ABI 1.8) ──────────────────────────────────────────
+
+#[cfg(feature = "instance")]
+unsafe extern "C" fn host_instance_acquire(_app: *mut HostCarbonApp, app_id: *const c_char) -> i32 {
+    let Some(app_id) = cstr_arg(app_id) else {
+        return CARBON_ERR_INVALID;
+    };
+    match crate::instance::acquire(app_id) {
+        Ok(()) => CARBON_OK,
+        Err(_) => CARBON_ERR_GENERIC,
+    }
+}
+
+// ── Embedded SQLite storage (ABI 1.9) ───────────────────────────────────────
+
+#[cfg(feature = "sqlite")]
+unsafe extern "C" fn host_sqlite_exec(
+    _app: *mut HostCarbonApp,
+    db_path: *const c_char,
+    sql: *const c_char,
+    params_json: *const c_char,
+    out_status: *mut i32,
+) -> *mut c_char {
+    let (Some(db_path), Some(sql)) = (cstr_arg(db_path), cstr_arg(sql)) else {
+        write_status(out_status, CARBON_ERR_INVALID);
+        return core::ptr::null_mut();
+    };
+    let params_json = cstr_arg(params_json).unwrap_or("");
+    match crate::sqlite::exec(db_path, sql, params_json) {
+        Ok(json) => {
+            write_status(out_status, CARBON_OK);
+            alloc_cstring(&json)
+        }
+        Err(_) => {
+            write_status(out_status, CARBON_ERR_GENERIC);
+            core::ptr::null_mut()
+        }
+    }
+}
+
+// ── Taskbar badge and progress (ABI 1.10) ───────────────────────────────────
+
+#[cfg(feature = "taskbar")]
+unsafe extern "C" fn host_taskbar_set_progress(
+    app: *mut HostCarbonApp,
+    completed: u64,
+    total: u64,
+) -> i32 {
+    if app.is_null() {
+        return CARBON_ERR_INVALID;
+    }
+    let hwnd = (*app).raw_window_handle as isize;
+    match crate::taskbar::set_progress(hwnd, completed, total) {
+        Ok(()) => CARBON_OK,
+        Err(_) => CARBON_ERR_GENERIC,
+    }
+}
+
+#[cfg(feature = "taskbar")]
+unsafe extern "C" fn host_taskbar_set_badge(
+    app: *mut HostCarbonApp,
+    icon_path: *const c_char,
+    description: *const c_char,
+) -> i32 {
+    if app.is_null() {
+        return CARBON_ERR_INVALID;
+    }
+    let hwnd = (*app).raw_window_handle as isize;
+    let icon_path = cstr_arg(icon_path).unwrap_or("");
+    let description = cstr_arg(description).unwrap_or("");
+    match crate::taskbar::set_badge(hwnd, icon_path, description) {
+        Ok(()) => CARBON_OK,
+        Err(_) => CARBON_ERR_GENERIC,
+    }
+}
+
+// ── Theme preferences (ABI 1.11) ────────────────────────────────────────────
+
+#[cfg(feature = "theme")]
+unsafe extern "C" fn host_theme_query(_app: *mut HostCarbonApp, out_status: *mut i32) -> *mut c_char {
+    match crate::theme::query() {
+        Ok(prefs) => match serde_json::to_string(&prefs) {
+            Ok(json) => {
+                write_status(out_status, CARBON_OK);
+                alloc_cstring(&json)
+            }
+            Err(_) => {
+                write_status(out_status, CARBON_ERR_GENERIC);
+                core::ptr::null_mut()
+            }
+        },
+        Err(_) => {
+            write_status(out_status, CARBON_ERR_GENERIC);
+            core::ptr::null_mut()
+        }
+    }
+}
+
+// ── Structured file logging (ABI 1.12) ──────────────────────────────────────
+
+#[cfg(feature = "logging")]
+unsafe extern "C" fn host_log_write(
+    _app: *mut HostCarbonApp,
+    path: *const c_char,
+    level: *const c_char,
+    message: *const c_char,
+) -> i32 {
+    let (Some(path), Some(level), Some(message)) = (cstr_arg(path), cstr_arg(level), cstr_arg(message)) else {
+        return CARBON_ERR_INVALID;
+    };
+    match crate::logging::write_line(path, level, message) {
+        Ok(()) => CARBON_OK,
+        Err(_) => CARBON_ERR_GENERIC,
+    }
+}
+
+// ── Screen-reader detection (ABI 1.13) ──────────────────────────────────────
+
+#[cfg(feature = "accessibility")]
+unsafe extern "C" fn host_accessibility_query(_app: *mut HostCarbonApp, out_active: *mut i32) -> i32 {
+    if out_active.is_null() {
+        return CARBON_ERR_INVALID;
+    }
+    match crate::accessibility::screen_reader_active() {
+        Ok(active) => {
+            *out_active = if active { 1 } else { 0 };
+            CARBON_OK
+        }
+        Err(_) => {
+            *out_active = 0;
+            CARBON_ERR_GENERIC
+        }
+    }
+}
+
+// ── Printing (ABI 1.14) ─────────────────────────────────────────────────────
+
+#[cfg(feature = "printing")]
+unsafe extern "C" fn host_print_file(_app: *mut HostCarbonApp, path: *const c_char) -> i32 {
+    let Some(path) = cstr_arg(path) else {
+        return CARBON_ERR_INVALID;
+    };
+    match crate::printing::print_file(path) {
+        Ok(()) => CARBON_OK,
+        Err(_) => CARBON_ERR_GENERIC,
+    }
+}
+
+// ── Screen capture (ABI 1.15) ────────────────────────────────────────────────
+
+#[cfg(feature = "screencapture")]
+unsafe extern "C" fn host_screen_capture(
+    app: *mut HostCarbonApp,
+    target: *const c_char,
+    out_path: *const c_char,
+) -> i32 {
+    let (Some(target), Some(out_path)) = (cstr_arg(target), cstr_arg(out_path)) else {
+        return CARBON_ERR_INVALID;
+    };
+    let hwnd = if app.is_null() { 0 } else { (*app).raw_window_handle as isize };
+    match crate::screencapture::capture(target, hwnd, out_path) {
+        Ok(()) => CARBON_OK,
+        Err(_) => CARBON_ERR_GENERIC,
+    }
+}
+
+// ── System audio volume/mute and media keys (ABI 1.16) ─────────────────────
+
+#[cfg(feature = "media")]
+unsafe extern "C" fn host_media_get_volume(_app: *mut HostCarbonApp, out_level: *mut f32) -> i32 {
+    if out_level.is_null() {
+        return CARBON_ERR_INVALID;
+    }
+    match crate::media::get_volume() {
+        Ok(level) => {
+            *out_level = level;
+            CARBON_OK
+        }
+        Err(_) => CARBON_ERR_GENERIC,
+    }
+}
+
+#[cfg(feature = "media")]
+unsafe extern "C" fn host_media_set_volume(_app: *mut HostCarbonApp, level: f32) -> i32 {
+    match crate::media::set_volume(level) {
+        Ok(()) => CARBON_OK,
+        Err(_) => CARBON_ERR_GENERIC,
+    }
+}
+
+#[cfg(feature = "media")]
+unsafe extern "C" fn host_media_get_mute(_app: *mut HostCarbonApp, out_muted: *mut i32) -> i32 {
+    if out_muted.is_null() {
+        return CARBON_ERR_INVALID;
+    }
+    match crate::media::get_mute() {
+        Ok(muted) => {
+            *out_muted = if muted { 1 } else { 0 };
+            CARBON_OK
+        }
+        Err(_) => CARBON_ERR_GENERIC,
+    }
+}
+
+#[cfg(feature = "media")]
+unsafe extern "C" fn host_media_set_mute(_app: *mut HostCarbonApp, muted: i32) -> i32 {
+    match crate::media::set_mute(muted != 0) {
+        Ok(()) => CARBON_OK,
+        Err(_) => CARBON_ERR_GENERIC,
+    }
+}
+
+#[cfg(feature = "media")]
+unsafe extern "C" fn host_media_listen_keys(_app: *mut HostCarbonApp) -> i32 {
+    crate::media::ensure_media_key_listener();
+    CARBON_OK
+}
+
+// ── Input (ABI 1.17) ─────────────────────────────────────────────────────────
+
+#[cfg(feature = "input")]
+unsafe extern "C" fn host_input_modifier_state(_app: *mut HostCarbonApp, out_status: *mut i32) -> *mut c_char {
+    let s = crate::input::modifier_state();
+    let json = format!(
+        "{{\"shift\":{},\"ctrl\":{},\"alt\":{},\"capsLock\":{},\"numLock\":{}}}",
+        s.shift, s.ctrl, s.alt, s.caps_lock, s.num_lock
+    );
+    write_status(out_status, CARBON_OK);
+    alloc_cstring(&json)
+}
+
+#[cfg(feature = "input")]
+unsafe extern "C" fn host_input_send_key(_app: *mut HostCarbonApp, vk: u16, key_down: i32) -> i32 {
+    match crate::input::send_key(vk, key_down != 0) {
+        Ok(()) => CARBON_OK,
+        Err(_) => CARBON_ERR_GENERIC,
+    }
+}
+
+#[cfg(feature = "input")]
+unsafe extern "C" fn host_input_move_mouse(_app: *mut HostCarbonApp, x: i32, y: i32) -> i32 {
+    match crate::input::move_mouse(x, y) {
+        Ok(()) => CARBON_OK,
+        Err(_) => CARBON_ERR_GENERIC,
+    }
+}
+
+#[cfg(feature = "input")]
+unsafe extern "C" fn host_input_click_mouse(_app: *mut HostCarbonApp, button: i32, is_down: i32) -> i32 {
+    match crate::input::click_mouse(button, is_down != 0) {
+        Ok(()) => CARBON_OK,
+        Err(_) => CARBON_ERR_GENERIC,
+    }
+}
+
+#[cfg(feature = "input")]
+unsafe extern "C" fn host_input_keyboard_layout(_app: *mut HostCarbonApp, out_status: *mut i32) -> *mut c_char {
+    match crate::input::keyboard_layout_name() {
+        Ok(name) => {
+            write_status(out_status, CARBON_OK);
+            alloc_cstring(&format!("\"{name}\""))
+        }
+        Err(_) => {
+            write_status(out_status, CARBON_ERR_GENERIC);
+            core::ptr::null_mut()
+        }
+    }
+}
+
+// ── Biometrics (ABI 1.18) ────────────────────────────────────────────────────
+
+#[cfg(feature = "biometrics")]
+unsafe extern "C" fn host_biometric_verify(_app: *mut HostCarbonApp, message: *const c_char) -> i32 {
+    let message = cstr_arg(message).unwrap_or("").to_string();
+    match crate::biometrics::verify(message) {
+        Ok(()) => CARBON_OK,
+        Err(_) => CARBON_ERR_GENERIC,
+    }
+}
+
+// ── Sharing (ABI 1.19) ────────────────────────────────────────────────────
+
+#[cfg(feature = "sharing")]
+unsafe extern "C" fn host_share_content(
+    app: *mut HostCarbonApp,
+    title: *const c_char,
+    text: *const c_char,
+    url: *const c_char,
+) -> i32 {
+    if app.is_null() {
+        return CARBON_ERR_INVALID;
+    }
+    let hwnd = (*app).raw_window_handle as isize;
+    let title = cstr_arg(title).unwrap_or("");
+    let text = cstr_arg(text).unwrap_or("");
+    let url = cstr_arg(url).unwrap_or("");
+    match crate::sharing::share(hwnd, title, text, url) {
+        Ok(()) => CARBON_OK,
+        Err(_) => CARBON_ERR_GENERIC,
+    }
+}
+
+// ── Bluetooth (ABI 1.20) ─────────────────────────────────────────────────
+
+#[cfg(feature = "bluetooth")]
+unsafe extern "C" fn host_bluetooth_scan_start(_app: *mut HostCarbonApp) -> i32 {
+    match crate::bluetooth::scan_start() {
+        Ok(()) => CARBON_OK,
+        Err(_) => CARBON_ERR_GENERIC,
+    }
+}
+
+#[cfg(feature = "bluetooth")]
+unsafe extern "C" fn host_bluetooth_scan_stop(_app: *mut HostCarbonApp) -> i32 {
+    match crate::bluetooth::scan_stop() {
+        Ok(()) => CARBON_OK,
+        Err(_) => CARBON_ERR_GENERIC,
+    }
+}
+
+#[cfg(feature = "bluetooth")]
+unsafe extern "C" fn host_bluetooth_connect(_app: *mut HostCarbonApp, address: *const c_char) -> i32 {
+    let Some(address) = cstr_arg(address) else {
+        return CARBON_ERR_INVALID;
+    };
+    match crate::bluetooth::connect(address) {
+        Ok(()) => CARBON_OK,
+        Err(_) => CARBON_ERR_GENERIC,
+    }
+}
+
+#[cfg(feature = "bluetooth")]
+unsafe extern "C" fn host_bluetooth_subscribe(
+    _app: *mut HostCarbonApp,
+    address: *const c_char,
+    service_uuid: *const c_char,
+    characteristic_uuid: *const c_char,
+) -> i32 {
+    let (Some(address), Some(service_uuid), Some(characteristic_uuid)) =
+        (cstr_arg(address), cstr_arg(service_uuid), cstr_arg(characteristic_uuid))
+    else {
+        return CARBON_ERR_INVALID;
+    };
+    match crate::bluetooth::subscribe(address, service_uuid, characteristic_uuid) {
+        Ok(()) => CARBON_OK,
+        Err(_) => CARBON_ERR_GENERIC,
+    }
+}
+
+#[cfg(feature = "bluetooth")]
+unsafe extern "C" fn host_bluetooth_write_characteristic(
+    _app: *mut HostCarbonApp,
+    address: *const c_char,
+    service_uuid: *const c_char,
+    characteristic_uuid: *const c_char,
+    data: *const u8,
+    data_len: usize,
+) -> i32 {
+    let (Some(address), Some(service_uuid), Some(characteristic_uuid)) =
+        (cstr_arg(address), cstr_arg(service_uuid), cstr_arg(characteristic_uuid))
+    else {
+        return CARBON_ERR_INVALID;
+    };
+    let bytes = if data.is_null() || data_len == 0 { Vec::new() } else { core::slice::from_raw_parts(data, data_len).to_vec() };
+    match crate::bluetooth::write_characteristic(address, service_uuid, characteristic_uuid, bytes) {
+        Ok(()) => CARBON_OK,
+        Err(_) => CARBON_ERR_GENERIC,
+    }
+}
+
+// ── Microphone (ABI 1.21) ────────────────────────────────────────────────
+
+#[cfg(feature = "microphone")]
+unsafe extern "C" fn host_microphone_start(_app: *mut HostCarbonApp) -> i32 {
+    match crate::microphone::start() {
+        Ok(()) => CARBON_OK,
+        Err(_) => CARBON_ERR_GENERIC,
+    }
+}
+
+#[cfg(feature = "microphone")]
+unsafe extern "C" fn host_microphone_stop(_app: *mut HostCarbonApp) -> i32 {
+    match crate::microphone::stop() {
+        Ok(()) => CARBON_OK,
+        Err(_) => CARBON_ERR_GENERIC,
+    }
+}
+
+// ── Camera (ABI 1.22) ─────────────────────────────────────────────────────
+
+#[cfg(feature = "camera")]
+unsafe extern "C" fn host_camera_start(_app: *mut HostCarbonApp) -> i32 {
+    match crate::camera::start() {
+        Ok(()) => CARBON_OK,
+        Err(_) => CARBON_ERR_GENERIC,
+    }
+}
+
+#[cfg(feature = "camera")]
+unsafe extern "C" fn host_camera_stop(_app: *mut HostCarbonApp) -> i32 {
+    match crate::camera::stop() {
+        Ok(()) => CARBON_OK,
+        Err(_) => CARBON_ERR_GENERIC,
+    }
+}
+
+// ── Carbon self-introspection (ABI 1.23) ──────────────────────────────────
+
+unsafe extern "C" fn host_manifest_read(app: *mut HostCarbonApp, out_status: *mut i32) -> *mut c_char {
+    if app.is_null() {
+        write_status(out_status, CARBON_ERR_INVALID);
+        return core::ptr::null_mut();
+    }
+    let project_dir = cstr_arg((*app).project_dir).unwrap_or("");
+    match crate::carbon_manifest::read(project_dir) {
+        Ok(json) => {
+            write_status(out_status, CARBON_OK);
+            alloc_cstring(&json)
+        }
+        Err(_) => {
+            write_status(out_status, CARBON_ERR_GENERIC);
+            core::ptr::null_mut()
+        }
+    }
+}
+
+unsafe extern "C" fn host_framecache_stats(_app: *mut HostCarbonApp, out_status: *mut i32) -> *mut c_char {
+    match crate::framecache::stats() {
+        Ok(json) => {
+            write_status(out_status, CARBON_OK);
+            alloc_cstring(&json)
+        }
+        Err(_) => {
+            write_status(out_status, CARBON_ERR_GENERIC);
+            core::ptr::null_mut()
+        }
+    }
+}
+
+unsafe extern "C" fn host_framecache_clear(app: *mut HostCarbonApp) -> i32 {
+    if app.is_null() {
+        return CARBON_ERR_INVALID;
+    }
+    let project_dir = cstr_arg((*app).project_dir).unwrap_or("");
+    match crate::framecache::clear(project_dir) {
         Ok(()) => CARBON_OK,
         Err(_) => CARBON_ERR_GENERIC,
     }
@@ -944,11 +1591,17 @@ impl HostCarbonAppStorage {
         project_dir: &str,
         window_width: u32,
         window_height: u32,
+        backend_name: &str,
+        runtime_features_json: &str,
+        snapshot_restored: bool,
     ) -> Box<Self> {
         // Empty strings as fallback if the caller passed something invalid.
         let app_name_c = CString::new(app_name).unwrap_or_else(|_| CString::new("").unwrap());
         let app_version_c = CString::new(app_version).unwrap_or_else(|_| CString::new("").unwrap());
         let project_dir_c = CString::new(project_dir).unwrap_or_else(|_| CString::new("").unwrap());
+        let backend_name_c = CString::new(backend_name).unwrap_or_else(|_| CString::new("").unwrap());
+        let runtime_features_json_c =
+            CString::new(runtime_features_json).unwrap_or_else(|_| CString::new("{}").unwrap());
 
         let mut storage = Box::new(HostCarbonAppStorage {
             app: HostCarbonApp {
@@ -1028,9 +1681,9 @@ impl HostCarbonAppStorage {
                 dialog_confirm: Some(host_dialog_confirm),
                 #[cfg(not(feature = "dialog"))]
                 dialog_confirm: None,
-                #[cfg(feature = "notification")]
+                #[cfg(feature = "notify")]
                 notification_send: Some(host_notification_send),
-                #[cfg(not(feature = "notification"))]
+                #[cfg(not(feature = "notify"))]
                 notification_send: None,
                 #[cfg(feature = "keychain")]
                 keychain_set: Some(host_keychain_set),
@@ -1044,26 +1697,158 @@ impl HostCarbonAppStorage {
                 keychain_delete: Some(host_keychain_delete),
                 #[cfg(not(feature = "keychain"))]
                 keychain_delete: None,
-                #[cfg(feature = "global-shortcuts")]
+                #[cfg(feature = "shortcuts")]
                 global_shortcut_register: Some(host_global_shortcut_register),
-                #[cfg(not(feature = "global-shortcuts"))]
+                #[cfg(not(feature = "shortcuts"))]
                 global_shortcut_register: None,
-                #[cfg(feature = "global-shortcuts")]
+                #[cfg(feature = "shortcuts")]
                 global_shortcut_unregister: Some(host_global_shortcut_unregister),
-                #[cfg(not(feature = "global-shortcuts"))]
+                #[cfg(not(feature = "shortcuts"))]
                 global_shortcut_unregister: None,
                 #[cfg(feature = "tray")]
                 tray_setup: Some(host_tray_setup),
                 #[cfg(not(feature = "tray"))]
                 tray_setup: None,
-                #[cfg(feature = "deep-link")]
+                #[cfg(feature = "deeplink")]
                 deeplink_register: Some(host_deeplink_register),
-                #[cfg(not(feature = "deep-link"))]
+                #[cfg(not(feature = "deeplink"))]
                 deeplink_register: None,
+                #[cfg(feature = "menu")]
+                menu_setup: Some(host_menu_setup),
+                #[cfg(not(feature = "menu"))]
+                menu_setup: None,
+                #[cfg(feature = "instance")]
+                instance_acquire: Some(host_instance_acquire),
+                #[cfg(not(feature = "instance"))]
+                instance_acquire: None,
+                #[cfg(feature = "sqlite")]
+                sqlite_exec: Some(host_sqlite_exec),
+                #[cfg(not(feature = "sqlite"))]
+                sqlite_exec: None,
+                #[cfg(feature = "taskbar")]
+                taskbar_set_progress: Some(host_taskbar_set_progress),
+                #[cfg(not(feature = "taskbar"))]
+                taskbar_set_progress: None,
+                #[cfg(feature = "taskbar")]
+                taskbar_set_badge: Some(host_taskbar_set_badge),
+                #[cfg(not(feature = "taskbar"))]
+                taskbar_set_badge: None,
+                #[cfg(feature = "theme")]
+                theme_query: Some(host_theme_query),
+                #[cfg(not(feature = "theme"))]
+                theme_query: None,
+                #[cfg(feature = "logging")]
+                log_write: Some(host_log_write),
+                #[cfg(not(feature = "logging"))]
+                log_write: None,
+                #[cfg(feature = "accessibility")]
+                accessibility_query: Some(host_accessibility_query),
+                #[cfg(not(feature = "accessibility"))]
+                accessibility_query: None,
+                #[cfg(feature = "printing")]
+                print_file: Some(host_print_file),
+                #[cfg(not(feature = "printing"))]
+                print_file: None,
+                #[cfg(feature = "screencapture")]
+                screen_capture: Some(host_screen_capture),
+                #[cfg(not(feature = "screencapture"))]
+                screen_capture: None,
+                #[cfg(feature = "media")]
+                media_get_volume: Some(host_media_get_volume),
+                #[cfg(not(feature = "media"))]
+                media_get_volume: None,
+                #[cfg(feature = "media")]
+                media_set_volume: Some(host_media_set_volume),
+                #[cfg(not(feature = "media"))]
+                media_set_volume: None,
+                #[cfg(feature = "media")]
+                media_get_mute: Some(host_media_get_mute),
+                #[cfg(not(feature = "media"))]
+                media_get_mute: None,
+                #[cfg(feature = "media")]
+                media_set_mute: Some(host_media_set_mute),
+                #[cfg(not(feature = "media"))]
+                media_set_mute: None,
+                #[cfg(feature = "media")]
+                media_listen_keys: Some(host_media_listen_keys),
+                #[cfg(not(feature = "media"))]
+                media_listen_keys: None,
+                #[cfg(feature = "input")]
+                input_modifier_state: Some(host_input_modifier_state),
+                #[cfg(not(feature = "input"))]
+                input_modifier_state: None,
+                #[cfg(feature = "input")]
+                input_send_key: Some(host_input_send_key),
+                #[cfg(not(feature = "input"))]
+                input_send_key: None,
+                #[cfg(feature = "input")]
+                input_move_mouse: Some(host_input_move_mouse),
+                #[cfg(not(feature = "input"))]
+                input_move_mouse: None,
+                #[cfg(feature = "input")]
+                input_click_mouse: Some(host_input_click_mouse),
+                #[cfg(not(feature = "input"))]
+                input_click_mouse: None,
+                #[cfg(feature = "input")]
+                input_keyboard_layout: Some(host_input_keyboard_layout),
+                #[cfg(not(feature = "input"))]
+                input_keyboard_layout: None,
+                #[cfg(feature = "biometrics")]
+                biometric_verify: Some(host_biometric_verify),
+                #[cfg(not(feature = "biometrics"))]
+                biometric_verify: None,
+                #[cfg(feature = "sharing")]
+                share_content: Some(host_share_content),
+                #[cfg(not(feature = "sharing"))]
+                share_content: None,
+                #[cfg(feature = "bluetooth")]
+                bluetooth_scan_start: Some(host_bluetooth_scan_start),
+                #[cfg(not(feature = "bluetooth"))]
+                bluetooth_scan_start: None,
+                #[cfg(feature = "bluetooth")]
+                bluetooth_scan_stop: Some(host_bluetooth_scan_stop),
+                #[cfg(not(feature = "bluetooth"))]
+                bluetooth_scan_stop: None,
+                #[cfg(feature = "bluetooth")]
+                bluetooth_connect: Some(host_bluetooth_connect),
+                #[cfg(not(feature = "bluetooth"))]
+                bluetooth_connect: None,
+                #[cfg(feature = "bluetooth")]
+                bluetooth_subscribe: Some(host_bluetooth_subscribe),
+                #[cfg(not(feature = "bluetooth"))]
+                bluetooth_subscribe: None,
+                #[cfg(feature = "bluetooth")]
+                bluetooth_write_characteristic: Some(host_bluetooth_write_characteristic),
+                #[cfg(not(feature = "bluetooth"))]
+                bluetooth_write_characteristic: None,
+                #[cfg(feature = "microphone")]
+                microphone_start: Some(host_microphone_start),
+                #[cfg(not(feature = "microphone"))]
+                microphone_start: None,
+                #[cfg(feature = "microphone")]
+                microphone_stop: Some(host_microphone_stop),
+                #[cfg(not(feature = "microphone"))]
+                microphone_stop: None,
+                #[cfg(feature = "camera")]
+                camera_start: Some(host_camera_start),
+                #[cfg(not(feature = "camera"))]
+                camera_start: None,
+                #[cfg(feature = "camera")]
+                camera_stop: Some(host_camera_stop),
+                #[cfg(not(feature = "camera"))]
+                camera_stop: None,
+                backend_name: backend_name_c.as_ptr(),
+                runtime_features_json: runtime_features_json_c.as_ptr(),
+                snapshot_restored: snapshot_restored as i32,
+                manifest_read: Some(host_manifest_read),
+                framecache_stats: Some(host_framecache_stats),
+                framecache_clear: Some(host_framecache_clear),
             },
             _app_name: app_name_c,
             _app_version: app_version_c,
             _project_dir: project_dir_c,
+            _backend_name: backend_name_c,
+            _runtime_features_json: runtime_features_json_c,
         });
         // Re-bake the string pointers from the now-pinned CStrings (Box's
         // contents have a stable address; the field-init above used the
@@ -1071,6 +1856,8 @@ impl HostCarbonAppStorage {
         storage.app.app_name = storage._app_name.as_ptr();
         storage.app.app_version = storage._app_version.as_ptr();
         storage.app.project_dir = storage._project_dir.as_ptr();
+        storage.app.backend_name = storage._backend_name.as_ptr();
+        storage.app.runtime_features_json = storage._runtime_features_json.as_ptr();
         storage
     }
 

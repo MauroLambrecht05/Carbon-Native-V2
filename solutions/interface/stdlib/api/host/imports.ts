@@ -71,7 +71,8 @@ declare global {
   const __cm_os_version: () => string;
 
   // PTY moved to the terminal plugin (carbon:terminal) — no longer
-  // always-on `__cm_pty_*` globals, see products/carbon-sdk/terminal.
+  // always-on `__cm_pty_*` globals, see
+  // products/carbon-sdk/plugins/carbon-dev/terminal.
 
   // ─── Process ───────────────────────────────────────────────────────────
   const __cm_proc_pid_self: () => number;

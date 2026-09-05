@@ -1,0 +1,21 @@
+# GENERATED — do not hand-edit. Source of truth is the `CFG`
+# config in src/main.zig; run `zig build gen-manifest` after
+# changing it. See manifest.zig's `toToml` doc comment for why
+# this file exists at all alongside that config.
+name = "sqlite"
+version = "0.1.0"
+language = "zig"
+
+extension-points = ["lifecycle.register","lifecycle.after_reload"]
+modules = ["carbon:sqlite"]
+
+[exports."carbon:sqlite"]
+names = ["exec"]
+
+[abi]
+major = 1
+minor = 9
+
+[capabilities]
+required = []
+optional = []

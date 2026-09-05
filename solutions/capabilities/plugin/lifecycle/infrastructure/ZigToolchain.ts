@@ -169,13 +169,39 @@ function findExe(root: string): string | null {
 }
 
 /**
+ * In-flight resolution, shared across concurrent callers within this one
+ * process. `SyncPluginsUseCase` now builds+signs multiple vendor plugins in
+ * parallel (`Promise.all`), each independently calling `ensureZig` — without
+ * this, the FIRST-EVER run on a machine with no Zig anywhere (not on PATH,
+ * nothing cached yet) would have every one of them independently decide "not
+ * cached" and race to download into the exact same `download-<pid>.*` path
+ * and extract into the same version directory at once. Memoizing means every
+ * concurrent caller in this process awaits the SAME single resolution — one
+ * probe/download instead of N, and no race. Reset to `null` on failure so a
+ * later call (there won't be one within a single `carbon run`, but tests and
+ * long-lived processes shouldn't get a permanently-cached rejection) retries
+ * rather than replaying a stale error.
+ */
+let inFlight: Promise<string> | null = null;
+
+/**
  * Resolve an absolute path to a working `zig` executable, downloading and
  * caching one if neither PATH nor a prior download has it. Throws with a
  * message naming the manual fallback (install Zig yourself) if this
  * platform has no known download target or the download/verify/extract
  * pipeline fails.
  */
-export async function ensureZig(logger: Logger): Promise<string> {
+export function ensureZig(logger: Logger): Promise<string> {
+  if (!inFlight) {
+    inFlight = ensureZigUncached(logger).catch((e) => {
+      inFlight = null;
+      throw e;
+    });
+  }
+  return inFlight;
+}
+
+async function ensureZigUncached(logger: Logger): Promise<string> {
   if (await systemZigWorks()) {
     return resolveSystemZigPath();
   }

@@ -134,7 +134,22 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    // manifest.zig's own tests never ran before this: `tests` above roots at
+    // carbon_sdk.zig, and Zig's test runner only collects `test` blocks from
+    // the root file itself, not ones in files it `@import`s — so
+    // manifest.zig's tests (the multi-module export-grouping ones included)
+    // were dead unless targeted directly, as this does.
+    const manifest_tests_mod = b.createModule(.{
+        .root_source_file = b.path(SRC ++ "/manifest.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    manifest_tests_mod.addImport("carbon_extension_points", registry_mod);
+    manifest_tests_mod.addImport("carbon_plugin_linkage", linkage_mod);
+    const manifest_tests = b.addTest(.{ .root_module = manifest_tests_mod });
+
     const test_step = b.step("test", "Run the SDK and registry tests");
     test_step.dependOn(&b.addRunArtifact(tests).step);
     test_step.dependOn(&b.addRunArtifact(registry_tests).step);
+    test_step.dependOn(&b.addRunArtifact(manifest_tests).step);
 }

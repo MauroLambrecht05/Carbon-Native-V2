@@ -38,6 +38,7 @@ import { ensureZig } from "../../infrastructure/ZigToolchain.ts";
 import { generateUmbrella, type UmbrellaPlugin } from "../../infrastructure/StaticUmbrellaGenerator.ts";
 import type { PluginWorkspace } from "../ports/PluginWorkspace.ts";
 import type { PreflightPluginsUseCase } from "./PreflightPluginsUseCase.ts";
+import { resolveStandardPluginDir } from "./resolveStandardPluginDir.ts";
 
 export interface StaticLinkOptions {
   readonly logger?: Logger;
@@ -68,7 +69,7 @@ export class StaticLinkPluginsUseCase {
     private readonly processes: ProcessRunner,
     private readonly preflight: PreflightPluginsUseCase,
     private readonly sdkRoot: string,
-    /** Where carbon-sdk lives — `products/carbon-sdk`. A vendor plugin's
+    /** Where carbon-sdk's plugins live — `products/carbon-sdk/plugins`. A vendor plugin's
      *  REAL source lives here, never in the app's own carbon/plugins/vendor/
      *  (which only ever gets the compiled artifact — see
      *  StaticUmbrellaGenerator's UmbrellaPlugin.mainZigPath doc comment).
@@ -127,7 +128,12 @@ export class StaticLinkPluginsUseCase {
       const points = declaration.extensionPoints.filter((id) => extensionPoint(id));
       const mainZigPath =
         entry.source === "vendor"
-          ? join(this.standardPluginsRoot, name, "src", "main.zig")
+          ? join(
+              resolveStandardPluginDir(this.workspace, this.standardPluginsRoot, name) ??
+                join(this.standardPluginsRoot, name),
+              "src",
+              "main.zig",
+            )
           : join(pluginsRoot, "local", name, "src", "main.zig");
       plugins.push({ name, mainZigPath, points });
     }
