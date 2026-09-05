@@ -79,7 +79,7 @@ export function buildRegistry(): CommandRegistry {
     defineCommand(
       {
         name: "plugin",
-        summary: "Manage native plugins (new / add / build / check / install / enable / disable / list / info / dev-key)",
+        summary: "Manage native plugins (new / add / search / publish / build / check / install / enable / disable / list / info / dev-key)",
         usage: "plugin <subcommand> [options]",
       },
       async () => new (await import("../presentation/commands/plugins/plugin.command.ts")).PluginCommand(),
@@ -110,6 +110,15 @@ export function buildRegistry(): CommandRegistry {
         usage: "cloud <signup|login|worker-token|deploy|list|status> [options]",
       },
       async () => new (await import("../presentation/commands/cloud/cloud.command.ts")).CloudCommand(),
+    ),
+
+    defineCommand(
+      {
+        name: "db",
+        summary: "Inspect and query local Carbon Database services",
+        usage: "db <status|sql|export> [options]",
+      },
+      async () => new (await import("../presentation/commands/database/db.command.ts")).DbCommand(),
     ),
 
     defineCommand(
