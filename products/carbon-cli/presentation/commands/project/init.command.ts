@@ -51,12 +51,19 @@ export class InitCommand extends Command {
       { name: "no-install",    boolean: true, description: "Skip bun install" },
       { name: "run",           boolean: true, description: "Start carbon dev once scaffolded" },
       { name: "list-presets",  boolean: true, description: "Show available presets and exit" },
+      {
+        name: "template",
+        placeholder: "<id>",
+        description: "Scaffold from a production template (tray-daemon | database-studio | realtime-chat | audio-station)",
+      },
+      { name: "list-templates", boolean: true, description: "Show available production templates and exit" },
       { name: "yes",           boolean: true, description: "Accept all defaults without prompting" },
     ],
     examples: [
       "carbon init",
       "carbon init my-app",
       "carbon init my-app --preset react-tailwind",
+      "carbon init my-app --template tray-daemon",
       "carbon init my-app --yes",
     ],
   };
@@ -65,6 +72,48 @@ export class InitCommand extends Command {
     if (ctx.flags.has("list-presets")) {
       this.listPresets(ctx);
       return EXIT_OK;
+    }
+
+    if (ctx.flags.has("list-templates")) {
+      const { TemplateRegistry } = await import("../../../../carbon-templates/infrastructure/services/TemplateRegistry.ts");
+      const templates = TemplateRegistry.getInstance().list();
+      ctx.io.raw("\nAvailable Production Templates:\n");
+      for (const t of templates) {
+        ctx.io.raw(`  • ${ctx.io.c.bold(t.id.padEnd(18))} ${t.name} ${ctx.io.c.dim(`(${t.category})`)}`);
+        ctx.io.raw(`    ${t.description}\n`);
+      }
+      return EXIT_OK;
+    }
+
+    if (ctx.flags.has("template")) {
+      const templateId = ctx.flags.get("template")!;
+      const name =
+        ctx.first && ctx.first !== "."
+          ? ctx.first
+          : ctx.flags.has("here")
+            ? basenameOf(ctx.cwd) ?? "my-app"
+            : "my-app";
+      const targetDir =
+        ctx.first && ctx.first !== "." && !ctx.flags.has("here") ? join(ctx.cwd, name) : ctx.cwd;
+
+      const { ScaffolderEngine } = await import(
+        "../../../../carbon-templates/infrastructure/services/ScaffolderEngine.ts"
+      );
+      try {
+        const result = await ScaffolderEngine.getInstance().scaffold({
+          templateId,
+          targetDir,
+          appName: name,
+        });
+
+        ctx.io.success(`Project ${ctx.io.c.bold(name)} scaffolded from ${ctx.io.c.green(result.templateName)}!`);
+        ctx.io.info(`Created ${result.createdFiles.length} files in ${targetDir}`);
+        ctx.io.raw(`\nNext steps:\n  cd ${name}\n  carbon dev\n`);
+        return EXIT_OK;
+      } catch (err: any) {
+        ctx.io.error(err.message);
+        return EXIT_FAILURE;
+      }
     }
 
     const interactive = !ctx.flags.has("yes") && ctx.io.isInteractive();
