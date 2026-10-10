@@ -29,3 +29,9 @@ export type { ArtifactVerifier, PlatformBuildRepository, ProvenanceSigner } from
 export { Ed25519ProvenanceSigner, verifyBuildProvenance } from "./infrastructure/BuildProvenanceSigning.ts";
 export { S3ArtifactVerifier, type ArtifactStoreConfig } from "./infrastructure/S3ArtifactVerifier.ts";
 export { PostgresPlatformBuildRepository } from "./infrastructure/PostgresPlatformBuildRepository.ts";
+
+// Releases and channels: immutable releases over verified build artifacts, signed channel revisions, the public update feed.
+export { AccountReleases, PublicUpdateFeed, MAX_SIGNED_ARTIFACT_BYTES, channelManifest, type ReleaseSettings } from "./application/usecases/PlatformReleases.ts";
+export type { ArtifactReader, PlatformReleaseRepository, ReleaseSigner, UpdateFeed } from "./application/ports/PlatformReleaseRepository.ts";
+export { PostgresPlatformReleaseRepository } from "./infrastructure/PostgresPlatformReleaseRepository.ts";
+export { S3ArtifactReader, SecretReleaseSigner, type SigningSecretReader } from "./infrastructure/ReleaseSigning.ts";

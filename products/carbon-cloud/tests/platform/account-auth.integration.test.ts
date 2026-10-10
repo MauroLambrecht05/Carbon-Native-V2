@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { nodeProcessRunner } from "@carbon/process";
 import { DisposableWorkspaces, GitSourceCheckout, HttpBuildProtocol, RunLeasedBuildUseCase, digestDependencyLocks, type BuildPipeline } from "@carbon/worker";
-import { createHash, createHmac, randomBytes, generateKeyPairSync } from "node:crypto";
+import { createHash, createHmac, createPrivateKey, createPublicKey, randomBytes, generateKeyPairSync } from "node:crypto";
 import {
   AccountAuthentication, AccountDeviceAuthorization, AccountServiceAccounts, AccountAudit, OrganizationLifecycle, PostgresAuditLog, AccountPersonalCredentials, PersonalCredentialAuthentication, PersonalCredentialExchange, PostgresPersonalCredentialRepository, AccountLegacyTokens, PostgresLegacyTokenRepository, PostgresIdentityRepository, CreateOrganizationUseCase, IssueWorkerTokenUseCase, VerifyTokenUseCase, DeviceCredentialAuthentication, DeliverAccountMail, EnvelopeMessageProtector, PostgresAccountIdentityRepository, PostgresDeviceAuthorizationRepository, PostgresServiceAccountRepository, ServiceAccountAuthentication, ServiceAssertionIssuer, ServiceAssertionVerifier,
   PostgresAccountMailQueue, bodyDigest, tokenDigest, type AccountEmail,
@@ -18,7 +18,9 @@ import {
 import { GitHubAccountProvider } from "@carbon/github-identity";
 import { ResendAccountNotification } from "@carbon/resend-notification";
 import { migrate } from "../../infrastructure/persistence/Database.ts";
-import { AccountBuilds, BuildOrchestration, Ed25519ProvenanceSigner, PostgresPlatformBuildRepository, WorkerBuilds, verifyBuildProvenance } from "@carbon/orchestration";
+import { AccountBuilds, AccountReleases, BuildOrchestration, Ed25519ProvenanceSigner, PostgresPlatformBuildRepository, PostgresPlatformReleaseRepository, PublicUpdateFeed, SecretReleaseSigner, WorkerBuilds, verifyBuildProvenance } from "@carbon/orchestration";
+import { decideUpdate, verifyUpdateSignature } from "@carbon/updating";
+import { createUpdateRoutes } from "../../infrastructure/http/update-routes.ts";
 import { SignJWT } from "jose";
 import { AccountRealms, AppAuthentication, HttpOidcClient, PostgresAppAuthRepository, PostgresAppMailQueue } from "@carbon/auth";
 import { createAppRoutes } from "../../infrastructure/http/app-routes.ts";
@@ -81,7 +83,13 @@ async function harness() {
   const store = { objects, put(key: string, bytes: string | Uint8Array) { const value = typeof bytes === 'string' ? new TextEncoder().encode(bytes) : bytes; objects.set(key, value); return { objectKey: key, sizeBytes: value.byteLength, sha256: createHash('sha256').update(value).digest('hex') }; }, setAvailable(value: boolean) { storeAvailable = value; } };
   const artifactVerifier = { async verify(artifact: { objectKey: string; sizeBytes: number; sha256: string }) { if (!storeAvailable) throw new Error('store down'); const value = objects.get(artifact.objectKey); return !!value && value.byteLength === artifact.sizeBytes && createHash('sha256').update(value).digest('hex') === artifact.sha256; } };
   const buildRepository = new PostgresPlatformBuildRepository(sql, new PostgresWorkerRepository(sql, secretProtector), provenanceSigner); const builds = new BuildOrchestration(buildRepository);
-  const makeHandler = (auth: AccountAuthentication) => createAccountRoutes(auth, origin, new AccountSecurity(auth, new PostgresAccountSecurityRepository(sql, mfa), protector, totp), new AccountProfile(auth, new PostgresAccountProfileRepository(sql, mfa), protector, config), new OrganizationAccess(auth, new PostgresOrganizationRepository(sql), protector), new OrganizationInvitations(auth, new PostgresOrganizationInvitationsRepository(sql), new PostgresOrganizationRepository(sql), protector, config), new ExternalAccountAuthentication(auth, new PostgresExternalAccountRepository(sql, mfa), githubProvider, protector, config), new AccountAuthorization(auth, new PostgresPlatformAuthority(sql)), new AccountCatalog(auth, new PostgresCatalogRepository(sql), protector), undefined, undefined, new AccountEnvironmentCredentials(auth, new PostgresEnvironmentCredentialRepository(sql), protector), new AccountEnvironmentSecrets(auth, new PostgresEnvironmentSecretRepository(sql, secretProtector), protector), new AccountRepositories(auth, new PostgresRepositoryIntegrationRepository(sql), repositoryProvider, protector), new AccountDeviceAuthorization(auth,new PostgresDeviceAuthorizationRepository(sql),protector,origin,config.rateLimitKey,new DeviceCredentialAuthentication(sql),assertionIssuer),new AccountServiceAccounts(auth,new PostgresServiceAccountRepository(sql),protector,assertionIssuer),new AccountPersonalCredentials(auth,new PostgresPersonalCredentialRepository(sql),protector),new AccountLegacyTokens(auth,new PostgresLegacyTokenRepository(sql),protector,'accept'),new AccountWorkers(auth,new PostgresWorkerRepository(sql,secretProtector),protector),new AccountAudit(auth,new PostgresAuditLog(sql),protector,{pollMs:15,heartbeatMs:120,maxMs:900}),new AccountRealms(auth,new PostgresAppAuthRepository(sql),protector),new PersonalCredentialExchange(new PersonalCredentialAuthentication(sql),assertionIssuer),new AccountBuilds(auth,buildRepository,protector));
+  const releaseRepository = new PostgresPlatformReleaseRepository(sql, origin);
+  // Reads what a worker uploaded, the way Cloud reads the artifact bucket before it signs.
+  const artifactReader = { async read(objectKey: string, maximumBytes: number) { if (!storeAvailable) throw new Error('store down'); const value = objects.get(objectKey); return value && value.byteLength <= maximumBytes ? value : null; } };
+  const updateHandler = createUpdateRoutes(new PublicUpdateFeed(releaseRepository));
+  // What an installed app does: an anonymous GET of the public feed.
+  const updates = (path: string, method = 'GET') => updateHandler(new Request(origin + path, { method }));
+  const makeHandler = (auth: AccountAuthentication) => createAccountRoutes(auth, origin, new AccountSecurity(auth, new PostgresAccountSecurityRepository(sql, mfa), protector, totp), new AccountProfile(auth, new PostgresAccountProfileRepository(sql, mfa), protector, config), new OrganizationAccess(auth, new PostgresOrganizationRepository(sql), protector), new OrganizationInvitations(auth, new PostgresOrganizationInvitationsRepository(sql), new PostgresOrganizationRepository(sql), protector, config), new ExternalAccountAuthentication(auth, new PostgresExternalAccountRepository(sql, mfa), githubProvider, protector, config), new AccountAuthorization(auth, new PostgresPlatformAuthority(sql)), new AccountCatalog(auth, new PostgresCatalogRepository(sql), protector), undefined, undefined, new AccountEnvironmentCredentials(auth, new PostgresEnvironmentCredentialRepository(sql), protector), new AccountEnvironmentSecrets(auth, new PostgresEnvironmentSecretRepository(sql, secretProtector), protector), new AccountRepositories(auth, new PostgresRepositoryIntegrationRepository(sql), repositoryProvider, protector), new AccountDeviceAuthorization(auth,new PostgresDeviceAuthorizationRepository(sql),protector,origin,config.rateLimitKey,new DeviceCredentialAuthentication(sql),assertionIssuer),new AccountServiceAccounts(auth,new PostgresServiceAccountRepository(sql),protector,assertionIssuer),new AccountPersonalCredentials(auth,new PostgresPersonalCredentialRepository(sql),protector),new AccountLegacyTokens(auth,new PostgresLegacyTokenRepository(sql),protector,'accept'),new AccountWorkers(auth,new PostgresWorkerRepository(sql,secretProtector),protector),new AccountAudit(auth,new PostgresAuditLog(sql),protector,{pollMs:15,heartbeatMs:120,maxMs:900}),new AccountRealms(auth,new PostgresAppAuthRepository(sql),protector),new PersonalCredentialExchange(new PersonalCredentialAuthentication(sql),assertionIssuer),new AccountBuilds(auth,buildRepository,protector),new AccountReleases(auth,releaseRepository,new SecretReleaseSigner(new PostgresProviderSecretReader(sql,secretProtector)),artifactReader,protector,{artifactBaseUrl:'https://downloads.example.test/'}));
   let auth = makeAuth(); let handler = makeHandler(auth);
   // A stand-in identity provider: real discovery, token and key endpoints over the OIDC client's transport, a real signing key.
   const idpIssuer = 'https://login.example.test'; const idpKeys = generateKeyPairSync('ec', { namedCurve: 'P-256' }); const forgedKeys = generateKeyPairSync('ec', { namedCurve: 'P-256' });
@@ -192,7 +200,7 @@ async function harness() {
     const redirected = await githubCallback(url.searchParams.get('state')!); expect(redirected.status).toBe(303);
     return redirected.headers.get('location')!.split('#token=')[1]!;
   };
-  return { sql, protector, secretProtector, workerApi, workerFetch, store, provenancePublicKey: provenanceSigner.publicKey(), leases, builds, organizationLifecycle, catalogLifecycle, app, idp, deliverApp, assertionPublicKey:assertionKeys.publicKey, assertionKey, mail, cookies, call, challenge, complete, token, freshRequest, freshComplete, profile, emailToken, emailComplete, createOrganization, organizationCommand, restoreCookies,
+  return { sql, protector, secretProtector, workerApi, workerFetch, updates, store, provenancePublicKey: provenanceSigner.publicKey(), leases, builds, organizationLifecycle, catalogLifecycle, app, idp, deliverApp, assertionPublicKey:assertionKeys.publicKey, assertionKey, mail, cookies, call, challenge, complete, token, freshRequest, freshComplete, profile, emailToken, emailComplete, createOrganization, organizationCommand, restoreCookies,
     catalogCommand, createProject,
     invitation, invitationToken, invitationProof,
     githubStart, githubCallback, githubComplete, githubBegin, githubCalls,
@@ -1483,6 +1491,213 @@ suite("real account authentication", () => {
       const durable = JSON.stringify({ logs: await h.sql`SELECT * FROM build_log_segments`, events: await h.sql`SELECT * FROM build_events`, provenance: await h.sql`SELECT * FROM build_provenance` });
       for (const secret of ['signing-key-value', token]) expect(durable).not.toContain(secret);
     } finally { rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
+  });
+
+  test('releases are immutable signed metadata over verified build artifacts, and channels move between them by signed revisions that real updaters accept', async () => {
+    const h = await harness(); await h.challenge('owner@example.test'); await h.deliver(); await h.complete();
+    const org = (await organizationResponse(h.createOrganization('Release team', 'release-team'))).receipt.id;
+    const scope = parseComponent('EnvironmentScope', parseComponent('CatalogReceipt', (await (await h.createProject(org)).json() as { receipt: unknown }).receipt).scope);
+    const csrf = () => h.cookies.get('__Host-carbon-csrf')!; const envPath = `/platform/v1/orgs/${org}/projects/${scope.projectId}/environments/${scope.environmentId}`;
+    const post = (path: string, body: unknown, revision?: string, overrides: Record<string, string> = {}) => h.call(path, 'POST', body, { 'x-csrf-token': csrf(), ...(revision ? { 'if-match': revision } : {}), ...overrides });
+    const digest = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
+    await h.sql`INSERT INTO org_plans (org_id, plan) VALUES (${org}, 'pro')`;
+    // The update signing key lives only as an environment secret: a 32-byte Ed25519 seed.
+    const seed = randomBytes(32); const updateKey = generateKeyPairSync('ed25519'); void updateKey;
+    const publicKeyOf = (value: Buffer) => (createPublicKey(createPrivateKey({ key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), value]), format: 'der', type: 'pkcs8' })).export({ format: 'der', type: 'spki' }) as Buffer).subarray(-32).toString('base64');
+    const publicKey = publicKeyOf(seed);
+    let revisionOf = parseComponent('CatalogEnvironmentDetails', await (await h.call(envPath)).json()).environment.revision;
+    const secret = async (name: string, value: string) => { const response = await post(`${envPath}/secrets`, { name, value }, revisionOf); expect(response.status).toBe(201); return parseComponent('EnvironmentSecretReceipt', await response.json()).secret; };
+    const signingSecret = await secret('UPDATE_SIGNING_KEY', seed.toString('base64')); await secret('NOT_A_KEY', 'just a password');
+
+    // A succeeded build with two verified artifacts, produced through the worker protocol.
+    const enrollment = parseComponent('WorkerEnrollmentIssue', await (await post(`/platform/v1/orgs/${org}/workers`, { name: 'win-01', purposes: ['build'] })).json());
+    const worker = parseComponent('WorkerCredentialIssue', await (await h.workerApi('/worker/v1/enroll', { code: enrollment.code, capabilities: { platform: 'windows', arch: 'x64', toolchains: [] } })).json());
+    const bearer = { authorization: `Bearer ${worker.token}` };
+    const queue = async (commit: string) => parseComponent('BuildReceipt', await (await post(`${envPath}/builds`, { repositoryUrl: 'https://github.com/carbon-team/desktop.git', commitSha: commit.repeat(40), targets: ['nsis', 'wix'], secretNames: [], platform: 'windows' })).json()).build;
+    const built = async (commit: string) => {
+      const build = await queue(commit);
+      const offer = parseComponent('WorkerLeaseOffer', await (await h.workerApi('/worker/v1/leases/claim', undefined, bearer)).json()); if (offer.state !== 'leased') throw new Error('expected a lease');
+      const on = (suffix: string, body?: unknown) => h.workerApi(`/worker/v1/leases/${offer.lease.id}/build${suffix}`, body, { ...bearer, 'x-carbon-lease-token': offer.leaseToken });
+      expect((await on('')).status).toBe(200); const artifacts: Record<string, { objectKey: string; sizeBytes: number; sha256: string }> = {};
+      for (const target of ['nsis', 'wix']) { artifacts[target] = h.store.put(`artifacts/${build.id}/1/${target}/setup-${commit}.${target}`, `${target} installer of ${commit}`); expect((await on('/artifacts', { target, ...artifacts[target] })).status).toBe(201); }
+      expect((await on('/complete', { outcome: 'succeeded', materials: { resolvedCommit: commit.repeat(40), dependencyLockDigest: digest('lock'), configurationDigest: null, tools: [{ name: 'bun', version: '1.3.10' }], workspaceErased: true } })).status).toBe(200);
+      return { id: build.id, artifacts };
+    };
+    const first = await built('a'); const second = await built('b'); const unfinished = await queue('c');
+    const WINDOWS = 'x86_64-pc-windows-msvc';
+
+    // Signing profiles: only the public key is recorded.
+    const profilesPath = `${envPath}/signing-profiles`;
+    expect((await h.call(profilesPath, 'POST', { name: 'release', secretName: 'UPDATE_SIGNING_KEY' })).status).toBe(403);
+    expect((await post(profilesPath, { name: 'release', secretName: 'MISSING_SECRET' })).status).toBe(409);
+    expect((await post(profilesPath, { name: 'release', secretName: 'NOT_A_KEY' })).status).toBe(400);
+    expect((await post(profilesPath, { name: 'Release', secretName: 'UPDATE_SIGNING_KEY' })).status).toBe(400);
+    const profileResponse = await post(profilesPath, { name: 'release', secretName: 'UPDATE_SIGNING_KEY' }); expect(profileResponse.status).toBe(201);
+    const profile = parseComponent('SigningProfile', await profileResponse.json()); expect(profile).toMatchObject({ scope, name: 'release', secretName: 'UPDATE_SIGNING_KEY', publicKey });
+    expect((await post(profilesPath, { name: 'release', secretName: 'UPDATE_SIGNING_KEY' })).status).toBe(409);
+    expect(parseComponent('SigningProfileList', await (await h.call(profilesPath)).json()).items).toEqual([profile]);
+
+    // Creating a release.
+    const releasesPath = `${envPath}/releases`;
+    const request = { buildId: first.id, version: '1.0.0', notes: 'First release', minVersion: null, signingProfileId: profile.id, artifacts: [{ platform: WINDOWS, target: 'nsis' }, { platform: 'x86_64-pc-windows-msvc-msi', target: 'wix' }] };
+    expect((await h.call(releasesPath, 'POST', request)).status).toBe(403);
+    for (const invalid of [{ ...request, version: 'v1.0.0' }, { ...request, version: '1.0' }, { ...request, minVersion: '2.0.0' }, { ...request, artifacts: [{ platform: WINDOWS, target: 'nsis' }, { platform: WINDOWS, target: 'wix' }] },
+      { ...request, artifacts: [{ platform: WINDOWS, target: 'deb' }] }, { ...request, artifacts: [] }, { ...request, buildId: crypto.randomUUID() }, { ...request, signingProfileId: crypto.randomUUID() }]) expect((await post(releasesPath, invalid)).status).toBe(400);
+    // Only a succeeded build can be released.
+    expect((await post(releasesPath, { ...request, buildId: unfinished.id })).status).toBe(409);
+    // The stored artifact no longer matches what the build verified, or storage is down: nothing is signed and nothing is released.
+    const original = h.store.objects.get(first.artifacts.nsis!.objectKey)!;
+    h.store.put(first.artifacts.nsis!.objectKey, 'nsis installer of X'); expect((await post(releasesPath, request)).status).toBe(409);
+    h.store.objects.delete(first.artifacts.nsis!.objectKey); expect((await post(releasesPath, request)).status).toBe(409);
+    h.store.put(first.artifacts.nsis!.objectKey, original);
+    h.store.setAvailable(false); expect((await post(releasesPath, request)).status).toBe(503); h.store.setAvailable(true);
+    // The secret now holds a different key than the profile recorded: Cloud refuses to sign with it.
+    const rotated = parseComponent('EnvironmentSecretReceipt', await (await post(`${envPath}/secrets/${signingSecret.id}`, { kind: 'rotate', value: randomBytes(32).toString('base64') }, signingSecret.revision)).json()).secret;
+    expect((await post(releasesPath, request)).status).toBe(409);
+    expect((await post(`${envPath}/secrets/${signingSecret.id}`, { kind: 'rotate', value: seed.toString('base64') }, rotated.revision)).status).toBe(200);
+    expect(await h.sql`SELECT id FROM releases`).toHaveLength(0);
+
+    const key = crypto.randomUUID(); const createdResponse = await post(releasesPath, request, undefined, { 'idempotency-key': key }); expect(createdResponse.status).toBe(201);
+    const release1 = parseComponent('ReleaseReceipt', await createdResponse.json()).release;
+    expect(release1).toMatchObject({ scope, buildId: first.id, version: '1.0.0', notes: 'First release', minVersion: null, signingProfileId: profile.id, state: 'published', withdrawnReason: null, withdrawnAt: null });
+    expect(release1.artifacts.map(item => [item.platform, item.target, item.objectKey, item.sha256, item.url])).toEqual([
+      [WINDOWS, 'nsis', first.artifacts.nsis!.objectKey, first.artifacts.nsis!.sha256, `https://downloads.example.test/${first.artifacts.nsis!.objectKey}`],
+      ['x86_64-pc-windows-msvc-msi', 'wix', first.artifacts.wix!.objectKey, first.artifacts.wix!.sha256, `https://downloads.example.test/${first.artifacts.wix!.objectKey}`]]);
+    // Each artifact signature is over the stored bytes, under the profile's key.
+    for (const item of release1.artifacts) { expect(verifyUpdateSignature(h.store.objects.get(item.objectKey)!, item.signature, publicKey)).toBe(true); expect(verifyUpdateSignature('other bytes', item.signature, publicKey)).toBe(false); }
+    expect(parseComponent('ReleaseReceipt', await (await post(releasesPath, request, undefined, { 'idempotency-key': key })).json()).release).toEqual(release1);
+    expect((await post(releasesPath, { ...request, notes: 'Changed' }, undefined, { 'idempotency-key': key })).status).toBe(409);
+    // A version is used once.
+    expect((await post(releasesPath, { ...request, buildId: second.id })).status).toBe(409);
+    const release2 = parseComponent('ReleaseReceipt', await (await post(releasesPath, { ...request, buildId: second.id, version: '2.0.0', notes: 'Second release', minVersion: '1.0.0', artifacts: [{ platform: WINDOWS, target: 'nsis' }] })).json()).release;
+    expect(parseComponent('ReleasePage', await (await h.call(releasesPath)).json()).items.map(item => item.version).sort()).toEqual(['1.0.0', '2.0.0']);
+    expect(parseComponent('Release', await (await h.call(`${releasesPath}/${release1.id}`)).json())).toEqual(release1);
+
+    // Channels. The first publication creates the channel and the environment's public feed.
+    const channelsPath = `${envPath}/channels`; const stablePath = `${channelsPath}/stable`;
+    expect(parseComponent('ChannelList', await (await h.call(channelsPath)).json()).items).toEqual([]); expect((await h.call(stablePath)).status).toBe(404);
+    expect((await post(stablePath, { kind: 'rollout', rollout: 50 })).status).toBe(404);
+    expect((await post(stablePath, { kind: 'publish', releaseId: release1.id, rollout: 101 })).status).toBe(400);
+    expect((await post(`${channelsPath}/Stable`, { kind: 'publish', releaseId: release1.id, rollout: 25 })).status).toBe(400);
+    expect((await post(stablePath, { kind: 'publish', releaseId: crypto.randomUUID(), rollout: 25 })).status).toBe(404);
+    const publishKey = crypto.randomUUID(); const published = parseComponent('ChannelReceipt', await (await post(stablePath, { kind: 'publish', releaseId: release1.id, rollout: 25 }, undefined, { 'idempotency-key': publishKey })).json()).channel;
+    expect(published).toMatchObject({ name: 'stable', scope, revision: '1', current: { number: 1, releaseId: release1.id, version: '1.0.0', rollout: 25, reason: 'publish' } });
+    expect(published.feedUrl).toMatch(/^https:\/\/cloud\.example\.test\/updates\/v1\/[a-f0-9]{32}\/stable$/); const feed = new URL(published.feedUrl).pathname;
+    expect(parseComponent('ChannelReceipt', await (await post(stablePath, { kind: 'publish', releaseId: release1.id, rollout: 25 }, undefined, { 'idempotency-key': publishKey })).json()).channel).toEqual(published);
+    // An existing channel moves only from the revision the caller saw.
+    expect((await post(stablePath, { kind: 'publish', releaseId: release1.id, rollout: 50 })).status).toBe(409); expect((await post(stablePath, { kind: 'rollout', rollout: 50 }, '7')).status).toBe(409);
+
+    // The public feed: anonymous, signed, and exactly the bytes that were signed.
+    const read = async (path: string) => { const response = await h.updates(path); return { status: response.status, body: await response.text(), cache: response.headers.get('cache-control') }; };
+    const manifest1 = await read(`${feed}/manifest.json`); expect(manifest1.status).toBe(200); expect(manifest1.cache).toBe('public, max-age=60');
+    const signature1 = (await read(`${feed}/manifest.sig`)).body;
+    expect(verifyUpdateSignature(manifest1.body, signature1, publicKey)).toBe(true); expect(verifyUpdateSignature(manifest1.body.replace('"rollout":25', '"rollout":100'), signature1, publicKey)).toBe(false);
+    expect(digest(manifest1.body)).toBe(published.current.manifestDigest!);
+    expect(JSON.parse(manifest1.body)).toEqual({ version: '1.0.0', pub_date: release1.createdAt.slice(0, 10), notes: 'First release', channel: 'stable', min_version: null, rollout: 25,
+      keyring: { primary: publicKey, secondary: null, validity_window_days: 90 },
+      platforms: { [WINDOWS]: { signature: release1.artifacts[0]!.signature, url: release1.artifacts[0]!.url, sha256: release1.artifacts[0]!.sha256 },
+        'x86_64-pc-windows-msvc-msi': { signature: release1.artifacts[1]!.signature, url: release1.artifacts[1]!.url, sha256: release1.artifacts[1]!.sha256 } } });
+    expect(JSON.parse((await read(`${feed}/yanked.json`)).body)).toEqual({ yanked: [], generated_at: '' });
+    for (const path of [`${feed}/manifest.json?x=1`, `${feed}/other.json`, `/updates/v1/${'0'.repeat(32)}/stable/manifest.json`, `${feed.replace('/stable', '/beta')}/manifest.json`, `${feed.replace('/stable', '/Stable')}/manifest.json`, `/updates/v1/short/stable/manifest.json`]) expect((await h.updates(path)).status).toBe(404);
+    expect((await h.updates(`${feed}/manifest.json`, 'POST')).status).toBe(405); expect(await (await h.updates(`${feed}/manifest.json`, 'HEAD')).text()).toBe('');
+    // A paused environment's feed stops answering, and answers again when it is active.
+    await h.sql`UPDATE environments SET state = 'paused' WHERE id = ${scope.environmentId}`; expect((await read(`${feed}/manifest.json`)).status).toBe(404); expect((await read(`${feed}/yanked.json`)).status).toBe(404);
+    await h.sql`UPDATE environments SET state = 'active' WHERE id = ${scope.environmentId}`; expect((await read(`${feed}/manifest.json`)).status).toBe(200);
+
+    // What an installed app decides from the feed, using the updater's own rules.
+    const consumer = async (channelFeed: string, channel: string, currentVersion: string, installationId = 'install-0') => {
+      const text = await read(`${channelFeed}/manifest.json`); const sig = await read(`${channelFeed}/manifest.sig`); const stop = JSON.parse((await read(`${channelFeed}/yanked.json`)).body);
+      if (text.status !== 200) return { action: 'nothing-offered', stop };
+      if (!verifyUpdateSignature(text.body, sig.body, publicKey)) throw new Error('the feed served an unverifiable manifest');
+      return decideUpdate({ manifest: JSON.parse(text.body), stopList: stop, currentVersion, installationId, platform: WINDOWS, channel });
+    };
+    const bucket = (id: string, version: string) => createHash('sha256').update(`${id}${version}`).digest().readUInt32BE(0) % 100;
+    const pick = (version: string, admitted: boolean) => { for (let index = 0; ; index++) if ((bucket(`install-${index}`, version) < 25) === admitted) return `install-${index}`; };
+    expect(await consumer(feed, 'stable', '0.9.0', pick('1.0.0', true))).toMatchObject({ action: 'update', version: '1.0.0', artifact: { url: release1.artifacts[0]!.url, sha256: release1.artifacts[0]!.sha256 } });
+    expect(await consumer(feed, 'stable', '0.9.0', pick('1.0.0', false))).toEqual({ action: 'none', reason: 'not_in_rollout' });
+    expect(await consumer(feed, 'beta', '0.9.0', pick('1.0.0', true))).toEqual({ action: 'none', reason: 'channel_mismatch' });
+
+    // Rollout change: a new revision of the same release, with its own signed manifest.
+    const widened = parseComponent('ChannelReceipt', await (await post(stablePath, { kind: 'rollout', rollout: 100 }, published.revision)).json()).channel;
+    expect(widened).toMatchObject({ revision: '2', current: { number: 2, releaseId: release1.id, version: '1.0.0', rollout: 100, reason: 'rollout' } }); expect(widened.feedUrl).toBe(published.feedUrl);
+    const manifest2 = await read(`${feed}/manifest.json`); expect(JSON.parse(manifest2.body).rollout).toBe(100); expect(verifyUpdateSignature(manifest2.body, (await read(`${feed}/manifest.sig`)).body, publicKey)).toBe(true);
+    expect(await consumer(feed, 'stable', '0.9.0', pick('1.0.0', false))).toMatchObject({ action: 'update', version: '1.0.0' });
+
+    // A second channel, then promotion: the same release offered on stable. The release itself does not change.
+    const betaPath = `${channelsPath}/beta`; const beta = parseComponent('ChannelReceipt', await (await post(betaPath, { kind: 'publish', releaseId: release2.id, rollout: 100 })).json()).channel;
+    const betaFeed = new URL(beta.feedUrl).pathname; expect(betaFeed).toBe(feed.replace('/stable', '/beta'));
+    expect(await consumer(betaFeed, 'beta', '1.0.0')).toMatchObject({ action: 'update', version: '2.0.0' });
+    // Compatibility: 2.0.0 requires at least 1.0.0.
+    expect(await consumer(betaFeed, 'beta', '0.9.0')).toEqual({ action: 'none', reason: 'incompatible' });
+    expect(await consumer(feed, 'stable', '1.0.0')).toEqual({ action: 'none', reason: 'current' });
+    const promoted = parseComponent('ChannelReceipt', await (await post(stablePath, { kind: 'publish', releaseId: release2.id, rollout: 100 }, widened.revision)).json()).channel;
+    expect(promoted).toMatchObject({ revision: '3', current: { number: 3, releaseId: release2.id, version: '2.0.0', rollout: 100, reason: 'publish' } });
+    expect(parseComponent('Release', await (await h.call(`${releasesPath}/${release2.id}`)).json())).toEqual(release2);
+    expect(await consumer(feed, 'stable', '1.0.0')).toMatchObject({ action: 'update', version: '2.0.0' });
+    expect(parseComponent('ChannelDetails', await (await h.call(stablePath)).json()).revisions.map(item => [item.number, item.version, item.rollout, item.reason])).toEqual([[3, '2.0.0', 100, 'publish'], [2, '1.0.0', 100, 'rollout'], [1, '1.0.0', 25, 'publish']]);
+    expect(parseComponent('ChannelList', await (await h.call(channelsPath)).json()).items.map(item => [item.name, item.current.version])).toEqual([['beta', '2.0.0'], ['stable', '2.0.0']]);
+
+    // Withdrawal: the release joins the stop list and every channel offering it moves back, in one step.
+    expect((await post(`${releasesPath}/${release2.id}`, { kind: 'withdraw', reason: 'Crash on launch' })).status).toBe(400);
+    expect((await post(`${releasesPath}/${release2.id}`, { kind: 'withdraw', reason: 'Crash on launch' }, '9')).status).toBe(409);
+    const withdrawKey = crypto.randomUUID(); const withdrawn = parseComponent('ReleaseReceipt', await (await post(`${releasesPath}/${release2.id}`, { kind: 'withdraw', reason: 'Crash on launch' }, release2.revision, { 'idempotency-key': withdrawKey })).json()).release;
+    expect(withdrawn).toMatchObject({ id: release2.id, state: 'withdrawn', withdrawnReason: 'Crash on launch', revision: '2', artifacts: release2.artifacts }); expect(withdrawn.withdrawnAt).not.toBeNull();
+    expect(parseComponent('ReleaseReceipt', await (await post(`${releasesPath}/${release2.id}`, { kind: 'withdraw', reason: 'Crash on launch' }, release2.revision, { 'idempotency-key': withdrawKey })).json()).release).toEqual(withdrawn);
+    expect((await post(`${releasesPath}/${release2.id}`, { kind: 'withdraw', reason: 'Again' }, withdrawn.revision)).status).toBe(409);
+    // Stable goes back to 1.0.0 at the rollout it last had, serving the manifest that was signed for it then.
+    const stableAfter = parseComponent('ChannelDetails', await (await h.call(stablePath)).json());
+    expect(stableAfter.channel).toMatchObject({ revision: '4', current: { number: 4, releaseId: release1.id, version: '1.0.0', rollout: 100, reason: 'withdrawal' } });
+    expect((await read(`${feed}/manifest.json`)).body).toBe(manifest2.body); expect(verifyUpdateSignature(manifest2.body, (await read(`${feed}/manifest.sig`)).body, publicKey)).toBe(true);
+    // Beta never offered anything else: it now offers nothing, but still publishes the stop list.
+    expect(parseComponent('ChannelDetails', await (await h.call(betaPath)).json()).channel.current).toMatchObject({ number: 2, releaseId: null, version: null, rollout: 0, reason: 'withdrawal', manifestDigest: null });
+    expect((await read(`${betaFeed}/manifest.json`)).status).toBe(404); expect((await read(`${betaFeed}/manifest.sig`)).status).toBe(404);
+    for (const path of [feed, betaFeed]) expect(JSON.parse((await read(`${path}/yanked.json`)).body)).toEqual({ yanked: [{ version: '2.0.0', reason: 'Crash on launch', yanked_at: withdrawn.withdrawnAt }], generated_at: withdrawn.withdrawnAt });
+    // Installs: one already on the withdrawn version rolls back; nobody is offered it; an older install still gets 1.0.0.
+    expect(await consumer(feed, 'stable', '2.0.0')).toEqual({ action: 'rollback', reason: 'current_withdrawn' });
+    expect(await consumer(feed, 'stable', '0.9.0')).toMatchObject({ action: 'update', version: '1.0.0' });
+    expect(await consumer(betaFeed, 'beta', '1.0.0')).toMatchObject({ action: 'nothing-offered' });
+    // A withdrawn release is never offered again, its version is never reused, and a channel with nothing to offer cannot be rolled out.
+    expect((await post(stablePath, { kind: 'publish', releaseId: release2.id, rollout: 100 }, stableAfter.channel.revision)).status).toBe(409);
+    expect((await post(releasesPath, { ...request, buildId: second.id, version: '2.0.0' })).status).toBe(409);
+    expect((await post(betaPath, { kind: 'rollout', rollout: 50 }, '2')).status).toBe(409);
+
+    // Nothing recorded can be rewritten, even by direct SQL.
+    const refusal = async (statement: Promise<unknown>) => { let failure: unknown; try { await statement; } catch (error) { failure = error; } return String((failure as { constraint?: string } | undefined)?.constraint ?? failure); };
+    expect(await refusal(h.sql`UPDATE releases SET notes = 'edited' WHERE id = ${release1.id}`)).toContain('release_immutable');
+    expect(await refusal(h.sql`UPDATE releases SET version = '9.9.9' WHERE id = ${release1.id}`)).toContain('release_immutable');
+    expect(await refusal(h.sql`UPDATE releases SET state = 'published', withdrawn_reason = NULL, withdrawn_at = NULL WHERE id = ${release2.id}`)).toContain('release_withdrawal_final');
+    expect(await refusal(h.sql`UPDATE release_artifacts SET sha256 = ${digest('swapped')} WHERE release_id = ${release1.id}`)).toContain('release_record_append_only');
+    expect(await refusal(h.sql`UPDATE channel_revisions SET rollout = 1 WHERE environment_id = ${scope.environmentId}`)).toContain('release_record_append_only');
+    expect(await refusal(h.sql`DELETE FROM channel_revisions WHERE environment_id = ${scope.environmentId}`)).toContain('release_record_append_only');
+    expect(await refusal(h.sql`UPDATE signing_profiles SET public_key = ${publicKeyOf(randomBytes(32))} WHERE id = ${profile.id}`)).toContain('release_record_append_only');
+
+    // The audit trail, in order, and nothing durable holds the private key.
+    const audit = (await h.sql`SELECT action, resource_kind FROM platform_events WHERE org_id = ${org} AND resource_kind IN ('release', 'channel', 'signing_profile') ORDER BY transaction_id, sequence`).map((row: { action: string }) => row.action);
+    expect(audit).toEqual(['signing_profile.created', 'release.published', 'release.published', 'channel.published', 'channel.rollout_changed', 'channel.published', 'channel.published', 'channel.withdrawn', 'channel.withdrawn', 'release.withdrawn']);
+    const durable = JSON.stringify({ profiles: await h.sql`SELECT * FROM signing_profiles`, releases: await h.sql`SELECT * FROM releases`, artifacts: await h.sql`SELECT * FROM release_artifacts`, revisions: await h.sql`SELECT * FROM channel_revisions`,
+      events: await h.sql`SELECT * FROM release_events`, commands: await h.sql`SELECT * FROM release_commands` });
+    expect(durable).not.toContain(seed.toString('base64')); expect(durable).not.toContain(seed.toString('hex'));
+
+    // A Viewer reads but cannot publish, withdraw, move channels or bind keys. Another organization sees nothing.
+    const ownerCookies = new Map(h.cookies); h.cookies.clear(); await h.challenge('viewer@example.test'); await h.deliver(); await h.complete();
+    const viewer = (await h.sql`SELECT id FROM accounts WHERE primary_email = 'viewer@example.test'`)[0].id;
+    await h.sql`INSERT INTO memberships (id, account_id, org_id, role, state, project_access) VALUES (${crypto.randomUUID()}, ${viewer}, ${org}, 'Viewer', 'active', 'all')`;
+    await h.sql`UPDATE accounts SET permission_revision = permission_revision + 1 WHERE id = ${viewer}`;
+    for (const path of [releasesPath, `${releasesPath}/${release1.id}`, channelsPath, stablePath, profilesPath]) expect((await h.call(path)).status).toBe(200);
+    for (const [path, body, revision] of [[releasesPath, { ...request, version: '3.0.0' }, undefined], [`${releasesPath}/${release1.id}`, { kind: 'withdraw', reason: 'No' }, release1.revision],
+      [stablePath, { kind: 'rollout', rollout: 1 }, stableAfter.channel.revision], [profilesPath, { name: 'other', secretName: 'UPDATE_SIGNING_KEY' }, undefined]] as const) expect((await post(path, body, revision)).status).toBe(403);
+    h.cookies.clear(); await h.challenge('other@example.test'); await h.deliver(); await h.complete(); await organizationResponse(h.createOrganization('Other releases', 'other-releases'));
+    for (const path of [releasesPath, `${releasesPath}/${release1.id}`, channelsPath, stablePath, profilesPath]) expect((await h.call(path)).status).toBe(404);
+    for (const [path, body] of [[releasesPath, request], [`${releasesPath}/${release1.id}`, { kind: 'withdraw', reason: 'No' }], [stablePath, { kind: 'rollout', rollout: 1 }], [profilesPath, { name: 'other', secretName: 'UPDATE_SIGNING_KEY' }]] as const) expect((await post(path, body, '1')).status).toBe(404);
+    h.restoreCookies(ownerCookies);
+    expect(parseComponent('ChannelDetails', await (await h.call(stablePath)).json()).channel).toEqual(stableAfter.channel);
+
+    // Withdrawing the last published release: stable's history holds only withdrawn releases now, so it offers nothing rather than an earlier withdrawn one.
+    const last = parseComponent('ReleaseReceipt', await (await post(`${releasesPath}/${release1.id}`, { kind: 'withdraw', reason: 'Superseded' }, release1.revision)).json()).release; expect(last.state).toBe('withdrawn');
+    expect(parseComponent('ChannelDetails', await (await h.call(stablePath)).json()).channel.current).toMatchObject({ number: 5, releaseId: null, version: null, rollout: 0, reason: 'withdrawal' });
+    expect((await read(`${feed}/manifest.json`)).status).toBe(404);
+    expect(JSON.parse((await read(`${feed}/yanked.json`)).body).yanked.map((item: { version: string }) => item.version).sort()).toEqual(['1.0.0', '2.0.0']);
+    expect(await consumer(feed, 'stable', '1.0.0')).toMatchObject({ action: 'nothing-offered' });
   });
 
   test('builds survive lost workers within the attempt limit, and cancellation, reported failure, no worker and deadlines each end them cleanly', async () => {
@@ -3161,10 +3376,11 @@ test('secret custody and worker configuration is explicit, complete and never fa
   expect(() => accountPlatformConfigFromEnv({ ...base, CARBON_WORKERS: 'enabled' })).toThrow('CARBON_WORKERS requires CARBON_SECRETS=enabled');
   expect(() => accountPlatformConfigFromEnv({ ...local, CARBON_WORKERS: 'yes' })).toThrow('CARBON_WORKERS must be enabled or disabled');
   // Builds cannot succeed without reading artifacts back, so workers need the artifact store.
-  const store = { OBJECT_STORE_ENDPOINT: 'http://localhost:9000', OBJECT_STORE_BUCKET: 'carbon-artifacts', OBJECT_STORE_ACCESS_KEY_ID: 'store-id', OBJECT_STORE_SECRET_ACCESS_KEY: 'store-secret' };
+  const store = { OBJECT_STORE_ENDPOINT: 'http://localhost:9000', OBJECT_STORE_BUCKET: 'carbon-artifacts', OBJECT_STORE_ACCESS_KEY_ID: 'store-id', OBJECT_STORE_SECRET_ACCESS_KEY: 'store-secret', OBJECT_STORE_PUBLIC_BASE_URL: 'https://downloads.example.test' };
   for (const missing of Object.keys(store)) expect(() => accountPlatformConfigFromEnv({ ...local, ...store, CARBON_WORKERS: 'enabled', [missing]: '' })).toThrow(missing);
   const withWorkers = accountPlatformConfigFromEnv({ ...local, ...store, CARBON_WORKERS: 'enabled' })!;
-  expect(withWorkers).toMatchObject({ workers: true, provenance: undefined, artifactStore: { endpoint: 'http://localhost:9000', bucket: 'carbon-artifacts', accessKeyId: 'store-id', secretAccessKey: 'store-secret' } });
+  expect(() => accountPlatformConfigFromEnv({ ...local, ...store, CARBON_WORKERS: 'enabled', OBJECT_STORE_PUBLIC_BASE_URL: 'downloads.example.test' })).toThrow('OBJECT_STORE_PUBLIC_BASE_URL must be an http(s) URL');
+  expect(withWorkers).toMatchObject({ workers: true, provenance: undefined, artifactPublicBaseUrl: 'https://downloads.example.test', artifactStore: { endpoint: 'http://localhost:9000', bucket: 'carbon-artifacts', accessKeyId: 'store-id', secretAccessKey: 'store-secret' } });
   expect(accountPlatformConfigFromEnv(local)!.artifactStore).toBeUndefined();
   const pem = generateKeyPairSync('ed25519').privateKey.export({ type: 'pkcs8', format: 'pem' }) as string;
   expect(() => accountPlatformConfigFromEnv({ ...local, ...store, CARBON_WORKERS: 'enabled', CARBON_PROVENANCE_PRIVATE_KEY: pem })).toThrow('CARBON_PROVENANCE_KEY_ID');

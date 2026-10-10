@@ -18,9 +18,13 @@ pub mod rollout;
 pub mod state;
 #[path = "domain/stop_list.rs"]
 pub mod stop_list;
+#[path = "domain/version.rs"]
+pub mod version;
 
 #[path = "application/apply.rs"]
 pub mod apply;
+#[path = "application/decide.rs"]
+pub mod decide;
 #[path = "application/rollback.rs"]
 pub mod rollback;
 #[path = "application/verify.rs"]
@@ -31,6 +35,7 @@ pub mod downloader;
 #[path = "infrastructure/http_client.rs"]
 pub mod http_client;
 
+pub use decide::{decide, Decision, NoUpdate};
 pub use http_client::{fetch_manifest, fetch_manifest_sig, fetch_stop_list};
 pub use manifest::UpdaterManifest;
 pub use rollout::in_rollout;

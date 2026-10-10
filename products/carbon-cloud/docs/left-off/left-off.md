@@ -1,6 +1,6 @@
 # Carbon platform left-off checkpoint
 
-Checkpoint: 2026-10-10, after Phase 8: build execution (partly complete).
+Checkpoint: 2026-10-10, after Phase 9: releases, channels and updater conformance.
 
 The overall platform plan remains unfinished. The rough scope estimate is about
 **30% of the complete backend-and-frontend goal**, with backend foundations in
@@ -49,6 +49,11 @@ the **low 40% range** and the requested production frontend redesign still at
   pinned commit into a disposable workspace, requires a lockfile, redacts
   secrets from logs and erases the workspace before reporting success. Real
   NSIS/WiX packaging, Authenticode signing and build isolation are unproven.
+- Releases and channels: immutable releases over verified build artifacts,
+  signing profiles backed by environment secrets, signed channel revisions,
+  promotion, rollout, withdrawal with a stop list, and a public update feed.
+- One shared update conformance fixture, run by the TypeScript updater, the
+  Rust runtime updater and the standalone updater.
 
 The service-account implementation is described in
 [service-accounts.md](../service-accounts.md), its wire surface in
@@ -59,13 +64,16 @@ legacy permissions are inferred.
 
 ## Last verified state
 
-- Affected Bun regression: **578 tests, 5,728 assertions across 67 files, 0 failures**,
-  including the real HTTP/PostgreSQL cross-service suites.
+- Affected Bun regression: **675 tests passed, 1 skipped (the object-store test, which needs a configured store) and 0 failed, with 6,455 assertions across 82 files. The set is wider than before: it now includes the distribution capabilities and the standalone updater**,
+  including the real HTTP/PostgreSQL cross-service suites. These database
+  scenarios run on the development machine only: CI has no database and skips
+  them (G-50).
+- The Rust updater's 18 tests pass, including the conformance fixture.
 - The artifact store test passed against a local MinIO container (not in CI).
 - Solutions, Carbon Cloud, Database, Registry and CLI TypeScript checks passed.
 - Generated platform types are current.
 - The build OpenAPI document parses as JSON.
-- CI was green at the Phase 7 commit; check the Phase 8 commit's run.
+- The build and release OpenAPI documents parse as JSON.
 - A full local `bazel build //...` passed on 2026-10-10 before Phases 2 to 7. Local
   `bazel test //...` is unreliable while `defs.bzl` runs `cargo sweep` after
   every Cargo invocation: parallel Rust tests delete each other's build output
@@ -92,7 +100,10 @@ Registry assertions, and the CLI can read its Registry namespace. Builds are
 orchestrated on worker leases, verified against object storage and given signed
 provenance, and a worker runtime runs them in a disposable workspace. That
 runtime has never compiled, packaged or signed a real Carbon app, and it does
-not isolate or limit a build (G-36 to G-38). The
+not isolate or limit a build (G-36 to G-38). Releases, channels and the public
+update feed work against the updaters' shared rules, but no packaged app has
+updated itself from a Cloud channel yet (G-57), and the CLI still publishes
+through the older S3 path (G-59). The
 AWS KMS adapter and the OIDC client are tested against stand-ins, not real
 providers. Final deletion marks rows and destroys no owning-service data.
 Suspension has no operator route. Legacy `cc_` and `wk_` tokens, the legacy
@@ -100,13 +111,13 @@ build queue and the legacy end-user routes still work as before. Existing legacy
 implementations elsewhere in the repository still need review against the new
 isolation, durability and trust requirements before they count as complete.
 
-Phase 8 is **partly complete**. What remains needs a Windows build host with
-NSIS, WiX and a signing certificate, and a decision on how builds are isolated
-(gaps G-36 to G-38, and G-39 to G-49 around them).
+Phase 8 is **partly complete** and Phase 9 is complete. By the owner's decision
+(2026-10-10), open decisions and everything a phase could not finish or prove
+are collected in [gaps.md](gaps.md) and worked in a final Phase 19; phases do
+not stop for them.
 
-The next bounded goal is **Phase 9: releases, channel revisions,
-rollout/promotion/withdrawal and updater compatibility**, which does not depend
-on those. Continue with exactly one phase from [handoff.md](handoff.md) per
-future work session. Finish that phase's proof gate, update both checkpoint
-documents, and stop before beginning the next phase unless the user explicitly
-combines them.
+The next bounded goal is **Phase 10: relational exports, foreign keys, impact
+previews, asynchronous schema work, migration promotion and restricted SQL**.
+Continue with exactly one phase from [handoff.md](handoff.md) per future work
+session. Finish that phase's proof gate, update both checkpoint documents, and
+stop before beginning the next phase unless the user explicitly combines them.

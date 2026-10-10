@@ -27,3 +27,28 @@ bun_test(
     entry = "tests/slot-lifecycle.integration.test.ts",
     srcs = [":srcs", ":tests"],
 )
+
+# The shared update conformance fixture (//solutions/contracts/update), run by
+# the TypeScript updater here and by the Rust updater below.
+bun_test(
+    name = "conformance_test",
+    entry = "tests/conformance.test.ts",
+    srcs = [":srcs", ":tests", "//solutions/contracts/update:fixtures"],
+)
+
+load("//.tools/orchestration/bazel/cargo:defs.bzl", "cargo_test")
+
+filegroup(
+    name = "rust_srcs",
+    srcs = glob(["rust/**/*.rs", "rust/Cargo.toml"], allow_empty = True),
+)
+
+# The Rust updater's unit tests and the same conformance fixture. This is the
+# updater packaged apps run. size = "large": on a cold Cargo cache the target
+# waits on the shared build directory while other crates compile.
+cargo_test(
+    name = "rust_updater_test",
+    package = "carbon-updater",
+    srcs = [":rust_srcs", "//solutions/contracts/update:fixtures"],
+    size = "large",
+)

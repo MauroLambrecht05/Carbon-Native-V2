@@ -47,38 +47,33 @@ pub(crate) fn check_for_update_once(
 
     let mut state = carbon_updater::SlotState::load(install_dir)?;
 
-    // Is what's CURRENTLY RUNNING yanked? Checked before anything about a
-    // new version — a yanked current version needs to roll back regardless
-    // of whether a fix is out yet.
+    // One decision, made the same way by every updater (carbon_updater::decide,
+    // held to solutions/contracts/update/fixtures/conformance.json): a
+    // withdrawn running version rolls back before anything else is
+    // considered; only a strictly newer, compatible, non-withdrawn version in
+    // this install's rollout bucket, on this install's channel, is installed.
     let stop_list = carbon_updater::fetch_stop_list(base_url)?;
-    if carbon_updater::stop_list::is_yanked(&stop_list, current_version).is_some() {
-        eprintln!(
-            "[carbon-updater] running version {current_version} of {app_name} is yanked — \
-             rolling back to {:?} for next launch",
-            state.previous_slot
-        );
-        state.rollback(install_dir)?;
-        return Ok(());
-    }
-
-    if manifest.version == current_version {
-        return Ok(()); // Already current — nothing to do this pass.
-    }
-
-    // KNOWN LIMITATION: manifest.min_version (the oldest version allowed to
-    // jump straight to this release) is not enforced here — comparing it
-    // correctly needs real semver ordering, which nothing in this crate
-    // pulls in yet. Skipping the gate rather than comparing version strings
-    // naively (which would accept or refuse the wrong releases silently) —
-    // tracked as a real gap, not quietly "handled".
-    let _ = &manifest.min_version;
-
-    if !carbon_updater::in_rollout(
+    match carbon_updater::decide(
+        &manifest,
+        &stop_list,
+        current_version,
         &state.installation_id,
-        &manifest.version,
-        manifest.rollout as u8,
+        platform,
+        Some(&cfg.channel),
     ) {
-        return Ok(()); // Not in this rollout stage yet — check again next interval.
+        carbon_updater::Decision::Rollback => {
+            eprintln!(
+                "[carbon-updater] running version {current_version} of {app_name} is withdrawn — \
+                 rolling back to {:?} for next launch",
+                state.previous_slot
+            );
+            state.rollback(install_dir)?;
+            return Ok(());
+        }
+        // Nothing to do this pass: already current, not in this rollout
+        // stage yet, incompatible, or no artifact for this platform.
+        carbon_updater::Decision::None(_) => return Ok(()),
+        carbon_updater::Decision::Update { .. } => {}
     }
 
     eprintln!(

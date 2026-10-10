@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { AccountBuilds } from '@carbon/orchestration';
+import type { AccountBuilds, AccountReleases } from '@carbon/orchestration';
 import type { AccountRealms } from '@carbon/auth';
 import type { AccountCatalog, AccountEnvironmentCredentials, AccountWorkers, AccountEnvironmentSecrets, AccountRepositories, CatalogCommand } from '@carbon/catalog';
 import type { AccountData, AccountImports } from '@carbon/data';
@@ -14,7 +14,7 @@ function cookieValue(request: Request, name: string): string {
   return matches.length === 1 ? matches[0]!.slice(name.length + 1) : "";
 }
 
-export function createAccountRoutes(auth: AccountAuthentication, origin: string, security?: AccountSecurity, profile?: AccountProfile, organizations?: OrganizationAccess, invitations?: OrganizationInvitations, github?: ExternalAccountAuthentication, access?: AccountAuthorization, catalog?: AccountCatalog, data?: AccountData, imports?: AccountImports, credentials?: AccountEnvironmentCredentials, secrets?: AccountEnvironmentSecrets, repositories?: AccountRepositories, devices?: AccountDeviceAuthorization, serviceAccounts?: AccountServiceAccounts, personal?: AccountPersonalCredentials, legacy?: AccountLegacyTokens, workers?: AccountWorkers, audit?: AccountAudit, realms?: AccountRealms, personalExchange?: PersonalCredentialExchange, builds?: AccountBuilds) {
+export function createAccountRoutes(auth: AccountAuthentication, origin: string, security?: AccountSecurity, profile?: AccountProfile, organizations?: OrganizationAccess, invitations?: OrganizationInvitations, github?: ExternalAccountAuthentication, access?: AccountAuthorization, catalog?: AccountCatalog, data?: AccountData, imports?: AccountImports, credentials?: AccountEnvironmentCredentials, secrets?: AccountEnvironmentSecrets, repositories?: AccountRepositories, devices?: AccountDeviceAuthorization, serviceAccounts?: AccountServiceAccounts, personal?: AccountPersonalCredentials, legacy?: AccountLegacyTokens, workers?: AccountWorkers, audit?: AccountAudit, realms?: AccountRealms, personalExchange?: PersonalCredentialExchange, builds?: AccountBuilds, releases?: AccountReleases) {
   const secure = new URL(origin).protocol === "https:";
   const names = { session: `${secure ? "__Host-" : ""}carbon-session`, csrf: `${secure ? "__Host-" : ""}carbon-csrf`, browser: `${secure ? "__Host-" : ""}carbon-browser` };
   const cookie = (name: string, value: string, seconds: number, httpOnly = true) => `${name}=${value}; Path=/; Max-Age=${seconds}; SameSite=Lax${httpOnly ? "; HttpOnly" : ""}${secure ? "; Secure" : ""}`;
@@ -130,6 +130,28 @@ export function createAccountRoutes(auth: AccountAuthentication, origin: string,
         if (request.method === 'GET') return json(await builds.get(session, scope, buildId!));
         if (request.method === 'POST' && !buildId) return json(await builds.create(session, csrf, scope, parseComponent('BuildCreate', await body()), parseComponent('CommandOptions', { idempotencyKey: request.headers.get('idempotency-key') ?? '', expectedRevision: request.headers.get('if-match')?.replace(/^"([1-9][0-9]*)"$/, '$1') }), requestId), 201);
         if (request.method === 'POST' && buildId && !buildRoute[5]) return json(await builds.command(session, csrf, scope, buildId, parseComponent('BuildCommand', await body()), parseComponent('CommandOptions', { idempotencyKey: request.headers.get('idempotency-key') ?? '', expectedRevision: request.headers.get('if-match')?.replace(/^"([1-9][0-9]*)"$/, '$1') }), requestId));
+      }
+      const releaseRoute = new RegExp(`^${BASE}/orgs/([^/]+)/projects/([^/]+)/environments/([^/]+)/(signing-profiles|releases|channels)(?:/([^/]+))?$`).exec(url.pathname);
+      if (releaseRoute) {
+        if (!releases) throw new PlatformFault('capability', 'Releases are not configured');
+        const scope = parseComponent('EnvironmentScope', { orgId: releaseRoute[1], projectId: releaseRoute[2], environmentId: releaseRoute[3] });
+        const session = cookieValue(request, names.session); const csrf = request.headers.get('x-csrf-token') ?? ''; const kind = releaseRoute[4]; const id = releaseRoute[5];
+        const options = () => parseComponent('CommandOptions', { idempotencyKey: request.headers.get('idempotency-key') ?? '', expectedRevision: request.headers.get('if-match')?.replace(/^"([1-9][0-9]*)"$/, '$1') });
+        if (kind === 'signing-profiles' && !id) {
+          if (request.method === 'GET') return json(await releases.profiles(session, scope));
+          if (request.method === 'POST') return json(await releases.createProfile(session, csrf, scope, parseComponent('SigningProfileCreate', await body()), requestId), 201);
+        }
+        if (kind === 'releases') {
+          if (request.method === 'GET' && !id) return json(await releases.list(session, scope, page()));
+          if (request.method === 'GET') return json(await releases.get(session, scope, id!));
+          if (request.method === 'POST' && !id) return json(await releases.create(session, csrf, scope, parseComponent('ReleaseCreate', await body()), options(), requestId), 201);
+          if (request.method === 'POST') return json(await releases.command(session, csrf, scope, id!, parseComponent('ReleaseCommand', await body()), options(), requestId));
+        }
+        if (kind === 'channels') {
+          if (request.method === 'GET' && !id) return json(await releases.channels(session, scope));
+          if (request.method === 'GET') return json(await releases.channel(session, scope, id!));
+          if (request.method === 'POST' && id) return json(await releases.channelCommand(session, csrf, scope, id, parseComponent('ChannelCommand', await body()), options(), requestId));
+        }
       }
       const realmRoute = new RegExp(`^${BASE}/orgs/([^/]+)/projects/([^/]+)/environments/([^/]+)/realm(?:/(users)(?:/([^/]+))?)?$`).exec(url.pathname);
       if (realmRoute) {

@@ -16,7 +16,8 @@ import { ResendAccountNotification } from "@carbon/resend-notification";
 import { DevelopmentInboxNotification } from "../infrastructure/notifications/DevelopmentInboxNotification.ts";
 import { AccountRealms, AppAuthentication, HttpOidcClient, PostgresAppAuthRepository, PostgresAppMailQueue } from '@carbon/auth';
 import { createAppRoutes } from '../infrastructure/http/app-routes.ts';
-import { AccountBuilds, BuildOrchestration, Ed25519ProvenanceSigner, PostgresPlatformBuildRepository, S3ArtifactVerifier, WorkerBuilds } from '@carbon/orchestration';
+import { AccountBuilds, AccountReleases, BuildOrchestration, Ed25519ProvenanceSigner, PostgresPlatformBuildRepository, PostgresPlatformReleaseRepository, PublicUpdateFeed, S3ArtifactReader, S3ArtifactVerifier, SecretReleaseSigner, WorkerBuilds } from '@carbon/orchestration';
+import { createUpdateRoutes } from '../infrastructure/http/update-routes.ts';
 import { createWorkerRoutes } from '../infrastructure/http/worker-routes.ts';
 import { createAccountRoutes } from "../infrastructure/http/account-routes.ts";
 import { serviceAssertionIssuerFromEnv } from './service-assertion-signing.ts';
@@ -37,6 +38,8 @@ export interface AccountPlatformConfig {
   readonly workers?: boolean;
   /** Where workers upload artifacts; Cloud reads them back to verify declarations. */
   readonly artifactStore?: import('@carbon/orchestration').ArtifactStoreConfig;
+  /** The public address of the artifact bucket: where installed apps download released artifacts. */
+  readonly artifactPublicBaseUrl?: string;
   /** Signs build provenance. Without it provenance is recorded unsigned. */
   readonly provenance?: { readonly keyId: string; readonly privateKey: string };
   readonly githubRepositories?: { readonly appId: string; readonly privateKey: string; readonly webhookSecret: string };
@@ -102,6 +105,8 @@ export function accountPlatformConfigFromEnv(env: NodeJS.ProcessEnv = process.en
   if (workers && !secrets) throw new Error('CARBON_WORKERS requires CARBON_SECRETS=enabled');
   // Builds cannot succeed without reading artifacts back, so the store is required with workers, not optional.
   const artifactStore = workers ? { endpoint: required('OBJECT_STORE_ENDPOINT'), bucket: required('OBJECT_STORE_BUCKET'), accessKeyId: required('OBJECT_STORE_ACCESS_KEY_ID'), secretAccessKey: required('OBJECT_STORE_SECRET_ACCESS_KEY') } : undefined;
+  const artifactPublicBaseUrl = workers ? required('OBJECT_STORE_PUBLIC_BASE_URL') : undefined;
+  if (artifactPublicBaseUrl && !/^https?:\/\/[^\s]+$/.test(artifactPublicBaseUrl)) throw new Error('OBJECT_STORE_PUBLIC_BASE_URL must be an http(s) URL');
   const provenance = env.CARBON_PROVENANCE_PRIVATE_KEY ? { keyId: required('CARBON_PROVENANCE_KEY_ID'), privateKey: env.CARBON_PROVENANCE_PRIVATE_KEY.replace(/\\n/g, '\n') } : undefined;
   if(env.CARBON_SERVICE_ACCOUNT_ASSERTIONS&& !['enabled','disabled'].includes(env.CARBON_SERVICE_ACCOUNT_ASSERTIONS))throw new Error('CARBON_SERVICE_ACCOUNT_ASSERTIONS must be enabled or disabled');
   const serviceAccountAssertions=env.CARBON_SERVICE_ACCOUNT_ASSERTIONS==='enabled'?serviceAssertionIssuerFromEnv(env):undefined;
@@ -113,7 +118,7 @@ export function accountPlatformConfigFromEnv(env: NodeJS.ProcessEnv = process.en
   const personalAssertions = env.CARBON_PERSONAL_ASSERTIONS === 'enabled' ? serviceAssertionIssuerFromEnv(env) : undefined;
   return {
     origin, termsVersion: required("CARBON_TERMS_VERSION"), rateLimitKey,
-    activeKeyId: required("CARBON_ACCOUNT_ACTIVE_KEY_ID"), encryptionKeys: keys as Record<string, string>, notification, github, githubRepositories, secrets, workers, artifactStore, provenance, serviceAccountAssertions, deviceAssertions, legacyTokens: legacyTokenConfigFromEnv(env), appAssertions, personalAssertions, data: dataClientFromEnv(env), imports: importClientFromEnv(env),
+    activeKeyId: required("CARBON_ACCOUNT_ACTIVE_KEY_ID"), encryptionKeys: keys as Record<string, string>, notification, github, githubRepositories, secrets, workers, artifactStore, artifactPublicBaseUrl, provenance, serviceAccountAssertions, deviceAssertions, legacyTokens: legacyTokenConfigFromEnv(env), appAssertions, personalAssertions, data: dataClientFromEnv(env), imports: importClientFromEnv(env),
   };
 }
 
@@ -137,6 +142,10 @@ export function composeAccountPlatform(sql: Bun.SQL, config: AccountPlatformConf
   // Builds run on worker leases, so they exist exactly when workers do.
   const buildRepository = workerRepository && config.artifactStore ? new PostgresPlatformBuildRepository(sql, workerRepository,
     config.provenance ? new Ed25519ProvenanceSigner(config.provenance.keyId, config.provenance.privateKey) : undefined) : undefined;
+  // Releases are made from builds and signed with keys held as environment secrets, so they need both.
+  const releaseRepository = buildRepository && secretProtector && config.artifactStore && config.artifactPublicBaseUrl ? new PostgresPlatformReleaseRepository(sql, config.origin) : undefined;
+  const accountReleases = releaseRepository ? new AccountReleases(auth, releaseRepository, new SecretReleaseSigner(new PostgresProviderSecretReader(sql, secretProtector!)), new S3ArtifactReader(config.artifactStore!),
+    protector, { artifactBaseUrl: config.artifactPublicBaseUrl! }) : undefined;
   const github = config.github ? new ExternalAccountAuthentication(auth, externalAccounts,
     new GitHubAccountProvider(config.github.clientId, config.github.clientSecret, config.origin + "/platform/v1/auth/github/callback"), protector, config) : undefined;
   const accountRepositories = config.githubRepositories ? new AccountRepositories(auth, new PostgresRepositoryIntegrationRepository(sql),
@@ -145,8 +154,9 @@ export function composeAccountPlatform(sql: Bun.SQL, config: AccountPlatformConf
     ? new ResendAccountNotification(config.notification.apiKey, config.notification.from)
     : new DevelopmentInboxNotification(config.notification.directory);
   return {
-    handler: createAccountRoutes(auth, config.origin, security, new AccountProfile(auth, new PostgresAccountProfileRepository(sql, mfa), protector, config), new OrganizationAccess(auth, new PostgresOrganizationRepository(sql), protector), new OrganizationInvitations(auth, new PostgresOrganizationInvitationsRepository(sql), new PostgresOrganizationRepository(sql), protector, config), github, new AccountAuthorization(auth, new PostgresPlatformAuthority(sql)), new AccountCatalog(auth, new PostgresCatalogRepository(sql), protector), config.data ? new AccountData(auth, new PostgresAccountDataAuthority(sql), config.data, protector) : undefined, importJobs ? new AccountImports(auth, importJobs) : undefined, new AccountEnvironmentCredentials(auth, environmentCredentials, protector), environmentSecrets ? new AccountEnvironmentSecrets(auth, environmentSecrets, protector) : undefined, accountRepositories, new AccountDeviceAuthorization(auth,new PostgresDeviceAuthorizationRepository(sql),protector,config.origin,config.rateLimitKey,new DeviceCredentialAuthentication(sql),config.deviceAssertions),new AccountServiceAccounts(auth,new PostgresServiceAccountRepository(sql),protector,config.serviceAccountAssertions),new AccountPersonalCredentials(auth,new PostgresPersonalCredentialRepository(sql),protector),new AccountLegacyTokens(auth,new PostgresLegacyTokenRepository(sql),protector,config.legacyTokens?.policy??'issue'),workerRepository?new AccountWorkers(auth,workerRepository,protector):undefined,new AccountAudit(auth,auditLog,protector),new AccountRealms(auth,appRepository,protector),new PersonalCredentialExchange(new PersonalCredentialAuthentication(sql),config.personalAssertions),buildRepository?new AccountBuilds(auth,buildRepository,protector):undefined),
+    handler: createAccountRoutes(auth, config.origin, security, new AccountProfile(auth, new PostgresAccountProfileRepository(sql, mfa), protector, config), new OrganizationAccess(auth, new PostgresOrganizationRepository(sql), protector), new OrganizationInvitations(auth, new PostgresOrganizationInvitationsRepository(sql), new PostgresOrganizationRepository(sql), protector, config), github, new AccountAuthorization(auth, new PostgresPlatformAuthority(sql)), new AccountCatalog(auth, new PostgresCatalogRepository(sql), protector), config.data ? new AccountData(auth, new PostgresAccountDataAuthority(sql), config.data, protector) : undefined, importJobs ? new AccountImports(auth, importJobs) : undefined, new AccountEnvironmentCredentials(auth, environmentCredentials, protector), environmentSecrets ? new AccountEnvironmentSecrets(auth, environmentSecrets, protector) : undefined, accountRepositories, new AccountDeviceAuthorization(auth,new PostgresDeviceAuthorizationRepository(sql),protector,config.origin,config.rateLimitKey,new DeviceCredentialAuthentication(sql),config.deviceAssertions),new AccountServiceAccounts(auth,new PostgresServiceAccountRepository(sql),protector,config.serviceAccountAssertions),new AccountPersonalCredentials(auth,new PostgresPersonalCredentialRepository(sql),protector),new AccountLegacyTokens(auth,new PostgresLegacyTokenRepository(sql),protector,config.legacyTokens?.policy??'issue'),workerRepository?new AccountWorkers(auth,workerRepository,protector):undefined,new AccountAudit(auth,auditLog,protector),new AccountRealms(auth,appRepository,protector),new PersonalCredentialExchange(new PersonalCredentialAuthentication(sql),config.personalAssertions),buildRepository?new AccountBuilds(auth,buildRepository,protector):undefined,accountReleases),
     buildOrchestration: buildRepository ? new BuildOrchestration(buildRepository) : undefined,
+    updateHandler: releaseRepository ? createUpdateRoutes(new PublicUpdateFeed(releaseRepository)) : undefined,
     appHandler: createAppRoutes(new AppAuthentication(appRepository, protector, { rateLimitKey: config.rateLimitKey }, new HttpOidcClient(),
       secretProtector ? new PostgresProviderSecretReader(sql, secretProtector) : undefined, config.appAssertions), config.origin),
     deliverAppMail: new DeliverAccountMail(new PostgresAppMailQueue(sql), protector, notification),

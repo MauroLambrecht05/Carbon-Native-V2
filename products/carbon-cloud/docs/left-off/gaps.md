@@ -8,6 +8,14 @@ here.
 Each entry says what is missing, where it came from, why it is open, and what
 would close it.
 
+**Where these get done.** By the owner's decision on 2026-10-10, open decisions
+and everything a phase could not finish or prove are worked in one final phase,
+Phase 19 in [handoff.md](handoff.md), after the planned phases. A phase does not
+stop for them: where a decision was needed to keep going, a default was chosen
+and is recorded in the entry. An entry that names an earlier phase as its owner
+is closed there if that phase's own work reaches it, and otherwise falls to
+Phase 19 as well.
+
 ## Open: needs something from outside the repository
 
 | # | Gap | From | Why open | Closes when |
@@ -85,6 +93,30 @@ The rest of the gate is not, and is listed here.
 | G-48 | Cancellation stops the worker between steps. A compile or package step already running is not killed, so a cancelled build can keep using the machine until that step ends | `RealLocalPipeline` does not take the abort signal | Subprocesses are terminated on cancellation |
 | G-49 | The worker removes only its own settings from the environment. Any other secret in the worker machine's environment is inherited by builds. The worker credential is not rotated automatically, and the `build-worker.ts` loop has no test beyond its settings handling | Depends on G-38 for a real boundary | With G-38 |
 
+## Open: from Phase 9 (releases)
+
+| # | Gap | Why open | Closes when |
+|---|---|---|---|
+| G-51 | An artifact is signed by reading it whole into Cloud's memory, so anything over 512 MiB cannot be released | Ed25519 signs a whole message; the existing updaters verify that form | Artifacts are signed where they are built, or the contract moves to signing a digest |
+| G-52 | The stop list (`yanked.json`) is not signed. Someone who can alter traffic can hide a withdrawal from an install, though not forge an update | The existing updaters read an unsigned stop list | A signed stop list is added to the update contract and every updater |
+| G-53 | An update signing key cannot be rotated. A profile is fixed to one key, and the manifest's `keyring.secondary` is always empty | Rotation needs the overlap rules of `@carbon/signing`'s keyring wired into profiles and manifests | A rotation with an overlap window passes the conformance fixture |
+| G-54 | Signing keys are environment secrets: encrypted at rest under the configured custody, decrypted in Cloud's memory for each signature. The plan asks that private keys never enter Cloud tables; the encrypted form does. Default chosen: reuse the secret store | Signing inside a KMS or HSM needs a provider and a decision | A custody adapter signs without exporting the key |
+| G-55 | A release's compatibility is `min_version` only. The plan also lists the data environment and migration warnings | Those belong to data migrations (Phase 10) | Phase 10 |
+| G-56 | Nothing schedules a rollout, widens it over time, or halts it when installs crash | No health signal reaches Cloud; the plan forbids device telemetry unless the app enables it | A decision on telemetry |
+| G-57 | No packaged app has updated itself from this feed. The three updaters agree with the publisher on signatures and decisions through the shared fixture, and Cloud's feed is checked with the TypeScript updater's code, but download, slot swap and restart against a Cloud release have not run | Needs a real packaged build (G-36) | A packaged app on version N updates to N+1 from a Cloud channel and rolls back after a withdrawal |
+| G-58 | `products/carbon-updater` (the standalone daemon) is not the canonical updater and still exists. Its local HTTP surface takes the trusted key and a manifest from the request body with open CORS | Default chosen: keep it conforming, mark it non-canonical | A decision to harden or remove it |
+| G-59 | The CLI still publishes through the older path (`carbon publish` straight to S3, `PublishReleaseUseCase`, `RollbackReleaseUseCase`, `YankReleaseUseCase`), which bypasses Cloud releases, their audit trail and their immutability | CLI work is Phase 15 | Phase 15 |
+| G-60 | The public feed is read from the database on every request, with a 60-second cache header and no rate limit or CDN | Acceptable until load says otherwise | Phase 18 |
+| G-61 | A paused environment's feed answers 404, so its installs see no updates and no stop list while it is paused. Default chosen: only an active environment serves a feed | Needs a product decision on what "paused" means for shipped apps | A decision |
+| G-62 | Withdrawing a release leaves its artifacts in the bucket and reachable by URL | No object lifecycle yet | Phase 11 |
+| G-63 | A channel shows its latest 100 revisions; older ones are stored but cannot be listed. Releases cannot be filtered by state | Paging was not needed yet | When a channel passes 100 revisions |
+
+## Open: verification
+
+| # | Gap | Why open | Closes when |
+|---|---|---|---|
+| G-50 | **CI does not run the PostgreSQL-backed tests.** The workflow has no database, so `account_auth_test` and the other integration suites skip their database scenarios there and pass in about two seconds. Every "CI green" in this log means typechecks, lint, unit tests, the contract and conformance tests and the Rust build passed. The database scenarios have only ever been run on the development machine | CI runs on Windows runners, where service containers are not available | CI starts PostgreSQL (and MinIO, G-44) and sets the `CARBON_*_TEST_DATABASE_URL` variables |
+
 ## Open: local environment
 
 | # | Gap | Notes |
@@ -98,6 +130,8 @@ The rest of the gate is not, and is listed here.
 
 | Gap | From | Closed by |
 |---|---|---|
+| Three updaters decided differently: the standalone one bucketed rollouts without the version, accepted unsigned manifests and ignored `min_version`; the runtime one ignored `min_version` and would install an older version | Inherited | Phase 9: one decision function per language, all held to the shared conformance fixture |
+| The Rust updater's tests never ran in CI | Inherited | Phase 9: `//solutions/capabilities/distribution/updating:rust_updater_test` |
 | G-27: Cloud did not verify declared artifacts | Phase 7 | Phase 8: every declared object is read back and its size and SHA-256 compared before success; keys are confined to the build and attempt |
 | G-31: secret values were not removed from build logs | Phase 7 | Phase 8: the worker redacts lease secrets and its own credentials before sending (encoded forms remain open as G-46) |
 | G-35: no worker runtime spoke the canonical build protocol | Phase 7 | Phase 8: `RunLeasedBuildUseCase` and `build-worker.ts` (real packaging remains open as G-36) |

@@ -7,6 +7,8 @@
 
 export { SlotState, type SlotStateData } from "./domain/entities/SlotState.ts";
 export { inRollout } from "./domain/services/RolloutService.ts";
+export { compareVersions, parseVersion, type ParsedVersion } from "./domain/services/VersionOrder.ts";
+export { decideUpdate, verifyUpdateSignature, type UpdateDecision, type UpdateDecisionInput } from "./domain/services/UpdateDecision.ts";
 export { StopList, isYanked, type YankedEntry, type StopListData } from "./domain/value-objects/StopList.ts";
 export type { SlotStateRepository } from "./domain/repositories/SlotStateRepository.ts";
 export type { ArtifactSource, FetchedArtifact } from "./application/ports/ArtifactSource.ts";

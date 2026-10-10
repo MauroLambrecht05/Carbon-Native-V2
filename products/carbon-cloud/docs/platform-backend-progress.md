@@ -1731,3 +1731,84 @@ anywhere in the artifact bucket and objects are verified once.
 Phase 8 stops here, partly complete. Finishing it needs a Windows build host
 with NSIS, WiX and a signing certificate. Phase 9 (releases) is next in
 [the handoff](left-off/handoff.md) and does not depend on those.
+
+## 2026-10-10: Phase 9, releases, channels and updater conformance
+
+Phase 9 turned verified build artifacts into releases that installed apps can
+be offered, and made every updater decide the same way.
+
+**Updater conformance.** `solutions/contracts/update/fixtures/conformance.json`
+is generated from the publisher's own manifest builder and serializer and signed
+with a fixed test key. It holds 8 signature cases, 20 version orderings and 17
+invalid versions, 72 rollout buckets and 22 decisions. Three consumers run it:
+
+- the TypeScript updater (`@carbon/updating`: `compareVersions`, `decideUpdate`,
+  `verifyUpdateSignature`);
+- the Rust updater packaged apps use (`carbon_updater::decide`, `version`),
+  which the runtime's background updater now calls;
+- the standalone updater (`products/carbon-updater`), which now delegates to
+  `@carbon/updating`.
+
+Before this the three disagreed. The standalone updater bucketed rollouts
+without the version, accepted a manifest with no signature and ignored
+`min_version`. The runtime updater ignored `min_version` and treated any
+different version as an update, so a channel moved back would have downgraded
+installs. Those are fixed by construction: each now has one decision function
+with the checks in a fixed order.
+
+**Releases and channels in Cloud** (migration `0028_releases.sql`,
+[releases.md](releases.md), [release-api.openapi.json](release-api.openapi.json)):
+
+- Signing profiles bind an environment secret that holds an Ed25519 key; only
+  the public key is recorded.
+- A release is made from a succeeded build. Cloud reads each chosen artifact
+  back, checks it against the build's digest, signs it, and stores immutable
+  metadata. A version is used once per environment.
+- A channel moves by `publish` and `rollout`. Each move is a new immutable
+  revision with its own signed manifest; promotion does not touch the release.
+- Withdrawal adds the release to the stop list and moves every channel that
+  offered it back to its last published release, in one transaction.
+- A public feed serves `manifest.json`, `manifest.sig` and `yanked.json` per
+  channel at an unguessable address, in the layout the Rust updater already
+  fetches.
+
+Proof, over the real HTTP handlers and PostgreSQL:
+
+- **End to end:** two builds through the worker protocol, two releases, two
+  channels. The manifest served by the public feed verifies under the profile's
+  key, is byte-for-byte what was signed, and is fed to the updater's own
+  `decideUpdate`: in and out of a 25% rollout, channel mismatch, compatibility,
+  promotion, and after withdrawal a rollback for an install on the withdrawn
+  version and 1.0.0 for an older one.
+- **Refusals:** an unfinished build; an artifact changed or missing in storage;
+  storage down (503); a signing secret replaced with another key; a reused
+  version; a withdrawn release offered again; a channel moved from a stale
+  revision; a rollout on a channel that offers nothing.
+- **Immutability:** direct SQL updates to a release, a withdrawal, release
+  artifacts, channel revisions and signing profiles are refused by triggers.
+  Promotion and rollout leave the release row identical.
+- **Authorization:** a Viewer reads and cannot write; another organization gets
+  404 everywhere; binding a key needs `signing.manage`.
+- **Secrets:** the private key appears in no release, revision, event or
+  command row.
+- **Mutation checks:** 28 deliberate breakages each make a test fail: 9 in the TypeScript updater, 2 in the standalone updater, 6 in the Rust updater and 11 in the release code (artifact digest, replaced signing key, unfinished build, withdrawal not moving channels, falling back to a withdrawn release, stale channel revision, re-offering a withdrawn release, a paused feed, signing and publishing permissions, and served manifest bytes). Three of the release guards are checked in two places; for those, both had to be removed before a test failed.
+
+The affected regression passed **675 tests passed, 1 skipped (the object-store test, which needs a configured store) and 0 failed, with 6,455 assertions across 82 files. The set is wider than before: it now includes the distribution capabilities and the standalone updater**. Generated contracts and
+the conformance fixture are current, the TypeScript checks pass, and the Rust
+updater's 18 tests pass. The runtime compiles with the `updater` feature.
+
+**A correction to earlier entries.** While adding Bazel targets I found that CI
+has no database: the PostgreSQL-backed suites skip their database scenarios
+there (G-50). "CI green" in earlier entries is true but covers typechecks, lint,
+unit, contract and conformance tests and the Rust build, not the database
+scenarios. Those have been run on the development machine only. Phase 9 adds
+four targets CI does run: the three conformance suites and the fixture
+freshness check. The Rust updater's tests had never run in CI before.
+
+New gaps are G-50 to G-63. By the owner's decision the open decisions and
+everything earlier phases could not finish are now collected into a final
+Phase 19 rather than blocking phases as they come up.
+
+Phase 9 stops here. Phase 10 (relational exports, foreign keys, impact previews,
+asynchronous schema work, migration promotion and restricted SQL) is next in
+[the handoff](left-off/handoff.md).

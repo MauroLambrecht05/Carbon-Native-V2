@@ -2,9 +2,15 @@ load("//.tools/orchestration/bazel/checks:defs.bzl", "workspace_check_test")
 
 package(default_visibility = ["//visibility:public"])
 
-exports_files(["generate-platform-types.ts"])
+exports_files(["generate-platform-types.ts", "generate-update-conformance.ts"])
 
 workspace_check_test(
     name = "platform_types_test",
     command = ["bun", ".tools/automation/contracts/generate-platform-types.ts", "--check"],
+)
+
+# The update conformance fixture must be what the publisher's code generates.
+workspace_check_test(
+    name = "update_conformance_test",
+    command = ["bun", ".tools/automation/contracts/generate-update-conformance.ts", "--check"],
 )

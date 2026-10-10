@@ -1,0 +1,16 @@
+load("//.tools/orchestration/bazel/bun:defs.bzl", "bun_test")
+
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["composition/**/*.ts", "infrastructure/**/*.ts", "presentation/**/*.ts", "tests/**/*.ts", "**/tsconfig.json"]),
+)
+
+# The standalone updater against the shared update conformance fixture.
+bun_test(
+    name = "update_checker_test",
+    entry = "tests/update-checker.test.ts",
+    srcs = [":srcs", "//solutions/contracts/update:fixtures"],
+    deps = ["//solutions/capabilities/distribution/updating:srcs"],
+)

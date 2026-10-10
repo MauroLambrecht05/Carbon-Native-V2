@@ -6,7 +6,8 @@ also how the worker gets the secrets the build names. The wire contract is in
 [build-api.openapi.json](build-api.openapi.json); storage is Cloud migrations
 `0026_platform_builds.sql` and `0027_build_provenance.sql`. Builds exist when
 `CARBON_WORKERS=enabled`, which also requires the `OBJECT_STORE_*` settings. The
-worker side is in [build-worker.md](build-worker.md).
+worker side is in [build-worker.md](build-worker.md). A succeeded build becomes
+something installed apps are offered through a release ([releases.md](releases.md)).
 
 These are the canonical, environment-scoped builds. The legacy organization-wide
 queue (`/v1/builds`, `wk_` tokens) is separate and unchanged.

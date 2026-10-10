@@ -304,6 +304,42 @@ export type BuildMaterials = { readonly "resolvedCommit": string; readonly "depe
 
 export type BuildProvenance = { readonly "statement": { readonly "version": 1; readonly "buildId": Id; readonly "scope": EnvironmentScope; readonly "attempt": number; readonly "workerId": Id; readonly "source": BuildSource; readonly "sourceDigest": Digest; readonly "materials": BuildMaterials; readonly "artifacts": ReadonlyArray<{ readonly "target": string; readonly "objectKey": string; readonly "sizeBytes": number; readonly "sha256": Digest; }>; readonly "startedAt": Timestamp; readonly "finishedAt": Timestamp; }; readonly "statementDigest": Digest; readonly "signature": { readonly "keyId": string; readonly "algorithm": "ed25519"; readonly "value": string; } | null; };
 
+export type SemanticVersion = string;
+
+export type UpdatePlatform = string;
+
+export type ChannelName = string;
+
+export type SigningProfileCreate = { readonly "name": string; readonly "secretName": string; };
+
+export type SigningProfile = { readonly "id": Id; readonly "scope": EnvironmentScope; readonly "name": string; readonly "secretName": string; readonly "publicKey": string; readonly "createdBy": Id; readonly "createdAt": Timestamp; };
+
+export type SigningProfileList = { readonly "items": ReadonlyArray<SigningProfile>; };
+
+export type ReleaseCreate = { readonly "buildId": Id; readonly "version": SemanticVersion; readonly "notes": string; readonly "minVersion": SemanticVersion | null; readonly "signingProfileId": Id; readonly "artifacts": ReadonlyArray<{ readonly "platform": UpdatePlatform; readonly "target": string; }>; };
+
+export type ReleaseArtifact = { readonly "platform": UpdatePlatform; readonly "target": string; readonly "objectKey": string; readonly "sizeBytes": number; readonly "sha256": Digest; readonly "signature": string; readonly "url": string; };
+
+export type Release = { readonly "id": Id; readonly "scope": EnvironmentScope; readonly "buildId": Id; readonly "version": SemanticVersion; readonly "notes": string; readonly "minVersion": SemanticVersion | null; readonly "signingProfileId": Id; readonly "state": "published" | "withdrawn"; readonly "artifacts": ReadonlyArray<ReleaseArtifact>; readonly "withdrawnReason": string | null; readonly "createdBy": Id; readonly "revision": Revision; readonly "createdAt": Timestamp; readonly "withdrawnAt": Timestamp | null; };
+
+export type ReleaseCommand = { readonly "kind": "withdraw"; readonly "reason": string; };
+
+export type ReleaseReceipt = { readonly "release": Release; readonly "message": string; };
+
+export type ReleasePage = { readonly "items": ReadonlyArray<Release>; readonly "nextCursor": string | null; };
+
+export type ChannelRevision = { readonly "number": number; readonly "releaseId": Id | null; readonly "version": SemanticVersion | null; readonly "rollout": number; readonly "reason": "publish" | "rollout" | "withdrawal"; readonly "manifestDigest": Digest | null; readonly "createdBy": Id; readonly "createdAt": Timestamp; };
+
+export type Channel = { readonly "name": ChannelName; readonly "scope": EnvironmentScope; readonly "feedUrl": string; readonly "current": ChannelRevision; readonly "revision": Revision; };
+
+export type ChannelCommand = { readonly "kind": "publish"; readonly "releaseId": Id; readonly "rollout": number; } | { readonly "kind": "rollout"; readonly "rollout": number; };
+
+export type ChannelDetails = { readonly "channel": Channel; readonly "revisions": ReadonlyArray<ChannelRevision>; };
+
+export type ChannelList = { readonly "items": ReadonlyArray<Channel>; };
+
+export type ChannelReceipt = { readonly "channel": Channel; readonly "message": string; };
+
 export type WorkerBuildComplete = { readonly "outcome": "succeeded"; readonly "materials": BuildMaterials; } | { readonly "outcome": "failed"; readonly "errorCategory": string; };
 
 export type ServiceAccountCreate = { readonly "name": string; readonly "scope": Scope; readonly "permissions": ReadonlyArray<EnvironmentCredentialPermission>; };
@@ -679,6 +715,24 @@ export interface Components {
   WorkerBuildInput: WorkerBuildInput;
   BuildMaterials: BuildMaterials;
   BuildProvenance: BuildProvenance;
+  SemanticVersion: SemanticVersion;
+  UpdatePlatform: UpdatePlatform;
+  ChannelName: ChannelName;
+  SigningProfileCreate: SigningProfileCreate;
+  SigningProfile: SigningProfile;
+  SigningProfileList: SigningProfileList;
+  ReleaseCreate: ReleaseCreate;
+  ReleaseArtifact: ReleaseArtifact;
+  Release: Release;
+  ReleaseCommand: ReleaseCommand;
+  ReleaseReceipt: ReleaseReceipt;
+  ReleasePage: ReleasePage;
+  ChannelRevision: ChannelRevision;
+  Channel: Channel;
+  ChannelCommand: ChannelCommand;
+  ChannelDetails: ChannelDetails;
+  ChannelList: ChannelList;
+  ChannelReceipt: ChannelReceipt;
   WorkerBuildComplete: WorkerBuildComplete;
   ServiceAccountCreate: ServiceAccountCreate;
   ServiceAccountCommand: ServiceAccountCommand;

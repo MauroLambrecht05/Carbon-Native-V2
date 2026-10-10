@@ -130,3 +130,11 @@ statement, its exact serialized text, its SHA-256 and, when a signing key is
 configured, an Ed25519 signature and key identifier. Rows cannot be updated or
 deleted. It is additive. Recovery: code from before 0027 ignores the table, but
 that code also accepts a build without verifying its artifacts.
+
+0028 adds releases and channels: `signing_profiles`, `update_feeds`, `releases`,
+`release_artifacts`, `channels`, `channel_revisions`, `release_commands` and
+`release_events`. Triggers make a release immutable except for one withdrawal,
+make release artifacts, channel revisions and signing profiles append-only, and
+copy release events into `platform_events`. It is additive and leaves the legacy
+`releases`-in-object-storage layout untouched. Recovery: code from before 0028
+ignores these tables.
