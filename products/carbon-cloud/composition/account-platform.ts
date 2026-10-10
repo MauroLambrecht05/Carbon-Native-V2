@@ -16,6 +16,7 @@ import { ResendAccountNotification } from "@carbon/resend-notification";
 import { DevelopmentInboxNotification } from "../infrastructure/notifications/DevelopmentInboxNotification.ts";
 import { AccountRealms, AppAuthentication, HttpOidcClient, PostgresAppAuthRepository, PostgresAppMailQueue } from '@carbon/auth';
 import { createAppRoutes } from '../infrastructure/http/app-routes.ts';
+import { AccountBuilds, BuildOrchestration, PostgresPlatformBuildRepository, WorkerBuilds } from '@carbon/orchestration';
 import { createWorkerRoutes } from '../infrastructure/http/worker-routes.ts';
 import { createAccountRoutes } from "../infrastructure/http/account-routes.ts";
 import { serviceAssertionIssuerFromEnv } from './service-assertion-signing.ts';
@@ -126,6 +127,8 @@ export function composeAccountPlatform(sql: Bun.SQL, config: AccountPlatformConf
   const auditLog = new PostgresAuditLog(sql);
   const appRepository = new PostgresAppAuthRepository(sql);
   const workerRepository = config.workers && secretProtector ? new PostgresWorkerRepository(sql, secretProtector) : undefined;
+  // Builds run on worker leases, so they exist exactly when workers do.
+  const buildRepository = workerRepository ? new PostgresPlatformBuildRepository(sql, workerRepository) : undefined;
   const github = config.github ? new ExternalAccountAuthentication(auth, externalAccounts,
     new GitHubAccountProvider(config.github.clientId, config.github.clientSecret, config.origin + "/platform/v1/auth/github/callback"), protector, config) : undefined;
   const accountRepositories = config.githubRepositories ? new AccountRepositories(auth, new PostgresRepositoryIntegrationRepository(sql),
@@ -134,13 +137,14 @@ export function composeAccountPlatform(sql: Bun.SQL, config: AccountPlatformConf
     ? new ResendAccountNotification(config.notification.apiKey, config.notification.from)
     : new DevelopmentInboxNotification(config.notification.directory);
   return {
-    handler: createAccountRoutes(auth, config.origin, security, new AccountProfile(auth, new PostgresAccountProfileRepository(sql, mfa), protector, config), new OrganizationAccess(auth, new PostgresOrganizationRepository(sql), protector), new OrganizationInvitations(auth, new PostgresOrganizationInvitationsRepository(sql), new PostgresOrganizationRepository(sql), protector, config), github, new AccountAuthorization(auth, new PostgresPlatformAuthority(sql)), new AccountCatalog(auth, new PostgresCatalogRepository(sql), protector), config.data ? new AccountData(auth, new PostgresAccountDataAuthority(sql), config.data, protector) : undefined, importJobs ? new AccountImports(auth, importJobs) : undefined, new AccountEnvironmentCredentials(auth, environmentCredentials, protector), environmentSecrets ? new AccountEnvironmentSecrets(auth, environmentSecrets, protector) : undefined, accountRepositories, new AccountDeviceAuthorization(auth,new PostgresDeviceAuthorizationRepository(sql),protector,config.origin,config.rateLimitKey,new DeviceCredentialAuthentication(sql),config.deviceAssertions),new AccountServiceAccounts(auth,new PostgresServiceAccountRepository(sql),protector,config.serviceAccountAssertions),new AccountPersonalCredentials(auth,new PostgresPersonalCredentialRepository(sql),protector),new AccountLegacyTokens(auth,new PostgresLegacyTokenRepository(sql),protector,config.legacyTokens?.policy??'issue'),workerRepository?new AccountWorkers(auth,workerRepository,protector):undefined,new AccountAudit(auth,auditLog,protector),new AccountRealms(auth,appRepository,protector),new PersonalCredentialExchange(new PersonalCredentialAuthentication(sql),config.personalAssertions)),
+    handler: createAccountRoutes(auth, config.origin, security, new AccountProfile(auth, new PostgresAccountProfileRepository(sql, mfa), protector, config), new OrganizationAccess(auth, new PostgresOrganizationRepository(sql), protector), new OrganizationInvitations(auth, new PostgresOrganizationInvitationsRepository(sql), new PostgresOrganizationRepository(sql), protector, config), github, new AccountAuthorization(auth, new PostgresPlatformAuthority(sql)), new AccountCatalog(auth, new PostgresCatalogRepository(sql), protector), config.data ? new AccountData(auth, new PostgresAccountDataAuthority(sql), config.data, protector) : undefined, importJobs ? new AccountImports(auth, importJobs) : undefined, new AccountEnvironmentCredentials(auth, environmentCredentials, protector), environmentSecrets ? new AccountEnvironmentSecrets(auth, environmentSecrets, protector) : undefined, accountRepositories, new AccountDeviceAuthorization(auth,new PostgresDeviceAuthorizationRepository(sql),protector,config.origin,config.rateLimitKey,new DeviceCredentialAuthentication(sql),config.deviceAssertions),new AccountServiceAccounts(auth,new PostgresServiceAccountRepository(sql),protector,config.serviceAccountAssertions),new AccountPersonalCredentials(auth,new PostgresPersonalCredentialRepository(sql),protector),new AccountLegacyTokens(auth,new PostgresLegacyTokenRepository(sql),protector,config.legacyTokens?.policy??'issue'),workerRepository?new AccountWorkers(auth,workerRepository,protector):undefined,new AccountAudit(auth,auditLog,protector),new AccountRealms(auth,appRepository,protector),new PersonalCredentialExchange(new PersonalCredentialAuthentication(sql),config.personalAssertions),buildRepository?new AccountBuilds(auth,buildRepository,protector):undefined),
+    buildOrchestration: buildRepository ? new BuildOrchestration(buildRepository) : undefined,
     appHandler: createAppRoutes(new AppAuthentication(appRepository, protector, { rateLimitKey: config.rateLimitKey }, new HttpOidcClient(),
       secretProtector ? new PostgresProviderSecretReader(sql, secretProtector) : undefined, config.appAssertions), config.origin),
     deliverAppMail: new DeliverAccountMail(new PostgresAppMailQueue(sql), protector, notification),
     organizationLifecycle: new OrganizationLifecycle(auditLog),
     catalogLifecycle: new CatalogLifecycle(new PostgresCatalogRepository(sql)),
-    workerHandler: workerRepository ? createWorkerRoutes(new WorkerProtocol(workerRepository, config.rateLimitKey), config.origin) : undefined,
+    workerHandler: workerRepository ? createWorkerRoutes(new WorkerProtocol(workerRepository, config.rateLimitKey), config.origin, buildRepository ? new WorkerBuilds(buildRepository) : undefined) : undefined,
     workerLeases: workerRepository ? new WorkerLeases(workerRepository) : undefined,
     runImports: importJobs && config.imports ? new RunImportJobs(importJobs, config.imports) : undefined,
     deliverMail: new DeliverAccountMail(new PostgresAccountMailQueue(sql), protector, notification),

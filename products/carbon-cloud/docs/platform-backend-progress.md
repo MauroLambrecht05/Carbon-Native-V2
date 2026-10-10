@@ -1589,3 +1589,68 @@ Still open from earlier phases, with the reason:
   decided.
 - Custom claims, passwords, passkeys and MFA for app users; migrating the legacy
   organization-wide end users; event retention and export: not started.
+
+## 2026-10-10: Phase 7 — build orchestration
+
+**Builds.** `POST .../environments/{id}/builds` stores a canonical, digested
+input (commit, targets, secret names, platform), reserves 30 minutes of the
+organization's monthly build minutes, and grants the worker lease, all in one
+transaction. This is the first production caller of worker leases. Developers
+list builds, read details and logs, and cancel.
+
+**Worker protocol.** On a held build lease a worker fetches the input (which
+starts the attempt), appends ordered log segments, declares artifacts and
+reports the outcome. Completion ends the lease, the attempt and the build
+together and settles quota from the time attempts actually ran.
+
+**Recovery.** A lost worker's lease is re-offered by the lease sweeper as the
+next attempt, up to three; the sweeper then fails builds with no lease left
+(`worker_lost`, `no_worker`) or past their deadline (`deadline_exceeded`).
+Cancellation cancels the lease first. See [builds.md](builds.md).
+
+**Structure.** HTTP route files moved from `presentation/http/` to
+`infrastructure/http/` in Cloud, Database and Registry, following the rule that
+`presentation/` is UI only. A gap ledger, [gaps.md](left-off/gaps.md), now
+tracks every open item.
+
+Proof gate, over real HTTP routes and PostgreSQL:
+
+- **Immutable input:** every attempt receives the stored input and digest;
+  direct SQL updates to the input, to a finished state, and to stored logs and
+  artifacts are refused by triggers.
+- **Duplicate commands:** a retried create returns the same build and creates
+  one row; a retried cancel returns the same receipt; a different request under
+  the same key is refused.
+- **Quota:** two racing requests for the last slot produce exactly one build;
+  a finished or cancelled build frees its reservation; used minutes are recorded
+  from attempt time.
+- **Log ordering:** out-of-order and rewritten segments are refused, an
+  identical retry is accepted, the sequence continues gaplessly across attempts,
+  and platform credentials are redacted.
+- **Artifacts:** an unknown target, a path traversal key and a changed
+  declaration are refused; success needs every target; a lost attempt's
+  declarations are not outputs.
+- **Lost and reclaimed workers:** the same input runs as attempt two on a new
+  lease, the lost worker is refused everywhere, and three lost attempts fail the
+  build as `worker_lost` with nothing left reserved.
+- **Cancellation, reported failure, no worker, deadline:** each ends the build
+  in the right state; a cancelled or timed-out build cannot be reported
+  successful; a reported failure is not retried.
+- **Authorization:** another organization gets 404; a Viewer can read but
+  neither create nor cancel.
+- Eight mutation checks (quota, log order, log rewrite, all targets, lease
+  cancellation, lost-attempt artifacts, lost-attempt marking, redaction) each
+  make a test fail. A ninth guard, refusing work on a finished build, is not
+  independently reachable because the lease check refuses first.
+
+The affected regression passed **562 tests, 0 failures and 5,534
+assertions across 65 files**. Generated contracts are current and the
+TypeScript checks pass for all projects.
+
+New gaps are G-27 to G-35 in the ledger. The main ones: Cloud does not verify
+declared artifacts against object storage, no worker runtime speaks this
+protocol yet, and the legacy `wk_` queue is still separate.
+
+Phase 7 stops here. Phase 8 (disposable Windows x64 execution, dependency locks,
+NSIS/WiX packaging, signing and provenance) is next in
+[the handoff](left-off/handoff.md).

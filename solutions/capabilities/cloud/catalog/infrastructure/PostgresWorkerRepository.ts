@@ -15,8 +15,11 @@ const ENROLLMENT_ATTEMPTS = 10;
 
 type Row = Record<string, any>;
 type Tx = Bun.TransactionSQL;
+/** A lease a worker holds right now, with the worker that holds it. */
+export interface HeldLease { readonly worker: Row; readonly lease: Row }
 /** Carries a refusal out of a transaction that still has to commit (an expiry it just recorded). */
-type Outcome<T> = { readonly value: T } | { readonly fault: PlatformFault };
+export type LeaseOutcome<T> = { readonly value: T } | { readonly fault: PlatformFault };
+type Outcome<T> = LeaseOutcome<T>;
 
 function pgArray(value: readonly string[]) { return `{${value.join(',')}}`; }
 function worker(row: Row): Worker {
@@ -263,36 +266,56 @@ export class PostgresWorkerRepository extends PostgresPlatformAuthority implemen
 
   // ── Trusted orchestration ────────────────────────────────────────────────
 
+  /** Grants a lease inside the caller's transaction, so the lease and the thing it is for commit together. */
+  async grantIn(tx: Tx, input: WorkerLeaseGrant): Promise<WorkerLease> {
+    const scope = input.scope;
+    const environment = (await tx`SELECT 1 FROM environments e JOIN projects p ON p.id = e.project_id AND p.org_id = e.org_id JOIN organizations o ON o.id = e.org_id
+      WHERE e.id = ${scope.environmentId} AND e.project_id = ${scope.projectId} AND e.org_id = ${scope.orgId} AND e.state = 'active' AND p.state = 'active' AND o.state = 'active' FOR SHARE OF e`)[0];
+    if (!environment) throw new PlatformFault('not_found', 'Environment not found');
+    const known = await tx<{ name: string }[]>`SELECT name FROM environment_secrets WHERE org_id = ${scope.orgId} AND project_id = ${scope.projectId}
+      AND environment_id = ${scope.environmentId} AND state = 'active' AND name = ANY(${pgArray(input.secretNames)}::text[])`;
+    if (known.length !== input.secretNames.length) throw new PlatformFault('validation', 'A requested secret is missing or disabled in this environment');
+    const row = (await tx<Row[]>`INSERT INTO worker_leases(id, org_id, project_id, environment_id, purpose, subject_id, max_attempts, secret_names, required_platform, expires_at, deadline_at)
+      VALUES (${input.id}, ${scope.orgId}, ${scope.projectId}, ${scope.environmentId}, ${input.purpose}, ${input.subjectId}, ${input.maxAttempts}, ${pgArray(input.secretNames)}::text[],
+        ${input.requiredPlatform ?? null}, now() + make_interval(secs => ${Math.min(input.claimSeconds, input.deadlineSeconds)}), now() + make_interval(secs => ${input.deadlineSeconds}))
+      RETURNING *, revision::text`)[0]!;
+    await this.event(tx, scope.orgId, 'lease.granted', input.requestId, { leaseId: row.id }, { purpose: input.purpose, subjectId: input.subjectId, secretNames: input.secretNames, attempt: 1 });
+    return lease(row);
+  }
+
   async grant(input: WorkerLeaseGrant) {
-    try {
-      return await this.sql.begin(async tx => {
-        const scope = input.scope;
-        const environment = (await tx`SELECT 1 FROM environments e JOIN projects p ON p.id = e.project_id AND p.org_id = e.org_id JOIN organizations o ON o.id = e.org_id
-          WHERE e.id = ${scope.environmentId} AND e.project_id = ${scope.projectId} AND e.org_id = ${scope.orgId} AND e.state = 'active' AND p.state = 'active' AND o.state = 'active' FOR SHARE OF e`)[0];
-        if (!environment) throw new PlatformFault('not_found', 'Environment not found');
-        const known = await tx<{ name: string }[]>`SELECT name FROM environment_secrets WHERE org_id = ${scope.orgId} AND project_id = ${scope.projectId}
-          AND environment_id = ${scope.environmentId} AND state = 'active' AND name = ANY(${pgArray(input.secretNames)}::text[])`;
-        if (known.length !== input.secretNames.length) throw new PlatformFault('validation', 'A requested secret is missing or disabled in this environment');
-        const row = (await tx<Row[]>`INSERT INTO worker_leases(id, org_id, project_id, environment_id, purpose, subject_id, max_attempts, secret_names, required_platform, expires_at, deadline_at)
-          VALUES (${input.id}, ${scope.orgId}, ${scope.projectId}, ${scope.environmentId}, ${input.purpose}, ${input.subjectId}, ${input.maxAttempts}, ${pgArray(input.secretNames)}::text[],
-            ${input.requiredPlatform ?? null}, now() + make_interval(secs => ${Math.min(input.claimSeconds, input.deadlineSeconds)}), now() + make_interval(secs => ${input.deadlineSeconds}))
-          RETURNING *, revision::text`)[0]!;
-        await this.event(tx, scope.orgId, 'lease.granted', input.requestId, { leaseId: row.id }, { purpose: input.purpose, subjectId: input.subjectId, secretNames: input.secretNames, attempt: 1 });
-        return lease(row);
-      });
-    } catch (error) {
+    try { return await this.sql.begin(tx => this.grantIn(tx, input)); }
+    catch (error) {
       if (error instanceof PlatformFault) throw error;
       if ((error as { errno?: string }).errno === '23505') throw new PlatformFault('conflict', 'This subject already has a lease');
       throw error;
     }
   }
 
-  async cancel(subjectId: string, requestId: string) {
-    return this.sql.begin(async tx => {
-      const rows = await tx<Row[]>`UPDATE worker_leases SET state = 'cancelled', lease_token_hash = NULL, revision = revision + 1, updated_at = now()
-        WHERE subject_id = ${subjectId} AND state IN ('granted', 'claimed') RETURNING *, revision::text`;
-      for (const row of rows) await this.event(tx, row.org_id, 'lease.cancelled', requestId, { workerId: row.worker_id, leaseId: row.id });
-      return rows.map(lease);
+  /** Cancels every open lease of a subject inside the caller's transaction. */
+  async cancelIn(tx: Tx, subjectId: string, requestId: string): Promise<readonly WorkerLease[]> {
+    const rows = await tx<Row[]>`UPDATE worker_leases SET state = 'cancelled', lease_token_hash = NULL, revision = revision + 1, updated_at = now()
+      WHERE subject_id = ${subjectId} AND state IN ('granted', 'claimed') RETURNING *, revision::text`;
+    for (const row of rows) await this.event(tx, row.org_id, 'lease.cancelled', requestId, { workerId: row.worker_id, leaseId: row.id });
+    return rows.map(lease);
+  }
+  async cancel(subjectId: string, requestId: string) { return this.sql.begin(tx => this.cancelIn(tx, subjectId, requestId)); }
+
+  /** Ends a held lease as completed inside the caller's transaction. */
+  async completeIn(tx: Tx, held: Row, requestId: string): Promise<void> {
+    await tx`UPDATE worker_leases SET state = 'completed', lease_token_hash = NULL, revision = revision + 1, updated_at = now() WHERE id = ${held.id}`;
+    await this.event(tx, held.org_id, 'lease.completed', requestId, { workerId: held.worker_id, leaseId: held.id });
+  }
+
+  /**
+   * Runs work for a worker that holds this lease right now: its credential, the lease token and the lease window are
+   * all checked first, and a cancelled lease is refused. This is how capabilities built on leases authenticate a worker.
+   */
+  async withHeldLease<T>(input: WorkerLeaseInput, work: (tx: Tx, held: HeldLease) => Promise<LeaseOutcome<T>>): Promise<T> {
+    return this.settle(async tx => {
+      const held = await this.held(tx, input); if ('fault' in held) return held;
+      if (held.value.lease.state === 'cancelled') return { fault: new PlatformFault('conflict', 'This lease was cancelled') };
+      return work(tx, held.value);
     });
   }
 

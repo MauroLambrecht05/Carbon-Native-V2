@@ -274,6 +274,34 @@ export type AppAssertionExchange = { readonly "audience": "carbon-database"; rea
 
 export type AppAssertionResponse = { readonly "tokenType": "Bearer"; readonly "token": string; readonly "expiresInSeconds": 60; };
 
+export type BuildSource = { readonly "commitSha": string; readonly "targets": ReadonlyArray<string>; readonly "secretNames": ReadonlyArray<string>; readonly "platform": "windows" | "linux" | "macos"; readonly "repositoryId"?: Id; };
+
+export type BuildCreate = { readonly "commitSha": string; readonly "targets": ReadonlyArray<string>; readonly "secretNames": ReadonlyArray<string>; readonly "platform": "windows" | "linux" | "macos"; readonly "repositoryId"?: Id; };
+
+export type Build = { readonly "id": Id; readonly "scope": EnvironmentScope; readonly "state": "queued" | "running" | "succeeded" | "failed" | "cancelled"; readonly "source": BuildSource; readonly "sourceDigest": Digest; readonly "attempt": number; readonly "createdBy": Id; readonly "reservedMinutes": number; readonly "usedMinutes": number | null; readonly "errorCategory": string | null; readonly "revision": Revision; readonly "createdAt": Timestamp; readonly "startedAt": Timestamp | null; readonly "completedAt": Timestamp | null; };
+
+export type BuildArtifact = { readonly "id": Id; readonly "attempt": number; readonly "target": string; readonly "objectKey": string; readonly "sizeBytes": number; readonly "sha256": Digest; readonly "createdAt": Timestamp; };
+
+export type BuildArtifactDeclare = { readonly "target": string; readonly "objectKey": string; readonly "sizeBytes": number; readonly "sha256": Digest; };
+
+export type BuildDetails = { readonly "build": Build; readonly "artifacts": ReadonlyArray<BuildArtifact>; };
+
+export type BuildPage = { readonly "items": ReadonlyArray<Build>; readonly "nextCursor": string | null; };
+
+export type BuildCommand = { readonly "kind": "cancel"; };
+
+export type BuildReceipt = { readonly "build": Build; readonly "message": string; };
+
+export type BuildLogSegment = { readonly "sequence": number; readonly "attempt": number; readonly "text": string; readonly "createdAt": Timestamp; };
+
+export type BuildLogAppend = { readonly "sequence": number; readonly "text": string; };
+
+export type BuildLogPage = { readonly "items": ReadonlyArray<BuildLogSegment>; readonly "nextSequence": number | null; };
+
+export type WorkerBuildInput = { readonly "buildId": Id; readonly "scope": EnvironmentScope; readonly "source": BuildSource; readonly "sourceDigest": Digest; readonly "attempt": number; readonly "nextLogSequence": number; };
+
+export type WorkerBuildComplete = { readonly "outcome": "succeeded"; } | { readonly "outcome": "failed"; readonly "errorCategory": string; };
+
 export type ServiceAccountCreate = { readonly "name": string; readonly "scope": Scope; readonly "permissions": ReadonlyArray<EnvironmentCredentialPermission>; };
 
 export type ServiceAccountCommand = { readonly "kind": "update"; readonly "name": string; readonly "permissions": ReadonlyArray<EnvironmentCredentialPermission>; } | { readonly "kind": "disable" | "enable"; };
@@ -632,6 +660,20 @@ export interface Components {
   AppOidcComplete: AppOidcComplete;
   AppAssertionExchange: AppAssertionExchange;
   AppAssertionResponse: AppAssertionResponse;
+  BuildSource: BuildSource;
+  BuildCreate: BuildCreate;
+  Build: Build;
+  BuildArtifact: BuildArtifact;
+  BuildArtifactDeclare: BuildArtifactDeclare;
+  BuildDetails: BuildDetails;
+  BuildPage: BuildPage;
+  BuildCommand: BuildCommand;
+  BuildReceipt: BuildReceipt;
+  BuildLogSegment: BuildLogSegment;
+  BuildLogAppend: BuildLogAppend;
+  BuildLogPage: BuildLogPage;
+  WorkerBuildInput: WorkerBuildInput;
+  WorkerBuildComplete: WorkerBuildComplete;
   ServiceAccountCreate: ServiceAccountCreate;
   ServiceAccountCommand: ServiceAccountCommand;
   ServiceAccount: ServiceAccount;

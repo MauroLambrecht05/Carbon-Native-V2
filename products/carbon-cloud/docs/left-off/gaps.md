@@ -28,7 +28,7 @@ would close it.
 
 | # | Gap | From | Owner |
 |---|---|---|---|
-| G-07 | The legacy `wk_` worker tokens and legacy build queue routes still work and are not connected to enrolled workers | Phases 3, 4 | Phase 7 bridges or retires them |
+| G-07 | The legacy `wk_` worker tokens and legacy build queue routes (`/v1/builds`) still work, separate from canonical builds | Phases 3, 4, 7 | Phase 7 built canonical builds but did not retire or bridge the legacy queue: the CLI's `carbon cloud deploy` and the Linux worker still use it. Retire with the CLI work in Phase 15 |
 | G-08 | Suspension and reinstatement have no operator HTTP surface | Phase 5 | Phase 16 |
 | G-09 | Final deletion marks rows in Cloud and destroys no data in Carbon Database, Carbon Registry or object storage | Phase 5 | Needs a delete action in the owning-service lifecycle protocol; Phase 16 (recovery and deletion) |
 | G-10 | Registry serves one canonical request, `namespace.get` | Phase 2 | Phase 14 |
@@ -50,6 +50,20 @@ would close it.
 | G-21 | Owning-service events (Database, Registry) are not in the organization log | Phase 5 | |
 | G-22 | The event stream polls the database once a second; there is no broker | Phase 5 | Acceptable until load says otherwise |
 
+## Open: from Phase 7 (builds)
+
+| # | Gap | Why open | Owner |
+|---|---|---|---|
+| G-27 | Cloud does not verify that a declared artifact exists in object storage or matches its size and SHA-256 before accepting success | Needs object-store access from Cloud and a real upload path | Phase 8 |
+| G-28 | A build's input is a commit, targets, secret names and platform; it is not a full snapshot of configuration, toolchain and dependency locks | Those are produced by real execution | Phase 8 |
+| G-29 | The commit SHA is supplied by the caller; a build is not created from a branch or tag through the repository integration, and `repositoryId` is optional | Resolution exists (`RepositoryCommitResolve`) but is not chained into build creation | Phase 8 |
+| G-30 | There is no dedicated build permission; creating a build needs `release.publish` | Adding one changes the permission vocabulary and role presets | Needs a decision |
+| G-31 | Cloud removes only credentials shaped like its own from logs; it does not know secret values and cannot remove them | By design Cloud keeps no plaintext secrets; the worker must redact what it was given | Phase 8 (worker runtime) |
+| G-32 | Build logs are read by polling `?after=N`; they are not on the event stream | The stream carries events, not log text | Phase 17 decides the UI need |
+| G-33 | The reservation is a fixed 30 minutes, the deadline equals it, and attempts are fixed at three | No per-plan or per-build policy yet | Phase 16 (quotas) |
+| G-34 | Quota reads the legacy `org_plans` and `usage_records` tables, whose organization column is text | Billing is rebuilt in Phase 16 | Phase 16 |
+| G-35 | No worker runtime speaks the canonical build protocol; `solutions/capabilities/cloud/worker` still implements the legacy queue | Real execution is the next phase | Phase 8 |
+
 ## Open: local environment
 
 | # | Gap | Notes |
@@ -63,6 +77,7 @@ would close it.
 
 | Gap | From | Closed by |
 |---|---|---|
+| Worker leases had no production caller | Phase 4 | Phase 7: creating a build grants its lease in the same transaction |
 | HTTP route files lived under `presentation/http/`, against the rule that `presentation/` is UI only | Inherited, and continued in Phases 4 and 6 | Moved to `infrastructure/http/` in all three services, 2026-10-10 |
 | Personal credentials could not be exchanged for assertions | Phase 3 | `7502ee9` |
 | No CLI command called Registry | Phase 2 | `7502ee9` |

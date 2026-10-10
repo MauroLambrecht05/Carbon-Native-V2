@@ -13,6 +13,7 @@ import {
 import { GitHubAccountProvider } from "@carbon/github-identity";
 import { ResendAccountNotification } from "@carbon/resend-notification";
 import { migrate } from "../../infrastructure/persistence/Database.ts";
+import { AccountBuilds, BuildOrchestration, PostgresPlatformBuildRepository, WorkerBuilds } from "@carbon/orchestration";
 import { SignJWT } from "jose";
 import { AccountRealms, AppAuthentication, HttpOidcClient, PostgresAppAuthRepository, PostgresAppMailQueue } from "@carbon/auth";
 import { createAppRoutes } from "../../infrastructure/http/app-routes.ts";
@@ -68,7 +69,8 @@ async function harness() {
     async createProposal(_installationId, _repositoryId, _baseBranch, proposal) { repositoryProposals++; return { pullRequestNumber: 12, url: 'https://github.com/carbon-team/desktop/pull/12', branch: proposal.branch, baseSha: 'b'.repeat(40), headSha: 'c'.repeat(40) }; },
     verifyWebhook(raw, signature, deliveryId, event) { const expected='sha256='+createHmac('sha256','repository-webhook-secret').update(raw).digest('hex'); if(signature!==expected||!deliveryId||!event) throw new Error('invalid webhook'); },
   };
-  const makeHandler = (auth: AccountAuthentication) => createAccountRoutes(auth, origin, new AccountSecurity(auth, new PostgresAccountSecurityRepository(sql, mfa), protector, totp), new AccountProfile(auth, new PostgresAccountProfileRepository(sql, mfa), protector, config), new OrganizationAccess(auth, new PostgresOrganizationRepository(sql), protector), new OrganizationInvitations(auth, new PostgresOrganizationInvitationsRepository(sql), new PostgresOrganizationRepository(sql), protector, config), new ExternalAccountAuthentication(auth, new PostgresExternalAccountRepository(sql, mfa), githubProvider, protector, config), new AccountAuthorization(auth, new PostgresPlatformAuthority(sql)), new AccountCatalog(auth, new PostgresCatalogRepository(sql), protector), undefined, undefined, new AccountEnvironmentCredentials(auth, new PostgresEnvironmentCredentialRepository(sql), protector), new AccountEnvironmentSecrets(auth, new PostgresEnvironmentSecretRepository(sql, secretProtector), protector), new AccountRepositories(auth, new PostgresRepositoryIntegrationRepository(sql), repositoryProvider, protector), new AccountDeviceAuthorization(auth,new PostgresDeviceAuthorizationRepository(sql),protector,origin,config.rateLimitKey,new DeviceCredentialAuthentication(sql),assertionIssuer),new AccountServiceAccounts(auth,new PostgresServiceAccountRepository(sql),protector,assertionIssuer),new AccountPersonalCredentials(auth,new PostgresPersonalCredentialRepository(sql),protector),new AccountLegacyTokens(auth,new PostgresLegacyTokenRepository(sql),protector,'accept'),new AccountWorkers(auth,new PostgresWorkerRepository(sql,secretProtector),protector),new AccountAudit(auth,new PostgresAuditLog(sql),protector,{pollMs:15,heartbeatMs:120,maxMs:900}),new AccountRealms(auth,new PostgresAppAuthRepository(sql),protector),new PersonalCredentialExchange(new PersonalCredentialAuthentication(sql),assertionIssuer));
+  const buildRepository = new PostgresPlatformBuildRepository(sql, new PostgresWorkerRepository(sql, secretProtector)); const builds = new BuildOrchestration(buildRepository);
+  const makeHandler = (auth: AccountAuthentication) => createAccountRoutes(auth, origin, new AccountSecurity(auth, new PostgresAccountSecurityRepository(sql, mfa), protector, totp), new AccountProfile(auth, new PostgresAccountProfileRepository(sql, mfa), protector, config), new OrganizationAccess(auth, new PostgresOrganizationRepository(sql), protector), new OrganizationInvitations(auth, new PostgresOrganizationInvitationsRepository(sql), new PostgresOrganizationRepository(sql), protector, config), new ExternalAccountAuthentication(auth, new PostgresExternalAccountRepository(sql, mfa), githubProvider, protector, config), new AccountAuthorization(auth, new PostgresPlatformAuthority(sql)), new AccountCatalog(auth, new PostgresCatalogRepository(sql), protector), undefined, undefined, new AccountEnvironmentCredentials(auth, new PostgresEnvironmentCredentialRepository(sql), protector), new AccountEnvironmentSecrets(auth, new PostgresEnvironmentSecretRepository(sql, secretProtector), protector), new AccountRepositories(auth, new PostgresRepositoryIntegrationRepository(sql), repositoryProvider, protector), new AccountDeviceAuthorization(auth,new PostgresDeviceAuthorizationRepository(sql),protector,origin,config.rateLimitKey,new DeviceCredentialAuthentication(sql),assertionIssuer),new AccountServiceAccounts(auth,new PostgresServiceAccountRepository(sql),protector,assertionIssuer),new AccountPersonalCredentials(auth,new PostgresPersonalCredentialRepository(sql),protector),new AccountLegacyTokens(auth,new PostgresLegacyTokenRepository(sql),protector,'accept'),new AccountWorkers(auth,new PostgresWorkerRepository(sql,secretProtector),protector),new AccountAudit(auth,new PostgresAuditLog(sql),protector,{pollMs:15,heartbeatMs:120,maxMs:900}),new AccountRealms(auth,new PostgresAppAuthRepository(sql),protector),new PersonalCredentialExchange(new PersonalCredentialAuthentication(sql),assertionIssuer),new AccountBuilds(auth,buildRepository,protector));
   let auth = makeAuth(); let handler = makeHandler(auth);
   // A stand-in identity provider: real discovery, token and key endpoints over the OIDC client's transport, a real signing key.
   const idpIssuer = 'https://login.example.test'; const idpKeys = generateKeyPairSync('ec', { namedCurve: 'P-256' }); const forgedKeys = generateKeyPairSync('ec', { namedCurve: 'P-256' });
@@ -96,7 +98,7 @@ async function harness() {
   // App calls carry no cookie and no Origin unless a test adds them on purpose.
   const app = (path: string, method = 'GET', input?: unknown, overrides: Record<string, string> = {}, peer = '203.0.113.10') => appHandler(new Request(origin + path, { method,
     headers: { ...(input === undefined ? {} : { 'content-type': 'application/json' }), ...overrides }, body: input === undefined ? undefined : JSON.stringify(input) }), peer);
-  const workerHandler = createWorkerRoutes(new WorkerProtocol(new PostgresWorkerRepository(sql, secretProtector), config.rateLimitKey), origin);
+  const workerHandler = createWorkerRoutes(new WorkerProtocol(new PostgresWorkerRepository(sql, secretProtector), config.rateLimitKey), origin, new WorkerBuilds(buildRepository));
   // Worker calls carry no Origin and no cookies unless a test adds them on purpose.
   const workerApi = (path: string, input?: unknown, overrides: Record<string, string> = {}, peer = '203.0.113.20') => workerHandler(new Request(origin + path, { method: 'POST',
     headers: { ...(input === undefined ? {} : { 'content-type': 'application/json' }), ...overrides }, body: input === undefined ? undefined : JSON.stringify(input) }), peer);
@@ -177,7 +179,7 @@ async function harness() {
     const redirected = await githubCallback(url.searchParams.get('state')!); expect(redirected.status).toBe(303);
     return redirected.headers.get('location')!.split('#token=')[1]!;
   };
-  return { sql, protector, secretProtector, workerApi, leases, organizationLifecycle, catalogLifecycle, app, idp, deliverApp, assertionPublicKey:assertionKeys.publicKey, assertionKey, mail, cookies, call, challenge, complete, token, freshRequest, freshComplete, profile, emailToken, emailComplete, createOrganization, organizationCommand, restoreCookies,
+  return { sql, protector, secretProtector, workerApi, leases, builds, organizationLifecycle, catalogLifecycle, app, idp, deliverApp, assertionPublicKey:assertionKeys.publicKey, assertionKey, mail, cookies, call, challenge, complete, token, freshRequest, freshComplete, profile, emailToken, emailComplete, createOrganization, organizationCommand, restoreCookies,
     catalogCommand, createProject,
     invitation, invitationToken, invitationProof,
     githubStart, githubCallback, githubComplete, githubBegin, githubCalls,
@@ -1229,6 +1231,216 @@ suite("real account authentication", () => {
     // A non-browser caller sends no Origin and is unaffected; an unknown realm allows no origin.
     const native = await h.app(`${appBase}/configuration`); expect(native.status).toBe(200); expect(native.headers.get('access-control-allow-origin')).toBeNull();
     expect((await h.app(`/app/v1/realms/${crypto.randomUUID()}/configuration`, 'GET', undefined, { origin: 'https://app.example.test' })).status).toBe(403);
+  });
+
+  test('builds run on worker leases with an immutable input, reserved quota, ordered logs, declared artifacts and settled usage', async () => {
+    const h = await harness(); await h.challenge('owner@example.test'); await h.deliver(); await h.complete();
+    const org = (await organizationResponse(h.createOrganization('Build team', 'build-team'))).receipt.id;
+    const scope = parseComponent('EnvironmentScope', parseComponent('CatalogReceipt', (await (await h.createProject(org)).json() as { receipt: unknown }).receipt).scope);
+    const csrf = () => h.cookies.get('__Host-carbon-csrf')!; const envPath = `/platform/v1/orgs/${org}/projects/${scope.projectId}/environments/${scope.environmentId}`; const buildsPath = `${envPath}/builds`;
+    const post = (path: string, body: unknown, revision?: string, overrides: Record<string, string> = {}) => h.call(path, 'POST', body, { 'x-csrf-token': csrf(), ...(revision ? { 'if-match': revision } : {}), ...overrides });
+    const environmentRevision = parseComponent('CatalogEnvironmentDetails', await (await h.call(envPath)).json()).environment.revision;
+    expect((await post(`${envPath}/secrets`, { name: 'SIGNING_KEY', value: 'signing-key-value' }, environmentRevision)).status).toBe(201);
+    const enrollment = parseComponent('WorkerEnrollmentIssue', await (await post(`/platform/v1/orgs/${org}/workers`, { name: 'win-01', purposes: ['build'] })).json());
+    const worker = parseComponent('WorkerCredentialIssue', await (await h.workerApi('/worker/v1/enroll', { code: enrollment.code, capabilities: { platform: 'windows', arch: 'x64', toolchains: [] } })).json());
+    const bearer = { authorization: `Bearer ${worker.token}` };
+    const claim = async () => { const offer = parseComponent('WorkerLeaseOffer', await (await h.workerApi('/worker/v1/leases/claim', undefined, bearer)).json()); if (offer.state !== 'leased') throw new Error('expected a lease'); return offer; };
+    const held = (offer: { leaseToken: string }) => ({ ...bearer, 'x-carbon-lease-token': offer.leaseToken });
+    const on = (offer: { lease: { id: string }; leaseToken: string }, suffix = '', body?: unknown) => h.workerApi(`/worker/v1/leases/${offer.lease.id}/build${suffix}`, body, held(offer));
+    const details = async (id: string) => parseComponent('BuildDetails', await (await h.call(`${buildsPath}/${id}`)).json());
+    const request = { commitSha: 'c'.repeat(40), targets: ['nsis', 'msi'], secretNames: ['SIGNING_KEY'], platform: 'windows' };
+    const digest = (value: string) => createHash('sha256').update(value).digest('hex');
+
+    // Creating a build.
+    expect((await h.call(buildsPath, 'POST', request)).status).toBe(403);
+    expect((await post(buildsPath, { ...request, commitSha: 'main' })).status).toBe(400);
+    expect((await post(buildsPath, { ...request, secretNames: ['MISSING'] })).status).toBe(400);
+    expect((await post(buildsPath, { ...request, targets: [] })).status).toBe(400);
+    expect(await h.sql`SELECT id FROM platform_builds`).toHaveLength(0); expect(await h.sql`SELECT id FROM worker_leases`).toHaveLength(0);
+    const key = crypto.randomUUID(); const createdResponse = await post(buildsPath, request, undefined, { 'idempotency-key': key }); expect(createdResponse.status).toBe(201);
+    const created = parseComponent('BuildReceipt', await createdResponse.json()).build;
+    // The stored input is canonical, and its digest covers exactly those bytes.
+    expect(created).toMatchObject({ scope, state: 'queued', attempt: 0, reservedMinutes: 30, usedMinutes: null, source: { commitSha: request.commitSha, platform: 'windows', secretNames: ['SIGNING_KEY'], targets: ['msi', 'nsis'] } });
+    expect(created.sourceDigest).toBe(digest(JSON.stringify({ commitSha: request.commitSha, platform: 'windows', secretNames: ['SIGNING_KEY'], targets: ['msi', 'nsis'] })));
+    expect(parseComponent('BuildReceipt', await (await post(buildsPath, request, undefined, { 'idempotency-key': key })).json()).build).toEqual(created);
+    expect((await post(buildsPath, { ...request, commitSha: 'd'.repeat(40) }, undefined, { 'idempotency-key': key })).status).toBe(409);
+    expect(await h.sql`SELECT id FROM platform_builds`).toHaveLength(1);
+
+    // Quota: the free plan includes 60 minutes and each build holds 30 until it finishes. Two racing requests cannot both take the last slot.
+    const racing = await Promise.all([post(buildsPath, { ...request, commitSha: 'd'.repeat(40) }), post(buildsPath, { ...request, commitSha: 'e'.repeat(40) })]);
+    expect(racing.map(response => response.status).sort()).toEqual([201, 429]);
+    const second = parseComponent('BuildReceipt', await racing.find(response => response.status === 201)!.json()).build;
+    expect((await post(buildsPath, { ...request, commitSha: 'f'.repeat(40) })).status).toBe(429);
+    expect(parseComponent('BuildPage', await (await h.call(buildsPath)).json()).items.map(item => item.id).sort()).toEqual([created.id, second.id].sort());
+
+    // The worker claims the oldest build and receives exactly the stored input.
+    const offer = await claim(); expect(offer.lease).toMatchObject({ subjectId: created.id, purpose: 'build', secretNames: ['SIGNING_KEY'], attempt: 1 });
+    expect((await on(offer, '/logs', { sequence: 1, text: 'too early' })).status).toBe(409);
+    const input = parseComponent('WorkerBuildInput', await (await on(offer)).json());
+    expect(input).toEqual({ buildId: created.id, scope, source: created.source, sourceDigest: created.sourceDigest, attempt: 1, nextLogSequence: 1 });
+    expect((await details(created.id)).build).toMatchObject({ state: 'running', attempt: 1 });
+    expect(parseComponent('WorkerBuildInput', await (await on(offer)).json())).toEqual(input);
+    expect(parseComponent('WorkerSecretBindings', await (await h.workerApi(`/worker/v1/leases/${offer.lease.id}/secrets`, undefined, held(offer))).json()).bindings).toEqual([{ name: 'SIGNING_KEY', version: 1, value: 'signing-key-value' }]);
+
+    // Logs: appended in order, retried safely, never rewritten, credentials removed.
+    expect((await on(offer, '/logs', { sequence: 1, text: 'Compiling crate one' })).status).toBe(200);
+    expect(await (await on(offer, '/logs', { sequence: 2, text: `uploading with ${worker.token}` })).json()).toEqual({ nextLogSequence: 3 });
+    expect(await (await on(offer, '/logs', { sequence: 2, text: `uploading with ${worker.token}` })).json()).toEqual({ nextLogSequence: 3 });
+    expect((await on(offer, '/logs', { sequence: 2, text: 'rewritten history' })).status).toBe(409);
+    expect((await on(offer, '/logs', { sequence: 4, text: 'skipped one' })).status).toBe(409);
+    expect((await on(offer, '/logs', { sequence: 3, text: 'Linking' })).status).toBe(200);
+    const logs = parseComponent('BuildLogPage', await (await h.call(`${buildsPath}/${created.id}/logs`)).json());
+    expect(logs.items.map(item => [item.sequence, item.attempt, item.text])).toEqual([[1, 1, 'Compiling crate one'], [2, 1, 'uploading with [redacted]'], [3, 1, 'Linking']]);
+    const paged = parseComponent('BuildLogPage', await (await h.call(`${buildsPath}/${created.id}/logs?after=1&limit=1`)).json());
+    expect(paged.items.map(item => item.sequence)).toEqual([2]); expect(paged.nextSequence).toBe(2);
+    expect((await h.call(`${buildsPath}/${created.id}/logs?limit=0`)).status).toBe(400);
+
+    // Artifacts: declared per target, immutable, and required for success.
+    const nsis = { target: 'nsis', objectKey: `builds/${created.id}/setup.exe`, sizeBytes: 4096, sha256: digest('setup.exe') };
+    expect((await on(offer, '/artifacts', { ...nsis, target: 'deb' })).status).toBe(400);
+    expect((await on(offer, '/artifacts', { ...nsis, objectKey: 'builds/../../etc/passwd' })).status).toBe(400);
+    const declared = await on(offer, '/artifacts', nsis); expect(declared.status).toBe(201);
+    expect(parseComponent('BuildArtifact', await (await on(offer, '/artifacts', nsis)).json())).toEqual(parseComponent('BuildArtifact', await declared.json()));
+    expect((await on(offer, '/artifacts', { ...nsis, sha256: digest('swapped') })).status).toBe(409);
+    expect((await on(offer, '/complete', { outcome: 'succeeded' })).status).toBe(409);
+    expect((await on(offer, '/artifacts', { target: 'msi', objectKey: `builds/${created.id}/setup.msi`, sizeBytes: 8192, sha256: digest('setup.msi') })).status).toBe(201);
+    expect((await details(created.id)).artifacts).toEqual([]);
+
+    // Completion settles quota from the time the attempt really ran.
+    await h.sql`UPDATE build_attempts SET started_at = now() - interval '150 seconds' WHERE build_id = ${created.id}`;
+    const finished = parseComponent('Build', await (await on(offer, '/complete', { outcome: 'succeeded' })).json());
+    expect(finished).toMatchObject({ state: 'succeeded', usedMinutes: 3, errorCategory: null }); expect(finished.completedAt).not.toBeNull();
+    for (const attempt of [on(offer, '/complete', { outcome: 'succeeded' }), on(offer, '/logs', { sequence: 4, text: 'late' }), on(offer, '/artifacts', nsis), on(offer)]) expect((await attempt).status).toBe(409);
+    const done = await details(created.id);
+    expect(done.artifacts.map(item => [item.target, item.attempt, item.sizeBytes])).toEqual([['msi', 1, 8192], ['nsis', 1, 4096]]);
+    expect((await h.sql`SELECT duration_ms::text FROM usage_records WHERE build_id = ${created.id}`)[0].duration_ms).toBe('180000');
+    expect((await h.sql`SELECT state FROM worker_leases WHERE subject_id = ${created.id}`)[0].state).toBe('completed');
+    // 3 minutes used and 30 still held by the second build leave no room for another 30; cancelling the second frees it.
+    expect((await post(buildsPath, { ...request, commitSha: 'f'.repeat(40) })).status).toBe(429);
+    const cancelled = parseComponent('BuildReceipt', await (await post(`${buildsPath}/${second.id}`, { kind: 'cancel' }, second.revision)).json()).build; expect(cancelled).toMatchObject({ state: 'cancelled', usedMinutes: 0 });
+    expect((await post(buildsPath, { ...request, commitSha: 'f'.repeat(40) })).status).toBe(201);
+
+    // The input, a finished state, logs and artifacts cannot be changed even by writing to the database directly.
+    const refusal = async (statement: Promise<unknown>) => { let failure: unknown; try { await statement; } catch (error) { failure = error; } return String((failure as { constraint?: string } | undefined)?.constraint ?? failure); };
+    expect(await refusal(h.sql`UPDATE platform_builds SET source = jsonb_set(source, '{commitSha}', '"0000000000000000000000000000000000000000"') WHERE id = ${created.id}`)).toContain('platform_build_immutable_input');
+    expect(await refusal(h.sql`UPDATE platform_builds SET state = 'running' WHERE id = ${created.id}`)).toContain('platform_build_terminal_state');
+    expect(await refusal(h.sql`UPDATE build_log_segments SET content = 'edited' WHERE build_id = ${created.id}`)).toContain('build_record_append_only');
+    expect(await refusal(h.sql`DELETE FROM build_log_segments WHERE build_id = ${created.id}`)).toContain('build_record_append_only');
+    expect(await refusal(h.sql`UPDATE build_artifacts SET sha256 = ${digest('swapped')} WHERE build_id = ${created.id}`)).toContain('build_record_append_only');
+    expect((await details(created.id)).build.sourceDigest).toBe(created.sourceDigest);
+
+    // Another organization sees none of it.
+    const ownerCookies = new Map(h.cookies); h.cookies.clear(); await h.challenge('other@example.test'); await h.deliver(); await h.complete(); await organizationResponse(h.createOrganization('Other builds', 'other-builds'));
+    for (const attempt of [h.call(buildsPath), h.call(`${buildsPath}/${created.id}`), h.call(`${buildsPath}/${created.id}/logs`), h.call(buildsPath, 'POST', request, { 'x-csrf-token': csrf() }),
+      h.call(`${buildsPath}/${created.id}`, 'POST', { kind: 'cancel' }, { 'x-csrf-token': csrf(), 'if-match': '1' })]) expect((await attempt).status).toBe(404);
+    h.restoreCookies(ownerCookies);
+    const audit = (await h.sql`SELECT action, actor_kind FROM platform_events WHERE org_id = ${org} AND resource_kind = 'build' AND resource_id = ${created.id} ORDER BY transaction_id, sequence`).map((row: { action: string; actor_kind: string }) => [row.action, row.actor_kind]);
+    expect(audit).toEqual([['build.queued', 'account'], ['build.attempt_started', 'worker'], ['build.succeeded', 'worker']]);
+    const durable = JSON.stringify({ logs: await h.sql`SELECT * FROM build_log_segments`, events: await h.sql`SELECT * FROM build_events`, builds: await h.sql`SELECT * FROM platform_builds` });
+    for (const secret of ['signing-key-value', worker.token, offer.leaseToken]) expect(durable).not.toContain(secret);
+  });
+
+  test('builds survive lost workers within the attempt limit, and cancellation, reported failure, no worker and deadlines each end them cleanly', async () => {
+    const h = await harness(); await h.challenge('owner@example.test'); await h.deliver(); await h.complete();
+    const org = (await organizationResponse(h.createOrganization('Recovery team', 'recovery-team'))).receipt.id;
+    const scope = parseComponent('EnvironmentScope', parseComponent('CatalogReceipt', (await (await h.createProject(org)).json() as { receipt: unknown }).receipt).scope);
+    const csrf = () => h.cookies.get('__Host-carbon-csrf')!; const envPath = `/platform/v1/orgs/${org}/projects/${scope.projectId}/environments/${scope.environmentId}`; const buildsPath = `${envPath}/builds`;
+    const post = (path: string, body: unknown, revision?: string, overrides: Record<string, string> = {}) => h.call(path, 'POST', body, { 'x-csrf-token': csrf(), ...(revision ? { 'if-match': revision } : {}), ...overrides });
+    const environmentRevision = parseComponent('CatalogEnvironmentDetails', await (await h.call(envPath)).json()).environment.revision;
+    expect((await post(`${envPath}/secrets`, { name: 'SIGNING_KEY', value: 'signing-key-value' }, environmentRevision)).status).toBe(201);
+    const enrollment = parseComponent('WorkerEnrollmentIssue', await (await post(`/platform/v1/orgs/${org}/workers`, { name: 'win-01', purposes: ['build'] })).json());
+    const worker = parseComponent('WorkerCredentialIssue', await (await h.workerApi('/worker/v1/enroll', { code: enrollment.code, capabilities: { platform: 'windows', arch: 'x64', toolchains: [] } })).json());
+    const bearer = { authorization: `Bearer ${worker.token}` };
+    const claim = async () => { const offer = parseComponent('WorkerLeaseOffer', await (await h.workerApi('/worker/v1/leases/claim', undefined, bearer)).json()); if (offer.state !== 'leased') throw new Error('expected a lease'); return offer; };
+    const held = (offer: { leaseToken: string }) => ({ ...bearer, 'x-carbon-lease-token': offer.leaseToken });
+    const on = (offer: { lease: { id: string }; leaseToken: string }, suffix = '', body?: unknown) => h.workerApi(`/worker/v1/leases/${offer.lease.id}/build${suffix}`, body, held(offer));
+    const details = async (id: string) => parseComponent('BuildDetails', await (await h.call(`${buildsPath}/${id}`)).json());
+    const request = { commitSha: 'c'.repeat(40), targets: ['nsis', 'msi'], secretNames: ['SIGNING_KEY'], platform: 'windows' };
+    const digest = (value: string) => createHash('sha256').update(value).digest('hex');
+    await h.sql`INSERT INTO org_plans (org_id, plan) VALUES (${org}, 'pro')`;
+    const start = async (commit: string) => parseComponent('BuildReceipt', await (await post(buildsPath, { ...request, commitSha: commit.repeat(40) })).json()).build;
+    const lose = (leaseId: string) => h.sql`UPDATE worker_leases SET expires_at = now() - interval '1 second' WHERE id = ${leaseId}`;
+    const openReservations = async () => Number((await h.sql`SELECT COALESCE(sum(reserved_minutes), 0)::integer AS minutes FROM platform_builds WHERE org_id = ${org} AND state IN ('queued', 'running')`)[0].minutes);
+
+    // A lost worker: the same input runs again as the next attempt, on a new lease, with the log continuing.
+    const resilient = await start('1'); let offer = await claim(); expect(parseComponent('WorkerBuildInput', await (await on(offer)).json()).attempt).toBe(1);
+    expect((await on(offer, '/logs', { sequence: 1, text: 'attempt one started' })).status).toBe(200);
+    expect((await on(offer, '/artifacts', { target: 'nsis', objectKey: 'builds/a1/setup.exe', sizeBytes: 10, sha256: digest('attempt-1') })).status).toBe(201);
+    await lose(offer.lease.id);
+    expect((await h.leases.reclaim(crypto.randomUUID())).map(lease => [lease.subjectId, lease.attempt])).toEqual([[resilient.id, 2]]);
+    // The lost worker comes back: its lease is gone, so it can do nothing more.
+    for (const attempt of [on(offer, '/logs', { sequence: 2, text: 'ghost' }), on(offer, '/complete', { outcome: 'succeeded' }), on(offer)]) expect((await attempt).status).toBe(409);
+    expect(await h.builds.reconcile(crypto.randomUUID())).toEqual([]);
+    const retry = await claim(); expect(retry.lease).toMatchObject({ subjectId: resilient.id, attempt: 2 }); expect(retry.lease.id).not.toBe(offer.lease.id);
+    const again = parseComponent('WorkerBuildInput', await (await on(retry)).json());
+    expect(again).toMatchObject({ attempt: 2, nextLogSequence: 2, sourceDigest: resilient.sourceDigest, source: resilient.source });
+    expect((await h.sql`SELECT number, state FROM build_attempts WHERE build_id = ${resilient.id} ORDER BY number`) as unknown[]).toEqual([{ number: 1, state: 'lost' }, { number: 2, state: 'running' }]);
+    expect((await on(retry, '/logs', { sequence: 2, text: 'attempt two started' })).status).toBe(200);
+    for (const target of ['msi', 'nsis']) expect((await on(retry, '/artifacts', { target, objectKey: `builds/a2/setup.${target}`, sizeBytes: 20, sha256: digest(`attempt-2-${target}`) })).status).toBe(201);
+    expect(parseComponent('Build', await (await on(retry, '/complete', { outcome: 'succeeded' })).json())).toMatchObject({ state: 'succeeded', attempt: 2 });
+    const recovered = await details(resilient.id);
+    // The build's outputs are the successful attempt's; what the lost attempt declared is not an output.
+    expect(recovered.artifacts.map(item => [item.target, item.attempt, item.objectKey])).toEqual([['msi', 2, 'builds/a2/setup.msi'], ['nsis', 2, 'builds/a2/setup.nsis']]);
+    expect(parseComponent('BuildLogPage', await (await h.call(`${buildsPath}/${resilient.id}/logs`)).json()).items.map(item => [item.sequence, item.attempt])).toEqual([[1, 1], [2, 2]]);
+
+    // Lost on every allowed attempt: the build fails as worker_lost and gives its quota back.
+    const doomed = await start('2');
+    for (const attempt of [1, 2, 3]) {
+      offer = await claim(); expect(offer.lease).toMatchObject({ subjectId: doomed.id, attempt }); expect((await on(offer)).status).toBe(200);
+      await lose(offer.lease.id); expect((await h.leases.reclaim(crypto.randomUUID())).length).toBe(attempt < 3 ? 1 : 0);
+    }
+    expect(await openReservations()).toBe(30);
+    expect((await h.builds.reconcile(crypto.randomUUID())).map(build => [build.id, build.state, build.errorCategory])).toEqual([[doomed.id, 'failed', 'worker_lost']]);
+    expect((await h.sql`SELECT state FROM build_attempts WHERE build_id = ${doomed.id} ORDER BY number`).map((row: { state: string }) => row.state)).toEqual(['lost', 'lost', 'lost']);
+    expect(await openReservations()).toBe(0); expect(await h.builds.reconcile(crypto.randomUUID())).toEqual([]);
+
+    // Nobody claims it: the offer lapses and the build fails as no_worker.
+    const unclaimed = await start('3'); await h.sql`UPDATE worker_leases SET expires_at = now() - interval '1 second' WHERE subject_id = ${unclaimed.id}`;
+    expect(await h.leases.reclaim(crypto.randomUUID())).toEqual([]);
+    expect((await h.builds.reconcile(crypto.randomUUID())).map(build => [build.id, build.errorCategory, build.usedMinutes])).toEqual([[unclaimed.id, 'no_worker', 0]]);
+
+    // Cancellation: the worker is told, and can neither read secrets nor report success afterwards.
+    const stopped = await start('4'); offer = await claim(); expect((await on(offer)).status).toBe(200);
+    expect((await post(`${buildsPath}/${stopped.id}`, { kind: 'cancel' }, '99')).status).toBe(409);
+    const running = (await details(stopped.id)).build; const cancelKey = crypto.randomUUID();
+    const cancelled = parseComponent('BuildReceipt', await (await post(`${buildsPath}/${stopped.id}`, { kind: 'cancel' }, running.revision, { 'idempotency-key': cancelKey })).json());
+    expect(cancelled.build).toMatchObject({ state: 'cancelled', errorCategory: 'cancelled' });
+    expect(parseComponent('BuildReceipt', await (await post(`${buildsPath}/${stopped.id}`, { kind: 'cancel' }, running.revision, { 'idempotency-key': cancelKey })).json())).toEqual(cancelled);
+    expect((await post(`${buildsPath}/${stopped.id}`, { kind: 'cancel' }, cancelled.build.revision)).status).toBe(409);
+    expect(parseComponent('WorkerLeaseReceipt', await (await h.workerApi(`/worker/v1/leases/${offer.lease.id}`, { kind: 'heartbeat' }, held(offer))).json()).cancelled).toBe(true);
+    for (const attempt of [on(offer, '/complete', { outcome: 'succeeded' }), on(offer, '/logs', { sequence: 1, text: 'after cancel' }), h.workerApi(`/worker/v1/leases/${offer.lease.id}/secrets`, undefined, held(offer))]) expect((await attempt).status).toBe(409);
+    expect((await details(stopped.id)).build.state).toBe('cancelled');
+    expect((await h.sql`SELECT state FROM build_attempts WHERE build_id = ${stopped.id}`)[0].state).toBe('cancelled');
+
+    // A failure the worker reports is the build's own and is not retried.
+    const broken = await start('5'); offer = await claim(); expect((await on(offer)).status).toBe(200);
+    expect((await on(offer, '/complete', { outcome: 'failed' })).status).toBe(400);
+    expect(parseComponent('Build', await (await on(offer, '/complete', { outcome: 'failed', errorCategory: 'compile.failed' })).json())).toMatchObject({ state: 'failed', errorCategory: 'compile.failed', attempt: 1 });
+    expect(parseComponent('WorkerLeaseOffer', await (await h.workerApi('/worker/v1/leases/claim', undefined, bearer)).json())).toEqual({ state: 'none' });
+    expect(await h.sql`SELECT id FROM worker_leases WHERE subject_id = ${broken.id}`).toHaveLength(1);
+
+    // The deadline ends a build even while a worker still holds it.
+    const slow = await start('6'); offer = await claim(); expect((await on(offer)).status).toBe(200);
+    await h.sql`UPDATE platform_builds SET deadline_at = now() - interval '1 second' WHERE id = ${slow.id}`;
+    expect((await h.builds.reconcile(crypto.randomUUID())).map(build => [build.id, build.errorCategory])).toEqual([[slow.id, 'deadline_exceeded']]);
+    expect((await on(offer, '/complete', { outcome: 'succeeded' })).status).toBe(409);
+    expect((await h.sql`SELECT state FROM worker_leases WHERE id = ${offer.lease.id}`)[0].state).toBe('cancelled');
+
+    // Only the creator, or a member who may cancel any build, can cancel.
+    const guarded = await start('7'); const other = crypto.randomUUID(); const ownerCookies = new Map(h.cookies);
+    h.cookies.clear(); await h.challenge('viewer@example.test'); await h.deliver(); await h.complete();
+    const viewer = (await h.sql`SELECT id FROM accounts WHERE primary_email = 'viewer@example.test'`)[0].id; void other;
+    await h.sql`INSERT INTO memberships (id, account_id, org_id, role, state, project_access) VALUES (${crypto.randomUUID()}, ${viewer}, ${org}, 'Viewer', 'active', 'all')`;
+    await h.sql`UPDATE accounts SET permission_revision = permission_revision + 1 WHERE id = ${viewer}`;
+    expect((await h.call(`${buildsPath}/${guarded.id}`)).status).toBe(200);
+    expect((await h.call(`${buildsPath}/${guarded.id}`, 'POST', { kind: 'cancel' }, { 'x-csrf-token': csrf(), 'if-match': guarded.revision })).status).toBe(403);
+    expect((await h.call(buildsPath, 'POST', request, { 'x-csrf-token': csrf() })).status).toBe(403);
+    h.restoreCookies(ownerCookies);
+    expect((await post(`${buildsPath}/${guarded.id}`, { kind: 'cancel' }, guarded.revision)).status).toBe(200);
+
+    // Every build is finished and has settled; nothing is left reserved.
+    expect((await h.sql`SELECT state, used_minutes IS NOT NULL AS settled FROM platform_builds WHERE org_id = ${org}`).every((row: { state: string; settled: boolean }) => ['succeeded', 'failed', 'cancelled'].includes(row.state) && row.settled)).toBe(true);
+    expect(await openReservations()).toBe(0);
   });
 
   test('device authorization approves bounded CLI access, discloses once, rate-limits polling, and revokes durably', async()=>{

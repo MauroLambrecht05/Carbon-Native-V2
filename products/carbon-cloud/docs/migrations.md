@@ -117,3 +117,10 @@ source event tables for rows written before 0023. Backfilled rows are placed
 under transaction 3 so they sort before every event recorded by the triggers.
 The statement skips rows already present, so it is safe to repeat. Recovery:
 code from before 0025 ignores both.
+
+0026 adds canonical builds: `platform_builds`, `build_attempts`,
+`build_log_segments`, `build_artifacts`, `build_commands` and `build_events`,
+with triggers that make a build's input, a finished state, and stored logs and
+artifacts unchangeable, and a trigger that copies build events into
+`platform_events`. It is additive and leaves the legacy `builds` table of 0001
+untouched. Recovery: code from before 0026 ignores these tables.

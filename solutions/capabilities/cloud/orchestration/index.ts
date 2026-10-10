@@ -21,3 +21,9 @@ export { GetBuildUseCase } from "./application/usecases/GetBuildUseCase.ts";
 export { ListOrgBuildsUseCase } from "./application/usecases/ListOrgBuildsUseCase.ts";
 export { InMemoryBuildRepository } from "./infrastructure/InMemoryBuildRepository.ts";
 export { PostgresBuildRepository } from "./infrastructure/PostgresBuildRepository.ts";
+
+// Canonical, environment-scoped builds on worker leases: the supported path.
+// The classes above are the legacy organization-wide wk_ queue.
+export { AccountBuilds, BuildOrchestration, WorkerBuilds, canonicalBuildSource } from "./application/usecases/PlatformBuilds.ts";
+export type { PlatformBuildRepository } from "./application/ports/PlatformBuildRepository.ts";
+export { PostgresPlatformBuildRepository } from "./infrastructure/PostgresPlatformBuildRepository.ts";

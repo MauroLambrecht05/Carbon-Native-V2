@@ -1,7 +1,6 @@
 # Carbon platform left-off checkpoint
 
-Checkpoint: 2026-10-10, after Phase 6 (application authentication) and the gap
-closures that followed it.
+Checkpoint: 2026-10-10, after Phase 7: build orchestration.
 
 The overall platform plan remains unfinished. The rough scope estimate is about
 **30% of the complete backend-and-frontend goal**, with backend foundations in
@@ -43,6 +42,8 @@ the **low 40% range** and the requested production frontend redesign still at
   organizations, operator suspension, and a two-tenant denial matrix.
 - Application authentication: one realm per environment, emailed sign-in links,
   OIDC providers, app sessions, and Database row access as a verified app user.
+- Build orchestration on worker leases: immutable input, quota reservation,
+  attempts, ordered logs, declared artifacts, cancellation and recovery.
 
 The service-account implementation is described in
 [service-accounts.md](../service-accounts.md), its wire surface in
@@ -53,12 +54,12 @@ legacy permissions are inferred.
 
 ## Last verified state
 
-- Affected Bun regression: **530 tests, 5,329 assertions, 0 failures across 62
+- Affected Bun regression: **562 tests, 5,534 assertions, 0 failures across 65
   files**, including the real HTTP/PostgreSQL cross-service suites.
 - Solutions, Carbon Cloud, Database, Registry and CLI TypeScript checks passed.
 - Generated platform types are current.
-- The app-authentication OpenAPI document parses as JSON.
-- A full local `bazel build //...` passed on 2026-10-10 before Phases 2 to 6. Local
+- The build OpenAPI document parses as JSON.
+- A full local `bazel build //...` passed on 2026-10-10 before Phases 2 to 7. Local
   `bazel test //...` is unreliable while `defs.bzl` runs `cargo sweep` after
   every Cargo invocation: parallel Rust tests delete each other's build output
   from the shared target directory. That `defs.bzl` change is still uncommitted.
@@ -80,7 +81,9 @@ service accounts and CLI device credentials, personal credentials, enrolled
 workers that receive leased secrets, a browsable and streamable organization
 event log, recoverable deletion, and application authentication with Database
 row access for app users. Personal credentials exchange for Database and
-Registry assertions, and the CLI can read its Registry namespace. Nothing grants worker leases in production yet. The
+Registry assertions, and the CLI can read its Registry namespace. Builds are
+orchestrated on worker leases, but no worker runtime speaks that protocol yet
+and declared artifacts are not verified. The
 AWS KMS adapter and the OIDC client are tested against stand-ins, not real
 providers. Final deletion marks rows and destroys no owning-service data.
 Suspension has no operator route. Legacy `cc_` and `wk_` tokens, the legacy
@@ -88,9 +91,8 @@ build queue and the legacy end-user routes still work as before. Existing legacy
 implementations elsewhere in the repository still need review against the new
 isolation, durability and trust requirements before they count as complete.
 
-The next bounded goal is **Phase 7: build orchestration — immutable source
-snapshots, quota reservations, attempts, leases, heartbeats, cancellation and
-ordered logs**. Continue with
+The next bounded goal is **Phase 8: disposable Windows x64 execution, dependency
+locks, NSIS/WiX packaging, signing and provenance**. Continue with
 exactly one phase from [handoff.md](handoff.md) per future work
 session. Finish that phase's proof gate, update both checkpoint documents, and
 stop before beginning the next phase unless the user explicitly combines them.

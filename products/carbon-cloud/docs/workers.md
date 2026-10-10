@@ -47,8 +47,8 @@ unexpired and its organization is active.
 A lease is one subject (a build or a function execution), one environment, a
 named list of secrets, and a deadline. Leases are granted only by
 `WorkerLeases.grant` inside Cloud. There is no HTTP route for it, so a browser
-session or an API credential cannot grant itself a lease. Build orchestration
-(Phase 7) is the intended caller; nothing calls it in production yet.
+session or an API credential cannot grant itself a lease. Creating a build
+([builds.md](builds.md)) grants one in the same transaction as the build.
 
 1. **Grant.** The environment must be active and every named secret must exist
    and be active. One subject has one open lease.
@@ -100,8 +100,9 @@ values when the lease ends.
 
 ## Not included
 
-- Nothing grants leases in production yet; build and function orchestration are
-  Phases 7 and 13.
+- Builds grant leases; function executions do not yet (Phase 13).
+- A worker that ends a build lease with the plain lease `complete` command,
+  instead of the build's own, leaves the build to be failed by the sweeper.
 - The legacy `wk_` worker tokens and the legacy build queue routes are unchanged
   and are not connected to enrolled workers.
 - Authenticated worker calls are not rate limited; only enrollment attempts are.
