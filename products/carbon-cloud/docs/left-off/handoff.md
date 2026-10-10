@@ -16,7 +16,7 @@ meaningful tests pass together.
 | 3 — complete | Add personal credentials and a reviewed migration/deprecation path for legacy `cc_` credentials. | Completed: `pt_` credentials with one-time disclosure, hash-only storage, exact delegated scope, rotation and revocation; staged `cc_` deprecation, owner claim and reversible retirement; cross-tenant tests pass. |
 | 4 — complete | Add worker enrollment, lease-scoped worker credentials, hosted KMS/HSM custody, and short-lived build/function secret materialization. | Completed: `we_`/`wc_`/`wl_` credentials, leases granted only inside Cloud, single-use lease-bound secret delivery, sweeper, AWS KMS adapter; expiry, cancellation, replay, rotation and worker loss are tested. Not run against real AWS. |
 | 5 — complete | Finish BE-01 to BE-03 lifecycle gaps: streams, audit browsing, archive/deletion/suspension/recovery, revocation propagation and adversarial tenant coverage. | Completed: unified event log, audit listing and SSE stream, scheduled recoverable deletion for environments, projects and organizations, operator suspension, credential revocation matrix, and a 69-case two-tenant denial matrix. |
-| 6 | Implement BE-04 application authentication realms, app users, identities, providers, challenges and sessions. | Signup policy, verified magic-link/OIDC, redirect allowlists, rotation/revocation, rate limits and app-audience Database policy context pass end-to-end tests. |
+| 6 — complete | Implement BE-04 application authentication realms, app users, identities, providers, challenges and sessions. | Completed: realm per environment, generic single-use magic links, OIDC with PKCE and verified ID tokens, exact redirect allowlist, rate limits, session rotation and revocation, and app-user Database row access proven end to end. |
 | 7 | Implement BE-06 build orchestration: immutable source snapshots, quota reservations, attempts, leases, heartbeats, cancellation and ordered logs. | Lost/reclaimed workers, duplicate commands, quota release, log ordering and immutable input/artifact references are proven durably. |
 | 8 | Implement disposable Windows x64 execution, dependency locks, NSIS/WiX packaging, signing and provenance. | A clean Windows worker builds a pinned commit under resource/egress limits and emits verified immutable artifacts and provenance. |
 | 9 | Implement BE-07 releases, channel revisions, rollout/promotion/withdrawal and updater compatibility. | Publisher, TypeScript, standalone and Rust consumers pass shared digest/signature, rollback and channel-transition conformance. |
@@ -30,25 +30,31 @@ meaningful tests pass together.
 | 17 | Complete production browser adapters and the Carbon frontend one vertical slice at a time. | Each frontend-plan walkthrough passes against real services; production bundles contain no mock imports or mock data. |
 | 18 | Complete observability, deployment compatibility, security review, migration reconciliation, canary rollout and cutover. | Sections 25-29 of the backend plan have recorded production evidence, including restore, rotation, rollback and no-mock-fallback drills. |
 
-## Start with Phase 6
+## Start with Phase 7
 
-Phases 1 to 5 are complete. Read these files before changing Phase 6 code:
+Phases 1 to 6 are complete. Read these files before changing Phase 7 code:
 
-- section 10 of [the backend plan](../platform-backend-plan.md) (BE-04)
-- [account-authentication.md](../account-authentication.md) and [github-account-authentication.md](../github-account-authentication.md)
+- section 12 of [the backend plan](../platform-backend-plan.md) (BE-06) and section 5.2 (operations)
+- [workers.md](../workers.md): enrollment, leases and secret delivery already exist
+- [github-repositories.md](../github-repositories.md): immutable commit resolution
 - [resource-lifecycle.md](../resource-lifecycle.md) and [audit-events.md](../audit-events.md)
-- `solutions/capabilities/cloud/auth/` (the legacy magic-link end-user capability)
-- `solutions/capabilities/cloud/identity/application/usecases/AccountAuthentication.ts`
-- `solutions/capabilities/cloud/identity/domain/policies/PlatformAuthorization.ts` (the `app_user` principal and `realmId` scope are reserved but unused)
+- `solutions/capabilities/cloud/orchestration/` and `solutions/capabilities/cloud/worker/` (the legacy build queue and worker runtime)
+- `solutions/capabilities/cloud/catalog/application/usecases/WorkerAccess.ts` (`WorkerLeases.grant`, `cancel`, `reclaim`)
+- `solutions/capabilities/cloud/billing/` for quota reservations
 
-Phase 6 adds application authentication: realms per environment, app users,
-identities, providers, challenges and sessions, with signup policy, verified
-magic-link and OIDC, redirect allowlists, rotation and revocation, rate limits,
-and an app-audience Database policy context. Realm scopes are rejected
-everywhere today (`Realm authority is not configured`); that is the seam to
-open. New event tables need a trigger for `platform_events` (see migration
-0023). Stop after its tests and documentation; do not pull build orchestration
-into that phase.
+Phase 7 builds orchestration on top of worker leases: a build is created from an
+immutable source snapshot (resolved commit, configuration, secret references,
+target formats, actor), reserves quota idempotently, and runs as attempts. Each
+attempt is a worker lease granted through `WorkerLeases.grant`; this phase is its
+first production caller. Add heartbeats tied to the lease, cooperative
+cancellation that can never become success, and ordered, bounded, append-only
+logs persisted outside process memory. New event tables need a trigger for
+`platform_events`. The legacy `wk_` queue can then be retired or bridged.
+
+Its proof gate: lost and reclaimed workers, duplicate commands, quota release,
+log ordering, and immutable input and artifact references, all proven durably.
+Stop after its tests and documentation; real Windows execution, packaging and
+signing are Phase 8.
 
 ## Verification baseline
 

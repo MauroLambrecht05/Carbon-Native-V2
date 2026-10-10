@@ -2,7 +2,7 @@
 
 Every capability writes its own event table (catalog, secrets, credentials,
 service accounts, devices, personal credentials, legacy tokens, workers,
-repositories, imports, organization security). Migration
+repositories, imports, organization security, app authentication). Migration
 `0023_platform_events.sql` projects all of them into one ordered,
 organization-scoped table, `platform_events`. The wire contract is in
 [audit-api.openapi.json](audit-api.openapi.json).

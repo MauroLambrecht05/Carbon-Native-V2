@@ -1,0 +1,675 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Carbon application authentication API",
+    "version": "1.0.0",
+    "description": "Realm administration for developers and the app-facing sign-in, session and assertion API for an app's own end users."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "paths": {
+    "/platform/v1/orgs/{orgId}/projects/{projectId}/environments/{environmentId}/realm": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrgId"
+        },
+        {
+          "$ref": "#/components/parameters/ProjectId"
+        },
+        {
+          "$ref": "#/components/parameters/EnvironmentId"
+        }
+      ],
+      "get": {
+        "operationId": "getRealm",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The environment's realm",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Realm"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "commandRealm",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "description": "configure creates the realm the first time. Requires resources.configure and a fresh session.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/MutationOrigin"
+          },
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          },
+          {
+            "$ref": "#/components/parameters/RequestId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/RealmCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated realm",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/RealmReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/orgs/{orgId}/projects/{projectId}/environments/{environmentId}/realm/users": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrgId"
+        },
+        {
+          "$ref": "#/components/parameters/ProjectId"
+        },
+        {
+          "$ref": "#/components/parameters/EnvironmentId"
+        }
+      ],
+      "get": {
+        "operationId": "listAppUsers",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "organization-api.openapi.json#/components/parameters/Limit"
+          },
+          {
+            "$ref": "organization-api.openapi.json#/components/parameters/Cursor"
+          },
+          {
+            "$ref": "organization-api.openapi.json#/components/parameters/Sort"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "App users",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/AppUserPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/orgs/{orgId}/projects/{projectId}/environments/{environmentId}/realm/users/{userId}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrgId"
+        },
+        {
+          "$ref": "#/components/parameters/ProjectId"
+        },
+        {
+          "$ref": "#/components/parameters/EnvironmentId"
+        },
+        {
+          "$ref": "#/components/parameters/UserId"
+        }
+      ],
+      "post": {
+        "operationId": "commandAppUser",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "description": "suspend, restore, delete or revoke-sessions. Each ends the user's sessions.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/MutationOrigin"
+          },
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          },
+          {
+            "$ref": "#/components/parameters/RequestId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/AppUserCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/AppUserReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/app/v1/realms/{realmId}/configuration": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/RealmId"
+        }
+      ],
+      "get": {
+        "operationId": "getAppRealmConfiguration",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Public realm configuration, with no provider detail beyond names",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/AppRealmConfiguration"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/app/v1/realms/{realmId}/challenges": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/RealmId"
+        }
+      ],
+      "post": {
+        "operationId": "requestAppSignInLink",
+        "security": [],
+        "description": "Always answers 202 with the same body, whatever the address.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/AppChallengeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "A generic receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/AppChallengeReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/app/v1/realms/{realmId}/sessions": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/RealmId"
+        }
+      ],
+      "post": {
+        "operationId": "createAppSession",
+        "security": [],
+        "description": "Exchanges a single-use link token for a session.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/AppSessionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The session and its only token disclosure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/AppSessionIssue"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/app/v1/realms/{realmId}/session": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/RealmId"
+        }
+      ],
+      "get": {
+        "operationId": "getAppSession",
+        "security": [
+          {
+            "appSession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The signed-in user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/AppSessionView"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "endAppSession",
+        "security": [
+          {
+            "appSession": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Signed out"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/app/v1/realms/{realmId}/session/rotate": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/RealmId"
+        }
+      ],
+      "post": {
+        "operationId": "rotateAppSession",
+        "security": [
+          {
+            "appSession": []
+          }
+        ],
+        "description": "Replaces the token at once without extending the session.",
+        "responses": {
+          "200": {
+            "description": "The session with its new token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/AppSessionIssue"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/app/v1/realms/{realmId}/oidc/start": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/RealmId"
+        }
+      ],
+      "post": {
+        "operationId": "startAppOidc",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/AppOidcStart"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The provider authorization URL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/AppOidcStartResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/app/v1/realms/{realmId}/oidc/complete": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/RealmId"
+        }
+      ],
+      "post": {
+        "operationId": "completeAppOidc",
+        "security": [],
+        "description": "Spends the state, exchanges the code and verifies the ID token.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/AppOidcComplete"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The session and its only token disclosure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/AppSessionIssue"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/app/v1/realms/{realmId}/assertions": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/RealmId"
+        }
+      ],
+      "post": {
+        "operationId": "exchangeAppDatabaseAssertion",
+        "security": [
+          {
+            "appSession": []
+          }
+        ],
+        "description": "Issues a 60-second assertion bound to one Database row request, with the app user as principal.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/AppAssertionExchange"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Request-bound Database assertion",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/AppAssertionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "browserSession": {
+        "$ref": "account-api.openapi.json#/components/securitySchemes/browserSession"
+      },
+      "appSession": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "An aps_ app session token."
+      }
+    },
+    "parameters": {
+      "OrgId": {
+        "name": "orgId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+        }
+      },
+      "ProjectId": {
+        "name": "projectId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+        }
+      },
+      "EnvironmentId": {
+        "name": "environmentId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+        }
+      },
+      "UserId": {
+        "name": "userId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+        }
+      },
+      "RealmId": {
+        "name": "realmId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+        }
+      },
+      "MutationOrigin": {
+        "$ref": "account-api.openapi.json#/components/parameters/Origin"
+      },
+      "CsrfToken": {
+        "$ref": "account-api.openapi.json#/components/parameters/CsrfToken"
+      },
+      "IdempotencyKey": {
+        "$ref": "account-api.openapi.json#/components/parameters/IdempotencyKey"
+      },
+      "IfMatch": {
+        "$ref": "account-api.openapi.json#/components/parameters/IfMatch"
+      },
+      "RequestId": {
+        "$ref": "account-api.openapi.json#/components/parameters/RequestId"
+      }
+    }
+  }
+}

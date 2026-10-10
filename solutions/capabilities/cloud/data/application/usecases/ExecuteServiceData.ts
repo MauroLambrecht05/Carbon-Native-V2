@@ -11,9 +11,15 @@ export class ExecuteServiceData {
     const command = request.command; const permission = dataPermission(command.kind);
     if (path !== dataRequestPath(request.scope, request.bindingId, command.kind)) throw new PlatformFault('validation', 'Data request does not match its canonical path');
     if ('commandId' in command ? idempotencyKey !== command.commandId : idempotencyKey !== null) throw new PlatformFault('validation', 'Invalid data idempotency key');
-    const assertion = await this.verifier.verify(token, { scope: request.scope, permission, method: 'POST', path, bodyDigest: bodyDigest(bytes), principalKinds: ['account','service_account'] });
+    // An app user's assertion carries its realm in the scope. The realm comes from the signed token, never from the
+    // request, and Cloud's live authority confirms it belongs to this environment.
+    const claimed = await this.verifier.inspect(token);
+    const app = claimed.principal.kind === 'app_user';
+    if (app && permission !== 'data.read' && permission !== 'data.write') throw new PlatformFault('forbidden', 'App users can only read and write rows');
+    if (app && !claimed.scope.realmId) throw new PlatformFault('forbidden', 'App identity requires a realm');
+    const assertion = await this.verifier.verify(token, { scope: app ? { ...request.scope, realmId: claimed.scope.realmId } : request.scope, permission, method: 'POST', path,
+      bodyDigest: bodyDigest(bytes), principalKinds: app ? ['app_user'] : ['account','service_account'] });
     if (assertion.requestId !== requestId) throw new PlatformFault('validation', 'Request correlation does not match the signed assertion');
-    // Application principals remain denied until the owning realm is verified by Cloud.
     const authority: NativeDataAuthority = { scope: request.scope, bindingId: request.bindingId, principal: assertion.principal, requestId,
       permit: async required => required === permission && !signal?.aborted && await this.security.isCurrent(assertion, token) };
     if (command.kind === 'table.types' || command.kind === 'rows.import-preview') {

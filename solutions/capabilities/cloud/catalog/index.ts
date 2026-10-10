@@ -12,6 +12,7 @@ export type { AwsCredentials } from './infrastructure/AwsKmsSecretKeyCustodian.t
 export { AccountWorkers, WorkerLeases, WorkerProtocol } from './application/usecases/WorkerAccess.ts';
 export type { WorkerLeaseRequest } from './application/usecases/WorkerAccess.ts';
 export { PostgresWorkerRepository } from './infrastructure/PostgresWorkerRepository.ts';
+export { PostgresProviderSecretReader } from './infrastructure/PostgresProviderSecretReader.ts';
 export type { WorkerRepository } from './application/ports/WorkerRepository.ts';
 export type { CatalogCommand, CatalogMutation, CatalogRepository } from './application/ports/CatalogRepository.ts';
 export type { EnvironmentCredentialGrant, EnvironmentCredentialMutation, EnvironmentCredentialRepository } from './application/ports/EnvironmentCredentialRepository.ts';

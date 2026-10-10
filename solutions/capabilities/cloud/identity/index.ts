@@ -64,7 +64,7 @@ export { PostgresAccountIdentityRepository } from "./infrastructure/PostgresAcco
 export { PostgresAccountMailQueue } from "./infrastructure/PostgresAccountMailQueue.ts";
 export { EnvelopeMessageProtector } from "./infrastructure/EnvelopeMessageProtector.ts";
 export type { AccountIdentityRepository } from "./application/ports/AccountIdentityRepository.ts";
-export type { AccountEmail, AccountNotification, AccountMailQueue, MessageProtector } from "./application/ports/AccountNotification.ts";
+export type { AccountEmail, AccountNotification, AccountMailJob, AccountMailQueue, MessageProtector } from "./application/ports/AccountNotification.ts";
 export { AccountSecurity } from "./application/usecases/AccountSecurity.ts";
 export { Rfc6238Totp, encodeBase32 } from "./infrastructure/Rfc6238Totp.ts";
 export { PostgresMfaVerification } from "./infrastructure/PostgresMfaVerification.ts";

@@ -1,5 +1,5 @@
 import { canonicalRegistryRequest, dataRequestPath, parseComponent, registryRequestPath, type DeviceAuthorizationCreate, type EnvironmentScope } from "@carbon/contracts/platform";
-import { AccountCatalog, AccountEnvironmentCredentials, AccountEnvironmentSecrets, AccountRepositories, AccountWorkers, WorkerLeases, WorkerProtocol, PostgresWorkerRepository, CatalogLifecycle, EnvelopeSecretProtector, EnvironmentCredentialAuthentication, LocalAesSecretKeyCustodian, PostgresCatalogRepository, PostgresEnvironmentCredentialRepository, PostgresEnvironmentSecretRepository, PostgresProvisioningRepository, PostgresRepositoryIntegrationRepository, PostgresServiceAuthority, ProvisionEnvironment, type ProvisioningWork, type RepositoryProvider } from '@carbon/catalog';
+import { AccountCatalog, AccountEnvironmentCredentials, AccountEnvironmentSecrets, AccountRepositories, AccountWorkers, WorkerLeases, WorkerProtocol, PostgresWorkerRepository, CatalogLifecycle, PostgresProviderSecretReader, EnvelopeSecretProtector, EnvironmentCredentialAuthentication, LocalAesSecretKeyCustodian, PostgresCatalogRepository, PostgresEnvironmentCredentialRepository, PostgresEnvironmentSecretRepository, PostgresProvisioningRepository, PostgresRepositoryIntegrationRepository, PostgresServiceAuthority, ProvisionEnvironment, type ProvisioningWork, type RepositoryProvider } from '@carbon/catalog';
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { createHash, createHmac, randomBytes, generateKeyPairSync } from "node:crypto";
 import {
@@ -13,6 +13,9 @@ import {
 import { GitHubAccountProvider } from "@carbon/github-identity";
 import { ResendAccountNotification } from "@carbon/resend-notification";
 import { migrate } from "../../infrastructure/persistence/Database.ts";
+import { SignJWT } from "jose";
+import { AccountRealms, AppAuthentication, HttpOidcClient, PostgresAppAuthRepository, PostgresAppMailQueue } from "@carbon/auth";
+import { createAppRoutes } from "../../presentation/http/app-routes.ts";
 import { createWorkerRoutes } from "../../presentation/http/worker-routes.ts";
 import { createAccountRoutes } from "../../presentation/http/account-routes.ts";
 import { accountPlatformConfigFromEnv } from "../../composition/account-platform.ts";
@@ -65,8 +68,34 @@ async function harness() {
     async createProposal(_installationId, _repositoryId, _baseBranch, proposal) { repositoryProposals++; return { pullRequestNumber: 12, url: 'https://github.com/carbon-team/desktop/pull/12', branch: proposal.branch, baseSha: 'b'.repeat(40), headSha: 'c'.repeat(40) }; },
     verifyWebhook(raw, signature, deliveryId, event) { const expected='sha256='+createHmac('sha256','repository-webhook-secret').update(raw).digest('hex'); if(signature!==expected||!deliveryId||!event) throw new Error('invalid webhook'); },
   };
-  const makeHandler = (auth: AccountAuthentication) => createAccountRoutes(auth, origin, new AccountSecurity(auth, new PostgresAccountSecurityRepository(sql, mfa), protector, totp), new AccountProfile(auth, new PostgresAccountProfileRepository(sql, mfa), protector, config), new OrganizationAccess(auth, new PostgresOrganizationRepository(sql), protector), new OrganizationInvitations(auth, new PostgresOrganizationInvitationsRepository(sql), new PostgresOrganizationRepository(sql), protector, config), new ExternalAccountAuthentication(auth, new PostgresExternalAccountRepository(sql, mfa), githubProvider, protector, config), new AccountAuthorization(auth, new PostgresPlatformAuthority(sql)), new AccountCatalog(auth, new PostgresCatalogRepository(sql), protector), undefined, undefined, new AccountEnvironmentCredentials(auth, new PostgresEnvironmentCredentialRepository(sql), protector), new AccountEnvironmentSecrets(auth, new PostgresEnvironmentSecretRepository(sql, secretProtector), protector), new AccountRepositories(auth, new PostgresRepositoryIntegrationRepository(sql), repositoryProvider, protector), new AccountDeviceAuthorization(auth,new PostgresDeviceAuthorizationRepository(sql),protector,origin,config.rateLimitKey,new DeviceCredentialAuthentication(sql),assertionIssuer),new AccountServiceAccounts(auth,new PostgresServiceAccountRepository(sql),protector,assertionIssuer),new AccountPersonalCredentials(auth,new PostgresPersonalCredentialRepository(sql),protector),new AccountLegacyTokens(auth,new PostgresLegacyTokenRepository(sql),protector,'accept'),new AccountWorkers(auth,new PostgresWorkerRepository(sql,secretProtector),protector),new AccountAudit(auth,new PostgresAuditLog(sql),protector,{pollMs:15,heartbeatMs:120,maxMs:900}));
+  const makeHandler = (auth: AccountAuthentication) => createAccountRoutes(auth, origin, new AccountSecurity(auth, new PostgresAccountSecurityRepository(sql, mfa), protector, totp), new AccountProfile(auth, new PostgresAccountProfileRepository(sql, mfa), protector, config), new OrganizationAccess(auth, new PostgresOrganizationRepository(sql), protector), new OrganizationInvitations(auth, new PostgresOrganizationInvitationsRepository(sql), new PostgresOrganizationRepository(sql), protector, config), new ExternalAccountAuthentication(auth, new PostgresExternalAccountRepository(sql, mfa), githubProvider, protector, config), new AccountAuthorization(auth, new PostgresPlatformAuthority(sql)), new AccountCatalog(auth, new PostgresCatalogRepository(sql), protector), undefined, undefined, new AccountEnvironmentCredentials(auth, new PostgresEnvironmentCredentialRepository(sql), protector), new AccountEnvironmentSecrets(auth, new PostgresEnvironmentSecretRepository(sql, secretProtector), protector), new AccountRepositories(auth, new PostgresRepositoryIntegrationRepository(sql), repositoryProvider, protector), new AccountDeviceAuthorization(auth,new PostgresDeviceAuthorizationRepository(sql),protector,origin,config.rateLimitKey,new DeviceCredentialAuthentication(sql),assertionIssuer),new AccountServiceAccounts(auth,new PostgresServiceAccountRepository(sql),protector,assertionIssuer),new AccountPersonalCredentials(auth,new PostgresPersonalCredentialRepository(sql),protector),new AccountLegacyTokens(auth,new PostgresLegacyTokenRepository(sql),protector,'accept'),new AccountWorkers(auth,new PostgresWorkerRepository(sql,secretProtector),protector),new AccountAudit(auth,new PostgresAuditLog(sql),protector,{pollMs:15,heartbeatMs:120,maxMs:900}),new AccountRealms(auth,new PostgresAppAuthRepository(sql),protector));
   let auth = makeAuth(); let handler = makeHandler(auth);
+  // A stand-in identity provider: real discovery, token and key endpoints over the OIDC client's transport, a real signing key.
+  const idpIssuer = 'https://login.example.test'; const idpKeys = generateKeyPairSync('ec', { namedCurve: 'P-256' }); const forgedKeys = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+  type IdpAnswer = { subject: string; email: string; emailVerified?: boolean; nonce?: string; audience?: string; issuer?: string; forged?: boolean; expired?: boolean; refuse?: boolean };
+  const idp = { issuer: idpIssuer, next: undefined as (IdpAnswer & { challenge: string; expectedNonce: string }) | undefined, last: undefined as Record<string, unknown> | undefined,
+    arm(url: URL, answer: IdpAnswer) { idp.next = { ...answer, challenge: url.searchParams.get('code_challenge')!, expectedNonce: url.searchParams.get('nonce')! }; } };
+  const idpTransport = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    if (url.href === `${idpIssuer}/.well-known/openid-configuration`) return Response.json({ issuer: idpIssuer, authorization_endpoint: `${idpIssuer}/authorize`, token_endpoint: `${idpIssuer}/token`, jwks_uri: `${idpIssuer}/keys` });
+    if (url.href === `${idpIssuer}/keys`) return Response.json({ keys: [{ ...idpKeys.publicKey.export({ format: 'jwk' }), kid: 'idp-key', alg: 'ES256', use: 'sig' }] });
+    if (url.href === `${idpIssuer}/token` && init?.method === 'POST') {
+      const form = new URLSearchParams(String(init.body)); const answer = idp.next; idp.next = undefined;
+      if (!answer || answer.refuse || form.get('code') !== 'good-code' || form.get('grant_type') !== 'authorization_code') return Response.json({ error: 'invalid_grant' }, { status: 400 });
+      idp.last = { pkce: createHash('sha256').update(form.get('code_verifier') ?? '').digest('base64url') === answer.challenge, clientSecret: form.get('client_secret'), redirectUri: form.get('redirect_uri'), clientId: form.get('client_id') };
+      const seconds = Math.floor(Date.now() / 1000);
+      const idToken = await new SignJWT({ nonce: answer.nonce ?? answer.expectedNonce, email: answer.email, email_verified: answer.emailVerified ?? true })
+        .setProtectedHeader({ alg: 'ES256', kid: 'idp-key' }).setIssuer(answer.issuer ?? idpIssuer).setAudience(answer.audience ?? 'carbon-client').setSubject(answer.subject)
+        .setIssuedAt(answer.expired ? seconds - 7200 : seconds).setExpirationTime(answer.expired ? seconds - 3600 : seconds + 300).sign(answer.forged ? forgedKeys.privateKey : idpKeys.privateKey);
+      return Response.json({ access_token: 'unused', token_type: 'Bearer', id_token: idToken });
+    }
+    return new Response('not found', { status: 404 });
+  }) as typeof fetch;
+  const appRepository = new PostgresAppAuthRepository(sql);
+  const appHandler = createAppRoutes(new AppAuthentication(appRepository, protector, { rateLimitKey: config.rateLimitKey }, new HttpOidcClient(idpTransport), new PostgresProviderSecretReader(sql, secretProtector), assertionIssuer), origin);
+  // App calls carry no cookie and no Origin unless a test adds them on purpose.
+  const app = (path: string, method = 'GET', input?: unknown, overrides: Record<string, string> = {}, peer = '203.0.113.10') => appHandler(new Request(origin + path, { method,
+    headers: { ...(input === undefined ? {} : { 'content-type': 'application/json' }), ...overrides }, body: input === undefined ? undefined : JSON.stringify(input) }), peer);
   const workerHandler = createWorkerRoutes(new WorkerProtocol(new PostgresWorkerRepository(sql, secretProtector)), origin);
   // Worker calls carry no Origin and no cookies unless a test adds them on purpose.
   const workerApi = (path: string, input?: unknown, overrides: Record<string, string> = {}) => workerHandler(new Request(origin + path, { method: 'POST',
@@ -85,6 +114,7 @@ async function harness() {
   }) as typeof fetch);
   const makeWorker = () => new DeliverAccountMail(new PostgresAccountMailQueue(sql), protector, provider);
   let worker = makeWorker();
+  const deliverApp = () => new DeliverAccountMail(new PostgresAppMailQueue(sql), protector, provider).execute();
   const cookies = new Map<string, string>();
   const call = async (path: string, method = "GET", input?: unknown, overrides: Record<string, string> = {}) => {
     const headers = new Headers({ origin, "content-type": "application/json", "idempotency-key": crypto.randomUUID(), cookie: [...cookies].map(([name, value]) => `${name}=${value}`).join("; "), ...overrides });
@@ -147,7 +177,7 @@ async function harness() {
     const redirected = await githubCallback(url.searchParams.get('state')!); expect(redirected.status).toBe(303);
     return redirected.headers.get('location')!.split('#token=')[1]!;
   };
-  return { sql, protector, secretProtector, workerApi, leases, organizationLifecycle, catalogLifecycle, assertionPublicKey:assertionKeys.publicKey, assertionKey, mail, cookies, call, challenge, complete, token, freshRequest, freshComplete, profile, emailToken, emailComplete, createOrganization, organizationCommand, restoreCookies,
+  return { sql, protector, secretProtector, workerApi, leases, organizationLifecycle, catalogLifecycle, app, idp, deliverApp, assertionPublicKey:assertionKeys.publicKey, assertionKey, mail, cookies, call, challenge, complete, token, freshRequest, freshComplete, profile, emailToken, emailComplete, createOrganization, organizationCommand, restoreCookies,
     catalogCommand, createProject,
     invitation, invitationToken, invitationProof,
     githubStart, githubCallback, githubComplete, githubBegin, githubCalls,
@@ -901,6 +931,205 @@ suite("real account authentication", () => {
     for (const path of [`/platform/v1/orgs`, `/platform/v1/orgs/${b}/projects`, `/platform/v1/orgs/${b}/audit`, `/platform/v1/orgs/${b}/service-accounts`, `/platform/v1/orgs/${b}/workers`, '/platform/v1/account/personal-credentials', '/platform/v1/account/devices']) {
       const response = await h.call(path); expect(response.status).toBe(200); const text = await response.text(); for (const value of private_) expect(text).not.toContain(value);
     }
+  });
+
+  test('app authentication: realm policy, generic magic links, single-use sign-in, sessions, rotation, revocation and user management', async () => {
+    const h = await harness(); await h.challenge('developer@example.test'); await h.deliver(); await h.complete();
+    const org = (await organizationResponse(h.createOrganization('App team', 'app-team'))).receipt.id;
+    const scope = parseComponent('EnvironmentScope', parseComponent('CatalogReceipt', (await (await h.createProject(org)).json() as { receipt: unknown }).receipt).scope);
+    const csrf = () => h.cookies.get('__Host-carbon-csrf')!; const realmPath = `/platform/v1/orgs/${org}/projects/${scope.projectId}/environments/${scope.environmentId}/realm`;
+    const redirectUri = 'https://app.example.test/callback'; const settings = { kind: 'configure', signupEnabled: false, magicLinkEnabled: true, sessionTtlSeconds: 3600, redirectAllowlist: [redirectUri] };
+    const admin = (body: unknown, revision?: string, overrides: Record<string, string> = {}) => h.call(realmPath, 'POST', body, { 'x-csrf-token': csrf(), ...(revision ? { 'if-match': revision } : {}), ...overrides });
+    const current = async () => parseComponent('Realm', await (await h.call(realmPath)).json());
+
+    // Realm configuration.
+    expect((await h.call(realmPath)).status).toBe(404);
+    expect((await admin({ kind: 'state', disabled: true })).status).toBe(404);
+    expect((await h.call(realmPath, 'POST', settings)).status).toBe(403);
+    for (const bad of ['https://app.example.test/*', 'http://app.example.test/callback', 'https://app.example.test/callback#fragment', 'javascript:alert(1)', 'https://user:pass@app.example.test/callback']) {
+      expect((await admin({ ...settings, redirectAllowlist: [bad] })).status).toBe(400);
+    }
+    const key = crypto.randomUUID(); const createdResponse = await admin(settings, undefined, { 'idempotency-key': key }); expect(createdResponse.status).toBe(200);
+    const created = parseComponent('RealmReceipt', await createdResponse.json()); const realmId = created.realm.id;
+    expect(created.realm).toMatchObject({ scope, state: 'active', signupEnabled: false, providers: [], claimsRevision: '1', revision: '1' });
+    expect(parseComponent('RealmReceipt', await (await admin(settings, undefined, { 'idempotency-key': key })).json())).toEqual(created);
+    expect((await admin({ ...settings, signupEnabled: true }, '99')).status).toBe(409);
+    const base = `/app/v1/realms/${realmId}`;
+    expect(parseComponent('AppRealmConfiguration', await (await h.app(`${base}/configuration`)).json())).toEqual({ realmId, signupEnabled: false, magicLinkEnabled: true, providers: [] });
+    expect((await h.app(`/app/v1/realms/${crypto.randomUUID()}/configuration`)).status).toBe(404);
+
+    // Magic links: one answer for every address, whatever happens behind it.
+    const ask = (email: string, peer?: string, uri = redirectUri) => h.app(`${base}/challenges`, 'POST', { email, redirectUri: uri }, {}, peer);
+    const linkToken = () => /#token=(am_[A-Za-z0-9_-]{43})/.exec(h.mail.at(-1)!.text)![1]!;
+    expect((await ask('customer@example.test', undefined, 'https://evil.example.test/callback')).status).toBe(400);
+    const closed = await ask('customer@example.test'); expect(closed.status).toBe(202); const generic = await closed.text();
+    expect(await h.deliverApp()).toBe(false); expect(await h.sql`SELECT id FROM app_challenges`).toHaveLength(0);
+    expect((await admin({ ...settings, signupEnabled: true }, (await current()).revision)).status).toBe(200);
+    const opened = await ask('Customer@Example.test'); expect(opened.status).toBe(202); expect(await opened.text()).toBe(generic);
+    expect(await h.deliverApp()).toBe(true); expect(h.mail.at(-1)!.to).toBe('customer@example.test');
+    const token = linkToken(); expect(h.mail.at(-1)!.text).toContain(`${redirectUri}#token=${token}`);
+    const stored = JSON.stringify({ challenges: await h.sql`SELECT * FROM app_challenges`, outbox: await h.sql`SELECT * FROM app_email_outbox` });
+    expect(stored).not.toContain(token); expect(stored).toContain(tokenDigest(token));
+
+    // Sign-in: single use, hash-only session.
+    expect((await h.app(`${base}/sessions`, 'POST', { token: 'am_' + 'A'.repeat(43) })).status).toBe(401);
+    expect((await h.app(`/app/v1/realms/${crypto.randomUUID()}/sessions`, 'POST', { token })).status).toBe(404);
+    const signedInResponse = await h.app(`${base}/sessions`, 'POST', { token }); expect(signedInResponse.status).toBe(201);
+    const signedIn = parseComponent('AppSessionIssue', await signedInResponse.json()); expect(signedIn.user.email).toBe('customer@example.test');
+    expect((await h.app(`${base}/sessions`, 'POST', { token })).status).toBe(401);
+    expect((await h.sql`SELECT token_hash FROM app_sessions`)[0].token_hash).toBe(tokenDigest(signedIn.token));
+    const lifetime = (new Date(signedIn.expiresAt).getTime() - Date.now()) / 1000; expect(lifetime).toBeGreaterThan(3590); expect(lifetime).toBeLessThanOrEqual(3600);
+    const bearer = (value: string) => ({ authorization: `Bearer ${value}` });
+    expect(parseComponent('AppSessionView', await (await h.app(`${base}/session`, 'GET', undefined, bearer(signedIn.token))).json()).user).toEqual(signedIn.user);
+    expect((await h.app(`${base}/session`)).status).toBe(401);
+    // A developer's browser session is not an app session, and other credential types are not accepted.
+    expect((await h.app(`${base}/session`, 'GET', undefined, { cookie: [...h.cookies].map(([name, value]) => `${name}=${value}`).join('; ') })).status).toBe(401);
+    for (const prefix of ['pt', 'dc', 'cs', 'wc', 'am']) expect((await h.app(`${base}/session`, 'GET', undefined, bearer(`${prefix}_${'A'.repeat(43)}`))).status).toBe(401);
+
+    // Rotation replaces the token without extending the session.
+    const rotated = parseComponent('AppSessionIssue', await (await h.app(`${base}/session/rotate`, 'POST', undefined, bearer(signedIn.token))).json());
+    expect(rotated.token).not.toBe(signedIn.token); expect(rotated.expiresAt).toBe(signedIn.expiresAt);
+    expect((await h.app(`${base}/session`, 'GET', undefined, bearer(signedIn.token))).status).toBe(401);
+    expect((await h.app(`${base}/session`, 'GET', undefined, bearer(rotated.token))).status).toBe(200);
+
+    // A known and an unknown address get byte-identical answers; with signup closed only the known one gets mail.
+    expect((await admin({ ...settings, signupEnabled: false }, (await current()).revision)).status).toBe(200);
+    const known = await ask('customer@example.test'); const unknown = await ask('stranger@example.test');
+    expect([known.status, await known.text()]).toEqual([unknown.status, await unknown.text()]);
+    expect(await h.deliverApp()).toBe(true); expect(await h.deliverApp()).toBe(false); expect(h.mail.at(-1)!.to).toBe('customer@example.test');
+    // Per-address limit: still the same answer, no more mail. Per-caller limit: refused.
+    for (let i = 0; i < 6; i++) expect((await ask('customer@example.test', `198.51.100.${i}`)).status).toBe(202);
+    // Three requests for this address were already counted above, so two of these six are sent before the limit of five.
+    let sent = 0; while (await h.deliverApp()) sent++; expect(sent).toBe(2);
+    const statuses: number[] = []; for (let i = 0; i < 22; i++) statuses.push((await ask(`flood-${i}@example.test`, '192.0.2.77')).status);
+    expect(statuses.slice(0, 20).every(status => status === 202)).toBe(true); expect(statuses.slice(20)).toEqual([429, 429]);
+    expect(JSON.stringify(await h.sql`SELECT * FROM app_auth_rate_limits`)).not.toContain('192.0.2.77');
+
+    // User management by the developer.
+    const usersPath = `${realmPath}/users`; let users = parseComponent('AppUserPage', await (await h.call(usersPath)).json());
+    expect(users.items.map(user => [user.email, user.state, user.identities.map(identity => identity.provider)])).toEqual([['customer@example.test', 'active', ['email']]]);
+    const user = users.items[0]!; const userCommand = (kind: string, revision: string) => h.call(`${usersPath}/${user.id}`, 'POST', { kind }, { 'if-match': revision, 'x-csrf-token': csrf() });
+    expect((await userCommand('restore', user.revision)).status).toBe(409);
+    const suspended = parseComponent('AppUserReceipt', await (await userCommand('suspend', user.revision)).json()).user; expect(suspended.state).toBe('suspended');
+    expect((await h.app(`${base}/session`, 'GET', undefined, bearer(rotated.token))).status).toBe(401);
+    while (await h.deliverApp()) { /* drain */ }
+    expect((await ask('customer@example.test', '203.0.113.50')).status).toBe(202); expect(await h.deliverApp()).toBe(false);
+    const restored = parseComponent('AppUserReceipt', await (await userCommand('restore', suspended.revision)).json()).user;
+    // Restoring a user does not bring their old session back.
+    expect((await h.app(`${base}/session`, 'GET', undefined, bearer(rotated.token))).status).toBe(401);
+    await h.sql`DELETE FROM app_auth_rate_limits`;
+    const signIn = async (email: string) => { expect((await ask(email)).status).toBe(202); expect(await h.deliverApp()).toBe(true); const response = await h.app(`${base}/sessions`, 'POST', { token: linkToken() }); expect(response.status).toBe(201); return parseComponent('AppSessionIssue', await response.json()); };
+    let session = await signIn('customer@example.test'); expect(session.user.id).toBe(user.id);
+
+    // Ending sessions: sign-out, realm-wide invalidation, expiry, disabling the realm.
+    expect((await h.app(`${base}/session`, 'DELETE', undefined, bearer(session.token))).status).toBe(204);
+    expect((await h.app(`${base}/session`, 'GET', undefined, bearer(session.token))).status).toBe(401);
+    session = await signIn('customer@example.test'); expect((await ask('customer@example.test')).status).toBe(202); expect(await h.deliverApp()).toBe(true); const pending = linkToken();
+    const invalidated = parseComponent('RealmReceipt', await (await admin({ kind: 'invalidate-sessions' }, (await current()).revision)).json()); expect(invalidated.realm.claimsRevision).toBe('2');
+    expect((await h.app(`${base}/session`, 'GET', undefined, bearer(session.token))).status).toBe(401);
+    expect((await h.app(`${base}/sessions`, 'POST', { token: pending })).status).toBe(401);
+    session = await signIn('customer@example.test');
+    await h.sql`UPDATE app_sessions SET expires_at = now() - interval '1 second' WHERE token_hash = ${tokenDigest(session.token)}`;
+    expect((await h.app(`${base}/session`, 'GET', undefined, bearer(session.token))).status).toBe(401);
+    session = await signIn('customer@example.test');
+    expect((await admin({ kind: 'state', disabled: true }, (await current()).revision)).status).toBe(200);
+    expect((await h.app(`${base}/configuration`)).status).toBe(404); expect((await h.app(`${base}/session`, 'GET', undefined, bearer(session.token))).status).toBe(401); expect((await ask('customer@example.test')).status).toBe(404);
+    expect((await admin({ kind: 'state', disabled: false }, (await current()).revision)).status).toBe(200);
+    expect((await h.app(`${base}/session`, 'GET', undefined, bearer(session.token))).status).toBe(200);
+
+    // Deleting a user ends them; the address can sign up again as a different user.
+    const deleted = parseComponent('AppUserReceipt', await (await userCommand('delete', (parseComponent('AppUserPage', await (await h.call(usersPath)).json()).items[0]!).revision)).json()).user; expect(deleted.state).toBe('deleted');
+    expect((await h.app(`${base}/session`, 'GET', undefined, bearer(session.token))).status).toBe(401);
+    expect(parseComponent('AppUserPage', await (await h.call(usersPath)).json()).items).toEqual([]);
+    expect((await h.call(`${usersPath}/${user.id}`, 'POST', { kind: 'restore' }, { 'if-match': deleted.revision, 'x-csrf-token': csrf() })).status).toBe(404);
+    expect((await admin({ ...settings, signupEnabled: true }, (await current()).revision)).status).toBe(200);
+    await h.sql`DELETE FROM app_auth_rate_limits`; // this address has used its five links for the window
+    const reborn = await signIn('customer@example.test'); expect(reborn.user.id).not.toBe(user.id); expect(restored.id).toBe(user.id);
+
+    // Another developer's realm: neither its administration nor its sessions cross over.
+    const developerCookies = new Map(h.cookies); h.cookies.clear(); await h.challenge('other-developer@example.test'); await h.deliver(); await h.complete();
+    const otherOrg = (await organizationResponse(h.createOrganization('Other app', 'other-app'))).receipt.id;
+    const otherScope = parseComponent('EnvironmentScope', parseComponent('CatalogReceipt', (await (await h.createProject(otherOrg)).json() as { receipt: unknown }).receipt).scope);
+    const otherRealmPath = `/platform/v1/orgs/${otherOrg}/projects/${otherScope.projectId}/environments/${otherScope.environmentId}/realm`;
+    for (const attempt of [h.call(realmPath), h.call(usersPath), h.call(realmPath, 'POST', { kind: 'invalidate-sessions' }, { 'x-csrf-token': csrf(), 'if-match': '1' }),
+      h.call(`${usersPath}/${reborn.user.id}`, 'POST', { kind: 'delete' }, { 'x-csrf-token': csrf(), 'if-match': '1' })]) expect((await attempt).status).toBe(404);
+    const otherRealm = parseComponent('RealmReceipt', await (await h.call(otherRealmPath, 'POST', { ...settings, signupEnabled: true }, { 'x-csrf-token': csrf() })).json()).realm;
+    expect((await h.app(`/app/v1/realms/${otherRealm.id}/session`, 'GET', undefined, bearer(reborn.token))).status).toBe(401);
+    expect((await ask('customer@example.test')).status).toBe(202); expect(await h.deliverApp()).toBe(true);
+    expect((await h.app(`/app/v1/realms/${otherRealm.id}/sessions`, 'POST', { token: linkToken() })).status).toBe(401);
+    expect(parseComponent('AppUserPage', await (await h.call(`${otherRealmPath}/users`)).json()).items).toEqual([]);
+    h.restoreCookies(developerCookies);
+
+    const audit = (await h.sql`SELECT action FROM platform_events WHERE org_id = ${org} AND source = 'app_auth_events'`).map((row: { action: string }) => row.action);
+    for (const action of ['realm.created', 'realm.configure', 'realm.invalidate-sessions', 'realm.state', 'app_user.signed_up', 'app_user.signed_in', 'app_user.session_rotated', 'app_user.signed_out', 'app_user.suspend', 'app_user.restore', 'app_user.delete']) expect(audit).toContain(action);
+    const durable = JSON.stringify({ events: await h.sql`SELECT * FROM app_auth_events`, sessions: await h.sql`SELECT * FROM app_sessions`, commands: await h.sql`SELECT * FROM realm_commands` });
+    for (const secret of [token, signedIn.token, rotated.token, reborn.token]) expect(durable).not.toContain(secret);
+  });
+
+  test('app authentication: an OIDC provider signs users in only with a verified ID token, PKCE, a single-use state and an allowed redirect', async () => {
+    const h = await harness(); await h.challenge('developer@example.test'); await h.deliver(); await h.complete();
+    const org = (await organizationResponse(h.createOrganization('OIDC team', 'oidc-team'))).receipt.id;
+    const scope = parseComponent('EnvironmentScope', parseComponent('CatalogReceipt', (await (await h.createProject(org)).json() as { receipt: unknown }).receipt).scope);
+    const csrf = () => h.cookies.get('__Host-carbon-csrf')!; const envPath = `/platform/v1/orgs/${org}/projects/${scope.projectId}/environments/${scope.environmentId}`; const realmPath = `${envPath}/realm`;
+    const redirectUri = 'https://app.example.test/callback'; const settings = { kind: 'configure', signupEnabled: true, magicLinkEnabled: true, sessionTtlSeconds: 3600, redirectAllowlist: [redirectUri] };
+    const admin = async (body: unknown) => { const existing = await h.call(realmPath); const revision = existing.status === 200 ? parseComponent('Realm', await existing.json()).revision : undefined;
+      return h.call(realmPath, 'POST', body, { 'x-csrf-token': csrf(), ...(revision ? { 'if-match': revision } : {}) }); };
+    const realmId = parseComponent('RealmReceipt', await (await admin(settings)).json()).realm.id; const base = `/app/v1/realms/${realmId}`;
+    const provider = { kind: 'provider-set', name: 'acme-sso', issuer: h.idp.issuer, clientId: 'carbon-client', clientSecretName: 'OIDC_CLIENT_SECRET', scopes: ['openid', 'email', 'profile'] };
+    // The client secret must be an existing secret of this environment; it is referenced by name, never stored in the realm.
+    expect((await admin(provider)).status).toBe(400);
+    const environmentRevision = parseComponent('CatalogEnvironmentDetails', await (await h.call(envPath)).json()).environment.revision;
+    expect((await h.call(`${envPath}/secrets`, 'POST', { name: 'OIDC_CLIENT_SECRET', value: 'oidc-client-secret-value' }, { 'if-match': environmentRevision, 'x-csrf-token': csrf() })).status).toBe(201);
+    const configured = parseComponent('RealmReceipt', await (await admin(provider)).json()).realm;
+    expect(configured.providers).toEqual([{ name: 'acme-sso', issuer: h.idp.issuer, clientId: 'carbon-client', clientSecretName: 'OIDC_CLIENT_SECRET', scopes: ['openid', 'email', 'profile'] }]);
+    const publicConfiguration = await (await h.app(`${base}/configuration`)).text();
+    expect(JSON.parse(publicConfiguration).providers).toEqual([{ name: 'acme-sso' }]); for (const hidden of ['carbon-client', 'OIDC_CLIENT_SECRET', 'oidc-client-secret-value', h.idp.issuer]) expect(publicConfiguration).not.toContain(hidden);
+
+    const start = async (providerName = 'acme-sso', uri = redirectUri) => h.app(`${base}/oidc/start`, 'POST', { provider: providerName, redirectUri: uri });
+    const begin = async () => { const response = await start(); expect(response.status).toBe(200); return new URL(parseComponent('AppOidcStartResponse', await response.json()).authorizationUrl); };
+    expect((await start('unknown-sso')).status).toBe(404); expect((await start('acme-sso', 'https://evil.example.test/callback')).status).toBe(400);
+    let url = await begin();
+    expect(url.origin + url.pathname).toBe(`${h.idp.issuer}/authorize`);
+    expect(Object.fromEntries(url.searchParams)).toMatchObject({ response_type: 'code', client_id: 'carbon-client', redirect_uri: redirectUri, code_challenge_method: 'S256', scope: 'openid email profile' });
+    expect(url.searchParams.get('state')).toMatch(/^ao_[A-Za-z0-9_-]{43}$/); expect(url.searchParams.get('code_challenge')).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    const stored = JSON.stringify(await h.sql`SELECT * FROM app_challenges WHERE kind = 'oidc'`); expect(stored).not.toContain(url.searchParams.get('state')!);
+    const complete = (state: string, code = 'good-code') => h.app(`${base}/oidc/complete`, 'POST', { state, code });
+
+    // A wrong state, then every way the provider's answer can be untrustworthy. Each attempt spends its state.
+    expect((await complete('ao_' + 'A'.repeat(43))).status).toBe(401);
+    const untrusted: [string, Partial<typeof h.idp.next>][] = [['unverified email', { emailVerified: false }], ['wrong nonce', { nonce: 'attacker-nonce' }], ['wrong audience', { audience: 'another-client' }],
+      ['wrong issuer', { issuer: 'https://attacker.example.test' }], ['forged signature', { forged: true }], ['expired token', { expired: true }], ['provider refuses the code', { refuse: true }]];
+    for (const [, fault] of untrusted) {
+      url = await begin(); h.idp.arm(url, { subject: 'idp-user-1', email: 'customer@example.test', ...fault });
+      const state = url.searchParams.get('state')!; expect((await complete(state)).status).toBe(401); expect((await complete(state)).status).toBe(401);
+    }
+    expect(await h.sql`SELECT id FROM app_users`).toHaveLength(0); expect(await h.sql`SELECT id FROM app_sessions`).toHaveLength(0);
+
+    // A verified sign-in. The provider saw the PKCE verifier matching the challenge and the stored client secret.
+    url = await begin(); h.idp.arm(url, { subject: 'idp-user-1', email: 'Customer@Example.test' });
+    const signedInResponse = await complete(url.searchParams.get('state')!); expect(signedInResponse.status).toBe(201);
+    const signedIn = parseComponent('AppSessionIssue', await signedInResponse.json()); expect(signedIn.user.email).toBe('customer@example.test');
+    expect(h.idp.last).toMatchObject({ pkce: true, clientSecret: 'oidc-client-secret-value', redirectUri, clientId: 'carbon-client' });
+    expect((await complete(url.searchParams.get('state')!)).status).toBe(401);
+    expect((await h.app(`${base}/session`, 'GET', undefined, { authorization: `Bearer ${signedIn.token}` })).status).toBe(200);
+    // The same provider subject is the same user even after their address changes; a verified address links to an existing user.
+    url = await begin(); h.idp.arm(url, { subject: 'idp-user-1', email: 'renamed@example.test' });
+    expect(parseComponent('AppSessionIssue', await (await complete(url.searchParams.get('state')!)).json()).user.id).toBe(signedIn.user.id);
+    expect((await h.app(`${base}/challenges`, 'POST', { email: 'customer@example.test', redirectUri })).status).toBe(202); expect(await h.deliverApp()).toBe(true);
+    const viaEmail = parseComponent('AppSessionIssue', await (await h.app(`${base}/sessions`, 'POST', { token: /#token=(am_[A-Za-z0-9_-]{43})/.exec(h.mail.at(-1)!.text)![1]! })).json());
+    expect(viaEmail.user.id).toBe(signedIn.user.id);
+    const users = parseComponent('AppUserPage', await (await h.call(`${realmPath}/users`)).json());
+    expect(users.items).toHaveLength(1); expect(users.items[0]!.identities.map(identity => identity.provider).sort()).toEqual(['acme-sso', 'email']);
+
+    // With signup closed a new provider identity is refused; removing the provider ends the flow.
+    expect((await admin({ ...settings, signupEnabled: false })).status).toBe(200);
+    url = await begin(); h.idp.arm(url, { subject: 'idp-user-2', email: 'newcomer@example.test' }); expect((await complete(url.searchParams.get('state')!)).status).toBe(401);
+    url = await begin(); h.idp.arm(url, { subject: 'idp-user-1', email: 'customer@example.test' });
+    expect((await admin({ kind: 'provider-remove', name: 'acme-sso' })).status).toBe(200);
+    expect((await complete(url.searchParams.get('state')!)).status).toBe(401); expect((await start()).status).toBe(404);
+    expect(await h.sql`SELECT id FROM app_users`).toHaveLength(1);
+    const durable = JSON.stringify({ events: await h.sql`SELECT * FROM app_auth_events`, challenges: await h.sql`SELECT * FROM app_challenges`, providers: await h.sql`SELECT * FROM realm_providers` });
+    for (const secret of ['oidc-client-secret-value', signedIn.token, viaEmail.token]) expect(durable).not.toContain(secret);
   });
 
   test('device authorization approves bounded CLI access, discloses once, rate-limits polling, and revokes durably', async()=>{

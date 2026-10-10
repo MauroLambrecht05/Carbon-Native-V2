@@ -62,6 +62,7 @@ export class PostgresServiceAuthority extends PostgresPlatformAuthority implemen
 
   private async dataAuthority(assertion: InternalAssertion): Promise<boolean> {
     const scope = assertion.scope; const principal = assertion.principal;
+    if (principal.kind === 'app_user') return this.appUserAuthority(assertion);
     if (assertion.aud !== 'carbon-database' || !((principal.kind === 'account' && ['dashboard','cli'].includes(principal.audience)) || (principal.kind === 'service_account' && principal.audience === 'automation')) || !scope.projectId || !scope.environmentId || scope.realmId || assertion.request.method !== 'POST') return false;
     let bindingId: string; let permission: ReturnType<typeof dataPermission>;
     try {
@@ -91,6 +92,38 @@ export class PostgresServiceAuthority extends PostgresPlatformAuthority implemen
         const organization = await this.organization(tx, scope.orgId, principal.id);
         return access.permissions.includes(permission) && assertion.roles.length === 1 && assertion.roles[0] === organization.role;
       } catch { return false; }
+    });
+  }
+  /**
+   * An app user's assertion is current only while their session, their user record and the realm are all live and
+   * the realm's claims revision is the one the assertion was issued under. App users can only ever read or write rows.
+   */
+  private async appUserAuthority(assertion: InternalAssertion): Promise<boolean> {
+    const scope = assertion.scope; const principal = assertion.principal;
+    if (assertion.aud !== 'carbon-database' || principal.audience !== 'app' || !scope.projectId || !scope.environmentId || !scope.realmId
+      || assertion.request.method !== 'POST' || assertion.roles.length !== 0) return false;
+    const environment = { orgId: scope.orgId, projectId: scope.projectId, environmentId: scope.environmentId };
+    let bindingId: string;
+    try {
+      const url = new URL(assertion.request.path, 'https://internal.invalid');
+      const kind = url.pathname.split('/').at(-1) as DataRequest['command']['kind'];
+      bindingId = url.searchParams.get('bindingId')!;
+      if (assertion.request.path !== dataRequestPath(environment, bindingId, kind)) return false;
+      const permission = dataPermission(kind);
+      if (permission !== 'data.read' && permission !== 'data.write') return false;
+      if (assertion.grants.length !== 1 || assertion.grants[0]!.permission !== permission || !sameScope(assertion.grants[0]!.scope, scope)) return false;
+    } catch { return false; }
+    return this.sql.begin(async tx => {
+      const binding = await tx`SELECT id FROM service_bindings WHERE id = ${bindingId} AND org_id = ${scope.orgId} AND project_id = ${scope.projectId}
+        AND environment_id = ${scope.environmentId} AND owner = 'database' AND remote_resource_id IS NOT NULL AND state = 'ready'`;
+      if (!binding.length) return false;
+      const live = await tx`SELECT 1 FROM app_sessions s JOIN app_users u ON u.id = s.user_id AND u.realm_id = s.realm_id JOIN realms r ON r.id = s.realm_id
+        JOIN environments e ON e.id = r.environment_id JOIN projects p ON p.id = r.project_id JOIN organizations o ON o.id = r.org_id
+        WHERE s.id = ${principal.credentialId} AND s.user_id = ${principal.id} AND r.id = ${scope.realmId!} AND r.org_id = ${scope.orgId} AND r.project_id = ${scope.projectId}
+          AND r.environment_id = ${scope.environmentId} AND r.state = 'active' AND u.state = 'active' AND s.revoked_at IS NULL AND s.expires_at > now()
+          AND s.claims_revision = r.claims_revision AND r.claims_revision::text = ${principal.permissionRevision}
+          AND e.state = 'active' AND p.state = 'active' AND o.state = 'active'`;
+      return live.length === 1;
     });
   }
   /** Exact-scope device (dc_) and managed service-account (cs_) credentials, rechecked against current state. */

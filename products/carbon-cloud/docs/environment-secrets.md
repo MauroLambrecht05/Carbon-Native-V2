@@ -63,7 +63,12 @@ a KMS stand-in. It has not been run against a real AWS account.
 
 ## Delivery to workers
 
-Account mail and staged import keys remain separate. Secret values are
-decrypted in exactly one place: delivery to an enrolled worker that holds a
-lease naming those secrets, once per lease. See [workers.md](workers.md). No
-browser route, data route or other credential type can decrypt them.
+Account mail and staged import keys remain separate. Secret values leave Cloud
+in exactly one way: delivery to an enrolled worker that holds a lease naming
+those secrets, once per lease. See [workers.md](workers.md). No browser route,
+data route or other credential type can decrypt them.
+
+Cloud itself decrypts one kind of secret for its own use: an OIDC provider's
+client secret, read by name during a token exchange with that provider
+([app-authentication.md](app-authentication.md)). The value is sent only to the
+provider's token endpoint and is never returned, stored elsewhere or logged.

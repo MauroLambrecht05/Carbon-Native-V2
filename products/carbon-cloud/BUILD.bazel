@@ -14,6 +14,7 @@ bun_test(
     entry = "tests/platform/account-auth.integration.test.ts",
     srcs = [":srcs"],
     deps = [
+        "//solutions/capabilities/cloud/auth:srcs",
         "//solutions/capabilities/cloud/identity:srcs",
         "//solutions/capabilities/cloud/catalog:srcs",
         "//solutions/capabilities/cloud/data:srcs",

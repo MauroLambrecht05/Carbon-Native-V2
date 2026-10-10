@@ -104,3 +104,10 @@ events are not backfilled. Recovery: code from before 0023 ignores the new table
 and columns; the triggers keep writing harmlessly. See
 [audit-events.md](audit-events.md) and
 [resource-lifecycle.md](resource-lifecycle.md).
+
+0024 adds application authentication: `realms`, `realm_providers`, `app_users`,
+`app_identities`, `app_challenges`, `app_email_outbox`, `app_sessions`,
+`app_auth_rate_limits`, `realm_commands` and `app_auth_events`, with a trigger
+that copies app events into `platform_events`. It is additive and leaves the
+legacy `end_users` tables of 0004 untouched. Recovery: code from before 0024
+ignores these tables.

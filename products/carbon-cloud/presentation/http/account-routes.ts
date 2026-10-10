@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { AccountRealms } from '@carbon/auth';
 import type { AccountCatalog, AccountEnvironmentCredentials, AccountWorkers, AccountEnvironmentSecrets, AccountRepositories, CatalogCommand } from '@carbon/catalog';
 import type { AccountData, AccountImports } from '@carbon/data';
 import { AccountAuthentication, opaqueToken, type AccountAudit, type AccountPersonalCredentials, type AccountLegacyTokens, type AccountDeviceAuthorization, type AccountServiceAccounts, type AccountSecurity, type AccountProfile, type OrganizationAccess, type OrganizationInvitations, type ExternalAccountAuthentication, type AccountAuthorization } from "@carbon/identity";
@@ -12,7 +13,7 @@ function cookieValue(request: Request, name: string): string {
   return matches.length === 1 ? matches[0]!.slice(name.length + 1) : "";
 }
 
-export function createAccountRoutes(auth: AccountAuthentication, origin: string, security?: AccountSecurity, profile?: AccountProfile, organizations?: OrganizationAccess, invitations?: OrganizationInvitations, github?: ExternalAccountAuthentication, access?: AccountAuthorization, catalog?: AccountCatalog, data?: AccountData, imports?: AccountImports, credentials?: AccountEnvironmentCredentials, secrets?: AccountEnvironmentSecrets, repositories?: AccountRepositories, devices?: AccountDeviceAuthorization, serviceAccounts?: AccountServiceAccounts, personal?: AccountPersonalCredentials, legacy?: AccountLegacyTokens, workers?: AccountWorkers, audit?: AccountAudit) {
+export function createAccountRoutes(auth: AccountAuthentication, origin: string, security?: AccountSecurity, profile?: AccountProfile, organizations?: OrganizationAccess, invitations?: OrganizationInvitations, github?: ExternalAccountAuthentication, access?: AccountAuthorization, catalog?: AccountCatalog, data?: AccountData, imports?: AccountImports, credentials?: AccountEnvironmentCredentials, secrets?: AccountEnvironmentSecrets, repositories?: AccountRepositories, devices?: AccountDeviceAuthorization, serviceAccounts?: AccountServiceAccounts, personal?: AccountPersonalCredentials, legacy?: AccountLegacyTokens, workers?: AccountWorkers, audit?: AccountAudit, realms?: AccountRealms) {
   const secure = new URL(origin).protocol === "https:";
   const names = { session: `${secure ? "__Host-" : ""}carbon-session`, csrf: `${secure ? "__Host-" : ""}carbon-csrf`, browser: `${secure ? "__Host-" : ""}carbon-browser` };
   const cookie = (name: string, value: string, seconds: number, httpOnly = true) => `${name}=${value}; Path=/; Max-Age=${seconds}; SameSite=Lax${httpOnly ? "; HttpOnly" : ""}${secure ? "; Secure" : ""}`;
@@ -108,6 +109,16 @@ export function createAccountRoutes(auth: AccountAuthentication, origin: string,
         if(request.method==='POST'&&id&&credentialsSegment&&credentialId){const input=parseComponent('ServiceAccountCredentialCommand',await body());const options=parseComponent('CommandOptions',{idempotencyKey:request.headers.get('idempotency-key')??'',expectedRevision:request.headers.get('if-match')?.replace(/^"([1-9][0-9]*)"$/,'$1')});return json(await serviceAccounts.credentialCommand(token,request.headers.get('x-csrf-token')??'',orgId,id,credentialId,input,options,requestId));}}
       if(url.pathname===`${BASE}/account/device-authorizations/review`&&request.method==='POST'){if(!devices)throw new PlatformFault('capability','Device authorization is not configured');const input=parseComponent('DeviceAuthorizationLookup',await body());return json(await devices.review(cookieValue(request,names.session),input.userCode));}
       if(url.pathname===`${BASE}/account/device-authorizations`&&request.method==='POST'){if(!devices)throw new PlatformFault('capability','Device authorization is not configured');const input=parseComponent('DeviceAuthorizationDecision',await body());const options=parseComponent('CommandOptions',{idempotencyKey:request.headers.get('idempotency-key')??'',expectedRevision:request.headers.get('if-match')?.replace(/^"([1-9][0-9]*)"$/,'$1')});return json(await devices.decide(cookieValue(request,names.session),request.headers.get('x-csrf-token')??'',input,options,requestId));}
+      const realmRoute = new RegExp(`^${BASE}/orgs/([^/]+)/projects/([^/]+)/environments/([^/]+)/realm(?:/(users)(?:/([^/]+))?)?$`).exec(url.pathname);
+      if (realmRoute) {
+        if (!realms) throw new PlatformFault('capability', 'App authentication is not configured');
+        const scope = parseComponent('EnvironmentScope', { orgId: realmRoute[1], projectId: realmRoute[2], environmentId: realmRoute[3] });
+        const session = cookieValue(request, names.session); const csrf = request.headers.get('x-csrf-token') ?? '';
+        if (request.method === 'GET' && !realmRoute[4]) return json(await realms.get(session, scope));
+        if (request.method === 'GET' && realmRoute[4] && !realmRoute[5]) return json(await realms.users(session, scope, page()));
+        if (request.method === 'POST' && !realmRoute[4]) return json(await realms.command(session, csrf, scope, parseComponent('RealmCommand', await body()), parseComponent('CommandOptions', { idempotencyKey: request.headers.get('idempotency-key') ?? '', expectedRevision: request.headers.get('if-match')?.replace(/^"([1-9][0-9]*)"$/, '$1') }), requestId));
+        if (request.method === 'POST' && realmRoute[5]) return json(await realms.userCommand(session, csrf, scope, realmRoute[5], parseComponent('AppUserCommand', await body()), parseComponent('CommandOptions', { idempotencyKey: request.headers.get('idempotency-key') ?? '', expectedRevision: request.headers.get('if-match')?.replace(/^"([1-9][0-9]*)"$/, '$1') }), requestId));
+      }
       const auditRoute = new RegExp(`^${BASE}/orgs/([^/]+)/(audit|events/stream)$`).exec(url.pathname);
       if (auditRoute && request.method === 'GET') {
         if (!audit) throw new PlatformFault('capability', 'Audit events are not configured');

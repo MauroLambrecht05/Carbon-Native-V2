@@ -236,6 +236,44 @@ export type AuditEntry = { readonly "id": Id; readonly "sequence": Sequence; rea
 
 export type AuditPage = { readonly "items": ReadonlyArray<AuditEntry>; readonly "nextCursor": string | null; };
 
+export type RealmProvider = { readonly "name": string; readonly "issuer": string; readonly "clientId": string; readonly "clientSecretName"?: string; readonly "scopes": ReadonlyArray<string>; };
+
+export type Realm = { readonly "id": Id; readonly "scope": EnvironmentScope; readonly "state": "active" | "disabled"; readonly "signupEnabled": boolean; readonly "magicLinkEnabled": boolean; readonly "sessionTtlSeconds": number; readonly "redirectAllowlist": ReadonlyArray<string>; readonly "providers": ReadonlyArray<RealmProvider>; readonly "claimsRevision": Revision; readonly "revision": Revision; readonly "createdAt": Timestamp; };
+
+export type RealmCommand = { readonly "kind": "configure"; readonly "signupEnabled": boolean; readonly "magicLinkEnabled": boolean; readonly "sessionTtlSeconds": number; readonly "redirectAllowlist": ReadonlyArray<string>; } | { readonly "kind": "state"; readonly "disabled": boolean; } | { readonly "kind": "invalidate-sessions"; } | { readonly "kind": "provider-set"; readonly "name": string; readonly "issuer": string; readonly "clientId": string; readonly "clientSecretName"?: string; readonly "scopes": ReadonlyArray<string>; } | { readonly "kind": "provider-remove"; readonly "name": string; };
+
+export type RealmReceipt = { readonly "realm": Realm; readonly "message": string; };
+
+export type AppUser = { readonly "id": Id; readonly "realmId": Id; readonly "email": string; readonly "state": "active" | "suspended" | "deleted"; readonly "identities": ReadonlyArray<{ readonly "provider": string; readonly "verifiedAt": Timestamp; }>; readonly "lastSignedInAt": Timestamp | null; readonly "revision": Revision; readonly "createdAt": Timestamp; };
+
+export type AppUserCommand = { readonly "kind": "suspend" | "restore" | "delete" | "revoke-sessions"; };
+
+export type AppUserReceipt = { readonly "user": AppUser; readonly "message": string; };
+
+export type AppUserPage = { readonly "items": ReadonlyArray<AppUser>; readonly "nextCursor": string | null; };
+
+export type AppRealmConfiguration = { readonly "realmId": Id; readonly "signupEnabled": boolean; readonly "magicLinkEnabled": boolean; readonly "providers": ReadonlyArray<{ readonly "name": string; }>; };
+
+export type AppChallengeRequest = { readonly "email": string; readonly "redirectUri": string; };
+
+export type AppChallengeReceipt = { readonly "message": string; };
+
+export type AppSessionRequest = { readonly "token": string; };
+
+export type AppSessionIssue = { readonly "token": string; readonly "expiresAt": Timestamp; readonly "user": { readonly "id": Id; readonly "email": string; }; };
+
+export type AppSessionView = { readonly "user": { readonly "id": Id; readonly "email": string; }; readonly "expiresAt": Timestamp; };
+
+export type AppOidcStart = { readonly "provider": string; readonly "redirectUri": string; };
+
+export type AppOidcStartResponse = { readonly "authorizationUrl": string; };
+
+export type AppOidcComplete = { readonly "state": string; readonly "code": string; };
+
+export type AppAssertionExchange = { readonly "audience": "carbon-database"; readonly "scope": EnvironmentScope; readonly "permission": "data.read" | "data.write"; readonly "request": { readonly "method": "POST"; readonly "path": string; readonly "bodyDigest": Digest; }; };
+
+export type AppAssertionResponse = { readonly "tokenType": "Bearer"; readonly "token": string; readonly "expiresInSeconds": 60; };
+
 export type ServiceAccountCreate = { readonly "name": string; readonly "scope": Scope; readonly "permissions": ReadonlyArray<EnvironmentCredentialPermission>; };
 
 export type ServiceAccountCommand = { readonly "kind": "update"; readonly "name": string; readonly "permissions": ReadonlyArray<EnvironmentCredentialPermission>; } | { readonly "kind": "disable" | "enable"; };
@@ -575,6 +613,25 @@ export interface Components {
   AuditActor: AuditActor;
   AuditEntry: AuditEntry;
   AuditPage: AuditPage;
+  RealmProvider: RealmProvider;
+  Realm: Realm;
+  RealmCommand: RealmCommand;
+  RealmReceipt: RealmReceipt;
+  AppUser: AppUser;
+  AppUserCommand: AppUserCommand;
+  AppUserReceipt: AppUserReceipt;
+  AppUserPage: AppUserPage;
+  AppRealmConfiguration: AppRealmConfiguration;
+  AppChallengeRequest: AppChallengeRequest;
+  AppChallengeReceipt: AppChallengeReceipt;
+  AppSessionRequest: AppSessionRequest;
+  AppSessionIssue: AppSessionIssue;
+  AppSessionView: AppSessionView;
+  AppOidcStart: AppOidcStart;
+  AppOidcStartResponse: AppOidcStartResponse;
+  AppOidcComplete: AppOidcComplete;
+  AppAssertionExchange: AppAssertionExchange;
+  AppAssertionResponse: AppAssertionResponse;
   ServiceAccountCreate: ServiceAccountCreate;
   ServiceAccountCommand: ServiceAccountCommand;
   ServiceAccount: ServiceAccount;

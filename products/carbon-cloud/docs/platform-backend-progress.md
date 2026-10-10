@@ -1481,3 +1481,70 @@ is paused.
 Phase 5 stops here. Phase 6 (application authentication realms, app users,
 identities, providers, challenges and sessions) is next in
 [the handoff](left-off/handoff.md).
+
+## 2026-10-10: Phase 6 — application authentication
+
+**Realms.** Each environment can have one realm, configured by developers at
+`.../environments/{id}/realm`: signup policy, email sign-in, session lifetime,
+an exact-match redirect allowlist, OIDC providers, disable, and realm-wide
+session invalidation. Developers list, suspend, restore and delete app users and
+revoke their sessions.
+
+**App-facing API.** Under `/app/v1/realms/{realmId}`: public configuration,
+generic emailed sign-in links, single-use link exchange, opaque `aps_` sessions
+with rotation and sign-out, OIDC authorization code with PKCE, and exchange of a
+session for a request-bound Database assertion. See
+[app-authentication.md](app-authentication.md).
+
+**Database access.** An app session exchanges for a 60-second assertion with an
+`app_user` principal and a realm-carrying scope, limited to `data.read` and
+`data.write`. Carbon Database accepts it for row operations only, takes the
+realm from the signed token, and Cloud's live authority re-checks the session,
+user, realm, claims revision and resource state. Row policies run with the
+verified user ID.
+
+**Supporting changes.** `PostgresProviderSecretReader` lets Cloud read an OIDC
+client secret by name for its own token exchange. The mail worker also delivers
+app sign-in links from a separate encrypted outbox. App events join the
+organization log.
+
+Proof gate, over real HTTP routes and PostgreSQL, the last group against the
+real Carbon Database service:
+
+- Signup policy: with signup closed an unknown address gets the same 202 and no
+  mail; a known and an unknown address get byte-identical answers.
+- Magic links are single use, hash-only, bound to their realm and to the claims
+  revision, and sent only to the exact allowed redirect.
+- Rate limits: five links per address (then silence), twenty requests per caller
+  (then 429), with no address stored.
+- Sessions: rotation stops the old token without extending the session;
+  sign-out, expiry, suspension, deletion, realm disable and realm-wide
+  invalidation each end access; restore does not revive old sessions.
+- OIDC: a wrong state, an unverified email, a wrong nonce, audience or issuer, a
+  forged signature, an expired token and a refused code are each rejected and
+  spend the state; the provider receives a PKCE verifier matching the challenge
+  and the stored client secret; a returning subject and a verified address map
+  to the same user; no provider detail appears in public configuration.
+- Tenant isolation: another developer gets 404 for the realm and its users; a
+  session or link from one realm is refused by another.
+- Database: two app users each read and write only their own rows; planting a
+  row for another user is refused; schema, listing and policy preview are
+  refused; the assertion cannot be replayed, altered or sent to Registry; sign
+  out, suspension and claims-revision change each stop an assertion already
+  issued; a developer session cannot use the application access mode.
+- Seven mutation checks (live user state, claims revision, app permission
+  limit, OIDC nonce, OIDC verified email, redirect allowlist, single-use link)
+  each make a test fail.
+
+The affected regression passed **524 tests, 0 failures and 5,243
+assertions across 62 files**. Generated contracts are current and the
+Solutions, Cloud, Database, Registry and CLI TypeScript checks pass.
+
+Not included: passwords, passkeys and MFA for app users; custom claims and
+roles; user export; CORS for browser callers on another origin; app users in
+Registry; migration of the legacy organization-wide end users; a run against a
+real OIDC provider.
+
+Phase 6 stops here. Phase 7 (build orchestration: immutable source snapshots,
+quota reservations, attempts, leases, heartbeats, cancellation and ordered logs)
+is next in [the handoff](left-off/handoff.md).

@@ -1,7 +1,6 @@
 # Carbon platform left-off checkpoint
 
-Checkpoint: 2026-10-10, after Phase 5: lifecycle, audit, event streams and tenant
-denial.
+Checkpoint: 2026-10-10, after Phase 6: application authentication.
 
 The overall platform plan remains unfinished. The rough scope estimate is about
 **30% of the complete backend-and-frontend goal**, with backend foundations in
@@ -41,6 +40,8 @@ the **low 40% range** and the requested production frontend redesign still at
 - One ordered organization event log, audit browsing, a live event stream,
   scheduled and recoverable deletion for environments, projects and
   organizations, operator suspension, and a two-tenant denial matrix.
+- Application authentication: one realm per environment, emailed sign-in links,
+  OIDC providers, app sessions, and Database row access as a verified app user.
 
 The service-account implementation is described in
 [service-accounts.md](../service-accounts.md), its wire surface in
@@ -51,12 +52,12 @@ legacy permissions are inferred.
 
 ## Last verified state
 
-- Affected Bun regression: **509 tests, 4,954 assertions, 0 failures across 61
+- Affected Bun regression: **524 tests, 5,243 assertions, 0 failures across 62
   files**, including the real HTTP/PostgreSQL cross-service suites.
 - Solutions, Carbon Cloud, Database, Registry and CLI TypeScript checks passed.
 - Generated platform types are current.
-- The audit OpenAPI document parses as JSON.
-- A full local `bazel build //...` passed on 2026-10-10 before Phases 2 to 5. Local
+- The app-authentication OpenAPI document parses as JSON.
+- A full local `bazel build //...` passed on 2026-10-10 before Phases 2 to 6. Local
   `bazel test //...` is unreliable while `defs.bzl` runs `cargo sweep` after
   every Cargo invocation: parallel Rust tests delete each other's build output
   from the shared target directory. That `defs.bzl` change is still uncommitted.
@@ -73,16 +74,18 @@ or customer cutover was performed.
 This checkpoint supports exact Database and Registry assertion exchange for
 service accounts and CLI device credentials, personal credentials, enrolled
 workers that receive leased secrets, a browsable and streamable organization
-event log, and recoverable deletion. Nothing grants worker leases in production
-yet. The AWS KMS adapter is tested against a stand-in, not a real AWS account.
-Final deletion marks rows and destroys no owning-service data. Suspension has no
-operator route. Legacy `cc_` and `wk_` tokens and the legacy build queue still
-work as before. Existing legacy implementations elsewhere in the repository
-still need review against the new isolation, durability and trust requirements
-before they count as complete.
+event log, recoverable deletion, and application authentication with Database
+row access for app users. Nothing grants worker leases in production yet. The
+AWS KMS adapter and the OIDC client are tested against stand-ins, not real
+providers. Final deletion marks rows and destroys no owning-service data.
+Suspension has no operator route. Legacy `cc_` and `wk_` tokens, the legacy
+build queue and the legacy end-user routes still work as before. Existing legacy
+implementations elsewhere in the repository still need review against the new
+isolation, durability and trust requirements before they count as complete.
 
-The next bounded goal is **Phase 6: application authentication realms, app
-users, identities, providers, challenges and sessions**. Continue with
+The next bounded goal is **Phase 7: build orchestration — immutable source
+snapshots, quota reservations, attempts, leases, heartbeats, cancellation and
+ordered logs**. Continue with
 exactly one phase from [handoff.md](handoff.md) per future work
 session. Finish that phase's proof gate, update both checkpoint documents, and
 stop before beginning the next phase unless the user explicitly combines them.

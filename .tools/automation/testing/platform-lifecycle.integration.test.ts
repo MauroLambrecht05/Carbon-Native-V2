@@ -5,6 +5,7 @@ import { AccountAuthentication, PostgresAccountIdentityRepository, EnvelopeMessa
 import { AccountCatalog, PostgresCatalogRepository, PostgresProvisioningRepository, ProvisionEnvironment, HttpEnvironmentProvisioner,
   PostgresServiceLifecycleRepository, PostgresDatabaseEnvironmentDriver, databaseEnvironmentIdentifiers, type ProvisioningWork } from '@carbon/catalog';
 import { parseComponent, serviceLifecycleBody, dataPermission, dataRequestPath, canonicalRegistryRequest, registryRequestPath } from '@carbon/contracts/platform';
+import { AppAuthentication, PostgresAppAuthRepository } from '@carbon/auth';
 import { HttpDataClient, AccountData, PostgresAccountDataAuthority, AccountImports, PostgresImportJobs, HttpImportClient, RunImportJobs } from '@carbon/data';
 import { migrate as migrateCloud } from '../../../products/carbon-cloud/infrastructure/persistence/Database.ts';
 import { migrate as migrateDatabase } from '../../../products/carbon-database/infrastructure/persistence/Database.ts';
@@ -101,7 +102,7 @@ async function harness() {
     principal: { id: account, kind: 'account', audience: 'dashboard', credentialId: session, permissionRevision: (await cloud`SELECT permission_revision::text FROM accounts WHERE id = ${account}`)[0].permission_revision },
     role: 'Owner', requestId: crypto.randomUUID(),
   });
-  return { cloud, database, registry, worker, repo, api, create, signed, signedData, clientData, account, organization, databaseProvider, registryProvider, databaseServer, registryServer,
+  return { cloud, database, registry, issuer, protector, worker, repo, api, create, signed, signedData, clientData, account, organization, databaseProvider, registryProvider, databaseServer, registryServer,
     importJobs, importClient, importWorker, restartImports: () => new PostgresImportJobs(cloud, protector),
     interceptAuthority: (callback?: (call: number) => Promise<void>) => { authorityCalls = 0; beforeAuthority = callback; },
     restart: () => { authority = composeServiceAuthority(cloud, trust); databaseHandler = composeDatabase(database, { trust, authorityOrigin: cloudServer.url.origin }); registryHandler = composeRegistry(registry, { trust, authorityOrigin: cloudServer.url.origin }); },
@@ -526,6 +527,81 @@ suite('Cloud-to-owning-service lifecycle over real HTTP and PostgreSQL', () => {
     expect((await send(h.registryServer.url.origin, outstanding)).status).toBe(401);
     expect((await exchange('/platform/v1/service-registry-assertions', registryExchange)).response.status).toBe(401);
     expect(JSON.stringify(await h.registry`SELECT * FROM internal_assertion_replays`)).not.toContain(issued.token);
+  }, 30000);
+
+  test('an app user reads and writes only their own rows through a request-bound assertion, and loses access with their session', async () => {
+    const h = await harness(); const created = await h.create('appdata', ['database']); expect(await h.worker.execute()).toBe(true);
+    const scope = parseComponent('EnvironmentScope', created.scope);
+    const bindingId = (await h.cloud`SELECT id FROM service_bindings WHERE environment_id = ${scope.environmentId} AND owner = 'database'`)[0].id;
+    // The developer creates a table whose rows belong to the app user in the "owner" column.
+    const tableId = crypto.randomUUID(); const definition = { name: 'notes', columns: [{ name: 'owner', type: 'uuid', nullable: false }, { name: 'body', type: 'text', nullable: false }],
+      policies: { enabled: true, rules: [{ id: crypto.randomUUID(), name: 'Owner', kind: 'owner', ownerColumn: 'owner', operations: ['select', 'insert', 'update', 'delete'] }] } };
+    const setup = await h.signedData({ scope, bindingId, command: { kind: 'table.create', commandId: crypto.randomUUID(), tableId, definition } }); expect((await fetch(setup.url, setup.init)).status).toBe(200);
+
+    // A realm for the environment, and two end users who sign in with real magic links.
+    const realmId = crypto.randomUUID(); const redirectUri = 'https://app.example.test/callback';
+    await h.cloud`INSERT INTO realms (id, org_id, project_id, environment_id, signup_enabled, redirect_allowlist, created_by) VALUES (${realmId}, ${scope.orgId}, ${scope.projectId}, ${scope.environmentId}, true, ${`{"${redirectUri}"}`}::text[], ${h.account})`;
+    const app = new AppAuthentication(new PostgresAppAuthRepository(h.cloud), h.protector, { rateLimitKey: randomBytes(32).toString('base64') }, undefined, undefined, h.issuer);
+    const signIn = async (email: string) => {
+      await app.challenge(realmId, { email, redirectUri }, '203.0.113.9', crypto.randomUUID());
+      const job = (await h.cloud`SELECT o.id, o.protected_message FROM app_email_outbox o JOIN app_challenges c ON c.id = o.id WHERE c.email = ${email} ORDER BY o.created_at DESC LIMIT 1`)[0];
+      const token = /#token=(am_[A-Za-z0-9_-]{43})/.exec(JSON.parse(await h.protector.open(job.protected_message, job.id)).text)![1]!;
+      return app.signIn(realmId, { token }, crypto.randomUUID());
+    };
+    const alice = await signIn('alice@example.test'); const bob = await signIn('bob@example.test');
+    const access = { mode: 'application' };
+    const call = async (session: { token: string }, command: { kind: string; commandId?: string; [key: string]: unknown }, options: { permission?: string; tamper?: (body: string) => string; origin?: string } = {}) => {
+      const request = parseComponent('DataRequest', { scope, bindingId, command }); const body = JSON.stringify(request); const requestId = crypto.randomUUID();
+      const path = dataRequestPath(scope, bindingId, request.command.kind);
+      const proof = await app.exchange(realmId, `Bearer ${session.token}`, { audience: 'carbon-database', scope, permission: (options.permission ?? dataPermission(request.command.kind)) as 'data.read',
+        request: { method: 'POST', path, bodyDigest: bodyDigest(body) } }, requestId);
+      const init = { method: 'POST', body: options.tamper ? options.tamper(body) : body, headers: { authorization: `Bearer ${proof.token}`, 'content-type': 'application/json', 'x-request-id': requestId,
+        ...(command.commandId ? { 'idempotency-key': command.commandId } : {}) } };
+      return { send: () => fetch((options.origin ?? h.databaseServer.url.origin) + path, init) };
+    };
+    const send = async (session: { token: string }, command: { kind: string; commandId?: string; [key: string]: unknown }) => (await call(session, command)).send();
+    const rows = async (response: Response) => parseComponent('DataQueryResult', parseComponent('DataResponse', await response.json()).result).rows;
+
+    // Each user writes and sees only rows they own.
+    const insert = (owner: string, body: string) => ({ kind: 'row.insert', commandId: crypto.randomUUID(), tableId, revision: '1', access, values: { owner, body } });
+    const written = await send(alice, insert(alice.user.id, 'alice-private-note')); expect(written.status).toBe(200);
+    const receipt = parseComponent('DataCommandReceipt', parseComponent('DataResponse', await written.json()).result);
+    expect((await send(bob, insert(bob.user.id, 'bob-private-note'))).status).toBe(200);
+    expect((await send(alice, insert(bob.user.id, 'planted-for-bob'))).status).toBe(403);
+    const query = { kind: 'rows.query', tableId, access, limit: 10 };
+    expect((await rows(await send(alice, query))).map(row => row.values.body)).toEqual(['alice-private-note']);
+    expect((await rows(await send(bob, query))).map(row => row.values.body)).toEqual(['bob-private-note']);
+    const stolen = await send(bob, { kind: 'row.update', commandId: crypto.randomUUID(), tableId, access, rowId: receipt.rowId, revision: receipt.revision, values: { body: 'overwritten' } });
+    expect(stolen.status).not.toBe(200); expect(await stolen.text()).not.toContain('alice-private-note');
+    const removed = await send(bob, { kind: 'row.delete', commandId: crypto.randomUUID(), tableId, access, rowId: receipt.rowId, revision: receipt.revision }); expect(removed.status).not.toBe(200);
+    expect((await rows(await send(alice, query))).map(row => row.values.body)).toEqual(['alice-private-note']);
+
+    // An app user is never a developer: no schema or metadata, no policy preview as someone else, no permission beyond rows.
+    expect((await (await call(alice, { kind: 'tables.list' }, { permission: 'data.read' })).send()).status).toBe(403);
+    expect((await (await call(alice, { kind: 'table.get', tableId } as { kind: string }, { permission: 'data.read' })).send()).status).toBe(403);
+    expect((await send(alice, { ...query, access: { mode: 'policy-preview', userId: bob.user.id } } as { kind: string })).status).toBe(403);
+    await expect(app.exchange(realmId, `Bearer ${alice.token}`, { audience: 'carbon-database', scope, permission: 'resources.configure' as 'data.read',
+      request: { method: 'POST', path: dataRequestPath(scope, bindingId, 'table.create'), bodyDigest: bodyDigest('{}') } }, crypto.randomUUID())).rejects.toThrow('Invalid platform AppAssertionExchange');
+    const elsewhere = { ...scope, environmentId: crypto.randomUUID() };
+    await expect(app.exchange(realmId, `Bearer ${alice.token}`, { audience: 'carbon-database', scope: elsewhere, permission: 'data.read',
+      request: { method: 'POST', path: dataRequestPath(elsewhere, bindingId, 'rows.query'), bodyDigest: bodyDigest('{}') } }, crypto.randomUUID())).rejects.toThrow('outside this app');
+
+    // The assertion is bound to one request: it cannot be replayed, altered, or presented to another service.
+    const once = await call(alice, query); expect((await once.send()).status).toBe(200); expect((await once.send()).status).toBe(401);
+    expect((await (await call(alice, query, { tamper: body => body.replace('"limit":10', '"limit":50') })).send()).status).toBe(401);
+    expect((await (await call(alice, query, { origin: h.registryServer.url.origin })).send()).status).not.toBe(200);
+
+    // Losing the session, the user or the realm's claims revision ends access, even for an assertion already issued.
+    const outstanding = await call(bob, query); await app.signOut(realmId, `Bearer ${bob.token}`, crypto.randomUUID());
+    expect((await outstanding.send()).status).toBe(401);
+    await expect(app.exchange(realmId, `Bearer ${bob.token}`, { audience: 'carbon-database', scope, permission: 'data.read', request: { method: 'POST', path: dataRequestPath(scope, bindingId, 'rows.query'), bodyDigest: bodyDigest('{}') } }, crypto.randomUUID())).rejects.toThrow('invalid or expired');
+    let pending = await call(alice, query); await h.cloud`UPDATE app_users SET state = 'suspended' WHERE id = ${alice.user.id}`; expect((await pending.send()).status).toBe(401);
+    await h.cloud`UPDATE app_users SET state = 'active' WHERE id = ${alice.user.id}`; expect((await send(alice, query)).status).toBe(200);
+    pending = await call(alice, query); await h.cloud`UPDATE realms SET claims_revision = claims_revision + 1 WHERE id = ${realmId}`; expect((await pending.send()).status).toBe(401);
+    await expect(app.view(realmId, `Bearer ${alice.token}`)).rejects.toThrow('invalid or expired');
+    // A developer session cannot pose as an app user: the application access mode needs a verified app assertion.
+    const developer = await h.signedData({ scope, bindingId, command: query }); expect((await fetch(developer.url, developer.init)).status).toBe(403);
+    expect(JSON.stringify(await h.database`SELECT * FROM canonical_data_commands`)).not.toContain('private-note');
   }, 30000);
 
   test('ensure, pause and resume provision real native resources and preserve cross-environment PostgreSQL privilege boundaries', async () => {

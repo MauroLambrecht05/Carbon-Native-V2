@@ -43,3 +43,11 @@ export {
 } from "./application/usecases/VerifyEndUserSessionUseCase.ts";
 export { InMemoryAuthRepository } from "./infrastructure/InMemoryAuthRepository.ts";
 export { PostgresAuthRepository } from "./infrastructure/PostgresAuthRepository.ts";
+
+// Application authentication realms (one per environment): the supported
+// path. The organization-wide magic-link classes above are the legacy v1.
+export { AccountRealms, AppAuthentication, type AppAuthenticationConfig } from "./application/usecases/AppAuthentication.ts";
+export type { AppAuthRepository, AppSession, OidcClient, OidcIdentity, OidcProviderConfiguration, ProviderSecretReader } from "./application/ports/AppAuthRepository.ts";
+export { PostgresAppAuthRepository } from "./infrastructure/PostgresAppAuthRepository.ts";
+export { PostgresAppMailQueue } from "./infrastructure/PostgresAppMailQueue.ts";
+export { HttpOidcClient } from "./infrastructure/HttpOidcClient.ts";

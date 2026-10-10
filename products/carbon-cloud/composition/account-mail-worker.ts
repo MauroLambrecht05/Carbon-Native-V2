@@ -5,7 +5,7 @@ if (import.meta.main) {
   const config = accountPlatformConfigFromEnv();
   if (!config || !process.env.DATABASE_URL) throw new Error("Account mail worker requires enabled account configuration and DATABASE_URL");
   const sql = openDatabase(process.env.DATABASE_URL);
-  const { deliverMail, expireAccountProofs } = composeAccountPlatform(sql, config);
+  const { deliverMail, deliverAppMail, expireAccountProofs } = composeAccountPlatform(sql, config);
   let nextMaintenance = 0;
   let stopping = false;
   process.once("SIGINT", () => { stopping = true; });
@@ -14,7 +14,8 @@ if (import.meta.main) {
     while (!stopping) {
       try {
         if (Date.now() >= nextMaintenance) { await expireAccountProofs(); nextMaintenance = Date.now() + 1000; }
-        if (await deliverMail.execute()) continue;
+        // Account mail first, then sign-in links for apps' own end users.
+        if (await deliverMail.execute() || await deliverAppMail.execute()) continue;
       }
       catch { console.error(JSON.stringify({ event: "account.mail.queue_unavailable" })); }
       await Bun.sleep(1000);
