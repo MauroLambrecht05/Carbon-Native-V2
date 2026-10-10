@@ -4,7 +4,7 @@ package(default_visibility = ["//visibility:public"])
 
 filegroup(
     name = "srcs",
-    srcs = glob(["composition/**/*.ts", "infrastructure/**/*.ts", "infrastructure/**/*.sql", "presentation/http/**/*.ts", "**/tsconfig.json"], exclude = ["infrastructure/browser/**"]),
+    srcs = glob(["composition/**/*.ts", "infrastructure/**/*.ts", "infrastructure/**/*.sql", "**/tsconfig.json"], exclude = ["infrastructure/browser/**"]),
 )
 
 # Without a configured Postgres URL, this still checks encryption/configuration.

@@ -1,6 +1,6 @@
 import { ServiceAssertionVerifier, type AssertionTrust } from '@carbon/identity';
 import { CheckServiceAuthority, PostgresServiceAuthority } from '@carbon/catalog';
-import { createAuthorityRoutes } from '../presentation/http/authority-routes.ts';
+import { createAuthorityRoutes } from '../infrastructure/http/authority-routes.ts';
 
 export function composeServiceAuthority(sql: Bun.SQL, trust: AssertionTrust) {
   // Introspection checks cryptography and live state; replay is owned by each receiving service.

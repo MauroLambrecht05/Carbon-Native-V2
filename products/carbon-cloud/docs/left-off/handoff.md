@@ -83,5 +83,7 @@ At the end of every phase:
    test evidence.
 2. Update [left-off.md](left-off.md) so it names the newly completed phase and
    the next phase.
-3. Update this document only when dependencies or phase boundaries change.
-4. Stop at the checkpoint and report the remaining phase number.
+3. Add every gap the phase leaves to [gaps.md](gaps.md), and move the ones it
+   closed to the closed table.
+4. Update this document only when dependencies or phase boundaries change.
+5. Stop at the checkpoint and report the remaining phase number.

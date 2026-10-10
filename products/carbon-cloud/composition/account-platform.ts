@@ -15,9 +15,9 @@ import { GitHubAppRepositoryProvider } from '@carbon/github-repository';
 import { ResendAccountNotification } from "@carbon/resend-notification";
 import { DevelopmentInboxNotification } from "../infrastructure/notifications/DevelopmentInboxNotification.ts";
 import { AccountRealms, AppAuthentication, HttpOidcClient, PostgresAppAuthRepository, PostgresAppMailQueue } from '@carbon/auth';
-import { createAppRoutes } from '../presentation/http/app-routes.ts';
-import { createWorkerRoutes } from '../presentation/http/worker-routes.ts';
-import { createAccountRoutes } from "../presentation/http/account-routes.ts";
+import { createAppRoutes } from '../infrastructure/http/app-routes.ts';
+import { createWorkerRoutes } from '../infrastructure/http/worker-routes.ts';
+import { createAccountRoutes } from "../infrastructure/http/account-routes.ts";
 import { serviceAssertionIssuerFromEnv } from './service-assertion-signing.ts';
 
 export interface AccountPlatformConfig {

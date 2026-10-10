@@ -1,7 +1,7 @@
 import { HttpAssertionAuthority, PostgresAssertionSecurityStore, ServiceAssertionVerifier, type AssertionTrust } from '@carbon/identity';
 import { ApplyServiceLifecycle, ExecuteServiceRegistry, PostgresRegistryNamespaces, PostgresServiceLifecycleRepository, PostgresRegistryEnvironmentDriver } from '@carbon/catalog';
-import { createLifecycleRoutes } from '../presentation/http/lifecycle-routes.ts';
-import { createRegistryRoutes } from '../presentation/http/registry-routes.ts';
+import { createLifecycleRoutes } from '../infrastructure/http/lifecycle-routes.ts';
+import { createRegistryRoutes } from '../infrastructure/http/registry-routes.ts';
 
 export interface LifecyclePlatformConfig { readonly trust: AssertionTrust; readonly authorityOrigin: string }
 export function composeLifecyclePlatform(sql: Bun.SQL, config: LifecyclePlatformConfig) {

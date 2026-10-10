@@ -10,7 +10,7 @@ import { HttpDataClient, AccountData, PostgresAccountDataAuthority, AccountImpor
 import { migrate as migrateCloud } from '../../../products/carbon-cloud/infrastructure/persistence/Database.ts';
 import { migrate as migrateDatabase } from '../../../products/carbon-database/infrastructure/persistence/Database.ts';
 import { migrate as migrateRegistry } from '../../../products/carbon-registry/infrastructure/persistence/Database.ts';
-import { createAccountRoutes } from '../../../products/carbon-cloud/presentation/http/account-routes.ts';
+import { createAccountRoutes } from '../../../products/carbon-cloud/infrastructure/http/account-routes.ts';
 import { composeServiceAuthority } from '../../../products/carbon-cloud/composition/service-authority.ts';
 import { composeLifecyclePlatform as composeDatabase } from '../../../products/carbon-database/composition/lifecycle-platform.ts';
 import { composeLifecyclePlatform as composeRegistry } from '../../../products/carbon-registry/composition/lifecycle-platform.ts';

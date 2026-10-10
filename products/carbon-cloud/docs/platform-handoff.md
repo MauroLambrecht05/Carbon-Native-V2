@@ -133,8 +133,8 @@ Primary new/changed implementation files:
   `HttpImportClient.ts`, `PostgresNativeTables.ts`, `NativeImportExecutor.ts`.
 - `solutions/capabilities/cloud/catalog/infrastructure/PostgresServiceAuthority.ts`.
 - `products/carbon-cloud/composition/account-platform.ts`, `data-platform.ts`,
-  `data-import-worker.ts`, and `presentation/http/account-routes.ts`.
-- `products/carbon-database/presentation/http/import-routes.ts` and
+  `data-import-worker.ts`, and `infrastructure/http/account-routes.ts`.
+- `products/carbon-database/infrastructure/http/import-routes.ts` and
   `composition/lifecycle-platform.ts`.
 - `.tools/automation/testing/platform-lifecycle.integration.test.ts` and
   `solutions/capabilities/cloud/data/tests/import-protocol.test.ts`.

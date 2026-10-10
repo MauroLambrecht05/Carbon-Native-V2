@@ -2,5 +2,5 @@ package(default_visibility = ["//visibility:public"])
 
 filegroup(
     name = "srcs",
-    srcs = glob(["composition/**/*.ts", "infrastructure/**/*.ts", "infrastructure/**/*.sql", "presentation/http/**/*.ts", "**/tsconfig.json"]),
+    srcs = glob(["composition/**/*.ts", "infrastructure/**/*.ts", "infrastructure/**/*.sql", "**/tsconfig.json"]),
 )

@@ -72,6 +72,9 @@ or customer cutover was performed.
 
 ## Deliberate boundary
 
+Every open gap is listed, with its reason, in [gaps.md](gaps.md). Read it before
+starting a phase and update it in the same commit as the work.
+
 This checkpoint supports exact Database and Registry assertion exchange for
 service accounts and CLI device credentials, personal credentials, enrolled
 workers that receive leased secrets, a browsable and streamable organization
