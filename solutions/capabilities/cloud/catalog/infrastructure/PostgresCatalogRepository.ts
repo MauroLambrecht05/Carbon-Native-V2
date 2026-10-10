@@ -4,9 +4,12 @@ import { PlatformFault, parseComponent, type Scope, type Permission, type Servic
 import type { CatalogMutation, CatalogRepository } from '../application/ports/CatalogRepository.ts';
 import { project, environment, binding, operationProjection } from './CatalogProjection.ts';
 
+/** How long a deleted project or environment can still be recovered. */
+const DELETION_WINDOW_DAYS = 7;
+
 export class PostgresCatalogRepository extends PostgresPlatformAuthority implements CatalogRepository {
   private async require(tx: Bun.TransactionSQL, actor: OrganizationActor, scope: Scope, permission: Permission,
-    intent?: 'project-restore' | 'environment-resume' | 'production-create') {
+    intent?: 'project-restore' | 'environment-resume' | 'production-create' | 'project-recover' | 'environment-recover') {
     const access = await this.resolveInTransaction(tx, actor, scope, undefined, intent);
     if (!access.permissions.includes(permission)) throw new PlatformFault('forbidden', 'This catalog action is not allowed');
     return access;
@@ -90,11 +93,15 @@ export class PostgresCatalogRepository extends PostgresPlatformAuthority impleme
       const p = scope.projectId ? await this.projectRow(tx, scope) : undefined;
       const e = scope.environmentId ? (await this.environmentRows(tx, scope, 1))[0] : undefined;
       const operation = command.action === 'operation-command' ? await this.operationRow(tx, scope, command.operationId) : undefined;
-      const intent = command.action === 'project-command' && command.input.kind === 'archive' ? 'project-restore'
+      const deleting = (command.action === 'project-command' || command.action === 'environment-command') && command.input.kind === 'delete' ? command.input : undefined;
+      const intent = deleting ? (command.action === 'project-command' ? (deleting.deleted ? 'project-restore' : 'project-recover') : (deleting.deleted ? 'environment-resume' : 'environment-recover'))
+        : command.action === 'project-command' && command.input.kind === 'archive' ? 'project-restore'
         : command.action === 'environment-create' && command.input.kind === 'production' ? 'production-create'
         : ((command.action === 'environment-command' && command.input.kind === 'pause') || command.action === 'operation-command') ? 'environment-resume' : undefined;
-      const permission = cancelling ? 'metadata.read' : command.action === 'project-create' || (command.action === 'project-command' && command.input.kind === 'archive') ? 'projects.create' : 'resources.configure';
+      const permission = cancelling ? 'metadata.read' : command.action === 'project-create' || (command.action === 'project-command' && (command.input.kind === 'archive' || command.input.kind === 'delete')) ? 'projects.create' : 'resources.configure';
       await this.require(tx, actor, scope, permission, intent);
+      if (deleting && !['Owner', 'Admin'].includes(org.role)) throw new PlatformFault('forbidden', 'An organization administrator must delete or recover this resource');
+      if (command.action === 'operation-command' && e && e.state === 'deletion_pending') throw new PlatformFault('conflict', 'This environment is scheduled for deletion');
       if (command.action === 'project-command' && command.input.kind === 'production-policy' && !['Owner', 'Admin'].includes(org.role)) throw new PlatformFault('forbidden', 'An organization administrator must change production policy');
       if (command.action === 'operation-command' && operation!.actor.id !== actor.accountId && !['Owner', 'Admin'].includes(org.role)) throw new PlatformFault('forbidden', 'Only the operation actor or an administrator may change this operation');
       const scopeKey = `catalog:${scope.orgId}:${scope.projectId ?? ''}:${scope.environmentId ?? ''}:${command.action === 'operation-command' ? command.operationId : ''}`;
@@ -129,13 +136,33 @@ export class PostgresCatalogRepository extends PostgresPlatformAuthority impleme
           if (input.kind === 'archive') {
             if (!['active', 'archived'].includes(p!.state)) throw new PlatformFault('conflict', 'This project cannot change archive state');
             await tx`UPDATE projects SET state = ${input.archived ? 'archived' : 'active'} WHERE id = ${scope.projectId!}`;
+          } else if (input.kind === 'delete') {
+            // archived -> deletion_pending -> (after the recovery window) deleted; recovery returns to archived.
+            if (input.deleted) {
+              if (p!.state !== 'archived') throw new PlatformFault('conflict', 'Archive the project before deleting it');
+              await tx`UPDATE projects SET state = 'deletion_pending', deletion_scheduled_at = now() + make_interval(days => ${DELETION_WINDOW_DAYS}), deletion_requested_by = ${actor.accountId} WHERE id = ${scope.projectId!}`;
+            } else {
+              if (p!.state !== 'deletion_pending') throw new PlatformFault('conflict', 'This project is not scheduled for deletion');
+              await tx`UPDATE projects SET state = 'archived', deletion_scheduled_at = NULL, deletion_requested_by = NULL WHERE id = ${scope.projectId!}`;
+            }
           } else await tx`UPDATE projects SET production_mutations_allowed = ${input.allowed} WHERE id = ${scope.projectId!}`;
         }
       } else if (command.action === 'environment-command') {
         const input = command.input;
         if (!e) throw new PlatformFault('not_found', 'Environment not found');
         if (input.kind === 'rename') await tx`UPDATE environments SET name = ${input.name} WHERE id = ${scope.environmentId!}`;
-        else {
+        else if (input.kind === 'delete') {
+          // paused -> deletion_pending -> (after the recovery window) deleted; recovery returns to paused.
+          if (input.confirmation !== p!.slug) throw new PlatformFault('validation', 'Confirm the current project namespace');
+          if (input.deleted) {
+            if (e.state !== 'paused') throw new PlatformFault('conflict', 'Pause the environment before deleting it');
+            if ((await tx`SELECT 1 FROM operations WHERE environment_id = ${scope.environmentId!} AND state IN ('queued', 'running', 'cancel_requested') LIMIT 1`).length) throw new PlatformFault('conflict', 'An environment operation is still active');
+            await tx`UPDATE environments SET state = 'deletion_pending', deletion_scheduled_at = now() + make_interval(days => ${DELETION_WINDOW_DAYS}), deletion_requested_by = ${actor.accountId} WHERE id = ${scope.environmentId!}`;
+          } else {
+            if (e.state !== 'deletion_pending') throw new PlatformFault('conflict', 'This environment is not scheduled for deletion');
+            await tx`UPDATE environments SET state = 'paused', deletion_scheduled_at = NULL, deletion_requested_by = NULL WHERE id = ${scope.environmentId!}`;
+          }
+        } else {
           if (!['active', 'paused'].includes(e.state)) throw new PlatformFault('conflict', 'This environment cannot change pause state');
           if (e.kind === 'production' && input.productionConfirmation !== p!.slug) throw new PlatformFault('validation', 'Confirm the project namespace before changing production');
           operationId = await this.queue(tx, mutation, scope, input.paused ? 'pause' : 'resume');
@@ -182,5 +209,37 @@ export class PostgresCatalogRepository extends PostgresPlatformAuthority impleme
       if (constraint === 'operations_environment_active_idx') throw new PlatformFault('conflict', 'An environment operation is already active');
       throw error;
     }
+  }
+
+  /**
+   * Makes due deletions final. Rows are kept and marked deleted: every reader already excludes that state, and no
+   * owning-service data is destroyed here. Open worker leases for the affected environments are cancelled.
+   */
+  async finalizeDeletions(requestId: string, limit: number) {
+    return this.sql.begin(async tx => {
+      const finalized: Scope[] = [];
+      const environments = await tx<Record<string, any>[]>`SELECT e.id, e.org_id, e.project_id, e.deletion_requested_by FROM environments e
+        WHERE e.state = 'deletion_pending' AND e.deletion_scheduled_at <= now() ORDER BY e.deletion_scheduled_at FOR UPDATE SKIP LOCKED LIMIT ${limit}`;
+      const projects = await tx<Record<string, any>[]>`SELECT p.id, p.org_id, p.deletion_requested_by FROM projects p
+        WHERE p.state = 'deletion_pending' AND p.deletion_scheduled_at <= now() ORDER BY p.deletion_scheduled_at FOR UPDATE SKIP LOCKED LIMIT ${limit}`;
+      const remove = async (row: Record<string, any>, actor: string) => {
+        const revision = (await tx`UPDATE environments SET state = 'deleted', deletion_scheduled_at = NULL, revision = revision + 1, authority_revision = authority_revision + 1, updated_at = now()
+          WHERE id = ${row.id} RETURNING revision::text`)[0].revision;
+        await tx`UPDATE worker_leases SET state = 'cancelled', lease_token_hash = NULL, revision = revision + 1, updated_at = now() WHERE environment_id = ${row.id} AND state IN ('granted', 'claimed')`;
+        await tx`INSERT INTO catalog_events (id, org_id, project_id, environment_id, actor_account_id, action, revision, request_id)
+          VALUES (${randomUUID()}, ${row.org_id}, ${row.project_id}, ${row.id}, ${actor}, 'catalog.environment.deleted', ${revision}, ${requestId})`;
+        finalized.push({ orgId: row.org_id, projectId: row.project_id, environmentId: row.id });
+      };
+      for (const row of environments) await remove(row, row.deletion_requested_by);
+      for (const row of projects) {
+        for (const child of await tx<Record<string, any>[]>`SELECT id, org_id, project_id FROM environments WHERE project_id = ${row.id} AND state <> 'deleted' FOR UPDATE`) await remove(child, row.deletion_requested_by);
+        const revision = (await tx`UPDATE projects SET state = 'deleted', deletion_scheduled_at = NULL, revision = revision + 1, authority_revision = authority_revision + 1, updated_at = now()
+          WHERE id = ${row.id} RETURNING revision::text`)[0].revision;
+        await tx`INSERT INTO catalog_events (id, org_id, project_id, environment_id, actor_account_id, action, revision, request_id)
+          VALUES (${randomUUID()}, ${row.org_id}, ${row.id}, NULL, ${row.deletion_requested_by}, 'catalog.project.deleted', ${revision}, ${requestId})`;
+        finalized.push({ orgId: row.org_id, projectId: row.id });
+      }
+      return finalized;
+    });
   }
 }

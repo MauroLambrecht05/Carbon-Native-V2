@@ -1,9 +1,9 @@
 import { canonicalRegistryRequest, dataRequestPath, parseComponent, registryRequestPath, type DeviceAuthorizationCreate, type EnvironmentScope } from "@carbon/contracts/platform";
-import { AccountCatalog, AccountEnvironmentCredentials, AccountEnvironmentSecrets, AccountRepositories, AccountWorkers, WorkerLeases, WorkerProtocol, PostgresWorkerRepository, EnvelopeSecretProtector, EnvironmentCredentialAuthentication, LocalAesSecretKeyCustodian, PostgresCatalogRepository, PostgresEnvironmentCredentialRepository, PostgresEnvironmentSecretRepository, PostgresProvisioningRepository, PostgresRepositoryIntegrationRepository, PostgresServiceAuthority, ProvisionEnvironment, type ProvisioningWork, type RepositoryProvider } from '@carbon/catalog';
+import { AccountCatalog, AccountEnvironmentCredentials, AccountEnvironmentSecrets, AccountRepositories, AccountWorkers, WorkerLeases, WorkerProtocol, PostgresWorkerRepository, CatalogLifecycle, EnvelopeSecretProtector, EnvironmentCredentialAuthentication, LocalAesSecretKeyCustodian, PostgresCatalogRepository, PostgresEnvironmentCredentialRepository, PostgresEnvironmentSecretRepository, PostgresProvisioningRepository, PostgresRepositoryIntegrationRepository, PostgresServiceAuthority, ProvisionEnvironment, type ProvisioningWork, type RepositoryProvider } from '@carbon/catalog';
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { createHash, createHmac, randomBytes, generateKeyPairSync } from "node:crypto";
 import {
-  AccountAuthentication, AccountDeviceAuthorization, AccountServiceAccounts, AccountPersonalCredentials, PersonalCredentialAuthentication, PostgresPersonalCredentialRepository, AccountLegacyTokens, PostgresLegacyTokenRepository, PostgresIdentityRepository, CreateOrganizationUseCase, IssueWorkerTokenUseCase, VerifyTokenUseCase, DeviceCredentialAuthentication, DeliverAccountMail, EnvelopeMessageProtector, PostgresAccountIdentityRepository, PostgresDeviceAuthorizationRepository, PostgresServiceAccountRepository, ServiceAccountAuthentication, ServiceAssertionIssuer, ServiceAssertionVerifier,
+  AccountAuthentication, AccountDeviceAuthorization, AccountServiceAccounts, AccountAudit, OrganizationLifecycle, PostgresAuditLog, AccountPersonalCredentials, PersonalCredentialAuthentication, PostgresPersonalCredentialRepository, AccountLegacyTokens, PostgresLegacyTokenRepository, PostgresIdentityRepository, CreateOrganizationUseCase, IssueWorkerTokenUseCase, VerifyTokenUseCase, DeviceCredentialAuthentication, DeliverAccountMail, EnvelopeMessageProtector, PostgresAccountIdentityRepository, PostgresDeviceAuthorizationRepository, PostgresServiceAccountRepository, ServiceAccountAuthentication, ServiceAssertionIssuer, ServiceAssertionVerifier,
   PostgresAccountMailQueue, bodyDigest, tokenDigest, type AccountEmail,
   AccountSecurity, PostgresAccountSecurityRepository, PostgresMfaVerification, Rfc6238Totp,
   AccountProfile, PostgresAccountProfileRepository,
@@ -65,13 +65,14 @@ async function harness() {
     async createProposal(_installationId, _repositoryId, _baseBranch, proposal) { repositoryProposals++; return { pullRequestNumber: 12, url: 'https://github.com/carbon-team/desktop/pull/12', branch: proposal.branch, baseSha: 'b'.repeat(40), headSha: 'c'.repeat(40) }; },
     verifyWebhook(raw, signature, deliveryId, event) { const expected='sha256='+createHmac('sha256','repository-webhook-secret').update(raw).digest('hex'); if(signature!==expected||!deliveryId||!event) throw new Error('invalid webhook'); },
   };
-  const makeHandler = (auth: AccountAuthentication) => createAccountRoutes(auth, origin, new AccountSecurity(auth, new PostgresAccountSecurityRepository(sql, mfa), protector, totp), new AccountProfile(auth, new PostgresAccountProfileRepository(sql, mfa), protector, config), new OrganizationAccess(auth, new PostgresOrganizationRepository(sql), protector), new OrganizationInvitations(auth, new PostgresOrganizationInvitationsRepository(sql), new PostgresOrganizationRepository(sql), protector, config), new ExternalAccountAuthentication(auth, new PostgresExternalAccountRepository(sql, mfa), githubProvider, protector, config), new AccountAuthorization(auth, new PostgresPlatformAuthority(sql)), new AccountCatalog(auth, new PostgresCatalogRepository(sql), protector), undefined, undefined, new AccountEnvironmentCredentials(auth, new PostgresEnvironmentCredentialRepository(sql), protector), new AccountEnvironmentSecrets(auth, new PostgresEnvironmentSecretRepository(sql, secretProtector), protector), new AccountRepositories(auth, new PostgresRepositoryIntegrationRepository(sql), repositoryProvider, protector), new AccountDeviceAuthorization(auth,new PostgresDeviceAuthorizationRepository(sql),protector,origin,config.rateLimitKey,new DeviceCredentialAuthentication(sql),assertionIssuer),new AccountServiceAccounts(auth,new PostgresServiceAccountRepository(sql),protector,assertionIssuer),new AccountPersonalCredentials(auth,new PostgresPersonalCredentialRepository(sql),protector),new AccountLegacyTokens(auth,new PostgresLegacyTokenRepository(sql),protector,'accept'),new AccountWorkers(auth,new PostgresWorkerRepository(sql,secretProtector),protector));
+  const makeHandler = (auth: AccountAuthentication) => createAccountRoutes(auth, origin, new AccountSecurity(auth, new PostgresAccountSecurityRepository(sql, mfa), protector, totp), new AccountProfile(auth, new PostgresAccountProfileRepository(sql, mfa), protector, config), new OrganizationAccess(auth, new PostgresOrganizationRepository(sql), protector), new OrganizationInvitations(auth, new PostgresOrganizationInvitationsRepository(sql), new PostgresOrganizationRepository(sql), protector, config), new ExternalAccountAuthentication(auth, new PostgresExternalAccountRepository(sql, mfa), githubProvider, protector, config), new AccountAuthorization(auth, new PostgresPlatformAuthority(sql)), new AccountCatalog(auth, new PostgresCatalogRepository(sql), protector), undefined, undefined, new AccountEnvironmentCredentials(auth, new PostgresEnvironmentCredentialRepository(sql), protector), new AccountEnvironmentSecrets(auth, new PostgresEnvironmentSecretRepository(sql, secretProtector), protector), new AccountRepositories(auth, new PostgresRepositoryIntegrationRepository(sql), repositoryProvider, protector), new AccountDeviceAuthorization(auth,new PostgresDeviceAuthorizationRepository(sql),protector,origin,config.rateLimitKey,new DeviceCredentialAuthentication(sql),assertionIssuer),new AccountServiceAccounts(auth,new PostgresServiceAccountRepository(sql),protector,assertionIssuer),new AccountPersonalCredentials(auth,new PostgresPersonalCredentialRepository(sql),protector),new AccountLegacyTokens(auth,new PostgresLegacyTokenRepository(sql),protector,'accept'),new AccountWorkers(auth,new PostgresWorkerRepository(sql,secretProtector),protector),new AccountAudit(auth,new PostgresAuditLog(sql),protector,{pollMs:15,heartbeatMs:120,maxMs:900}));
   let auth = makeAuth(); let handler = makeHandler(auth);
   const workerHandler = createWorkerRoutes(new WorkerProtocol(new PostgresWorkerRepository(sql, secretProtector)), origin);
   // Worker calls carry no Origin and no cookies unless a test adds them on purpose.
   const workerApi = (path: string, input?: unknown, overrides: Record<string, string> = {}) => workerHandler(new Request(origin + path, { method: 'POST',
     headers: { ...(input === undefined ? {} : { 'content-type': 'application/json' }), ...overrides }, body: input === undefined ? undefined : JSON.stringify(input) }));
   const leases = new WorkerLeases(new PostgresWorkerRepository(sql, secretProtector));
+  const organizationLifecycle = new OrganizationLifecycle(new PostgresAuditLog(sql)); const catalogLifecycle = new CatalogLifecycle(new PostgresCatalogRepository(sql));
   const mail: (AccountEmail & { idempotencyKey: string })[] = [];
   const accepted = new Set<string>(); let failProvider = false;
   const provider = new ResendAccountNotification("resend-test-only", "Carbon <auth@example.test>", (async (input, init) => {
@@ -146,7 +147,7 @@ async function harness() {
     const redirected = await githubCallback(url.searchParams.get('state')!); expect(redirected.status).toBe(303);
     return redirected.headers.get('location')!.split('#token=')[1]!;
   };
-  return { sql, protector, secretProtector, workerApi, leases, assertionPublicKey:assertionKeys.publicKey, assertionKey, mail, cookies, call, challenge, complete, token, freshRequest, freshComplete, profile, emailToken, emailComplete, createOrganization, organizationCommand, restoreCookies,
+  return { sql, protector, secretProtector, workerApi, leases, organizationLifecycle, catalogLifecycle, assertionPublicKey:assertionKeys.publicKey, assertionKey, mail, cookies, call, challenge, complete, token, freshRequest, freshComplete, profile, emailToken, emailComplete, createOrganization, organizationCommand, restoreCookies,
     catalogCommand, createProject,
     invitation, invitationToken, invitationProof,
     githubStart, githubCallback, githubComplete, githubBegin, githubCalls,
@@ -551,6 +552,355 @@ suite("real account authentication", () => {
     expect((await h.call(`${workersPath}/${current.id}`, 'POST', { kind: 'enable' }, { 'if-match': revoked.worker.revision, 'x-csrf-token': csrf() })).status).toBe(409);
     expect(await state(retry.lease.id)).toBe('expired');
     const durable = JSON.stringify(await h.sql`SELECT * FROM worker_events`); for (const value of ['first-signing-value', 'second-signing-value', previous, credential.token]) expect(durable).not.toContain(value);
+  });
+
+  test('projects, environments and organizations move through scheduled deletion, recovery and final deletion in order', async () => {
+    const h = await harness(); await h.challenge('owner@example.test'); await h.deliver(); await h.complete();
+    const org = (await organizationResponse(h.createOrganization('Lifecycle team', 'lifecycle-team'))).receipt.id;
+    const created = parseComponent('CatalogReceipt', (await (await h.createProject(org)).json() as { receipt: unknown }).receipt);
+    const scope = parseComponent('EnvironmentScope', created.scope); const csrf = () => h.cookies.get('__Host-carbon-csrf')!;
+    const base = `/platform/v1/orgs/${org}/projects/${scope.projectId}`; const envPath = `${base}/environments/${scope.environmentId}`;
+    const provider = { apply: async (work: ProvisioningWork) => ({ scope: work.scope, remoteResourceId: `${work.owner}-${work.scope.environmentId}`, state: work.action === 'pause' ? 'paused' as const : 'active' as const }) };
+    const provisioning = new ProvisionEnvironment(new PostgresProvisioningRepository(h.sql), { database: provider, registry: provider });
+    const drain = async () => { while (await provisioning.execute()) { /* until idle */ } };
+    await drain();
+    const environment = async () => parseComponent('CatalogEnvironmentDetails', await (await h.call(envPath)).json()).environment;
+    const project = async () => parseComponent('CatalogProject', await (await h.call(base)).json());
+    const environmentDelete = async (deleted: boolean, confirmation = 'app') => h.catalogCommand(envPath, { kind: 'delete', deleted, confirmation }, (await environment()).revision);
+    const projectDelete = async (deleted: boolean, confirmation = 'app') => h.catalogCommand(base, { kind: 'delete', deleted, confirmation }, (await project()).revision);
+
+    // Environment: active -> paused -> deletion_pending -> deleted, with recovery back to paused.
+    expect((await environmentDelete(true)).status).toBe(409);
+    expect((await h.catalogCommand(envPath, { kind: 'pause', paused: true }, (await environment()).revision)).status).toBe(202);
+    expect((await environmentDelete(true)).status).toBe(409);
+    await drain();
+    expect((await environmentDelete(true, 'wrong-name')).status).toBe(400);
+    expect((await environmentDelete(false)).status).toBe(403);
+    expect((await environmentDelete(true)).status).toBe(200);
+    let pending = await environment(); expect(pending.state).toBe('deletion_pending');
+    const days = (new Date(pending.deletionScheduledAt!).getTime() - Date.now()) / 86400_000; expect(days).toBeGreaterThan(6.9); expect(days).toBeLessThanOrEqual(7);
+    // Scheduled for deletion means read-only: no writes, no pause changes, no second deletion.
+    expect((await h.call(`${envPath}/secrets`, 'POST', { name: 'LATE_SECRET', value: 'x' }, { 'if-match': pending.revision, 'x-csrf-token': csrf() })).status).toBe(403);
+    expect((await h.catalogCommand(envPath, { kind: 'rename', name: 'Renamed' }, pending.revision)).status).toBe(403);
+    expect((await h.catalogCommand(envPath, { kind: 'pause', paused: false }, pending.revision)).status).toBe(403);
+    expect((await environmentDelete(true)).status).toBe(403);
+    expect(await h.catalogLifecycle.finalizeDeletions(crypto.randomUUID())).toEqual([]);
+    expect((await environmentDelete(false)).status).toBe(200);
+    const recovered = await environment(); expect(recovered.state).toBe('paused'); expect(recovered.deletionScheduledAt).toBeUndefined();
+    expect((await environmentDelete(false)).status).toBe(403);
+    expect((await environmentDelete(true)).status).toBe(200);
+    await h.sql`UPDATE environments SET deletion_scheduled_at = now() - interval '1 second' WHERE id = ${scope.environmentId}`;
+    expect(await h.catalogLifecycle.finalizeDeletions(crypto.randomUUID())).toEqual([scope]);
+    expect(await h.catalogLifecycle.finalizeDeletions(crypto.randomUUID())).toEqual([]);
+    expect((await h.call(envPath)).status).toBe(404);
+    expect((await h.catalogCommand(envPath, { kind: 'delete', deleted: false, confirmation: 'app' }, '1')).status).toBe(404);
+    expect((await h.sql`SELECT state FROM environments WHERE id = ${scope.environmentId}`)[0].state).toBe('deleted');
+
+    // Project: active -> archived -> deletion_pending -> deleted, with recovery back to archived.
+    const second = parseComponent('CatalogReceipt', (await (await h.catalogCommand(`${base}/environments`, { name: 'Staging', kind: 'staging', services: ['database'] }, (await project()).revision)).json() as { receipt: unknown }).receipt);
+    await drain();
+    expect((await projectDelete(true)).status).toBe(409);
+    expect((await h.catalogCommand(base, { kind: 'archive', archived: true, confirmation: 'app' }, (await project()).revision)).status).toBe(200);
+    expect((await projectDelete(true, 'wrong-name')).status).toBe(400);
+    expect((await projectDelete(true)).status).toBe(200);
+    let doomed = await project(); expect(doomed.state).toBe('deletion_pending'); expect(doomed.deletionScheduledAt).toBeDefined();
+    expect((await h.catalogCommand(`${base}/environments`, { name: 'Late', kind: 'development', services: ['database'] }, doomed.revision)).status).toBe(403);
+    expect((await h.catalogCommand(base, { kind: 'archive', archived: false, confirmation: 'app' }, doomed.revision)).status).toBe(403);
+    expect((await projectDelete(false)).status).toBe(200);
+    expect((await project()).state).toBe('archived');
+    expect((await projectDelete(true)).status).toBe(200);
+    await h.sql`UPDATE projects SET deletion_scheduled_at = now() - interval '1 second' WHERE id = ${scope.projectId}`;
+    // Deleting a project takes its remaining environments with it.
+    expect(await h.catalogLifecycle.finalizeDeletions(crypto.randomUUID())).toEqual([{ orgId: org, projectId: scope.projectId, environmentId: second.scope.environmentId! }, { orgId: org, projectId: scope.projectId }]);
+    expect((await h.call(base)).status).toBe(404);
+    expect((await h.sql`SELECT state FROM environments WHERE project_id = ${scope.projectId} ORDER BY state`).map((row: { state: string }) => row.state)).toEqual(['deleted', 'deleted']);
+    // A deleted project's namespace is not handed to a new project.
+    expect((await h.createProject(org)).status).toBe(409);
+
+    // Organization: active -> deletion_pending -> deleted, with cancellation back to active.
+    const settings = `/platform/v1/orgs/${org}/settings`;
+    const organization = async () => (await (await h.call(`/platform/v1/orgs/${org}`)).json() as { organization: { revision: string; state: string } }).organization;
+    const orgCommand = async (command: unknown) => h.call(settings, 'POST', command, { 'if-match': (await organization()).revision, 'x-csrf-token': csrf() });
+    expect((await orgCommand({ kind: 'delete-cancel' })).status).toBe(409);
+    expect((await orgCommand({ kind: 'delete', confirmation: 'wrong-name' })).status).toBe(400);
+    expect((await orgCommand({ kind: 'delete', confirmation: 'lifecycle-team' })).status).toBe(200);
+    expect((await organization()).state).toBe('deletion_pending');
+    expect((await h.createProject(org, 'Other', 'other')).status).toBe(403);
+    expect((await orgCommand({ kind: 'update', name: 'Renamed', slug: 'lifecycle-team' })).status).toBe(403);
+    expect((await orgCommand({ kind: 'delete-cancel' })).status).toBe(200);
+    expect((await organization()).state).toBe('active');
+    expect((await h.createProject(org, 'Other', 'other')).status).toBe(202);
+    expect((await orgCommand({ kind: 'delete', confirmation: 'lifecycle-team' })).status).toBe(200);
+    expect(await h.organizationLifecycle.finalizeDeletions(crypto.randomUUID())).toEqual([]);
+    await h.sql`UPDATE organizations SET deletion_scheduled_at = now() - interval '1 second' WHERE id = ${org}`;
+    expect(await h.organizationLifecycle.finalizeDeletions(crypto.randomUUID())).toEqual([org]);
+    expect((await h.call(`/platform/v1/orgs/${org}`)).status).toBe(404);
+    expect((await orgCommand({ kind: 'delete-cancel' }).catch(() => ({ status: 404 }))).status).toBe(404);
+
+    const actions = (await h.sql`SELECT action FROM platform_events WHERE org_id = ${org} ORDER BY transaction_id, sequence`).map((row: { action: string }) => row.action);
+    for (const action of ['catalog.environment-command.delete', 'catalog.environment.deleted', 'catalog.project-command.delete', 'catalog.project.deleted', 'organization.delete', 'organization.delete-cancel', 'organization.deleted']) expect(actions).toContain(action);
+  });
+
+  test('suspension, archive and scheduled deletion stop every credential type, and recovery restores them', async () => {
+    const h = await harness(); await h.challenge('owner@example.test'); await h.deliver(); await h.complete();
+    const org = (await organizationResponse(h.createOrganization('Credential matrix', 'credential-matrix'))).receipt.id;
+    const scope = parseComponent('EnvironmentScope', parseComponent('CatalogReceipt', (await (await h.createProject(org)).json() as { receipt: unknown }).receipt).scope);
+    const csrf = () => h.cookies.get('__Host-carbon-csrf')!; const base = `/platform/v1/orgs/${org}/projects/${scope.projectId}`; const envPath = `${base}/environments/${scope.environmentId}`;
+    const provider = { apply: async (work: ProvisioningWork) => ({ scope: work.scope, remoteResourceId: `${work.owner}-${work.scope.environmentId}`, state: work.action === 'pause' ? 'paused' as const : 'active' as const }) };
+    const provisioning = new ProvisionEnvironment(new PostgresProvisioningRepository(h.sql), { database: provider, registry: provider });
+    const drain = async () => { while (await provisioning.execute()) { /* until idle */ } };
+    await drain();
+    const environment = async () => parseComponent('CatalogEnvironmentDetails', await (await h.call(envPath)).json()).environment;
+    const project = async () => parseComponent('CatalogProject', await (await h.call(base)).json());
+    const expiresAt = new Date(Date.now() + 86400_000).toISOString(); const post = (path: string, body: unknown, revision?: string) => h.call(path, 'POST', body, { 'x-csrf-token': csrf(), ...(revision ? { 'if-match': revision } : {}) });
+
+    // One credential of every type, all for the same environment.
+    expect((await post(`${envPath}/secrets`, { name: 'TOKEN', value: 'matrix-secret-value' }, (await environment()).revision)).status).toBe(201);
+    const personal = parseComponent('PersonalCredentialIssue', await (await post('/platform/v1/account/personal-credentials', { name: 'Laptop', scope, permissions: ['metadata.read'], expiresAt })).json());
+    const environmentCredential = parseComponent('EnvironmentCredentialIssue', await (await post(`${envPath}/credentials`, { name: 'CI', permissions: ['metadata.read'], expiresAt }, (await environment()).revision)).json());
+    const serviceAccount = parseComponent('ServiceAccountReceipt', await (await post(`/platform/v1/orgs/${org}/service-accounts`, { name: 'Automation', scope, permissions: ['metadata.read'] }, (await environment()).revision)).json()).serviceAccount;
+    const service = parseComponent('ServiceAccountCredentialIssue', await (await post(`/platform/v1/orgs/${org}/service-accounts/${serviceAccount.id}/credentials`, { name: 'CI', expiresAt }, serviceAccount.revision)).json());
+    const challenge = parseComponent('DeviceAuthorizationChallenge', await (await h.call('/platform/v1/device/authorizations', 'POST', { clientName: 'Carbon CLI', deviceName: 'Workstation', scope, permissions: ['metadata.read'] })).json());
+    const review = parseComponent('DeviceAuthorizationReview', await (await h.call('/platform/v1/account/device-authorizations/review', 'POST', { userCode: challenge.userCode })).json());
+    expect((await post('/platform/v1/account/device-authorizations', { kind: 'approve', userCode: challenge.userCode }, review.revision)).status).toBe(200);
+    const device = parseComponent('DeviceTokenResponse', await (await h.call('/platform/v1/device/token', 'POST', { deviceCode: challenge.deviceCode })).json()); if (device.state !== 'authorized') throw new Error('expected a device token');
+    const enrollment = parseComponent('WorkerEnrollmentIssue', await (await post(`/platform/v1/orgs/${org}/workers`, { name: 'win-01', purposes: ['build'] })).json());
+    const worker = parseComponent('WorkerCredentialIssue', await (await h.workerApi('/worker/v1/enroll', { code: enrollment.code, capabilities: { platform: 'windows', arch: 'x64', toolchains: [] } })).json());
+
+    const works = (attempt: Promise<unknown>) => attempt.then(() => true, () => false);
+    const probes: Record<string, () => Promise<boolean>> = {
+      'pt_': () => works(new PersonalCredentialAuthentication(h.sql).verify(personal.token, scope, 'metadata.read')),
+      'ce_': () => works(new EnvironmentCredentialAuthentication(new PostgresEnvironmentCredentialRepository(h.sql)).verify(environmentCredential.token, scope, 'metadata.read')),
+      'cs_': () => works(new ServiceAccountAuthentication(new PostgresServiceAccountRepository(h.sql)).verify(service.token, scope, 'metadata.read')),
+      'dc_': () => works(new DeviceCredentialAuthentication(h.sql).verify(device.token, scope, 'metadata.read')),
+      // A worker is useful only through a lease: granting, claiming and reading its secrets must all succeed.
+      'wc_ lease': async () => {
+        const granted = await h.leases.grant({ scope, purpose: 'build', subjectId: crypto.randomUUID(), secretNames: ['TOKEN'] }, crypto.randomUUID()).catch(() => undefined);
+        if (!granted) return false;
+        const bearer = { authorization: `Bearer ${worker.token}` }; const claimed = await h.workerApi('/worker/v1/leases/claim', undefined, bearer);
+        const offer = claimed.status === 200 ? parseComponent('WorkerLeaseOffer', await claimed.json()) : { state: 'none' as const };
+        const delivered = offer.state === 'leased' && (await h.workerApi(`/worker/v1/leases/${offer.lease.id}/secrets`, undefined, { ...bearer, 'x-carbon-lease-token': offer.leaseToken })).status === 200;
+        await h.leases.cancel(granted.subjectId, crypto.randomUUID());
+        return delivered;
+      },
+    };
+    const snapshot = async () => Object.fromEntries(await Promise.all(Object.entries(probes).map(async ([name, probe]) => [name, await probe()] as const)));
+    const all = (value: boolean) => Object.fromEntries(Object.keys(probes).map(name => [name, value]));
+    expect(await snapshot()).toEqual(all(true));
+
+    // Operator suspension, and reinstatement.
+    await h.organizationLifecycle.suspend(org, 'billing.overdue', crypto.randomUUID());
+    await credentialRejection(h.organizationLifecycle.suspend(org, 'billing.overdue', crypto.randomUUID()), 'Only an active organization');
+    expect(await snapshot()).toEqual(all(false));
+    expect((await h.call(`/platform/v1/orgs/${org}`)).status).toBe(200);
+    expect((await h.createProject(org, 'Blocked', 'blocked')).status).toBe(403);
+    await h.organizationLifecycle.reinstate(org, crypto.randomUUID());
+    expect(await snapshot()).toEqual(all(true));
+
+    // Project archive, and restore.
+    expect((await h.catalogCommand(base, { kind: 'archive', archived: true, confirmation: 'app' }, (await project()).revision)).status).toBe(200);
+    expect(await snapshot()).toEqual(all(false));
+    expect((await h.catalogCommand(base, { kind: 'archive', archived: false, confirmation: 'app' }, (await project()).revision)).status).toBe(200);
+    expect(await snapshot()).toEqual(all(true));
+
+    // Environment scheduled for deletion, recovered, and finally deleted.
+    expect((await h.catalogCommand(envPath, { kind: 'pause', paused: true }, (await environment()).revision)).status).toBe(202); await drain();
+    // Paused: personal and device credentials and worker leases stop; automation credentials are left to the owning service's paused binding.
+    expect(await snapshot()).toEqual({ 'pt_': false, 'ce_': true, 'cs_': true, 'dc_': false, 'wc_ lease': false });
+    expect((await h.catalogCommand(envPath, { kind: 'delete', deleted: true, confirmation: 'app' }, (await environment()).revision)).status).toBe(200);
+    expect(await snapshot()).toEqual(all(false));
+    expect((await h.catalogCommand(envPath, { kind: 'delete', deleted: false, confirmation: 'app' }, (await environment()).revision)).status).toBe(200);
+    expect((await h.catalogCommand(envPath, { kind: 'pause', paused: false }, (await environment()).revision)).status).toBe(202); await drain();
+    expect((await environment()).state).toBe('active');
+    expect(await snapshot()).toEqual(all(true));
+    // A lease that is open when the environment is finally deleted is cancelled with it.
+    const open = await h.leases.grant({ scope, purpose: 'build', subjectId: crypto.randomUUID(), secretNames: ['TOKEN'] }, crypto.randomUUID());
+    expect((await h.catalogCommand(envPath, { kind: 'pause', paused: true }, (await environment()).revision)).status).toBe(202); await drain();
+    expect((await h.catalogCommand(envPath, { kind: 'delete', deleted: true, confirmation: 'app' }, (await environment()).revision)).status).toBe(200);
+    await h.sql`UPDATE environments SET deletion_scheduled_at = now() - interval '1 second' WHERE id = ${scope.environmentId}`;
+    expect(await h.catalogLifecycle.finalizeDeletions(crypto.randomUUID())).toEqual([scope]);
+    expect((await h.sql`SELECT state FROM worker_leases WHERE id = ${open.id}`)[0].state).toBe('cancelled');
+    expect(await snapshot()).toEqual(all(false));
+  });
+
+  test('audit events are browsable in order and streamed live, and both stop the moment access changes', async () => {
+    const h = await harness(); await h.challenge('owner@example.test'); await h.deliver(); await h.complete();
+    const org = (await organizationResponse(h.createOrganization('Audit team', 'audit-team'))).receipt.id;
+    const scope = parseComponent('EnvironmentScope', parseComponent('CatalogReceipt', (await (await h.createProject(org)).json() as { receipt: unknown }).receipt).scope);
+    const csrf = () => h.cookies.get('__Host-carbon-csrf')!; const envPath = `/platform/v1/orgs/${org}/projects/${scope.projectId}/environments/${scope.environmentId}`;
+    const owner = (await h.sql`SELECT id FROM accounts WHERE primary_email = 'owner@example.test'`)[0].id;
+    const secret = async (name: string) => { const revision = parseComponent('CatalogEnvironmentDetails', await (await h.call(envPath)).json()).environment.revision;
+      const response = await h.call(`${envPath}/secrets`, 'POST', { name, value: `value-of-${name}` }, { 'if-match': revision, 'x-csrf-token': csrf() }); expect(response.status).toBe(201); return parseComponent('EnvironmentSecretReceipt', await response.json()).secret; };
+    const first = await secret('FIRST'); await secret('SECOND');
+    const second = parseComponent('CatalogReceipt', (await (await h.createProject(org, 'Second', 'second')).json() as { receipt: unknown }).receipt);
+
+    // Browsing: newest first, safe fields only, stable pagination, scope filters.
+    const auditPath = `/platform/v1/orgs/${org}/audit`;
+    const everything = parseComponent('AuditPage', await (await h.call(auditPath)).json());
+    expect(everything.items.map(item => item.action)).toEqual(['catalog.project-create', 'secret.created', 'secret.created', 'catalog.project-create', 'organization.create']);
+    expect(everything.items[2]).toMatchObject({ scope, resource: { owner: 'cloud', kind: 'environment_secret', id: first.id }, actor: { kind: 'account', id: owner }, revision: '1' });
+    expect(JSON.stringify(everything)).not.toContain('value-of-');
+    const collected: string[] = []; let cursor: string | null = null; let pages = 0;
+    do { const page: { items: readonly { id: string }[]; nextCursor: string | null } = parseComponent('AuditPage', await (await h.call(`${auditPath}?limit=2${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`)).json());
+      expect(page.items.length).toBeLessThanOrEqual(2); collected.push(...page.items.map(item => item.id)); cursor = page.nextCursor; pages++; } while (cursor);
+    expect(pages).toBe(3); expect(collected).toEqual(everything.items.map(item => item.id));
+    const projectOnly = parseComponent('AuditPage', await (await h.call(`${auditPath}?projectId=${second.scope.projectId}`)).json());
+    expect(projectOnly.items.map(item => item.action)).toEqual(['catalog.project-create']);
+    expect(parseComponent('AuditPage', await (await h.call(`${auditPath}?projectId=${scope.projectId}&environmentId=${scope.environmentId}`)).json()).items).toHaveLength(3);
+    for (const query of ['?sort=id', '?limit=0', '?unknown=1', `?environmentId=${scope.environmentId}`, '?cursor=not-a-cursor']) expect((await h.call(auditPath + query)).status).toBe(400);
+    const firstPage = parseComponent('AuditPage', await (await h.call(`${auditPath}?limit=2`)).json());
+
+    // Another tenant, and a member without audit access.
+    const ownerCookies = new Map(h.cookies); h.cookies.clear(); await h.challenge('other@example.test'); await h.deliver(); await h.complete();
+    const otherOrg = (await organizationResponse(h.createOrganization('Other audit', 'other-audit'))).receipt.id;
+    expect((await h.call(auditPath)).status).toBe(404);
+    expect((await h.call(`${auditPath.replace(org, otherOrg)}?projectId=${scope.projectId}`)).status).toBe(404);
+    expect((await h.call(`/platform/v1/orgs/${org}/events/stream`)).status).toBe(404);
+    expect(parseComponent('AuditPage', await (await h.call(auditPath.replace(org, otherOrg))).json()).items.map(item => item.action)).toEqual(['organization.create']);
+    const other = (await h.sql`SELECT id FROM accounts WHERE primary_email = 'other@example.test'`)[0].id;
+    await h.sql`INSERT INTO memberships (id, account_id, org_id, role, state) VALUES (${crypto.randomUUID()}, ${other}, ${org}, 'Viewer', 'active')`;
+    await h.sql`UPDATE accounts SET permission_revision = permission_revision + 1 WHERE id = ${other}`;
+    expect((await h.call(auditPath)).status).toBe(403);
+    expect((await h.call(`/platform/v1/orgs/${org}/events/stream`)).status).toBe(403);
+    // A cursor belongs to the session that got it; presenting it elsewhere is just an invalid cursor.
+    expect((await h.call(`${auditPath}?limit=2&cursor=${encodeURIComponent(firstPage.nextCursor!)}`)).status).toBe(400);
+    await h.sql`UPDATE memberships SET role = 'Developer' WHERE account_id = ${other} AND org_id = ${org}`;
+    await h.sql`UPDATE accounts SET permission_revision = permission_revision + 1 WHERE id = ${other}`;
+    expect((await h.call(`${auditPath}?limit=2&cursor=${encodeURIComponent(firstPage.nextCursor!)}`)).status).toBe(400);
+    // A Developer is assigned projects only: the organization log and unassigned projects stay closed to them.
+    expect((await h.call(`${auditPath}?projectId=${scope.projectId}`)).status).toBe(404);
+    h.restoreCookies(ownerCookies);
+
+    // Streaming.
+    const decoder = new TextDecoder();
+    const open = async (query = '', headers: Record<string, string> = {}) => {
+      const response = await h.call(`/platform/v1/orgs/${org}/events/stream${query}`, 'GET', undefined, headers);
+      expect(response.status).toBe(200); expect(response.headers.get('content-type')).toBe('text/event-stream; charset=utf-8'); expect(response.headers.get('cache-control')).toBe('no-store');
+      const reader = response.body!.getReader(); let buffer = '';
+      const next = async () => { while (!buffer.includes('\n\n')) { const { value, done } = await reader.read(); if (done) return undefined; buffer += decoder.decode(value, { stream: true }); }
+        const index = buffer.indexOf('\n\n'); const frame = buffer.slice(0, index); buffer = buffer.slice(index + 2);
+        return { id: /^id: (.+)$/m.exec(frame)?.[1], message: parseComponent('SubscriptionMessage', JSON.parse(/^data: (.+)$/m.exec(frame)![1]!)) }; };
+      return { next, close: () => reader.cancel() };
+    };
+    let stream = await open(); let frame = await stream.next();
+    expect(frame!.message).toMatchObject({ state: 'connected', events: [] }); expect(frame!.id).toBe(frame!.message.cursor);
+    // Only what happens after connecting is delivered, in order, once.
+    const third = await secret('THIRD'); await secret('FOURTH');
+    const seen: { action: string; resource: { id: string } }[] = []; let resume = '';
+    while (seen.length < 2) { frame = await stream.next(); seen.push(...frame!.message.events); if (frame!.message.events.length) resume = frame!.message.cursor; }
+    expect(seen.map(item => item.action)).toEqual(['secret.created', 'secret.created']); expect(seen[0]!.resource.id).toBe(third.id);
+    frame = await stream.next(); expect(frame!.message).toMatchObject({ state: 'heartbeat', events: [] });
+    await stream.close();
+    // Reconnecting with the last cursor resumes without loss or repeats; events of another organization never appear.
+    const fifth = await secret('FIFTH');
+    await h.sql`INSERT INTO platform_events (id, source, org_id, actor_kind, action, resource_kind, resource_id, request_id) VALUES (${crypto.randomUUID()}, 'system', ${otherOrg}, 'system', 'organization.suspended', 'organization', ${otherOrg}, ${crypto.randomUUID()})`;
+    stream = await open('', { 'last-event-id': resume }); frame = await stream.next(); expect(frame!.message.events).toEqual([]);
+    frame = await stream.next(); expect(frame!.message.events.map(item => item.resource.id)).toEqual([fifth.id]);
+    // The stream ends itself after its maximum lifetime so clients reconnect under current authorization.
+    let last = frame; while ((frame = await stream.next())) last = frame; expect(last!.message.state).toBe('closed');
+
+    // Losing access ends the stream with one terminal frame, and the old cursor stops working.
+    stream = await open(); frame = await stream.next(); const stale = frame!.message.cursor;
+    await h.sql`UPDATE accounts SET permission_revision = permission_revision + 1 WHERE id = ${owner}`;
+    last = frame; while ((frame = await stream.next())) last = frame;
+    expect(last!.message).toEqual({ state: 'authorization_revoked', cursor: '', events: [] });
+    expect((await h.call(`/platform/v1/orgs/${org}/events/stream?cursor=${encodeURIComponent(stale)}`)).status).toBe(400);
+    expect((await h.call(`/platform/v1/orgs/${org}/events/stream?cursor=${encodeURIComponent(resume)}`)).status).toBe(400);
+    expect((await h.call(`/platform/v1/orgs/${org}/events/stream?limit=5`)).status).toBe(400);
+  });
+
+  test('two-tenant denial matrix: another organization cannot read, change or learn about any resource', async () => {
+    const h = await harness(); await h.challenge('tenant-a@example.test'); await h.deliver(); await h.complete();
+    const csrf = () => h.cookies.get('__Host-carbon-csrf')!; const expiresAt = new Date(Date.now() + 86400_000).toISOString();
+    const post = (path: string, body: unknown, revision?: string) => h.call(path, 'POST', body, { 'x-csrf-token': csrf(), ...(revision ? { 'if-match': revision } : {}) });
+    // Tenant A owns one of everything.
+    const a = (await organizationResponse(h.createOrganization('Tenant A private', 'tenant-a-private'))).receipt.id;
+    const created = parseComponent('CatalogReceipt', (await (await h.createProject(a, 'Tenant A project', 'tenant-a-project')).json() as { receipt: unknown }).receipt);
+    const scope = parseComponent('EnvironmentScope', created.scope); const project = `/platform/v1/orgs/${a}/projects/${scope.projectId}`; const environment = `${project}/environments/${scope.environmentId}`;
+    const revision = async () => parseComponent('CatalogEnvironmentDetails', await (await h.call(environment)).json()).environment.revision;
+    const secret = parseComponent('EnvironmentSecretReceipt', await (await post(`${environment}/secrets`, { name: 'TENANT_A_SECRET', value: 'tenant-a-secret-value' }, await revision())).json()).secret;
+    const credential = parseComponent('EnvironmentCredentialIssue', await (await post(`${environment}/credentials`, { name: 'Tenant A CI', permissions: ['metadata.read'], expiresAt }, await revision())).json());
+    const serviceAccount = parseComponent('ServiceAccountReceipt', await (await post(`/platform/v1/orgs/${a}/service-accounts`, { name: 'Tenant A automation', scope, permissions: ['metadata.read'] }, await revision())).json()).serviceAccount;
+    const serviceCredential = parseComponent('ServiceAccountCredentialIssue', await (await post(`/platform/v1/orgs/${a}/service-accounts/${serviceAccount.id}/credentials`, { name: 'Tenant A key', expiresAt }, serviceAccount.revision)).json());
+    const personal = parseComponent('PersonalCredentialIssue', await (await post('/platform/v1/account/personal-credentials', { name: 'Tenant A laptop', scope, permissions: ['metadata.read'], expiresAt })).json());
+    const worker = parseComponent('WorkerEnrollmentIssue', await (await post(`/platform/v1/orgs/${a}/workers`, { name: 'tenant-a-worker', purposes: ['build'] })).json()).worker;
+    const device = parseComponent('DeviceAuthorizationChallenge', await (await h.call('/platform/v1/device/authorizations', 'POST', { clientName: 'Tenant A CLI', deviceName: 'Tenant A machine', scope, permissions: ['metadata.read'] })).json());
+    const operation = (await h.sql`SELECT id FROM operations WHERE org_id = ${a}`)[0].id; const membership = (await h.sql`SELECT id FROM memberships WHERE org_id = ${a}`)[0].id;
+    const fingerprint = async () => JSON.stringify({
+      organizations: await h.sql`SELECT id, name, slug, state, revision::text FROM organizations WHERE id = ${a}`, memberships: await h.sql`SELECT account_id, role, state FROM memberships WHERE org_id = ${a}`,
+      projects: await h.sql`SELECT id, name, state, revision::text FROM projects WHERE org_id = ${a}`, environments: await h.sql`SELECT id, name, state, revision::text FROM environments WHERE org_id = ${a}`,
+      secrets: await h.sql`SELECT id, state, current_version, revision::text FROM environment_secrets WHERE org_id = ${a}`, credentials: await h.sql`SELECT id, status, revision::text FROM environment_credentials WHERE org_id = ${a}`,
+      serviceAccounts: await h.sql`SELECT id, status, revision::text FROM service_accounts WHERE org_id = ${a}`, serviceCredentials: await h.sql`SELECT id, status FROM service_account_credentials WHERE service_account_id = ${serviceAccount.id}`,
+      personal: await h.sql`SELECT id, status, revision::text FROM personal_credentials WHERE org_id = ${a}`, workers: await h.sql`SELECT id, status, revision::text FROM workers WHERE org_id = ${a}`,
+      devices: await h.sql`SELECT id, state FROM device_authorizations WHERE org_id = ${a}`, operations: await h.sql`SELECT id, state, revision::text FROM operations WHERE org_id = ${a}`,
+      events: (await h.sql`SELECT count(*)::integer AS count FROM platform_events WHERE org_id = ${a}`)[0].count });
+    const before = await fingerprint();
+
+    // Tenant B is a different account with its own organization.
+    h.cookies.clear(); await h.challenge('tenant-b@example.test'); await h.deliver(); await h.complete();
+    const b = (await organizationResponse(h.createOrganization('Tenant B', 'tenant-b'))).receipt.id;
+    const own = parseComponent('EnvironmentScope', parseComponent('CatalogReceipt', (await (await h.createProject(b)).json() as { receipt: unknown }).receipt).scope);
+    const ownEnvironment = `/platform/v1/orgs/${b}/projects/${own.projectId}/environments/${own.environmentId}`;
+    const mixedProject = `/platform/v1/orgs/${b}/projects/${scope.projectId}`; const mixedEnvironment = `${mixedProject}/environments/${scope.environmentId}`;
+    const attempts: [string, string, unknown?][] = [
+      // Reads of tenant A.
+      ['GET', `/platform/v1/orgs/${a}`], ['GET', `/platform/v1/orgs/${a}/members`], ['GET', `/platform/v1/orgs/${a}/access`], ['GET', `/platform/v1/orgs/${a}/invitations`],
+      ['GET', `/platform/v1/orgs/${a}/projects`], ['GET', project], ['GET', `${project}/environments`], ['GET', environment], ['GET', `${environment}/operations/${operation}`],
+      ['GET', `${environment}/secrets`], ['GET', `${environment}/credentials`], ['GET', `/platform/v1/orgs/${a}/service-accounts`], ['GET', `/platform/v1/orgs/${a}/service-accounts/${serviceAccount.id}/credentials`],
+      ['GET', `/platform/v1/orgs/${a}/workers`], ['GET', `/platform/v1/orgs/${a}/legacy-tokens`], ['GET', `/platform/v1/orgs/${a}/audit`], ['GET', `/platform/v1/orgs/${a}/audit?projectId=${scope.projectId}`],
+      ['GET', `/platform/v1/orgs/${a}/events/stream`],
+      // Changes to tenant A.
+      ['POST', `/platform/v1/orgs/${a}/settings`, { kind: 'update', name: 'Taken over', slug: 'taken-over' }], ['POST', `/platform/v1/orgs/${a}/settings`, { kind: 'policy', requireMfa: true }],
+      ['POST', `/platform/v1/orgs/${a}/settings`, { kind: 'delete', confirmation: 'tenant-a-private' }], ['POST', `/platform/v1/orgs/${a}/settings`, { kind: 'delete-cancel' }],
+      ['POST', `/platform/v1/orgs/${a}/members`, { kind: 'leave' }], ['POST', `/platform/v1/orgs/${a}/members`, { kind: 'member-revoke', membershipId: membership }],
+      ['POST', `/platform/v1/orgs/${a}/members`, { kind: 'member-role', membershipId: membership, role: 'Viewer' }],
+      ['POST', `/platform/v1/orgs/${a}/projects`, { name: 'Injected', slug: 'injected', services: ['database'] }],
+      ['POST', project, { kind: 'update', name: 'Renamed', slug: 'renamed' }], ['POST', project, { kind: 'archive', archived: true, confirmation: 'tenant-a-project' }],
+      ['POST', project, { kind: 'delete', deleted: true, confirmation: 'tenant-a-project' }], ['POST', project, { kind: 'production-policy', allowed: true, confirmation: 'tenant-a-project' }],
+      ['POST', `${project}/environments`, { name: 'Injected', kind: 'development', services: ['database'] }],
+      ['POST', environment, { kind: 'rename', name: 'Renamed' }], ['POST', environment, { kind: 'pause', paused: true }], ['POST', environment, { kind: 'delete', deleted: true, confirmation: 'tenant-a-project' }],
+      ['POST', `${environment}/operations/${operation}`, { kind: 'cancel' }], ['POST', `${environment}/operations/${operation}`, { kind: 'retry' }],
+      ['POST', `${environment}/secrets`, { name: 'INJECTED', value: 'x' }], ['POST', `${environment}/secrets/${secret.id}`, { kind: 'rotate', value: 'overwritten' }],
+      ['POST', `${environment}/secrets/${secret.id}`, { kind: 'disable', disabled: true }],
+      ['POST', `${environment}/credentials`, { name: 'Injected', permissions: ['data.write'], expiresAt }], ['POST', `${environment}/credentials/${credential.credential.id}`, { kind: 'revoke' }],
+      ['POST', `/platform/v1/orgs/${a}/service-accounts`, { name: 'Injected', scope, permissions: ['data.write'] }], ['POST', `/platform/v1/orgs/${a}/service-accounts/${serviceAccount.id}`, { kind: 'disable' }],
+      ['POST', `/platform/v1/orgs/${a}/service-accounts/${serviceAccount.id}/credentials`, { name: 'Injected', expiresAt }],
+      ['POST', `/platform/v1/orgs/${a}/service-accounts/${serviceAccount.id}/credentials/${serviceCredential.credential.id}`, { kind: 'revoke' }],
+      ['POST', `/platform/v1/orgs/${a}/workers`, { name: 'injected', purposes: ['build'] }], ['POST', `/platform/v1/orgs/${a}/workers/${worker.id}`, { kind: 'revoke' }],
+      ['POST', `/platform/v1/orgs/${a}/legacy-tokens/${crypto.randomUUID()}`, { kind: 'retire' }],
+      // Tenant A's identifiers under tenant B's own organization, where B does hold authority.
+      ['GET', mixedProject], ['GET', `${mixedProject}/environments`], ['GET', mixedEnvironment], ['GET', `${mixedEnvironment}/secrets`], ['GET', `${mixedEnvironment}/credentials`],
+      ['GET', `${ownEnvironment}/operations/${operation}`], ['GET', `/platform/v1/orgs/${b}/service-accounts/${serviceAccount.id}/credentials`], ['GET', `/platform/v1/orgs/${b}/audit?projectId=${scope.projectId}`],
+      ['POST', mixedProject, { kind: 'archive', archived: true, confirmation: 'tenant-a-project' }], ['POST', mixedEnvironment, { kind: 'pause', paused: true }],
+      ['POST', `${mixedEnvironment}/secrets`, { name: 'INJECTED', value: 'x' }], ['POST', `${ownEnvironment}/secrets/${secret.id}`, { kind: 'rotate', value: 'overwritten' }],
+      ['POST', `${ownEnvironment}/credentials/${credential.credential.id}`, { kind: 'revoke' }], ['POST', `${ownEnvironment}/operations/${operation}`, { kind: 'cancel' }],
+      ['POST', `/platform/v1/orgs/${b}/service-accounts/${serviceAccount.id}`, { kind: 'disable' }],
+      ['POST', `/platform/v1/orgs/${b}/workers/${worker.id}`, { kind: 'revoke' }],
+      // Account-level routes aimed at tenant A's resources.
+      ['POST', '/platform/v1/account/personal-credentials', { name: 'Injected', scope, permissions: ['metadata.read'], expiresAt }],
+      ['POST', `/platform/v1/account/personal-credentials/${personal.credential.id}`, { kind: 'revoke' }], ['POST', `/platform/v1/account/personal-credentials/${personal.credential.id}`, { kind: 'rotate', expiresAt }],
+      ['POST', '/platform/v1/account/device-authorizations/review', { userCode: device.userCode }], ['POST', '/platform/v1/account/device-authorizations', { kind: 'approve', userCode: device.userCode }],
+    ];
+    const private_ = ['Tenant A', 'tenant-a', 'TENANT_A_SECRET', 'tenant-a-secret-value', credential.token, serviceCredential.token, personal.token, secret.id, serviceAccount.id, worker.id];
+    const failures: string[] = [];
+    for (const [method, path, body] of attempts) {
+      const response = await h.call(path, method, body, method === 'POST' ? { 'x-csrf-token': csrf(), 'if-match': '1' } : {});
+      const text = await response.text(); const label = `${method} ${path.replaceAll(a, '{A}').replaceAll(b, '{B}')}${body ? ' ' + JSON.stringify((body as { kind?: string }).kind ?? 'create') : ''}`;
+      // Denied, and denied the same way whether or not the resource exists: never a success, a conflict or a validation hint.
+      if (![403, 404].includes(response.status)) failures.push(`${label} -> ${response.status}`);
+      const leaked = private_.find(value => text.includes(value)); if (leaked) failures.push(`${label} leaked ${leaked.slice(0, 12)}`);
+    }
+    expect(failures).toEqual([]);
+    // A body naming another organization than the path is malformed for any organization, existing or not.
+    expect((await post(`/platform/v1/orgs/${b}/service-accounts`, { name: 'Injected', scope, permissions: ['metadata.read'] }, '1')).status).toBe(400);
+    expect((await post(`/platform/v1/orgs/${b}/service-accounts`, { name: 'Injected', scope: { ...scope, orgId: crypto.randomUUID() }, permissions: ['metadata.read'] }, '1')).status).toBe(400);
+    expect(attempts.length).toBeGreaterThanOrEqual(60);
+    // Nothing of tenant A changed, and nothing was recorded against it.
+    expect(await fingerprint()).toBe(before);
+    // Tenant B's own lists contain only tenant B.
+    for (const path of [`/platform/v1/orgs`, `/platform/v1/orgs/${b}/projects`, `/platform/v1/orgs/${b}/audit`, `/platform/v1/orgs/${b}/service-accounts`, `/platform/v1/orgs/${b}/workers`, '/platform/v1/account/personal-credentials', '/platform/v1/account/devices']) {
+      const response = await h.call(path); expect(response.status).toBe(200); const text = await response.text(); for (const value of private_) expect(text).not.toContain(value);
+    }
   });
 
   test('device authorization approves bounded CLI access, discloses once, rate-limits polling, and revokes durably', async()=>{

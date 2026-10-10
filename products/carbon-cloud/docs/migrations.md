@@ -95,3 +95,12 @@ treat retired legacy tokens as accepted again. See
 `worker_events`. It is additive and touches no existing table. Recovery: code
 from before 0022 ignores these tables; dropping them loses only worker
 enrollments and lease history, never secret data.
+
+0023 adds `platform_events`, one ordered organization-scoped log, with triggers
+on the eleven existing event tables that write to it in the source transaction.
+It also adds deletion schedule columns to `projects`, `environments` and
+`organizations` and a suspension reason. Existing rows are untouched and earlier
+events are not backfilled. Recovery: code from before 0023 ignores the new table
+and columns; the triggers keep writing harmlessly. See
+[audit-events.md](audit-events.md) and
+[resource-lifecycle.md](resource-lifecycle.md).

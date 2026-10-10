@@ -54,7 +54,7 @@ export type OperationReceipt = { readonly "operationId": Id; readonly "revision"
 
 export type AuditRecord = { readonly "id": Id; readonly "actor": Principal; readonly "scope": Scope; readonly "action": string; readonly "resource": ResourceReference; readonly "outcome": "succeeded" | "failed"; readonly "occurredAt": Timestamp; readonly "requestId": Id; readonly "metadata": SafeMetadata; };
 
-export type PlatformEvent = { readonly "version": 1; readonly "id": Id; readonly "sequence": Sequence; readonly "scope": Scope; readonly "resource": ResourceReference; readonly "revision": Revision; readonly "action": string; readonly "occurredAt": Timestamp; readonly "requestId": Id; };
+export type PlatformEvent = { readonly "version": 1; readonly "id": Id; readonly "sequence": Sequence; readonly "scope": Scope; readonly "resource": ResourceReference; readonly "revision"?: Revision; readonly "action": string; readonly "occurredAt": Timestamp; readonly "requestId": Id; };
 
 export type SubscriptionMessage = { readonly "state": "connected" | "heartbeat" | "gap" | "authorization_revoked" | "closed"; readonly "cursor": string; readonly "events": ReadonlyArray<PlatformEvent>; readonly "error"?: ServiceError; };
 
@@ -96,7 +96,7 @@ export type OrganizationSummary = { readonly "id": Id; readonly "name": string; 
 
 export type OrganizationMember = { readonly "id": Id; readonly "accountId": Id; readonly "name": string; readonly "email": string; readonly "role": Role; readonly "revision": Revision; };
 
-export type OrganizationCommand = { readonly "kind": "update"; readonly "name": string; readonly "slug": string; } | { readonly "kind": "policy"; readonly "requireMfa": boolean; } | { readonly "kind": "member-role"; readonly "membershipId": Id; readonly "role": "Admin" | "Developer" | "Viewer" | "Billing"; } | { readonly "kind": "member-revoke"; readonly "membershipId": Id; } | { readonly "kind": "leave" | "ownership-cancel"; } | { readonly "kind": "ownership-propose"; readonly "membershipId": Id; readonly "previousRole": "Admin" | "Developer" | "Viewer" | "Billing"; } | { readonly "kind": "ownership-accept"; readonly "transferId": Id; } | { readonly "kind": "member-access"; readonly "membershipId": Id; readonly "projectAccess": "role" | "all" | "assigned"; readonly "projectIds": ReadonlyArray<Id>; readonly "grants": ReadonlyArray<MembershipGrant>; };
+export type OrganizationCommand = { readonly "kind": "update"; readonly "name": string; readonly "slug": string; } | { readonly "kind": "policy"; readonly "requireMfa": boolean; } | { readonly "kind": "member-role"; readonly "membershipId": Id; readonly "role": "Admin" | "Developer" | "Viewer" | "Billing"; } | { readonly "kind": "member-revoke"; readonly "membershipId": Id; } | { readonly "kind": "leave" | "ownership-cancel"; } | { readonly "kind": "ownership-propose"; readonly "membershipId": Id; readonly "previousRole": "Admin" | "Developer" | "Viewer" | "Billing"; } | { readonly "kind": "ownership-accept"; readonly "transferId": Id; } | { readonly "kind": "member-access"; readonly "membershipId": Id; readonly "projectAccess": "role" | "all" | "assigned"; readonly "projectIds": ReadonlyArray<Id>; readonly "grants": ReadonlyArray<MembershipGrant>; } | { readonly "kind": "delete"; readonly "confirmation": string; } | { readonly "kind": "delete-cancel"; };
 
 export type OwnershipTransfer = { readonly "id": Id; readonly "fromAccountId": Id; readonly "toAccountId": Id; readonly "previousRole": "Admin" | "Developer" | "Viewer" | "Billing"; readonly "expiresAt": Timestamp; };
 
@@ -230,6 +230,12 @@ export type WorkerSecretBinding = { readonly "name": string; readonly "version":
 
 export type WorkerSecretBindings = { readonly "leaseId": Id; readonly "bindings": ReadonlyArray<WorkerSecretBinding>; readonly "expiresAt": Timestamp; };
 
+export type AuditActor = { readonly "kind": "account" | "worker" | "system"; readonly "id": Id | null; };
+
+export type AuditEntry = { readonly "id": Id; readonly "sequence": Sequence; readonly "scope": Scope; readonly "action": string; readonly "resource": ResourceReference; readonly "actor": AuditActor; readonly "revision"?: Revision; readonly "occurredAt": Timestamp; readonly "requestId": Id; };
+
+export type AuditPage = { readonly "items": ReadonlyArray<AuditEntry>; readonly "nextCursor": string | null; };
+
 export type ServiceAccountCreate = { readonly "name": string; readonly "scope": Scope; readonly "permissions": ReadonlyArray<EnvironmentCredentialPermission>; };
 
 export type ServiceAccountCommand = { readonly "kind": "update"; readonly "name": string; readonly "permissions": ReadonlyArray<EnvironmentCredentialPermission>; } | { readonly "kind": "disable" | "enable"; };
@@ -320,13 +326,13 @@ export type CatalogProjectCreate = { readonly "name": string; readonly "slug": s
 
 export type CatalogEnvironmentCreate = { readonly "name": string; readonly "kind": EnvironmentKind; readonly "services": ReadonlyArray<ServiceOwner>; readonly "productionConfirmation"?: string; };
 
-export type CatalogProjectCommand = { readonly "kind": "update"; readonly "name": string; readonly "slug": string; } | { readonly "kind": "production-policy"; readonly "allowed": boolean; readonly "confirmation": string; } | { readonly "kind": "archive"; readonly "archived": boolean; readonly "confirmation": string; };
+export type CatalogProjectCommand = { readonly "kind": "update"; readonly "name": string; readonly "slug": string; } | { readonly "kind": "production-policy"; readonly "allowed": boolean; readonly "confirmation": string; } | { readonly "kind": "archive"; readonly "archived": boolean; readonly "confirmation": string; } | { readonly "kind": "delete"; readonly "deleted": boolean; readonly "confirmation": string; };
 
-export type CatalogEnvironmentCommand = { readonly "kind": "rename"; readonly "name": string; } | { readonly "kind": "pause"; readonly "paused": boolean; readonly "productionConfirmation"?: string; };
+export type CatalogEnvironmentCommand = { readonly "kind": "rename"; readonly "name": string; } | { readonly "kind": "pause"; readonly "paused": boolean; readonly "productionConfirmation"?: string; } | { readonly "kind": "delete"; readonly "deleted": boolean; readonly "confirmation": string; };
 
-export type CatalogProject = { readonly "id": Id; readonly "orgId": Id; readonly "name": string; readonly "slug": string; readonly "state": "active" | "archived" | "deletion_pending" | "deleted"; readonly "revision": Revision; readonly "productionMutationsAllowed": boolean; readonly "createdAt": Timestamp; };
+export type CatalogProject = { readonly "id": Id; readonly "orgId": Id; readonly "name": string; readonly "slug": string; readonly "state": "active" | "archived" | "deletion_pending" | "deleted"; readonly "revision": Revision; readonly "productionMutationsAllowed": boolean; readonly "createdAt": Timestamp; readonly "deletionScheduledAt"?: Timestamp; };
 
-export type CatalogEnvironment = { readonly "id": Id; readonly "orgId": Id; readonly "projectId": Id; readonly "name": string; readonly "kind": EnvironmentKind; readonly "state": "active" | "paused" | "deletion_pending" | "deleted"; readonly "revision": Revision; readonly "provisioning": "pending" | "ready" | "degraded" | "unconfigured"; readonly "createdAt": Timestamp; };
+export type CatalogEnvironment = { readonly "id": Id; readonly "orgId": Id; readonly "projectId": Id; readonly "name": string; readonly "kind": EnvironmentKind; readonly "state": "active" | "paused" | "deletion_pending" | "deleted"; readonly "revision": Revision; readonly "provisioning": "pending" | "ready" | "degraded" | "unconfigured"; readonly "createdAt": Timestamp; readonly "deletionScheduledAt"?: Timestamp; };
 
 export type ServiceBinding = { readonly "id": Id; readonly "scope": Scope; readonly "owner": ServiceOwner; readonly "state": "pending" | "ready" | "paused" | "failed"; readonly "desiredState": "active" | "paused"; readonly "remoteResourceId": string | null; readonly "operationId": Id; readonly "revision": Revision; };
 
@@ -566,6 +572,9 @@ export interface Components {
   WorkerLeaseReceipt: WorkerLeaseReceipt;
   WorkerSecretBinding: WorkerSecretBinding;
   WorkerSecretBindings: WorkerSecretBindings;
+  AuditActor: AuditActor;
+  AuditEntry: AuditEntry;
+  AuditPage: AuditPage;
   ServiceAccountCreate: ServiceAccountCreate;
   ServiceAccountCommand: ServiceAccountCommand;
   ServiceAccount: ServiceAccount;

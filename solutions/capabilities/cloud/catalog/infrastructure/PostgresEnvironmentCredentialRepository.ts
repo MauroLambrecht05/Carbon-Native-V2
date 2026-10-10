@@ -128,7 +128,7 @@ export class PostgresEnvironmentCredentialRepository extends PostgresPlatformAut
         JOIN projects p ON p.id = c.project_id AND p.org_id = c.org_id
         JOIN environments e ON e.id = c.environment_id AND e.project_id = c.project_id AND e.org_id = c.org_id
         WHERE c.org_id = ${scope.orgId} AND c.project_id = ${scope.projectId} AND c.environment_id = ${scope.environmentId}
-          AND c.status = 'active' AND o.state = 'active' AND p.state = 'active' AND e.state <> 'deleted'
+          AND c.status = 'active' AND o.state = 'active' AND p.state = 'active' AND e.state IN ('active', 'paused')
           AND c.permissions ? ${permission}
           AND ((c.token_hash = ${digest} AND c.expires_at > now()) OR EXISTS (
             SELECT 1 FROM environment_credential_overlaps overlap

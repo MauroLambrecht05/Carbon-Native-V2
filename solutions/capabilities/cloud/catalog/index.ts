@@ -1,4 +1,4 @@
-export { AccountCatalog } from './application/usecases/AccountCatalog.ts';
+export { AccountCatalog, CatalogLifecycle } from './application/usecases/AccountCatalog.ts';
 export { AccountEnvironmentCredentials, EnvironmentCredentialAuthentication } from './application/usecases/AccountEnvironmentCredentials.ts';
 export { AccountEnvironmentSecrets } from './application/usecases/AccountEnvironmentSecrets.ts';
 export { AccountRepositories } from './application/usecases/AccountRepositories.ts';

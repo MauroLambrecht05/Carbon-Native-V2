@@ -104,7 +104,7 @@ export class PostgresServiceAuthority extends PostgresPlatformAuthority implemen
         JOIN environments e ON e.id=s.environment_id AND e.project_id=s.project_id AND e.org_id=s.org_id
         WHERE s.managed AND s.id=${principal.id} AND c.id=${principal.credentialId} AND s.org_id=${scope.orgId} AND s.project_id=${scope.projectId}
           AND s.environment_id=${scope.environmentId} AND s.status='active' AND c.status='active' AND c.expires_at>now()
-          AND o.state='active' AND p.state='active' AND e.state<>'deleted' AND ${permission}=ANY(s.permissions)`)[0];
+          AND o.state='active' AND p.state='active' AND e.state IN ('active','paused') AND ${permission}=ANY(s.permissions)`)[0];
       return !!service&&service.permission_revision===principal.permissionRevision&&service.credential_permission_revision===service.permission_revision;
     }
     if(principal.audience==='cli'){
@@ -115,7 +115,7 @@ export class PostgresServiceAuthority extends PostgresPlatformAuthority implemen
         JOIN environments e ON e.id=g.environment_id AND e.project_id=g.project_id AND e.org_id=g.org_id
         WHERE g.id=${principal.credentialId} AND g.account_id=${principal.id} AND g.org_id=${scope.orgId} AND g.project_id=${scope.projectId}
           AND g.environment_id=${scope.environmentId} AND g.status='active' AND g.expires_at>now() AND a.state='active'
-          AND o.state='active' AND m.state='active' AND p.state='active' AND e.state<>'deleted' AND ${permission}=ANY(g.permissions)`)[0];
+          AND o.state='active' AND m.state='active' AND p.state='active' AND e.state IN ('active','paused') AND ${permission}=ANY(g.permissions)`)[0];
       return !!grant&&grant.grant_permission_revision===principal.permissionRevision&&grant.account_permission_revision===grant.grant_permission_revision;
     }
     return false;

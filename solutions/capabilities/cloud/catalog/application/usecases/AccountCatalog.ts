@@ -57,3 +57,9 @@ export class AccountCatalog {
       keyDigest: tokenDigest(options.idempotencyKey), requestDigest: tokenDigest(JSON.stringify({ command, scope, revision: options.expectedRevision })), requestId });
   }
 }
+
+/** Makes due project and environment deletions final. Run on a timer; not reachable over HTTP. */
+export class CatalogLifecycle {
+  constructor(private readonly repository: CatalogRepository) {}
+  async finalizeDeletions(requestId: string, limit = 50) { parseComponent('Id', requestId); return this.repository.finalizeDeletions(requestId, limit); }
+}

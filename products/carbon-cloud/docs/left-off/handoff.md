@@ -15,7 +15,7 @@ meaningful tests pass together.
 | 2 — complete | Extend exact short-lived assertion exchange to Registry without widening Database or credential audiences. | Completed: separate Registry exchange contracts and routes, a canonical Registry request, and cross-service tests proving Database and Registry assertions cannot cross and that revocation is live. |
 | 3 — complete | Add personal credentials and a reviewed migration/deprecation path for legacy `cc_` credentials. | Completed: `pt_` credentials with one-time disclosure, hash-only storage, exact delegated scope, rotation and revocation; staged `cc_` deprecation, owner claim and reversible retirement; cross-tenant tests pass. |
 | 4 — complete | Add worker enrollment, lease-scoped worker credentials, hosted KMS/HSM custody, and short-lived build/function secret materialization. | Completed: `we_`/`wc_`/`wl_` credentials, leases granted only inside Cloud, single-use lease-bound secret delivery, sweeper, AWS KMS adapter; expiry, cancellation, replay, rotation and worker loss are tested. Not run against real AWS. |
-| 5 | Finish BE-01 to BE-03 lifecycle gaps: streams, audit browsing, archive/deletion/suspension/recovery, revocation propagation and adversarial tenant coverage. | Every affected resource has a tested state machine, durable events, recovery path and two-tenant denial matrix. |
+| 5 — complete | Finish BE-01 to BE-03 lifecycle gaps: streams, audit browsing, archive/deletion/suspension/recovery, revocation propagation and adversarial tenant coverage. | Completed: unified event log, audit listing and SSE stream, scheduled recoverable deletion for environments, projects and organizations, operator suspension, credential revocation matrix, and a 69-case two-tenant denial matrix. |
 | 6 | Implement BE-04 application authentication realms, app users, identities, providers, challenges and sessions. | Signup policy, verified magic-link/OIDC, redirect allowlists, rotation/revocation, rate limits and app-audience Database policy context pass end-to-end tests. |
 | 7 | Implement BE-06 build orchestration: immutable source snapshots, quota reservations, attempts, leases, heartbeats, cancellation and ordered logs. | Lost/reclaimed workers, duplicate commands, quota release, log ordering and immutable input/artifact references are proven durably. |
 | 8 | Implement disposable Windows x64 execution, dependency locks, NSIS/WiX packaging, signing and provenance. | A clean Windows worker builds a pinned commit under resource/egress limits and emits verified immutable artifacts and provenance. |
@@ -30,28 +30,25 @@ meaningful tests pass together.
 | 17 | Complete production browser adapters and the Carbon frontend one vertical slice at a time. | Each frontend-plan walkthrough passes against real services; production bundles contain no mock imports or mock data. |
 | 18 | Complete observability, deployment compatibility, security review, migration reconciliation, canary rollout and cutover. | Sections 25-29 of the backend plan have recorded production evidence, including restore, rotation, rollback and no-mock-fallback drills. |
 
-## Start with Phase 5
+## Start with Phase 6
 
-Phases 1 to 4 are complete. Read these files before changing Phase 5 code:
+Phases 1 to 5 are complete. Read these files before changing Phase 6 code:
 
-- sections 7 to 9 of [the backend plan](../platform-backend-plan.md) (BE-01 to BE-03)
-- [platform-authorization.md](../platform-authorization.md) and [organization-access.md](../organization-access.md)
-- [catalog-provisioning.md](../catalog-provisioning.md)
-- [workers.md](../workers.md)
-- `solutions/capabilities/cloud/identity/infrastructure/PostgresPlatformAuthority.ts`
-- `solutions/capabilities/cloud/catalog/infrastructure/PostgresCatalogRepository.ts`
-- the `*_events` tables added by migrations 0005 to 0022
+- section 10 of [the backend plan](../platform-backend-plan.md) (BE-04)
+- [account-authentication.md](../account-authentication.md) and [github-account-authentication.md](../github-account-authentication.md)
+- [resource-lifecycle.md](../resource-lifecycle.md) and [audit-events.md](../audit-events.md)
+- `solutions/capabilities/cloud/auth/` (the legacy magic-link end-user capability)
+- `solutions/capabilities/cloud/identity/application/usecases/AccountAuthentication.ts`
+- `solutions/capabilities/cloud/identity/domain/policies/PlatformAuthorization.ts` (the `app_user` principal and `realmId` scope are reserved but unused)
 
-Every capability so far writes its own events table and none can be browsed.
-Phase 5 should add the general audit and event stream over them, finish the
-project and environment state machines (archive, deletion, suspension,
-recovery), make revocation propagate to every credential type (`dc_`, `cs_`,
-`ce_`, `pt_`, `wc_` and open worker leases), and add a two-tenant denial matrix
-across all resources. Stop after its tests and documentation; do not pull
-application authentication or build orchestration into that phase.
-
-`WorkerLeases.grant` has no production caller until Phase 7. Do not add an
-HTTP route for it.
+Phase 6 adds application authentication: realms per environment, app users,
+identities, providers, challenges and sessions, with signup policy, verified
+magic-link and OIDC, redirect allowlists, rotation and revocation, rate limits,
+and an app-audience Database policy context. Realm scopes are rejected
+everywhere today (`Realm authority is not configured`); that is the seam to
+open. New event tables need a trigger for `platform_events` (see migration
+0023). Stop after its tests and documentation; do not pull build orchestration
+into that phase.
 
 ## Verification baseline
 

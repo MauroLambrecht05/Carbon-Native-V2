@@ -1420,3 +1420,64 @@ not implemented.
 Phase 4 stops here. Phase 5 (lifecycle gaps: streams, audit browsing,
 archive/deletion/suspension/recovery, revocation propagation and adversarial
 tenant coverage) is next in [the handoff](left-off/handoff.md).
+
+## 2026-10-10: Phase 5 — lifecycle, audit, streams and tenant denial
+
+**Unified event log.** Migration 0023 adds `platform_events`, written by
+triggers on the eleven existing event tables inside the source transaction, and
+by Cloud directly for system actions. Readers order by writing transaction and
+sequence and read only below the oldest running transaction, so a cursor cannot
+skip a late commit.
+
+**Audit browsing and stream.** `GET /platform/v1/orgs/{orgId}/audit` lists
+entries newest first with project and environment filters.
+`GET /platform/v1/orgs/{orgId}/events/stream` is a server-sent event stream
+with heartbeat, resumable cursors, a 15-minute lifetime and a terminal
+`authorization_revoked` frame. Both need `audit.read`, re-resolve access on
+every read, and bind cursors to the session, its permission revision and the
+scope. See [audit-events.md](audit-events.md).
+
+**State machines.** Environments (active, paused, deletion pending, deleted),
+projects (active, archived, deletion pending, deleted) and organizations
+(active, deletion pending, deleted; suspended by operators) now have scheduled,
+recoverable deletion. `CatalogLifecycle`, `OrganizationLifecycle` and the new
+`lifecycle-sweeper` make due deletions final by marking rows. See
+[resource-lifecycle.md](resource-lifecycle.md).
+
+**Revocation propagation.** Every credential type is refused when its
+organization is suspended, its project archived, or its environment scheduled
+for deletion or deleted, and works again after recovery. A gap was closed:
+`cs_` and `ce_` verification and the service authority for `cs_`/`dc_`
+assertions accepted any environment that was not finally deleted; they now
+require active or paused.
+
+Proof gate, over real HTTP routes and PostgreSQL:
+
+- Each state machine is walked in order, including every refused out-of-order
+  step, the read-only behavior while deletion is pending, recovery, final
+  deletion, and project deletion taking its environments with it.
+- A credential matrix covers `pt_`, `ce_`, `cs_`, `dc_` and worker leases
+  across suspension, archive, pending deletion, recovery and final deletion.
+- Audit listing is ordered, paginates without gaps or repeats, filters by
+  scope, and is refused to other tenants, Viewers and unassigned Developers.
+- The stream delivers only new events in order, sends heartbeats, resumes from
+  a cursor without loss, never shows another organization's events, closes at
+  its lifetime, and ends with `authorization_revoked` when access changes.
+- A two-tenant matrix of 69 reads and changes returns only 403 or 404, leaks no
+  name, identifier or secret, and leaves the other tenant unchanged.
+- Reverting the deletion-pending fix, removing the audit permission check or
+  removing the pause-before-delete rule makes the tests fail.
+
+The affected regression passed **509 tests, 0 failures and 4,954
+assertions across 61 files**. Generated contracts are current and the
+Solutions, Cloud, Database, Registry and CLI TypeScript checks pass.
+
+Not included: an operator HTTP surface for suspension; destroying owning-service
+data after final deletion; backfill of events before 0023; account-level
+security events in the organization log; event retention and export; an
+external broker; automation credentials are still accepted while an environment
+is paused.
+
+Phase 5 stops here. Phase 6 (application authentication realms, app users,
+identities, providers, challenges and sessions) is next in
+[the handoff](left-off/handoff.md).

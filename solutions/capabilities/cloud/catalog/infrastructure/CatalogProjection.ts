@@ -2,11 +2,13 @@ import { parseComponent } from '@carbon/contracts/platform';
 
 export function project(row: Record<string, any>) {
   return parseComponent('CatalogProject', { id: row.id, orgId: row.org_id, name: row.name, slug: row.slug, state: row.state,
-    revision: row.revision, productionMutationsAllowed: row.production_mutations_allowed, createdAt: row.created_at.toISOString() });
+    revision: row.revision, productionMutationsAllowed: row.production_mutations_allowed, createdAt: row.created_at.toISOString(),
+    ...(row.deletion_scheduled_at ? { deletionScheduledAt: row.deletion_scheduled_at.toISOString() } : {}) });
 }
 export function environment(row: Record<string, any>) {
   return parseComponent('CatalogEnvironment', { id: row.id, orgId: row.org_id, projectId: row.project_id, name: row.name, kind: row.kind, state: row.state,
-    revision: row.revision, provisioning: row.provisioning, createdAt: row.created_at.toISOString() });
+    revision: row.revision, provisioning: row.provisioning, createdAt: row.created_at.toISOString(),
+    ...(row.deletion_scheduled_at ? { deletionScheduledAt: row.deletion_scheduled_at.toISOString() } : {}) });
 }
 export function binding(row: Record<string, any>) {
   return parseComponent('ServiceBinding', { id: row.id, scope: { orgId: row.org_id, projectId: row.project_id, environmentId: row.environment_id },

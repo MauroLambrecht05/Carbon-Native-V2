@@ -9,7 +9,7 @@ export class PostgresPlatformAuthority extends PostgresOrganizationAuthority imp
 
   /** Catalog mutations use this after acquiring their organization/account locks. */
   async resolveInTransaction(tx: Bun.TransactionSQL, actor: OrganizationActor, scope: Scope, grantValidThrough?: Date | null,
-    catalogIntent?: 'project-restore' | 'environment-resume' | 'production-create') {
+    catalogIntent?: 'project-restore' | 'environment-resume' | 'production-create' | 'project-recover' | 'environment-recover') {
     parseComponent("Scope", scope);
     if (scope.realmId) throw new PlatformFault("capability", "Realm authority is not configured");
     await tx`SELECT id FROM organizations WHERE id = ${scope.orgId} FOR SHARE`;
@@ -36,8 +36,8 @@ export class PostgresPlatformAuthority extends PostgresOrganizationAuthority imp
     const grants = rows.map(row => parseComponent("Grant", { permission: row.permission, scope: { orgId: scope.orgId,
       ...(row.project_id ? { projectId: row.project_id } : {}), ...(row.environment_id ? { environmentId: row.environment_id } : {}) } }));
     const resource: ResourceAuthority = { organizationState: org.state,
-      ...(project ? { projectState: catalogIntent === 'project-restore' && project.state === 'archived' && !environment ? 'active' : project.state, productionMutationAllowed: project.production_mutations_allowed } : {}),
-      ...(environment ? { environmentState: catalogIntent === 'environment-resume' && environment.state === 'paused' ? 'active' : environment.state, environmentKind: environment.kind } : {}),
+      ...(project ? { projectState: ((catalogIntent === 'project-restore' && project.state === 'archived') || (catalogIntent === 'project-recover' && project.state === 'deletion_pending')) && !environment ? 'active' : project.state, productionMutationAllowed: project.production_mutations_allowed } : {}),
+      ...(environment ? { environmentState: (catalogIntent === 'environment-resume' && environment.state === 'paused') || (catalogIntent === 'environment-recover' && environment.state === 'deletion_pending') ? 'active' : environment.state, environmentKind: environment.kind } : {}),
       ...(catalogIntent === 'production-create' && project && !environment ? { environmentKind: 'production' as const } : {}) };
     const effective = accountGrants({ id: actor.accountId, kind: 'account', audience: 'dashboard', credentialId: actor.sessionId, permissionRevision: actor.permissionRevision },
       { accountId: actor.accountId, orgId: scope.orgId, role: org.role as Role, state: 'active', permissionRevision: actor.permissionRevision, projectAccess,

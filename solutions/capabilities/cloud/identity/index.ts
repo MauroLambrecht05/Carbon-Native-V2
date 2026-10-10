@@ -48,6 +48,10 @@ export type { PersonalCredentialPrincipal } from './application/usecases/Account
 export { PostgresPersonalCredentialRepository } from './infrastructure/PostgresPersonalCredentialRepository.ts';
 export type { PersonalCredentialRepository } from './application/ports/PersonalCredentialRepository.ts';
 export { AccountLegacyTokens } from './application/usecases/AccountLegacyTokens.ts';
+export { AccountAudit, OrganizationLifecycle } from './application/usecases/AccountAudit.ts';
+export type { AuditStreamTiming } from './application/usecases/AccountAudit.ts';
+export { PostgresAuditLog } from './infrastructure/PostgresAuditLog.ts';
+export type { AuditLog, AuditPosition, AuditSlice, OrganizationLifecycleStore } from './application/ports/AuditLog.ts';
 export { PostgresLegacyTokenRepository } from './infrastructure/PostgresLegacyTokenRepository.ts';
 export type { LegacyTokenRepository } from './application/ports/LegacyTokenRepository.ts';
 export type { ServiceAccountGrant, ServiceAccountRepository } from './application/ports/ServiceAccountRepository.ts';

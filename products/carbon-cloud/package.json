@@ -9,6 +9,7 @@
     "catalog-worker": "bun ./composition/catalog-worker.ts",
     "data-import-worker": "bun ./composition/data-import-worker.ts",
     "worker-lease-sweeper": "bun ./composition/worker-lease-sweeper.ts",
+    "lifecycle-sweeper": "bun ./composition/lifecycle-sweeper.ts",
     "start": "bun ./composition/entrypoint.ts",
     "dev:mock": "vite --config composition/vite.mock.config.ts",
     "build:mock": "vite build --config composition/vite.mock.config.ts",

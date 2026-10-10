@@ -70,7 +70,8 @@ export class PostgresOrganizationRepository extends PostgresOrganizationAuthorit
       const actor = await this.actor(tx, mutation.actor, command.kind !== "create");
       let org = command.kind !== "create" ? await this.organization(tx, mutation.orgId!, actor.id) : undefined;
       if (org) {
-        if (org.state !== "active") throw new PlatformFault("forbidden", "This organization is not active");
+        // The one command allowed on an organization that is not active is cancelling its own scheduled deletion.
+        if (org.state !== "active" && !(command.kind === "delete-cancel" && org.state === "deletion_pending")) throw new PlatformFault("forbidden", "This organization is not active");
         if (command.kind !== "leave") this.mfaGuard(org, actor);
         authorizeOrganizationCommand(org.role as Role, command as Exclude<typeof command, { kind: "create" }>, target?.role);
       }
@@ -105,6 +106,13 @@ export class PostgresOrganizationRepository extends PostgresOrganizationAuthorit
         if (command.requireMfa && (!actor.mfa_enrolled || !actor.mfa_verified_at)) throw new PlatformFault("forbidden", "Enroll and verify MFA before requiring it");
         await tx`UPDATE organizations SET owner_policy = jsonb_set(owner_policy, '{requireMfa}', ${JSON.stringify(command.requireMfa)}::text::jsonb) WHERE id = ${orgId!}`;
         for (const row of policyMembers) affected.add(row.account_id);
+      } else if (command.kind === "delete") {
+        // active -> deletion_pending -> (after the recovery window) deleted; delete-cancel returns to active.
+        if (command.confirmation !== org!.slug) throw new PlatformFault("validation", "Confirm the organization namespace");
+        await tx`UPDATE organizations SET state = 'deletion_pending', deletion_scheduled_at = now() + interval '30 days', deletion_requested_by = ${actor.id} WHERE id = ${orgId!}`;
+      } else if (command.kind === "delete-cancel") {
+        if (org!.state !== "deletion_pending") throw new PlatformFault("conflict", "This organization is not scheduled for deletion");
+        await tx`UPDATE organizations SET state = 'active', deletion_scheduled_at = NULL, deletion_requested_by = NULL WHERE id = ${orgId!}`;
       } else if (command.kind === "member-access") {
         if (!target) throw new PlatformFault("not_found", "Member not found");
         if (target.account_id === actor.id) throw new PlatformFault("validation", "Another administrator must change your own access");

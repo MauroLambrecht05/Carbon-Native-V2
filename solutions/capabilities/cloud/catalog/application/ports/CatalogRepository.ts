@@ -21,4 +21,5 @@ export interface CatalogRepository {
   list(actor: OrganizationActor, scope: Scope, limit: number, afterId?: string, revision?: string): Promise<{ items: readonly (CatalogProject | CatalogEnvironment)[]; revision: string }>;
   operation(actor: OrganizationActor, scope: Scope, operationId: string): Promise<Operation>;
   execute(mutation: CatalogMutation): Promise<CatalogReceipt>;
+  finalizeDeletions(requestId: string, limit: number): Promise<readonly Scope[]>;
 }
