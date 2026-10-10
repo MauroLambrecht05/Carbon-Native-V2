@@ -13,7 +13,7 @@ meaningful tests pass together.
 |---|---|---|
 | 1 — complete | Make Carbon CLI complete device login, store `dc_` credentials safely, and exchange authorized CLI requests for exact Database assertions. | Completed: device flow, OS credential storage, exact Database request binding and live revocation are covered by CLI and PostgreSQL-backed tests. |
 | 2 — complete | Extend exact short-lived assertion exchange to Registry without widening Database or credential audiences. | Completed: separate Registry exchange contracts and routes, a canonical Registry request, and cross-service tests proving Database and Registry assertions cannot cross and that revocation is live. |
-| 3 | Add personal credentials and a reviewed migration/deprecation path for legacy `cc_` credentials. | Cross-tenant tests prove one-time disclosure, hash-only storage, bounded scopes, rotation/revocation, safe migration and rollback behavior. |
+| 3 — complete | Add personal credentials and a reviewed migration/deprecation path for legacy `cc_` credentials. | Completed: `pt_` credentials with one-time disclosure, hash-only storage, exact delegated scope, rotation and revocation; staged `cc_` deprecation, owner claim and reversible retirement; cross-tenant tests pass. |
 | 4 | Add worker enrollment, lease-scoped worker credentials, hosted KMS/HSM custody, and short-lived build/function secret materialization. | A worker can obtain only its leased inputs; browser/data routes cannot materialize secrets; expiry, cancellation, replay, key rotation and worker loss are tested. |
 | 5 | Finish BE-01 to BE-03 lifecycle gaps: streams, audit browsing, archive/deletion/suspension/recovery, revocation propagation and adversarial tenant coverage. | Every affected resource has a tested state machine, durable events, recovery path and two-tenant denial matrix. |
 | 6 | Implement BE-04 application authentication realms, app users, identities, providers, challenges and sessions. | Signup policy, verified magic-link/OIDC, redirect allowlists, rotation/revocation, rate limits and app-audience Database policy context pass end-to-end tests. |
@@ -30,33 +30,32 @@ meaningful tests pass together.
 | 17 | Complete production browser adapters and the Carbon frontend one vertical slice at a time. | Each frontend-plan walkthrough passes against real services; production bundles contain no mock imports or mock data. |
 | 18 | Complete observability, deployment compatibility, security review, migration reconciliation, canary rollout and cutover. | Sections 25-29 of the backend plan have recorded production evidence, including restore, rotation, rollback and no-mock-fallback drills. |
 
-## Start with Phase 3
+## Start with Phase 4
 
-Phases 1 and 2 are complete. Read these files before changing Phase 3 code:
+Phases 1 to 3 are complete. Read these files before changing Phase 4 code:
 
-- [device-authorization.md](../device-authorization.md)
-- [service-accounts.md](../service-accounts.md)
-- [environment-credentials.md](../environment-credentials.md)
-- `solutions/capabilities/cloud/identity/application/usecases/AccountDeviceAuthorization.ts`
-- `solutions/capabilities/cloud/identity/application/usecases/AccountServiceAccounts.ts`
-- `solutions/capabilities/cloud/catalog/infrastructure/PostgresServiceAuthority.ts`
-- the legacy `cc_` token paths in `products/carbon-cloud/` and `products/carbon-cli/`
+- [environment-secrets.md](../environment-secrets.md)
+- [personal-credentials.md](../personal-credentials.md)
+- [legacy-tokens.md](../legacy-tokens.md)
+- `solutions/capabilities/cloud/catalog/application/usecases/AccountEnvironmentSecrets.ts`
+- `solutions/capabilities/cloud/catalog/infrastructure/EnvelopeSecretProtector.ts`
+- `solutions/capabilities/cloud/identity/infrastructure/ServiceAssertions.ts`
+- `solutions/capabilities/cloud/worker/` and `solutions/capabilities/cloud/orchestration/`
+- the legacy `wk_` worker-token routes in `products/carbon-cloud/infrastructure/http/routes.ts`
 
-Keep `dc_`, `cs_`, `ce_` and any future personal/worker tokens as distinct
-credential types and audiences. The CLI should never receive a signing key or
-manufacture a service assertion locally. Cloud authenticates the credential,
-rechecks live authority and issues a short-lived assertion bound to one audience,
-scope, permission, method, path and body digest. Receiving services still verify
-the assertion and call live Cloud authority. Database and Registry each have
-their own exchange contract and route; add a new one per audience instead of
-widening an existing one.
+Keep `dc_`, `cs_`, `ce_`, `pt_` and future worker tokens as distinct credential
+types and audiences. Database and Registry each have their own exchange
+contract and route; add a new one per audience instead of widening an existing
+one. Legacy `wk_` worker tokens are outside the `CARBON_LEGACY_TOKENS` policy
+and should move to enrolled worker credentials in this phase.
 
-Phase 3 should add personal credentials with one-time disclosure, hash-only
-storage, bounded scopes, rotation and revocation, plus a reviewed migration and
-deprecation path for legacy `cc_` credentials. Its proof gate must include
-cross-tenant denial and safe migration and rollback behavior. Stop after its
-tests and documentation; do not pull workers, build execution or frontend work
-into that phase.
+Phase 4 should add worker enrollment, lease-scoped worker credentials, a hosted
+KMS/HSM custody adapter and short-lived build/function secret materialization.
+Its proof gate must show that a worker can obtain only its leased inputs, that
+browser and data routes cannot materialize secrets, and that expiry,
+cancellation, replay, key rotation and worker loss are handled. Stop after its
+tests and documentation; do not pull build execution or frontend work into that
+phase.
 
 ## Verification baseline
 

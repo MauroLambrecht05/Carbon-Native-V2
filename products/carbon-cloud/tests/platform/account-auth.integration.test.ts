@@ -3,7 +3,7 @@ import { AccountCatalog, AccountEnvironmentCredentials, AccountEnvironmentSecret
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { createHash, createHmac, randomBytes, generateKeyPairSync } from "node:crypto";
 import {
-  AccountAuthentication, AccountDeviceAuthorization, AccountServiceAccounts, DeviceCredentialAuthentication, DeliverAccountMail, EnvelopeMessageProtector, PostgresAccountIdentityRepository, PostgresDeviceAuthorizationRepository, PostgresServiceAccountRepository, ServiceAccountAuthentication, ServiceAssertionIssuer, ServiceAssertionVerifier,
+  AccountAuthentication, AccountDeviceAuthorization, AccountServiceAccounts, AccountPersonalCredentials, PersonalCredentialAuthentication, PostgresPersonalCredentialRepository, AccountLegacyTokens, PostgresLegacyTokenRepository, PostgresIdentityRepository, CreateOrganizationUseCase, IssueWorkerTokenUseCase, VerifyTokenUseCase, DeviceCredentialAuthentication, DeliverAccountMail, EnvelopeMessageProtector, PostgresAccountIdentityRepository, PostgresDeviceAuthorizationRepository, PostgresServiceAccountRepository, ServiceAccountAuthentication, ServiceAssertionIssuer, ServiceAssertionVerifier,
   PostgresAccountMailQueue, bodyDigest, tokenDigest, type AccountEmail,
   AccountSecurity, PostgresAccountSecurityRepository, PostgresMfaVerification, Rfc6238Totp,
   AccountProfile, PostgresAccountProfileRepository,
@@ -64,7 +64,7 @@ async function harness() {
     async createProposal(_installationId, _repositoryId, _baseBranch, proposal) { repositoryProposals++; return { pullRequestNumber: 12, url: 'https://github.com/carbon-team/desktop/pull/12', branch: proposal.branch, baseSha: 'b'.repeat(40), headSha: 'c'.repeat(40) }; },
     verifyWebhook(raw, signature, deliveryId, event) { const expected='sha256='+createHmac('sha256','repository-webhook-secret').update(raw).digest('hex'); if(signature!==expected||!deliveryId||!event) throw new Error('invalid webhook'); },
   };
-  const makeHandler = (auth: AccountAuthentication) => createAccountRoutes(auth, origin, new AccountSecurity(auth, new PostgresAccountSecurityRepository(sql, mfa), protector, totp), new AccountProfile(auth, new PostgresAccountProfileRepository(sql, mfa), protector, config), new OrganizationAccess(auth, new PostgresOrganizationRepository(sql), protector), new OrganizationInvitations(auth, new PostgresOrganizationInvitationsRepository(sql), new PostgresOrganizationRepository(sql), protector, config), new ExternalAccountAuthentication(auth, new PostgresExternalAccountRepository(sql, mfa), githubProvider, protector, config), new AccountAuthorization(auth, new PostgresPlatformAuthority(sql)), new AccountCatalog(auth, new PostgresCatalogRepository(sql), protector), undefined, undefined, new AccountEnvironmentCredentials(auth, new PostgresEnvironmentCredentialRepository(sql), protector), new AccountEnvironmentSecrets(auth, new PostgresEnvironmentSecretRepository(sql, secretProtector), protector), new AccountRepositories(auth, new PostgresRepositoryIntegrationRepository(sql), repositoryProvider, protector), new AccountDeviceAuthorization(auth,new PostgresDeviceAuthorizationRepository(sql),protector,origin,config.rateLimitKey,new DeviceCredentialAuthentication(sql),assertionIssuer),new AccountServiceAccounts(auth,new PostgresServiceAccountRepository(sql),protector,assertionIssuer));
+  const makeHandler = (auth: AccountAuthentication) => createAccountRoutes(auth, origin, new AccountSecurity(auth, new PostgresAccountSecurityRepository(sql, mfa), protector, totp), new AccountProfile(auth, new PostgresAccountProfileRepository(sql, mfa), protector, config), new OrganizationAccess(auth, new PostgresOrganizationRepository(sql), protector), new OrganizationInvitations(auth, new PostgresOrganizationInvitationsRepository(sql), new PostgresOrganizationRepository(sql), protector, config), new ExternalAccountAuthentication(auth, new PostgresExternalAccountRepository(sql, mfa), githubProvider, protector, config), new AccountAuthorization(auth, new PostgresPlatformAuthority(sql)), new AccountCatalog(auth, new PostgresCatalogRepository(sql), protector), undefined, undefined, new AccountEnvironmentCredentials(auth, new PostgresEnvironmentCredentialRepository(sql), protector), new AccountEnvironmentSecrets(auth, new PostgresEnvironmentSecretRepository(sql, secretProtector), protector), new AccountRepositories(auth, new PostgresRepositoryIntegrationRepository(sql), repositoryProvider, protector), new AccountDeviceAuthorization(auth,new PostgresDeviceAuthorizationRepository(sql),protector,origin,config.rateLimitKey,new DeviceCredentialAuthentication(sql),assertionIssuer),new AccountServiceAccounts(auth,new PostgresServiceAccountRepository(sql),protector,assertionIssuer),new AccountPersonalCredentials(auth,new PostgresPersonalCredentialRepository(sql),protector),new AccountLegacyTokens(auth,new PostgresLegacyTokenRepository(sql),protector,'accept'));
   let auth = makeAuth(); let handler = makeHandler(auth);
   const mail: (AccountEmail & { idempotencyKey: string })[] = [];
   const accepted = new Set<string>(); let failProvider = false;
@@ -188,6 +188,181 @@ suite("real account authentication", () => {
     const disabled=parseComponent('ServiceAccountReceipt',await (await h.call(`/platform/v1/orgs/${orgId}/service-accounts/${created.serviceAccount.id}`,'POST',{kind:'disable'},{'if-match':created.serviceAccount.revision,'x-csrf-token':csrf()})).json());expect(disabled.serviceAccount.status).toBe('disabled');expect(await liveAuthority.isCurrent(assertion)).toBe(false);expect(await liveAuthority.isCurrent(registryAssertion)).toBe(false);expect((await h.call('/platform/v1/service-registry-assertions','POST',registryExchange,bearer)).status).toBe(401);await credentialRejection(verifier.verify(rotated.token,scope,'metadata.read'),'invalid');expect((await h.call('/platform/v1/service-assertions','POST',exchangeInput,{authorization:`Bearer ${rotated.token}`})).status).toBe(401);const enabled=parseComponent('ServiceAccountReceipt',await (await h.call(`/platform/v1/orgs/${orgId}/service-accounts/${created.serviceAccount.id}`,'POST',{kind:'enable'},{'if-match':disabled.serviceAccount.revision,'x-csrf-token':csrf()})).json());expect(enabled.serviceAccount.status).toBe('active');await credentialRejection(verifier.verify(rotated.token,scope,'metadata.read'),'invalid');
     const refreshed=parseComponent('ServiceAccountCredentialIssue',await (await h.call(`/platform/v1/orgs/${orgId}/service-accounts/${created.serviceAccount.id}/credentials/${issued.credential.id}`,'POST',{kind:'rotate',expiresAt,overlapSeconds:60},{'if-match':rotated.credential.revision,'x-csrf-token':csrf()})).json());expect((await verifier.verify(refreshed.token,scope,'metadata.read')).permissionRevision).toBe(enabled.serviceAccount.permissionRevision);h.restart();const credentials=parseComponent('ServiceAccountCredentialPage',await (await h.call(`/platform/v1/orgs/${orgId}/service-accounts/${created.serviceAccount.id}/credentials`)).json());expect(credentials.items).toHaveLength(1);expect(JSON.stringify(credentials)).not.toContain(refreshed.token);
     const revokeHeaders={'if-match':refreshed.credential.revision,'idempotency-key':crypto.randomUUID(),'x-csrf-token':csrf()};const revoked=parseComponent('ServiceAccountCredentialReceipt',await (await h.call(`/platform/v1/orgs/${orgId}/service-accounts/${created.serviceAccount.id}/credentials/${issued.credential.id}`,'POST',{kind:'revoke'},revokeHeaders)).json());expect(revoked.credential.status).toBe('revoked');expect(parseComponent('ServiceAccountCredentialReceipt',await (await h.call(`/platform/v1/orgs/${orgId}/service-accounts/${created.serviceAccount.id}/credentials/${issued.credential.id}`,'POST',{kind:'revoke'},revokeHeaders)).json())).toEqual(revoked);await credentialRejection(verifier.verify(refreshed.token,scope,'metadata.read'),'invalid');const durable=JSON.stringify({events:await h.sql`SELECT * FROM service_account_events WHERE service_account_id=${created.serviceAccount.id}`,commands:await h.sql`SELECT * FROM service_account_commands WHERE scope_key LIKE ${`service-account%${created.serviceAccount.id}%`}`});expect(durable).not.toContain(refreshed.token);expect(durable).not.toContain(tokenDigest(refreshed.token));
+  });
+
+  test('personal credentials disclose once, store only a hash, stay inside exact delegated authority, rotate and revoke', async () => {
+    const h = await harness(); await h.challenge(); await h.deliver(); await h.complete();
+    const orgId = (await organizationResponse(h.createOrganization('Personal team', 'personal-team'))).receipt.id;
+    const project = parseComponent('CatalogReceipt', (await (await h.createProject(orgId)).json() as { receipt: unknown }).receipt);
+    const scope = parseComponent('EnvironmentScope', project.scope);
+    const csrf = () => h.cookies.get('__Host-carbon-csrf')!; const path = '/platform/v1/account/personal-credentials';
+    const expiresAt = new Date(Date.now() + 30 * 86400_000).toISOString();
+    const input = { name: 'Laptop', scope, permissions: ['data.read', 'metadata.read'], expiresAt };
+    const create = (value: unknown, overrides: Record<string, string> = {}) => h.call(path, 'POST', value, { 'x-csrf-token': csrf(), ...overrides });
+
+    expect((await h.call(path, 'POST', input)).status).toBe(403);
+    expect((await create({ ...input, expiresAt: new Date(Date.now() + 91 * 86400_000).toISOString() })).status).toBe(400);
+    expect((await create({ ...input, expiresAt: new Date(Date.now() - 1000).toISOString() })).status).toBe(400);
+    expect((await create({ ...input, permissions: ['organization.manage'] })).status).toBe(400);
+    expect((await create({ ...input, scope: { orgId, projectId: crypto.randomUUID() } })).status).toBe(404);
+    expect(await h.sql`SELECT id FROM personal_credentials`).toHaveLength(0);
+
+    const key = crypto.randomUUID(); const createdResponse = await create(input, { 'idempotency-key': key }); expect(createdResponse.status).toBe(201);
+    const issued = parseComponent('PersonalCredentialIssue', await createdResponse.json());
+    expect(issued.token).toMatch(/^pt_[A-Za-z0-9_-]{43}$/); expect(issued.credential.prefix).toBe(issued.token.slice(0, 11)); expect(issued.credential.scope).toEqual(scope);
+    // A retry never discloses the token again, and an active name is unique per account.
+    expect((await create(input, { 'idempotency-key': key })).status).toBe(409);
+    expect((await create(input)).status).toBe(409);
+    const stored = (await h.sql`SELECT token_hash, token_prefix FROM personal_credentials WHERE id = ${issued.credential.id}`)[0];
+    expect(stored.token_hash).toBe(tokenDigest(issued.token)); expect(JSON.stringify(stored)).not.toContain(issued.token);
+    let page = parseComponent('PersonalCredentialPage', await (await h.call(path)).json());
+    expect(page.items).toHaveLength(1); expect(JSON.stringify(page)).not.toContain(issued.token); expect(JSON.stringify(page)).not.toContain(stored.token_hash);
+
+    const verifier = new PersonalCredentialAuthentication(h.sql);
+    const principal = await verifier.verify(issued.token, scope, 'data.read'); expect(principal.credentialId).toBe(issued.credential.id);
+    await credentialRejection(verifier.verify(issued.token, scope, 'data.write'), 'invalid');
+    await credentialRejection(verifier.verify(issued.token, { orgId, projectId: scope.projectId }, 'data.read'), 'invalid');
+    await credentialRejection(verifier.verify(issued.token, { ...scope, environmentId: crypto.randomUUID() }, 'data.read'), 'invalid');
+    await credentialRejection(verifier.verify(issued.token.slice(0, -1) + (issued.token.endsWith('A') ? 'B' : 'A'), scope, 'data.read'), 'invalid');
+    // Any change to the owner's permissions suspends the credential until it is rotated under current authority.
+    await h.sql`UPDATE accounts SET permission_revision = permission_revision + 1 WHERE id = ${principal.accountId}`;
+    await credentialRejection(verifier.verify(issued.token, scope, 'data.read'), 'invalid');
+    await h.sql`UPDATE accounts SET permission_revision = permission_revision - 1 WHERE id = ${principal.accountId}`;
+    await h.sql`UPDATE personal_credentials SET expires_at = now() - interval '1 second' WHERE id = ${issued.credential.id}`;
+    await credentialRejection(verifier.verify(issued.token, scope, 'data.read'), 'invalid');
+    page = parseComponent('PersonalCredentialPage', await (await h.call(path)).json()); expect(page.items[0]!.status).toBe('expired');
+
+    const rotateHeaders = { 'if-match': issued.credential.revision, 'x-csrf-token': csrf(), 'idempotency-key': crypto.randomUUID() };
+    expect((await h.call(`${path}/${issued.credential.id}`, 'POST', { kind: 'rotate', expiresAt }, { ...rotateHeaders, 'if-match': '99', 'idempotency-key': crypto.randomUUID() })).status).toBe(409);
+    const rotatedResponse = await h.call(`${path}/${issued.credential.id}`, 'POST', { kind: 'rotate', expiresAt }, rotateHeaders); expect(rotatedResponse.status).toBe(200);
+    const rotated = parseComponent('PersonalCredentialIssue', await rotatedResponse.json());
+    expect(rotated.token).not.toBe(issued.token); expect(rotated.credential.id).toBe(issued.credential.id); expect(rotated.credential.status).toBe('active');
+    expect((await h.call(`${path}/${issued.credential.id}`, 'POST', { kind: 'rotate', expiresAt }, rotateHeaders)).status).toBe(409);
+    await credentialRejection(verifier.verify(issued.token, scope, 'data.read'), 'invalid');
+    expect((await verifier.verify(rotated.token, scope, 'metadata.read')).credentialId).toBe(issued.credential.id);
+
+    h.restart();
+    const revokeHeaders = { 'if-match': rotated.credential.revision, 'x-csrf-token': csrf(), 'idempotency-key': crypto.randomUUID() };
+    const revoked = parseComponent('PersonalCredentialReceipt', await (await h.call(`${path}/${issued.credential.id}`, 'POST', { kind: 'revoke' }, revokeHeaders)).json());
+    expect(revoked.credential.status).toBe('revoked');
+    expect(parseComponent('PersonalCredentialReceipt', await (await h.call(`${path}/${issued.credential.id}`, 'POST', { kind: 'revoke' }, revokeHeaders)).json())).toEqual(revoked);
+    expect((await h.sql`SELECT token_hash FROM personal_credentials WHERE id = ${issued.credential.id}`)[0].token_hash).toBeNull();
+    await credentialRejection(verifier.verify(rotated.token, scope, 'metadata.read'), 'invalid');
+    expect((await h.call(`${path}/${issued.credential.id}`, 'POST', { kind: 'rotate', expiresAt }, { 'if-match': revoked.credential.revision, 'x-csrf-token': csrf() })).status).toBe(409);
+    // The name is free again once the credential is revoked.
+    expect((await create(input)).status).toBe(201);
+    const durable = JSON.stringify({ events: await h.sql`SELECT * FROM personal_credential_events`, commands: await h.sql`SELECT * FROM personal_credential_commands` });
+    for (const secret of [issued.token, rotated.token, tokenDigest(issued.token), tokenDigest(rotated.token)]) expect(durable).not.toContain(secret);
+    expect((await h.sql`SELECT action FROM personal_credential_events WHERE credential_id = ${issued.credential.id} ORDER BY sequence`).map((row: { action: string }) => row.action)).toEqual(['personal.created', 'personal.rotated', 'personal.revoked']);
+  });
+
+  test('personal credentials are invisible to other accounts and cannot exceed or outlive the access their owner holds', async () => {
+    const h = await harness(); await h.challenge('owner@example.test'); await h.deliver(); await h.complete();
+    const orgId = (await organizationResponse(h.createOrganization('Tenant one', 'tenant-one'))).receipt.id;
+    const project = parseComponent('CatalogReceipt', (await (await h.createProject(orgId)).json() as { receipt: unknown }).receipt);
+    const scope = parseComponent('EnvironmentScope', project.scope);
+    const csrf = () => h.cookies.get('__Host-carbon-csrf')!; const path = '/platform/v1/account/personal-credentials';
+    const expiresAt = new Date(Date.now() + 86400_000).toISOString();
+    const create = (value: unknown) => h.call(path, 'POST', value, { 'x-csrf-token': csrf() });
+    const issued = parseComponent('PersonalCredentialIssue', await (await create({ name: 'Owner laptop', scope, permissions: ['data.write'], expiresAt })).json());
+    const ownerCookies = new Map(h.cookies);
+
+    h.cookies.clear(); await h.challenge('other@example.test'); await h.deliver(); await h.complete();
+    const otherOrg = (await organizationResponse(h.createOrganization('Tenant two', 'tenant-two'))).receipt.id;
+    expect(parseComponent('PersonalCredentialPage', await (await h.call(path)).json()).items).toHaveLength(0);
+    for (const command of [{ kind: 'revoke' }, { kind: 'rotate', expiresAt }]) {
+      expect((await h.call(`${path}/${issued.credential.id}`, 'POST', command, { 'if-match': issued.credential.revision, 'x-csrf-token': csrf() })).status).toBe(404);
+    }
+    // Another tenant's scope is not discoverable, and a foreign project cannot be attached to your own organization.
+    expect((await create({ name: 'Foreign', scope, permissions: ['metadata.read'], expiresAt })).status).toBe(404);
+    expect((await create({ name: 'Mixed', scope: { orgId: otherOrg, projectId: scope.projectId }, permissions: ['metadata.read'], expiresAt })).status).toBe(404);
+    expect(await h.sql`SELECT id FROM personal_credentials WHERE id <> ${issued.credential.id}`).toHaveLength(0);
+
+    // As a Viewer of tenant one, the second account can delegate only what a Viewer holds.
+    const other = (await h.sql`SELECT id FROM accounts WHERE primary_email = 'other@example.test'`)[0].id;
+    await h.sql`INSERT INTO memberships (id, account_id, org_id, role, state) VALUES (${crypto.randomUUID()}, ${other}, ${orgId}, 'Viewer', 'active')`;
+    await h.sql`UPDATE accounts SET permission_revision = permission_revision + 1 WHERE id = ${other}`;
+    expect((await create({ name: 'Viewer write', scope: { orgId }, permissions: ['data.write'], expiresAt })).status).toBe(403);
+    const viewerResponse = await create({ name: 'Viewer read', scope: { orgId }, permissions: ['metadata.read'], expiresAt }); expect(viewerResponse.status).toBe(201);
+    const viewer = parseComponent('PersonalCredentialIssue', await viewerResponse.json());
+    const verifier = new PersonalCredentialAuthentication(h.sql);
+    expect((await verifier.verify(viewer.token, { orgId }, 'metadata.read')).accountId).toBe(other);
+    await credentialRejection(verifier.verify(viewer.token, { orgId: otherOrg }, 'metadata.read'), 'invalid');
+    await credentialRejection(verifier.verify(viewer.token, scope, 'metadata.read'), 'invalid');
+    // Losing the membership ends the credential, and rotation cannot carry the lost access forward.
+    await h.sql`UPDATE memberships SET state = 'revoked' WHERE account_id = ${other} AND org_id = ${orgId}`;
+    await h.sql`UPDATE accounts SET permission_revision = permission_revision + 1 WHERE id = ${other}`;
+    await credentialRejection(verifier.verify(viewer.token, { orgId }, 'metadata.read'), 'invalid');
+    expect((await h.call(`${path}/${viewer.credential.id}`, 'POST', { kind: 'rotate', expiresAt }, { 'if-match': viewer.credential.revision, 'x-csrf-token': csrf() })).status).toBe(404);
+    expect((await h.call(`${path}/${viewer.credential.id}`, 'POST', { kind: 'revoke' }, { 'if-match': viewer.credential.revision, 'x-csrf-token': csrf() })).status).toBe(200);
+
+    h.restoreCookies(ownerCookies);
+    expect((await verifier.verify(issued.token, scope, 'data.write')).credentialId).toBe(issued.credential.id);
+    expect(parseComponent('PersonalCredentialPage', await (await h.call(path)).json()).items.map(item => item.id)).toEqual([issued.credential.id]);
+    await h.sql`UPDATE organizations SET state = 'suspended' WHERE id = ${orgId}`;
+    await credentialRejection(verifier.verify(issued.token, scope, 'data.write'), 'invalid');
+  });
+
+  test('legacy cc_ organizations are claimed by token possession only, then reviewed, retired and restored without losing the token', async () => {
+    const h = await harness(); const identity = new PostgresIdentityRepository(h.sql); const verify = new VerifyTokenUseCase(identity);
+    const legacy = await new CreateOrganizationUseCase(identity).execute('Legacy Co'); const worker = await new IssueWorkerTokenUseCase(identity).execute(legacy.orgId);
+    const untouched = await new CreateOrganizationUseCase(identity).execute('Unclaimed Co');
+    await h.challenge('owner@example.test'); await h.deliver(); await h.complete();
+    const csrf = () => h.cookies.get('__Host-carbon-csrf')!; const tokens = `/platform/v1/orgs/${legacy.orgId}/legacy-tokens`;
+    const claim = (credential: string, slug: string, overrides: Record<string, string> = {}) => h.call('/platform/v1/account/legacy-claims', 'POST', { credential, slug }, { 'x-csrf-token': csrf(), ...overrides });
+
+    // Nothing is inferred before the claim: the organization has no members and is invisible.
+    expect((await h.call(tokens)).status).toBe(404);
+    expect((await h.call('/platform/v1/account/legacy-claims', 'POST', { credential: legacy.apiToken, slug: 'legacy-co' })).status).toBe(403);
+    expect((await claim('cc_' + 'f'.repeat(32), 'legacy-co')).status).toBe(404);
+    expect((await claim(worker.workerToken, 'legacy-co')).status).toBe(400);
+    expect(await h.sql`SELECT id FROM memberships WHERE org_id = ${legacy.orgId}`).toHaveLength(0);
+
+    const key = crypto.randomUUID(); const claimedResponse = await claim(legacy.apiToken, 'legacy-co', { 'idempotency-key': key }); expect(claimedResponse.status).toBe(200);
+    const claimed = parseComponent('LegacyOrganizationClaimReceipt', await claimedResponse.json()); expect(claimed.organizationId).toBe(legacy.orgId);
+    expect(parseComponent('LegacyOrganizationClaimReceipt', await (await claim(legacy.apiToken, 'legacy-co', { 'idempotency-key': key })).json())).toEqual(claimed);
+    expect((await claim(legacy.apiToken, 'legacy-co-again')).status).toBe(409);
+    expect((await h.sql`SELECT slug, human_managed FROM organizations WHERE id = ${legacy.orgId}`)[0]).toEqual({ slug: 'legacy-co', human_managed: true });
+    expect((await h.sql`SELECT role, state FROM memberships WHERE org_id = ${legacy.orgId}`) as unknown[]).toEqual([{ role: 'Owner', state: 'active' }]);
+    expect((await h.sql`SELECT human_managed FROM organizations WHERE id = ${untouched.orgId}`)[0].human_managed).toBe(false);
+    const ownerCookies = new Map(h.cookies);
+
+    // A second account holding the same token cannot take the organization or see its tokens.
+    h.cookies.clear(); await h.challenge('other@example.test'); await h.deliver(); await h.complete();
+    expect((await claim(legacy.apiToken, 'stolen-co')).status).toBe(409);
+    expect((await h.call(tokens)).status).toBe(404);
+    h.restoreCookies(ownerCookies);
+
+    expect(await verify.execute(legacy.apiToken)).toEqual({ orgId: legacy.orgId, scope: 'org' });
+    let page = parseComponent('LegacyTokenPage', await (await h.call(tokens)).json());
+    expect(page.policy).toBe('accept'); expect(page.items.map(item => item.kind).sort()).toEqual(['org', 'worker']);
+    const orgToken = page.items.find(item => item.kind === 'org')!; expect(orgToken.status).toBe('active'); expect(orgToken.lastUsedAt).not.toBeNull();
+    expect(page.items.find(item => item.kind === 'worker')!.lastUsedAt).toBeNull();
+    const hash = (await h.sql`SELECT token_hash FROM api_tokens WHERE id = ${orgToken.id}`)[0].token_hash;
+    expect(JSON.stringify(page)).not.toContain(hash); expect(JSON.stringify(page)).not.toContain(legacy.apiToken);
+
+    const command = (id: string, value: unknown, revision: string, overrides: Record<string, string> = {}) => h.call(`${tokens}/${id}`, 'POST', value, { 'if-match': revision, 'x-csrf-token': csrf(), ...overrides });
+    expect((await command(orgToken.id, { kind: 'retire', replacedByServiceAccountId: crypto.randomUUID() }, orgToken.revision)).status).toBe(400);
+    expect((await command(orgToken.id, { kind: 'retire' }, '99')).status).toBe(409);
+    expect((await command(orgToken.id, { kind: 'restore' }, orgToken.revision)).status).toBe(409);
+    const unclaimedToken = (await h.sql`SELECT id FROM api_tokens WHERE org_id = ${untouched.orgId}`)[0].id;
+    expect((await command(unclaimedToken, { kind: 'retire' }, '1')).status).toBe(404);
+    const retireKey = crypto.randomUUID(); const retiredResponse = await command(orgToken.id, { kind: 'retire' }, orgToken.revision, { 'idempotency-key': retireKey }); expect(retiredResponse.status).toBe(200);
+    const retired = parseComponent('LegacyTokenReceipt', await retiredResponse.json()); expect(retired.legacyToken.status).toBe('retired'); expect(retired.legacyToken.retiredAt).not.toBeNull();
+    expect(parseComponent('LegacyTokenReceipt', await (await command(orgToken.id, { kind: 'retire' }, orgToken.revision, { 'idempotency-key': retireKey })).json())).toEqual(retired);
+    // Retirement stops authentication but keeps the hash, so the stage can be rolled back.
+    expect(await verify.execute(legacy.apiToken)).toBeNull();
+    expect(await verify.execute(worker.workerToken)).toEqual({ orgId: legacy.orgId, scope: 'worker' });
+    expect(await verify.execute(untouched.apiToken)).toEqual({ orgId: untouched.orgId, scope: 'org' });
+    expect((await h.sql`SELECT token_hash FROM api_tokens WHERE id = ${orgToken.id}`)[0].token_hash).toBe(hash);
+
+    h.restart();
+    const restored = parseComponent('LegacyTokenReceipt', await (await command(orgToken.id, { kind: 'restore' }, retired.legacyToken.revision)).json());
+    expect(restored.legacyToken.status).toBe('active'); expect(restored.legacyToken.retiredAt).toBeNull();
+    expect(await verify.execute(legacy.apiToken)).toEqual({ orgId: legacy.orgId, scope: 'org' });
+    const durable = JSON.stringify({ events: await h.sql`SELECT * FROM legacy_token_events`, commands: await h.sql`SELECT * FROM legacy_token_commands` });
+    expect(durable).not.toContain(legacy.apiToken); expect(durable).not.toContain(hash);
+    expect((await h.sql`SELECT action FROM legacy_token_events ORDER BY sequence`).map((row: { action: string }) => row.action)).toEqual(['legacy.claimed', 'legacy.retired', 'legacy.restored']);
   });
 
   test('device authorization approves bounded CLI access, discloses once, rate-limits polling, and revokes durably', async()=>{

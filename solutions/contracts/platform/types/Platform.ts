@@ -172,6 +172,32 @@ export type RegistryRequest = { readonly "scope": EnvironmentScope; readonly "bi
 
 export type RegistryResponse = { readonly "scope": EnvironmentScope; readonly "bindingId": Id; readonly "result": RegistryNamespace; };
 
+export type PersonalCredential = { readonly "id": Id; readonly "name": string; readonly "scope": Scope; readonly "permissions": ReadonlyArray<EnvironmentCredentialPermission>; readonly "prefix": string; readonly "status": "active" | "expired" | "revoked"; readonly "expiresAt": Timestamp; readonly "lastUsedAt": Timestamp | null; readonly "revision": Revision; readonly "createdAt": Timestamp; };
+
+export type PersonalCredentialCreate = { readonly "name": string; readonly "scope": Scope; readonly "permissions": ReadonlyArray<EnvironmentCredentialPermission>; readonly "expiresAt": Timestamp; };
+
+export type PersonalCredentialCommand = { readonly "kind": "rotate"; readonly "expiresAt": Timestamp; } | { readonly "kind": "revoke"; };
+
+export type PersonalCredentialIssue = { readonly "credential": PersonalCredential; readonly "token": string; };
+
+export type PersonalCredentialReceipt = { readonly "credential": PersonalCredential; readonly "message": string; };
+
+export type PersonalCredentialPage = { readonly "items": ReadonlyArray<PersonalCredential>; readonly "nextCursor": string | null; };
+
+export type LegacyTokenPolicy = "issue" | "accept" | "warn" | "reject";
+
+export type LegacyToken = { readonly "id": Id; readonly "orgId": Id; readonly "kind": "org" | "worker"; readonly "status": "active" | "retired"; readonly "createdAt": Timestamp; readonly "lastUsedAt": Timestamp | null; readonly "retiredAt": Timestamp | null; readonly "replacedByServiceAccountId": Id | null; readonly "revision": Revision; };
+
+export type LegacyTokenPage = { readonly "policy": LegacyTokenPolicy; readonly "items": ReadonlyArray<LegacyToken>; readonly "nextCursor": string | null; };
+
+export type LegacyTokenCommand = { readonly "kind": "retire"; readonly "replacedByServiceAccountId"?: Id; } | { readonly "kind": "restore"; };
+
+export type LegacyTokenReceipt = { readonly "legacyToken": LegacyToken; readonly "message": string; };
+
+export type LegacyOrganizationClaim = { readonly "credential": string; readonly "slug": string; };
+
+export type LegacyOrganizationClaimReceipt = { readonly "organizationId": Id; readonly "revision": Revision; readonly "message": string; };
+
 export type ServiceAccountCreate = { readonly "name": string; readonly "scope": Scope; readonly "permissions": ReadonlyArray<EnvironmentCredentialPermission>; };
 
 export type ServiceAccountCommand = { readonly "kind": "update"; readonly "name": string; readonly "permissions": ReadonlyArray<EnvironmentCredentialPermission>; } | { readonly "kind": "disable" | "enable"; };
@@ -479,6 +505,19 @@ export interface Components {
   RegistryNamespace: RegistryNamespace;
   RegistryRequest: RegistryRequest;
   RegistryResponse: RegistryResponse;
+  PersonalCredential: PersonalCredential;
+  PersonalCredentialCreate: PersonalCredentialCreate;
+  PersonalCredentialCommand: PersonalCredentialCommand;
+  PersonalCredentialIssue: PersonalCredentialIssue;
+  PersonalCredentialReceipt: PersonalCredentialReceipt;
+  PersonalCredentialPage: PersonalCredentialPage;
+  LegacyTokenPolicy: LegacyTokenPolicy;
+  LegacyToken: LegacyToken;
+  LegacyTokenPage: LegacyTokenPage;
+  LegacyTokenCommand: LegacyTokenCommand;
+  LegacyTokenReceipt: LegacyTokenReceipt;
+  LegacyOrganizationClaim: LegacyOrganizationClaim;
+  LegacyOrganizationClaimReceipt: LegacyOrganizationClaimReceipt;
   ServiceAccountCreate: ServiceAccountCreate;
   ServiceAccountCommand: ServiceAccountCommand;
   ServiceAccount: ServiceAccount;

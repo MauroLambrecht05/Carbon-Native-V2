@@ -1,0 +1,231 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Carbon legacy token migration API",
+    "version": "1.0.0",
+    "description": "Owner claim, usage review, retirement and restoration of legacy cc_ and wk_ tokens."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "security": [
+    {
+      "browserSession": []
+    }
+  ],
+  "paths": {
+    "/platform/v1/account/legacy-claims": {
+      "post": {
+        "operationId": "claimLegacyOrganization",
+        "description": "Attaches an unowned legacy organization to the signed-in account. An active cc_ organization token is the proof of control. Requires a fresh session.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/MutationOrigin"
+          },
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/RequestId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/LegacyOrganizationClaim"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The organization now owned by this account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/LegacyOrganizationClaimReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/orgs/{orgId}/legacy-tokens": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrgId"
+        }
+      ],
+      "get": {
+        "operationId": "listLegacyTokens",
+        "description": "Requires organization.manage. Never returns a token or hash.",
+        "parameters": [
+          {
+            "$ref": "organization-api.openapi.json#/components/parameters/Limit"
+          },
+          {
+            "$ref": "organization-api.openapi.json#/components/parameters/Cursor"
+          },
+          {
+            "$ref": "organization-api.openapi.json#/components/parameters/Sort"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Legacy token metadata and the current deprecation stage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/LegacyTokenPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/orgs/{orgId}/legacy-tokens/{tokenId}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrgId"
+        },
+        {
+          "$ref": "#/components/parameters/TokenId"
+        }
+      ],
+      "post": {
+        "operationId": "commandLegacyToken",
+        "description": "retire stops the token authenticating and keeps its hash; restore reverses it. Requires organization.manage and a fresh session.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/MutationOrigin"
+          },
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/RequestId"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/LegacyTokenCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated legacy token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/LegacyTokenReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "browserSession": {
+        "$ref": "account-api.openapi.json#/components/securitySchemes/browserSession"
+      }
+    },
+    "parameters": {
+      "OrgId": {
+        "name": "orgId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+        }
+      },
+      "TokenId": {
+        "name": "tokenId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+        }
+      },
+      "MutationOrigin": {
+        "$ref": "account-api.openapi.json#/components/parameters/Origin"
+      },
+      "CsrfToken": {
+        "$ref": "account-api.openapi.json#/components/parameters/CsrfToken"
+      },
+      "IdempotencyKey": {
+        "$ref": "account-api.openapi.json#/components/parameters/IdempotencyKey"
+      },
+      "IfMatch": {
+        "$ref": "account-api.openapi.json#/components/parameters/IfMatch"
+      },
+      "RequestId": {
+        "$ref": "account-api.openapi.json#/components/parameters/RequestId"
+      }
+    }
+  }
+}

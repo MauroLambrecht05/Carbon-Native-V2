@@ -38,7 +38,7 @@ import {
 } from "@carbon/billing";
 import { buildRoutes } from "../infrastructure/http/routes.ts";
 
-async function harness() {
+async function harness(legacyTokens?: { policy: "issue" | "accept" | "warn" | "reject"; sunset?: string }) {
   const builds = new InMemoryBuildRepository();
   const identity = new InMemoryIdentityRepository();
   const billing = new InMemoryBillingRepository();
@@ -64,6 +64,7 @@ async function harness() {
     startPlanUpgrade: new StartPlanUpgradeUseCase(new FakeCheckoutSessionProvider()),
     confirmPlanUpgrade: new ConfirmPlanUpgradeUseCase(billing),
     stripeWebhookSecret: "whsec_test_secret",
+    legacyTokens,
   });
   const server = Bun.serve({ port: 0, routes, fetch: () => new Response("not found", { status: 404 }) });
   const base = `http://localhost:${server.port}`;
@@ -637,6 +638,55 @@ describe("POST /v1/billing/webhook", () => {
     expect(artifacts.length).toBe(1);
     expect(artifacts[0].name).toBe("app_1.0.0_amd64.deb");
 
+    server.stop(true);
+  });
+});
+
+describe("legacy cc_ token deprecation stages", () => {
+  const signup = (base: string) => fetch(`${base}/v1/orgs`, { method: "POST", body: JSON.stringify({ name: "Acme" }) });
+
+  test("issue (the default) keeps signup open and adds no deprecation notice", async () => {
+    const { server, base, authed } = await harness();
+    expect((await signup(base)).status).toBe(201);
+    const res = await authed("/v1/auth/verify");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("deprecation")).toBeNull();
+    server.stop(true);
+  });
+
+  test("accept closes legacy signup but existing tokens keep working silently", async () => {
+    const { server, base, authed, asWorker } = await harness({ policy: "accept" });
+    expect((await signup(base)).status).toBe(410);
+    const res = await authed("/v1/auth/verify");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("deprecation")).toBeNull();
+    expect((await asWorker("/v1/auth/verify")).status).toBe(200);
+    server.stop(true);
+  });
+
+  test("warn marks every response a cc_ token authenticated, and only those", async () => {
+    const sunset = new Date("2027-01-01T00:00:00Z").toUTCString();
+    const { server, base, authed, asWorker, orgId } = await harness({ policy: "warn", sunset });
+    expect((await signup(base)).status).toBe(410);
+    const verified = await authed("/v1/auth/verify");
+    expect(verified.status).toBe(200);
+    expect(await verified.json()).toEqual({ orgId, scope: "org" });
+    expect(verified.headers.get("deprecation")).toBe("true");
+    expect(verified.headers.get("sunset")).toBe(sunset);
+    const workerTokens = await authed("/v1/worker-tokens", { method: "POST" });
+    expect(workerTokens.status).toBe(201);
+    expect(workerTokens.headers.get("deprecation")).toBe("true");
+    expect((await asWorker("/v1/auth/verify")).headers.get("deprecation")).toBeNull();
+    expect((await fetch(`${base}/healthz`)).headers.get("deprecation")).toBeNull();
+    server.stop(true);
+  });
+
+  test("reject refuses cc_ organization tokens everywhere while worker tokens keep working", async () => {
+    const { server, base, authed, asWorker } = await harness({ policy: "reject" });
+    expect((await signup(base)).status).toBe(410);
+    expect((await authed("/v1/auth/verify")).status).toBe(401);
+    expect((await authed("/v1/worker-tokens", { method: "POST" })).status).toBe(401);
+    expect((await asWorker("/v1/auth/verify")).status).toBe(200);
     server.stop(true);
   });
 });

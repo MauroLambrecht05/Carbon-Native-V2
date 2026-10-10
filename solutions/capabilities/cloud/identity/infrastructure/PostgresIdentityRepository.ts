@@ -24,9 +24,11 @@ export class PostgresIdentityRepository implements IdentityRepository {
   async findTokenByHash(tokenHash: string): Promise<ApiToken | null> {
     const rows = await this.sql<
       Array<{ id: string; org_id: string; scope: TokenScope; token_hash: string; created_at: Date }>
-    >`SELECT * FROM api_tokens WHERE token_hash = ${tokenHash}`;
+    >`SELECT * FROM api_tokens WHERE token_hash = ${tokenHash} AND status = 'active'`;
     const row = rows[0];
     if (!row) return null;
+    // Usage evidence for the cc_ migration; coarse so verification stays a read most of the time.
+    await this.sql`UPDATE api_tokens SET last_used_at = now() WHERE id = ${row.id} AND (last_used_at IS NULL OR last_used_at < now() - interval '1 minute')`;
     return ApiToken.fromProps({
       id: row.id,
       orgId: row.org_id,

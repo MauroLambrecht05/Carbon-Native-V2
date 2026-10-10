@@ -3,7 +3,7 @@ import { AccountCatalog, AccountEnvironmentCredentials, AccountEnvironmentSecret
 import { AccountData, AccountImports, PostgresImportJobs, RunImportJobs, PostgresAccountDataAuthority, type DataTransport, type ImportTransport } from '@carbon/data';
 import { dataClientFromEnv, importClientFromEnv } from './data-platform.ts';
 import {
-  AccountAuthentication, AccountDeviceAuthorization, AccountServiceAccounts, DeliverAccountMail, DeviceCredentialAuthentication, EnvelopeMessageProtector, PostgresAccountIdentityRepository, PostgresDeviceAuthorizationRepository, PostgresServiceAccountRepository,
+  AccountAuthentication, AccountDeviceAuthorization, AccountServiceAccounts, DeliverAccountMail, DeviceCredentialAuthentication, EnvelopeMessageProtector, PostgresAccountIdentityRepository, PostgresDeviceAuthorizationRepository, PostgresServiceAccountRepository, AccountPersonalCredentials, PostgresPersonalCredentialRepository, AccountLegacyTokens, PostgresLegacyTokenRepository,
   PostgresAccountMailQueue, type AccountNotification,
   AccountSecurity, PostgresAccountSecurityRepository, PostgresMfaVerification, Rfc6238Totp,
   AccountProfile, PostgresAccountProfileRepository,
@@ -31,6 +31,17 @@ export interface AccountPlatformConfig {
   readonly githubRepositories?: { readonly appId: string; readonly privateKey: string; readonly webhookSecret: string };
   readonly serviceAccountAssertions?: import('@carbon/identity').ServiceAssertionIssuer;
   readonly deviceAssertions?: import('@carbon/identity').ServiceAssertionIssuer;
+  readonly legacyTokens?: LegacyTokenConfig;
+}
+export interface LegacyTokenConfig { readonly policy: import('@carbon/contracts/platform').LegacyTokenPolicy; readonly sunset?: string }
+/** CARBON_LEGACY_TOKENS stages the cc_ deprecation; unset keeps today's behavior ("issue"). */
+export function legacyTokenConfigFromEnv(env: NodeJS.ProcessEnv = process.env): LegacyTokenConfig {
+  const policy = env.CARBON_LEGACY_TOKENS ?? 'issue';
+  if (policy !== 'issue' && policy !== 'accept' && policy !== 'warn' && policy !== 'reject') throw new Error('CARBON_LEGACY_TOKENS must be issue, accept, warn or reject');
+  if (!env.CARBON_LEGACY_TOKEN_SUNSET) return { policy };
+  const sunset = new Date(env.CARBON_LEGACY_TOKEN_SUNSET);
+  if (Number.isNaN(sunset.getTime())) throw new Error('CARBON_LEGACY_TOKEN_SUNSET must be a date');
+  return { policy, sunset: sunset.toUTCString() };
 }
 
 export function accountPlatformConfigFromEnv(env: NodeJS.ProcessEnv = process.env): AccountPlatformConfig | undefined {
@@ -69,7 +80,7 @@ export function accountPlatformConfigFromEnv(env: NodeJS.ProcessEnv = process.en
   const deviceAssertions=env.CARBON_DEVICE_ASSERTIONS==='enabled'?serviceAssertionIssuerFromEnv(env):undefined;
   return {
     origin, termsVersion: required("CARBON_TERMS_VERSION"), rateLimitKey,
-    activeKeyId: required("CARBON_ACCOUNT_ACTIVE_KEY_ID"), encryptionKeys: keys as Record<string, string>, notification, github, githubRepositories, secrets, serviceAccountAssertions, deviceAssertions, data: dataClientFromEnv(env), imports: importClientFromEnv(env),
+    activeKeyId: required("CARBON_ACCOUNT_ACTIVE_KEY_ID"), encryptionKeys: keys as Record<string, string>, notification, github, githubRepositories, secrets, serviceAccountAssertions, deviceAssertions, legacyTokens: legacyTokenConfigFromEnv(env), data: dataClientFromEnv(env), imports: importClientFromEnv(env),
   };
 }
 
@@ -93,7 +104,7 @@ export function composeAccountPlatform(sql: Bun.SQL, config: AccountPlatformConf
     ? new ResendAccountNotification(config.notification.apiKey, config.notification.from)
     : new DevelopmentInboxNotification(config.notification.directory);
   return {
-    handler: createAccountRoutes(auth, config.origin, security, new AccountProfile(auth, new PostgresAccountProfileRepository(sql, mfa), protector, config), new OrganizationAccess(auth, new PostgresOrganizationRepository(sql), protector), new OrganizationInvitations(auth, new PostgresOrganizationInvitationsRepository(sql), new PostgresOrganizationRepository(sql), protector, config), github, new AccountAuthorization(auth, new PostgresPlatformAuthority(sql)), new AccountCatalog(auth, new PostgresCatalogRepository(sql), protector), config.data ? new AccountData(auth, new PostgresAccountDataAuthority(sql), config.data, protector) : undefined, importJobs ? new AccountImports(auth, importJobs) : undefined, new AccountEnvironmentCredentials(auth, environmentCredentials, protector), environmentSecrets ? new AccountEnvironmentSecrets(auth, environmentSecrets, protector) : undefined, accountRepositories, new AccountDeviceAuthorization(auth,new PostgresDeviceAuthorizationRepository(sql),protector,config.origin,config.rateLimitKey,new DeviceCredentialAuthentication(sql),config.deviceAssertions),new AccountServiceAccounts(auth,new PostgresServiceAccountRepository(sql),protector,config.serviceAccountAssertions)),
+    handler: createAccountRoutes(auth, config.origin, security, new AccountProfile(auth, new PostgresAccountProfileRepository(sql, mfa), protector, config), new OrganizationAccess(auth, new PostgresOrganizationRepository(sql), protector), new OrganizationInvitations(auth, new PostgresOrganizationInvitationsRepository(sql), new PostgresOrganizationRepository(sql), protector, config), github, new AccountAuthorization(auth, new PostgresPlatformAuthority(sql)), new AccountCatalog(auth, new PostgresCatalogRepository(sql), protector), config.data ? new AccountData(auth, new PostgresAccountDataAuthority(sql), config.data, protector) : undefined, importJobs ? new AccountImports(auth, importJobs) : undefined, new AccountEnvironmentCredentials(auth, environmentCredentials, protector), environmentSecrets ? new AccountEnvironmentSecrets(auth, environmentSecrets, protector) : undefined, accountRepositories, new AccountDeviceAuthorization(auth,new PostgresDeviceAuthorizationRepository(sql),protector,config.origin,config.rateLimitKey,new DeviceCredentialAuthentication(sql),config.deviceAssertions),new AccountServiceAccounts(auth,new PostgresServiceAccountRepository(sql),protector,config.serviceAccountAssertions),new AccountPersonalCredentials(auth,new PostgresPersonalCredentialRepository(sql),protector),new AccountLegacyTokens(auth,new PostgresLegacyTokenRepository(sql),protector,config.legacyTokens?.policy??'issue')),
     runImports: importJobs && config.imports ? new RunImportJobs(importJobs, config.imports) : undefined,
     deliverMail: new DeliverAccountMail(new PostgresAccountMailQueue(sql), protector, notification),
     expireAccountProofs: () => externalAccounts.expire(),

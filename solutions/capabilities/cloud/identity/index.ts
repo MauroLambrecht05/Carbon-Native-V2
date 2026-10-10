@@ -43,6 +43,13 @@ export { AccountDeviceAuthorization } from './application/usecases/AccountDevice
 export { DeviceCredentialAuthentication } from './application/usecases/DeviceCredentialAuthentication.ts';
 export { AccountServiceAccounts, ServiceAccountAuthentication } from './application/usecases/AccountServiceAccounts.ts';
 export { PostgresServiceAccountRepository } from './infrastructure/PostgresServiceAccountRepository.ts';
+export { AccountPersonalCredentials, PersonalCredentialAuthentication } from './application/usecases/AccountPersonalCredentials.ts';
+export type { PersonalCredentialPrincipal } from './application/usecases/AccountPersonalCredentials.ts';
+export { PostgresPersonalCredentialRepository } from './infrastructure/PostgresPersonalCredentialRepository.ts';
+export type { PersonalCredentialRepository } from './application/ports/PersonalCredentialRepository.ts';
+export { AccountLegacyTokens } from './application/usecases/AccountLegacyTokens.ts';
+export { PostgresLegacyTokenRepository } from './infrastructure/PostgresLegacyTokenRepository.ts';
+export type { LegacyTokenRepository } from './application/ports/LegacyTokenRepository.ts';
 export type { ServiceAccountGrant, ServiceAccountRepository } from './application/ports/ServiceAccountRepository.ts';
 export type { DeviceCredentialPrincipal } from './application/usecases/DeviceCredentialAuthentication.ts';
 export { PostgresDeviceAuthorizationRepository } from './infrastructure/PostgresDeviceAuthorizationRepository.ts';

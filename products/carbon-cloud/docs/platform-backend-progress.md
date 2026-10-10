@@ -1290,3 +1290,62 @@ and trust work remains Phase 14.
 
 Phase 2 stops here. Phase 3 (personal credentials and the legacy `cc_`
 migration path) is next in [the handoff](left-off/handoff.md).
+
+## 2026-10-10: Phase 3 — personal credentials and the legacy `cc_` path
+
+**Personal credentials.** A signed-in account can create, list, rotate and
+revoke `pt_` credentials at `/platform/v1/account/personal-credentials`. Each
+carries one exact organization, project or environment scope and up to five
+environment-credential permissions the owner holds there. The token is disclosed
+once; only its SHA-256 hash and display prefix are stored. Expiry is required
+and at most 90 days; an account can hold 20 active credentials. Creation and
+rotation need a fresh session and re-check the delegated permissions.
+`PersonalCredentialAuthentication` verifies a token for one exact scope and
+permission against current account, membership, organization, project,
+environment and permission-revision state. See
+[personal-credentials.md](personal-credentials.md).
+
+**Legacy `cc_` tokens.** Migration 0021 adds status, usage and retirement
+columns to `api_tokens` without changing existing rows.
+`CARBON_LEGACY_TOKENS` stages the deprecation: `issue` (default, unchanged
+behavior), `accept` (legacy signup returns 410), `warn` (responses to
+`cc_`-authenticated requests carry `Deprecation` and optional `Sunset`
+headers) and `reject` (401). An account claims an unowned legacy organization
+by presenting an active `cc_` organization token; no owner is inferred and an
+organization with any member cannot be claimed. Owners with
+`organization.manage` can list legacy tokens with last-use time, retire one
+(optionally recording the replacing service account) and restore it. Retirement
+keeps the hash, so it is reversible. See [legacy-tokens.md](legacy-tokens.md).
+
+Proof gate, over real HTTP routes and PostgreSQL:
+
+- One-time disclosure: a retried create or rotate is refused with 409; pages,
+  receipts, events and command records contain no token or hash.
+- Bounded scope: a credential is refused for a broader, narrower or foreign
+  scope and for a permission it does not list; a Viewer cannot delegate
+  `data.write`; organization management permissions are rejected by contract.
+- Cross-tenant: a second account sees none of the first account's credentials
+  and gets 404 for rotate, revoke, foreign scopes and foreign legacy tokens.
+- Rotation and revocation: the old token stops at once; a lost membership,
+  suspended organization, expiry or permission change ends the credential, and
+  rotation cannot carry lost access forward.
+- Migration: baseline legacy rows survive 0021 unchanged and active; a claim
+  needs a valid token, CSRF and a fresh session, is idempotent, and cannot be
+  repeated by another account holding the same token.
+- Rollback: a retired token stops authenticating, keeps its hash, and works
+  again after restore; each stage is covered by a route test.
+- Removing the retired-token filter or the delegation check makes the new
+  tests fail, so the tests exercise both.
+
+The affected regression passed **498 tests, 0 failures and 4,485 assertions
+across 60 files**. Generated contracts are current and the Solutions, Cloud,
+Database, Registry and CLI TypeScript checks pass.
+
+Not included: exchanging a personal credential for a Database or Registry
+assertion, CLI use of personal credentials, deleting legacy hashes after a
+published window, an operator view across organizations, and `wk_` worker-token
+migration (Phase 4).
+
+Phase 3 stops here. Phase 4 (worker enrollment, lease-scoped worker credentials,
+hosted key custody and secret materialization) is next in
+[the handoff](left-off/handoff.md).

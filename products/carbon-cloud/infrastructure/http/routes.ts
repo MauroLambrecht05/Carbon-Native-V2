@@ -4,6 +4,7 @@
 // business logic lives in this file — that's the rule products/README.md
 // states and this product follows deliberately.
 
+import type { LegacyTokenPolicy } from "@carbon/contracts/platform";
 import type { InstallerTargetId, TargetPlatform } from "@carbon/contracts/distribution";
 import {
   BuildNotFoundError,
@@ -59,6 +60,30 @@ export interface RouteDeps {
    * signature against.
    */
   readonly stripeWebhookSecret?: string;
+  /**
+   * Deprecation stage for legacy cc_ organization tokens. Absent means
+   * "issue": today's behavior. Stages only ever tighten in this order:
+   * issue -> accept (no new signups) -> warn (Deprecation headers) -> reject.
+   */
+  readonly legacyTokens?: { readonly policy: LegacyTokenPolicy; readonly sunset?: string };
+}
+
+const legacyOrgRequests = new WeakSet<Request>();
+
+/** The "warn" stage: every response to a request a cc_ token authenticated says the token is deprecated. */
+function withLegacyNotice<T extends Record<string, Record<string, any>>>(routes: T, sunset?: string): T {
+  const wrapped: Record<string, Record<string, unknown>> = {};
+  for (const [path, methods] of Object.entries(routes)) {
+    wrapped[path] = Object.fromEntries(Object.entries(methods).map(([method, handler]) => [method, async (req: Request) => {
+      const response: Response = await handler(req);
+      if (!legacyOrgRequests.has(req)) return response;
+      const headers = new Headers(response.headers);
+      headers.set("Deprecation", "true");
+      if (sunset) headers.set("Sunset", sunset);
+      return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+    }]));
+  }
+  return wrapped as T;
 }
 
 function json(body: unknown, status = 200): Response {
@@ -89,15 +114,21 @@ function errorResponse(error: unknown): Response {
  */
 async function authenticate(
   req: Request,
-  verifyToken: VerifyTokenUseCase,
+  deps: Pick<RouteDeps, "verifyToken" | "legacyTokens">,
   allowedScopes: readonly TokenScope[],
 ): Promise<VerifiedToken | Response> {
   const header = req.headers.get("authorization") ?? "";
   const token = header.startsWith("Bearer ") ? header.slice("Bearer ".length) : null;
   if (!token) return json({ error: "missing bearer token" }, 401);
 
-  const verified = await verifyToken.execute(token);
+  const verified = await deps.verifyToken.execute(token);
   if (!verified) return json({ error: "invalid token" }, 401);
+  if (verified.scope === "org") {
+    if (deps.legacyTokens?.policy === "reject") {
+      return json({ error: "legacy organization tokens are no longer accepted — sign in and create a service account" }, 401);
+    }
+    legacyOrgRequests.add(req);
+  }
   if (!allowedScopes.includes(verified.scope)) {
     return json({ error: `a ${verified.scope} token cannot do this — needs: ${allowedScopes.join(" or ")}` }, 403);
   }
@@ -113,7 +144,7 @@ const DASHBOARD_HTML = `<!doctype html><html lang="en"><meta charset="utf-8">
 
 /** Bun.serve's `routes` object. The composition root is what calls Bun.serve. */
 export function buildRoutes(deps: RouteDeps) {
-  return {
+  const routes = {
     "/healthz": {
       GET: () => new Response("ok"),
     },
@@ -136,7 +167,7 @@ export function buildRoutes(deps: RouteDeps) {
     // not a parallel, potentially-drifting auth path.
     "/v1/auth/verify": {
       GET: async (req: Bun.BunRequest) => {
-        const verified = await authenticate(req, deps.verifyToken, ["org", "worker"]);
+        const verified = await authenticate(req, deps, ["org", "worker"]);
         if (verified instanceof Response) return verified;
         return json({ orgId: verified.orgId, scope: verified.scope });
       },
@@ -144,6 +175,9 @@ export function buildRoutes(deps: RouteDeps) {
 
     "/v1/orgs": {
       POST: async (req: Bun.BunRequest) => {
+        if ((deps.legacyTokens?.policy ?? "issue") !== "issue") {
+          return json({ error: "legacy organization signup is closed — create an account instead" }, 410);
+        }
         try {
           const body = (await req.json()) as { name: string };
           if (!body.name) return json({ error: "name is required" }, 400);
@@ -157,7 +191,7 @@ export function buildRoutes(deps: RouteDeps) {
 
     "/v1/worker-tokens": {
       POST: async (req: Bun.BunRequest) => {
-        const verified = await authenticate(req, deps.verifyToken, ["org"]);
+        const verified = await authenticate(req, deps, ["org"]);
         if (verified instanceof Response) return verified;
         try {
           return json(await deps.issueWorkerToken.execute(verified.orgId), 201);
@@ -226,7 +260,7 @@ export function buildRoutes(deps: RouteDeps) {
 
     "/v1/usage": {
       GET: async (req: Bun.BunRequest) => {
-        const verified = await authenticate(req, deps.verifyToken, ["org"]);
+        const verified = await authenticate(req, deps, ["org"]);
         if (verified instanceof Response) return verified;
         try {
           return json(await deps.checkUsageLimit.execute(verified.orgId));
@@ -238,7 +272,7 @@ export function buildRoutes(deps: RouteDeps) {
 
     "/v1/builds": {
       GET: async (req: Bun.BunRequest) => {
-        const verified = await authenticate(req, deps.verifyToken, ["org"]);
+        const verified = await authenticate(req, deps, ["org"]);
         if (verified instanceof Response) return verified;
         try {
           const limitParam = new URL(req.url).searchParams.get("limit");
@@ -249,7 +283,7 @@ export function buildRoutes(deps: RouteDeps) {
         }
       },
       POST: async (req: Bun.BunRequest) => {
-        const verified = await authenticate(req, deps.verifyToken, ["org"]);
+        const verified = await authenticate(req, deps, ["org"]);
         if (verified instanceof Response) return verified;
         try {
           const usage = await deps.checkUsageLimit.execute(verified.orgId);
@@ -276,7 +310,7 @@ export function buildRoutes(deps: RouteDeps) {
       GET: async (req: Bun.BunRequest<"/v1/builds/:id">) => {
         // Either scope: an org checks its own build, a worker checks one
         // it might be about to claim or just finished.
-        const verified = await authenticate(req, deps.verifyToken, ["org", "worker"]);
+        const verified = await authenticate(req, deps, ["org", "worker"]);
         if (verified instanceof Response) return verified;
         try {
           const build = await deps.getBuild.execute(req.params.id);
@@ -289,7 +323,7 @@ export function buildRoutes(deps: RouteDeps) {
 
     "/v1/builds/claim": {
       POST: async (req: Bun.BunRequest) => {
-        const verified = await authenticate(req, deps.verifyToken, ["worker"]);
+        const verified = await authenticate(req, deps, ["worker"]);
         if (verified instanceof Response) return verified;
         try {
           const body = (await req.json()) as { platform: TargetPlatform; workerId: string };
@@ -303,7 +337,7 @@ export function buildRoutes(deps: RouteDeps) {
 
     "/v1/builds/:id/complete": {
       POST: async (req: Bun.BunRequest<"/v1/builds/:id/complete">) => {
-        const verified = await authenticate(req, deps.verifyToken, ["worker"]);
+        const verified = await authenticate(req, deps, ["worker"]);
         if (verified instanceof Response) return verified;
         try {
           const body = (await req.json()) as Record<string, unknown>;
@@ -335,7 +369,7 @@ export function buildRoutes(deps: RouteDeps) {
 
     "/v1/builds/:id/logs": {
       GET: async (req: Bun.BunRequest<"/v1/builds/:id/logs">) => {
-        const verified = await authenticate(req, deps.verifyToken, ["org", "worker"]);
+        const verified = await authenticate(req, deps, ["org", "worker"]);
         if (verified instanceof Response) return verified;
         try {
           const logs = BuildArtifactStore.getInstance().getLogs(req.params.id);
@@ -345,7 +379,7 @@ export function buildRoutes(deps: RouteDeps) {
         }
       },
       POST: async (req: Bun.BunRequest<"/v1/builds/:id/logs">) => {
-        const verified = await authenticate(req, deps.verifyToken, ["worker"]);
+        const verified = await authenticate(req, deps, ["worker"]);
         if (verified instanceof Response) return verified;
         try {
           const body = (await req.json()) as { line: string; stream?: "stdout" | "stderr" };
@@ -359,7 +393,7 @@ export function buildRoutes(deps: RouteDeps) {
 
     "/v1/builds/:id/artifacts": {
       GET: async (req: Bun.BunRequest<"/v1/builds/:id/artifacts">) => {
-        const verified = await authenticate(req, deps.verifyToken, ["org", "worker"]);
+        const verified = await authenticate(req, deps, ["org", "worker"]);
         if (verified instanceof Response) return verified;
         try {
           const artifacts = BuildArtifactStore.getInstance().getArtifacts(req.params.id);
@@ -369,7 +403,7 @@ export function buildRoutes(deps: RouteDeps) {
         }
       },
       POST: async (req: Bun.BunRequest<"/v1/builds/:id/artifacts">) => {
-        const verified = await authenticate(req, deps.verifyToken, ["worker"]);
+        const verified = await authenticate(req, deps, ["worker"]);
         if (verified instanceof Response) return verified;
         try {
           const body = (await req.json()) as {
@@ -396,7 +430,7 @@ export function buildRoutes(deps: RouteDeps) {
 
     "/v1/billing/checkout": {
       POST: async (req: Bun.BunRequest) => {
-        const verified = await authenticate(req, deps.verifyToken, ["org"]);
+        const verified = await authenticate(req, deps, ["org"]);
         if (verified instanceof Response) return verified;
         try {
           const body = (await req.json()) as { plan: PlanId };
@@ -448,4 +482,5 @@ export function buildRoutes(deps: RouteDeps) {
       },
     },
   };
+  return deps.legacyTokens?.policy === "warn" ? withLegacyNotice(routes, deps.legacyTokens.sunset) : routes;
 }

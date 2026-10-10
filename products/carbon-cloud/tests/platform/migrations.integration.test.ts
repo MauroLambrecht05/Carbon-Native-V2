@@ -220,6 +220,7 @@ suite("Cloud migrations against real Postgres", () => {
     await migrate(sql);
     expect((await sql`SELECT name, slug FROM organizations WHERE id = ${org}`)[0]).toMatchObject({ name: "Legacy organization", slug: null });
     expect((await sql`SELECT token_hash FROM api_tokens WHERE id = ${token}`)[0].token_hash).toBe("legacy-hash");
+    expect((await sql`SELECT status, retired_at, last_used_at, revision::text FROM api_tokens WHERE id = ${token}`)[0]).toEqual({ status: "active", retired_at: null, last_used_at: null, revision: "1" });
     expect((await sql`SELECT count(*)::integer AS count FROM memberships`)[0].count).toBe(0);
     expect((await sql`SELECT count(*)::integer AS count FROM accounts`)[0].count).toBe(0);
   });

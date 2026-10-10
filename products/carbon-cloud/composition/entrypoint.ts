@@ -36,12 +36,13 @@ import {
 } from "@carbon/billing";
 import { migrate, openDatabase } from "../infrastructure/persistence/Database.ts";
 import { buildRoutes } from "../infrastructure/http/routes.ts";
-import { accountPlatformConfigFromEnv, composeAccountPlatform, type AccountPlatformConfig } from "./account-platform.ts";
+import { accountPlatformConfigFromEnv, composeAccountPlatform, legacyTokenConfigFromEnv, type AccountPlatformConfig, type LegacyTokenConfig } from "./account-platform.ts";
 import { composeServiceAuthority } from './service-authority.ts';
 
 export interface CarbonCloudConfig {
   readonly assertionTrust?: AssertionTrust;
   readonly accountPlatform?: AccountPlatformConfig;
+  readonly legacyTokens?: LegacyTokenConfig;
   readonly databaseUrl: string;
   readonly port: number;
   readonly objectStore: {
@@ -74,6 +75,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): CarbonCloud
   return {
     assertionTrust: assertionTrustFromEnv(env),
     accountPlatform: accountPlatformConfigFromEnv(env),
+    legacyTokens: legacyTokenConfigFromEnv(env),
     databaseUrl: required("DATABASE_URL"),
     port: Number(env.PORT ?? 8080),
     objectStore: {
@@ -118,6 +120,7 @@ export async function startServer(config: CarbonCloudConfig) {
     createOrganization: new CreateOrganizationUseCase(identity),
     issueWorkerToken: new IssueWorkerTokenUseCase(identity),
     verifyToken: new VerifyTokenUseCase(identity),
+    legacyTokens: config.legacyTokens,
     requestMagicLink: new RequestMagicLinkUseCase(auth),
     consumeMagicLink: new ConsumeMagicLinkUseCase(auth),
     verifyEndUserSession: new VerifyEndUserSessionUseCase(auth),

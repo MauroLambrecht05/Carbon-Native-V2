@@ -26,8 +26,9 @@ parents. Successful use updates metadata-only `lastUsedAt`.
 Migration 0005 contained unfinished organization-wide service-account and broad
 credential tables. Migration 0020 marks those rows as legacy and does not infer a
 canonical scope or import their grants. Only explicitly managed 0020 accounts are
-listed or accepted. A later reviewed `cc_` migration must reconcile any real
-legacy rows.
+listed or accepted. The `cc_` migration path in
+[legacy-tokens.md](legacy-tokens.md) retires legacy tokens in favor of managed
+service accounts; it does not convert those skeletal 0005 rows.
 
 When `CARBON_SERVICE_ACCOUNT_ASSERTIONS=enabled`, `POST
 /platform/v1/service-assertions` accepts a `Bearer cs_...` credential and an exact

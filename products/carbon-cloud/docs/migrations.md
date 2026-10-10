@@ -82,3 +82,11 @@ pretend a migration did not happen. Retain account/session data during recovery.
 Integration tests exercise fresh databases, baseline adoption, concurrent
 deployers, history drift and failure/retry against real PostgreSQL. They do not
 replace a staging backup/restore drill or authorize production deployment.
+
+0021 adds hash-only personal credentials with their command and event tables,
+and additive status, usage and retirement columns on the legacy `api_tokens`
+table with `legacy_token_commands` and `legacy_token_events`. Existing legacy
+rows keep their hash and default to `active`. Recovery: code from before 0021
+ignores the new columns, so a release rollback needs no schema change; it does
+treat retired legacy tokens as accepted again. See
+[legacy-tokens.md](legacy-tokens.md).
