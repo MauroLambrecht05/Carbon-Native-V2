@@ -6,7 +6,7 @@ describe("DbCommand (carbon db)", () => {
     const cmd = new DbCommand();
     expect(cmd.meta.name).toBe("db");
     expect(cmd.meta.summary).toContain("Carbon Database");
-    expect(cmd.meta.usage).toBe("db <status|sql|export> [options]");
+    expect(cmd.meta.usage).toBe("db <status|sql|export|data> [options]");
   });
 
   test("prints help and returns 0 when called without arguments", async () => {

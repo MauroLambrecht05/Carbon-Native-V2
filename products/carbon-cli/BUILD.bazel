@@ -70,6 +70,16 @@ bun_test(
     data = _DEPS,
 )
 
+bun_test(
+    name = "device_authorization_test",
+    entry = "tests/device-authorization.test.ts",
+    srcs = [
+        ":srcs",
+        ":test_srcs",
+    ],
+    data = _DEPS,
+)
+
 # The release artifact: a standalone carbon.exe (~118 MB) that bundles the CLI
 # and the Bun runtime together, for machines with no Bun installed.
 #

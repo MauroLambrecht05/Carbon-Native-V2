@@ -6,10 +6,13 @@
 import { Command, type CommandMeta, type ExitCode } from "@carbon/cli";
 import type { CommandContext } from "@carbon/cli";
 import { log, c } from "@carbon/logging";
-import { homedir } from "node:os";
+import { homedir, hostname } from "node:os";
 import { join } from "node:path";
-import { mkdirSync, readFileSync, writeFileSync, existsSync, chmodSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, existsSync, chmodSync, rmSync } from "node:fs";
 import { loadConfig } from "@carbon/workspace";
+import { parseComponent, type Permission } from "@carbon/contracts/platform";
+import { DeviceAuthorizationClient } from "../../../infrastructure/cloud/DeviceAuthorizationClient.ts";
+import { DeviceCredentialStore } from "../../../infrastructure/cloud/DeviceCredentialStore.ts";
 
 // Same directory signer.command.ts uses for keys — one place a user looks
 // for anything `carbon` keeps on their machine.
@@ -31,7 +34,16 @@ function writeCredentials(creds: Credentials): void {
   chmodSync(CREDENTIALS_PATH, 0o600);
 }
 
-export async function cloudCommand(rest: string[]): Promise<number> {
+export interface CloudCommandDependencies {
+  readonly deviceClient: DeviceAuthorizationClient;
+  readonly deviceStore: DeviceCredentialStore;
+}
+
+function defaultDependencies(): CloudCommandDependencies {
+  return { deviceClient: new DeviceAuthorizationClient(), deviceStore: new DeviceCredentialStore() };
+}
+
+export async function cloudCommand(rest: string[], dependencies: CloudCommandDependencies = defaultDependencies()): Promise<number> {
   if (rest.length === 0) {
     printCloudHelp();
     return 0;
@@ -45,7 +57,9 @@ export async function cloudCommand(rest: string[]): Promise<number> {
       case "signup":
         return await cloudSignup(args);
       case "login":
-        return await cloudLogin(args);
+        return await cloudLogin(args, dependencies);
+      case "logout":
+        return await cloudLogout(dependencies);
       case "worker-token":
         return await cloudWorkerToken();
       case "deploy":
@@ -108,9 +122,13 @@ async function cloudSignup(args: string[]): Promise<number> {
   return 0;
 }
 
-async function cloudLogin(args: string[]): Promise<number> {
+async function cloudLogin(args: string[], dependencies: CloudCommandDependencies): Promise<number> {
   let controlPlaneUrl = "";
   let apiToken = "";
+  let orgId = "";
+  let projectId = "";
+  let environmentId = "";
+  const permissions: Permission[] = [];
   let i = 0;
   while (i < args.length) {
     if (args[i] === "--url" && i + 1 < args.length) {
@@ -119,18 +137,50 @@ async function cloudLogin(args: string[]): Promise<number> {
     } else if (args[i] === "--token" && i + 1 < args.length) {
       apiToken = args[i + 1];
       i += 2;
+    } else if (args[i] === "--org" && i + 1 < args.length) {
+      orgId = args[i + 1]; i += 2;
+    } else if (args[i] === "--project" && i + 1 < args.length) {
+      projectId = args[i + 1]; i += 2;
+    } else if (args[i] === "--environment" && i + 1 < args.length) {
+      environmentId = args[i + 1]; i += 2;
+    } else if (args[i] === "--permission" && i + 1 < args.length) {
+      permissions.push(parseComponent("Permission", args[i + 1])); i += 2;
     } else {
       i++;
     }
   }
 
-  if (!controlPlaneUrl || !apiToken) {
-    log.error("--url and --token are both required");
+  if (!controlPlaneUrl) {
+    log.error("--url is required");
     return 1;
   }
+  if (apiToken) {
+    if (orgId || projectId || environmentId || permissions.length) { log.error("--token cannot be combined with device scope options"); return 1; }
+    writeCredentials({ controlPlaneUrl: controlPlaneUrl.replace(/\/$/, ""), apiToken });
+    log.success(`saved legacy credentials for ${controlPlaneUrl} to ${CREDENTIALS_PATH}`);
+    return 0;
+  }
+  if (!orgId || !projectId || !environmentId || !permissions.length) {
+    log.error("device login requires --org, --project, --environment and at least one --permission");
+    return 1;
+  }
+  const scope = parseComponent("EnvironmentScope", { orgId, projectId, environmentId });
+  const result = await dependencies.deviceClient.authorize(controlPlaneUrl, {
+    clientName: "Carbon CLI", deviceName: hostname().slice(0, 200) || "Unknown device", scope, permissions: [...new Set(permissions)].sort(),
+  }, { challenge: challenge => {
+    log.raw(`Open ${challenge.verificationUri}\nEnter code: ${challenge.userCode}\n`);
+  } });
+  await dependencies.deviceStore.save(controlPlaneUrl, result.token, result.grant);
+  log.success(`authorized ${result.grant.clientName} for environment ${environmentId}`);
+  return 0;
+}
 
-  writeCredentials({ controlPlaneUrl: controlPlaneUrl.replace(/\/$/, ""), apiToken });
-  log.success(`saved credentials for ${controlPlaneUrl} to ${CREDENTIALS_PATH}`);
+async function cloudLogout(dependencies: CloudCommandDependencies): Promise<number> {
+  const device = await dependencies.deviceStore.clear();
+  const legacy = existsSync(CREDENTIALS_PATH);
+  if (legacy) rmSync(CREDENTIALS_PATH, { force: true });
+  if (!device && !legacy) { log.info("no Carbon Cloud credentials were stored"); return 0; }
+  log.success("removed local Carbon Cloud credentials");
   return 0;
 }
 
@@ -277,9 +327,15 @@ ${c.bold("Subcommands:")}
                --url <url>                 (required)
                --name <org-name>           (required)
 
-  ${c.cyan("login")}    Save credentials for a control plane you already have a token for
+  ${c.cyan("login")}    Authorize this CLI through the browser device flow
                --url <url>                 (required)
-               --token <token>             (required)
+               --org <organization-id>     (required)
+               --project <project-id>      (required)
+               --environment <env-id>      (required)
+               --permission <permission>   (required, repeatable)
+               --token <legacy-token>      (legacy compatibility; excludes scope options)
+
+  ${c.cyan("logout")}   Remove the active device credential from OS secure storage
 
   ${c.cyan("worker-token")} Mint a worker-scoped token (set WORKER_API_TOKEN to it) — separate
                from the org token above: a worker token can claim/complete
@@ -298,7 +354,7 @@ ${c.bold("Subcommands:")}
 
 ${c.bold("Examples:")}
   ${c.dim("$")} carbon cloud signup --url https://cloud.example.com --name "My Org"
-  ${c.dim("$")} carbon cloud login --url https://cloud.example.com --token abc123
+  ${c.dim("$")} carbon cloud login --url https://cloud.example.com --org <id> --project <id> --environment <id> --permission metadata.read
   ${c.dim("$")} carbon cloud deploy --repo https://github.com/me/app.git --commit HEAD --target deb
   ${c.dim("$")} carbon cloud status 9f2c...
 `);
@@ -310,7 +366,7 @@ export class CloudCommand extends Command {
   readonly meta: CommandMeta = {
     name: "cloud",
     summary: "Build, sign and publish through Carbon Cloud",
-    usage: "cloud <signup|login|worker-token|deploy|list|status> [options]",
+    usage: "cloud <signup|login|logout|worker-token|deploy|list|status> [options]",
     examples: [
       "carbon cloud signup --url https://cloud.example.com --name \"My Org\"",
       "carbon cloud deploy --repo https://github.com/me/app.git --commit HEAD --target deb",

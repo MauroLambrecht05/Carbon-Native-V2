@@ -4,6 +4,10 @@
 import { Command, type CommandMeta, type ExitCode } from "@carbon/cli";
 import type { CommandContext } from "@carbon/cli";
 import { log, c } from "@carbon/logging";
+import { readFileSync } from "node:fs";
+import { parseComponent } from "@carbon/contracts/platform";
+import { DatabaseDeviceClient } from "../../../infrastructure/cloud/DatabaseDeviceClient.ts";
+import { DeviceCredentialStore } from "../../../infrastructure/cloud/DeviceCredentialStore.ts";
 
 export interface DbCommandOptions {
   url?: string;
@@ -11,7 +15,16 @@ export interface DbCommandOptions {
   project?: string;
 }
 
-export async function dbCommand(rest: string[]): Promise<number> {
+export interface DbCommandDependencies {
+  readonly deviceStore: DeviceCredentialStore;
+  readonly databaseClient: DatabaseDeviceClient;
+}
+
+function defaultDependencies(): DbCommandDependencies {
+  return { deviceStore: new DeviceCredentialStore(), databaseClient: new DatabaseDeviceClient() };
+}
+
+export async function dbCommand(rest: string[], dependencies: DbCommandDependencies = defaultDependencies()): Promise<number> {
   if (rest.length === 0 || rest[0] === "--help" || rest[0] === "-h") {
     printDbHelp();
     return 0;
@@ -32,6 +45,8 @@ export async function dbCommand(rest: string[]): Promise<number> {
         return await dbSql(url, token, project, args);
       case "export":
         return await dbExport(url, token, project, args);
+      case "data":
+        return await dbData(url, args, dependencies);
       default:
         log.error(`unknown subcommand "${subcommand}"`);
         printDbHelp();
@@ -41,6 +56,32 @@ export async function dbCommand(rest: string[]): Promise<number> {
     log.error(`db error: ${err.message || String(err)}`);
     return 1;
   }
+}
+
+async function dbData(defaultUrl: string, args: string[], dependencies: DbCommandDependencies): Promise<number> {
+  let databaseUrl = defaultUrl; let bindingId = ""; let commandText = ""; let commandFile = "";
+  for (let i = 0; i < args.length; i += 1) {
+    const next = args[i + 1];
+    if (args[i] === "--database-url" && next) { databaseUrl = next; i++; }
+    else if (args[i] === "--binding" && next) { bindingId = next; i++; }
+    else if (args[i] === "--command" && next) { commandText = next; i++; }
+    else if (args[i] === "--command-file" && next) { commandFile = next; i++; }
+    else { log.error(`unknown or incomplete data option: ${args[i]}`); return 1; }
+  }
+  if (!bindingId || (!commandText && !commandFile) || (commandText && commandFile)) {
+    log.error("data requires --binding and exactly one of --command or --command-file");
+    return 1;
+  }
+  const active = await dependencies.deviceStore.active();
+  if (!active) { log.error("no active device login — run `carbon cloud login` first"); return 1; }
+  const scope = parseComponent("EnvironmentScope", active.profile.grant.scope);
+  let value: unknown;
+  try { value = JSON.parse(commandFile ? readFileSync(commandFile, "utf8") : commandText); }
+  catch { log.error("data command must be valid JSON"); return 1; }
+  const request = parseComponent("DataRequest", { scope, bindingId, command: value });
+  const result = await dependencies.databaseClient.execute(databaseUrl, active.profile, active.token, request);
+  log.raw(JSON.stringify(result, null, 2) + "\n");
+  return 0;
 }
 
 async function dbStatus(url: string): Promise<number> {
@@ -131,11 +172,17 @@ ${c.bold("Subcommands:")}
   ${c.cyan("status")}         Check database server connectivity and engine health
   ${c.cyan("sql <query>")}    Execute a SQL statement and display the results table
   ${c.cyan("export [file]")}  Export all tables, vectors, and graph state to JSON
+  ${c.cyan("data")}           Execute one canonical platform data command using device authorization
+    --database-url <origin>  Database service origin (or CARBON_DB_URL)
+    --binding <id>           Exact Database binding ID
+    --command <json>         Data command JSON
+    --command-file <path>    Read data command JSON from a file
 
 ${c.bold("Examples:")}
   ${c.dim("$")} carbon db status
   ${c.dim("$")} carbon db sql "SELECT * FROM users LIMIT 5;"
   ${c.dim("$")} carbon db export backup.json
+  ${c.dim("$")} carbon db data --database-url https://database.example.com --binding <id> --command '{"kind":"tables.list"}'
 `);
 }
 
@@ -143,7 +190,7 @@ export class DbCommand extends Command {
   readonly meta: CommandMeta = {
     name: "db",
     summary: "Inspect and query local Carbon Database services",
-    usage: "db <status|sql|export> [options]",
+    usage: "db <status|sql|export|data> [options]",
     examples: [
       "carbon db status",
       "carbon db sql \"SELECT * FROM users;\"",

@@ -10,6 +10,29 @@ bun products/carbon-cli/main.ts --help               # or directly
 Both do the same work. See `.tools/orchestration/bazel/bun/README.md` for what
 the Bazel wrapper does and does not guarantee.
 
+## Cloud device login and Database commands
+
+Authorize the CLI for one exact environment and a bounded permission set:
+
+```sh
+carbon cloud login --url https://cloud.example.com \
+  --org <organization-id> --project <project-id> \
+  --environment <environment-id> --permission metadata.read
+
+carbon db data --database-url https://database.example.com \
+  --binding <database-binding-id> --command '{"kind":"tables.list","limit":25}'
+
+carbon cloud logout
+```
+
+Login prints the browser verification URI and short user code, polls at the
+server-advertised interval, and accepts the one-time `dc_` credential only after
+approval. The credential is stored with `Bun.secrets` in the operating system
+credential store; `~/.carbon/device-profile.json` contains scope and grant
+metadata but no token. Each `db data` invocation asks Cloud for a separate
+60-second assertion bound to the canonical Database request. HTTPS is required
+except for loopback development origins.
+
 The CLI runs on **Bun, not Node**: the bundler drives `Bun.build`,
 `doctor.command.ts` imports `spawnSync` from `"bun"`, and workspace resolution
 detects Bun's compiled-binary VFS. Under `node` the entrypoint loads and then
