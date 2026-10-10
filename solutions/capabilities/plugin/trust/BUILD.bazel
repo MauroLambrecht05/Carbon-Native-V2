@@ -26,7 +26,11 @@ filegroup(
 # Unit tests, in-crate: hashing, the detached-signature layout, verification in
 # both directions, the revocation lookup and the key file's round trip. All
 # pure computation plus a temp file or two — no plugin, no dlopen, nothing
-# platform-specific, so the default size is right.
+# platform-specific.
+#
+# size = "large" (900s, default "medium"/300s): TIMEOUT at 300.0s on a real CI
+# run and locally. The tests take milliseconds; on a cold Cargo cache the target
+# waits on the shared build directory lock while the other crates compile.
 #
 # The end-to-end check against a REAL compiled `.dll` deliberately lives
 # elsewhere and is deliberately opt-in — see
@@ -35,4 +39,5 @@ cargo_test(
     name = "plugin_trust_test",
     package = "carbon-plugin-trust",
     srcs = [":srcs", ":tests"],
+    size = "large",
 )
