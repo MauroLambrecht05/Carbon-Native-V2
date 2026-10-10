@@ -1,0 +1,8 @@
+{
+  "name": "@carbon/resend-notification",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Resend adapter for Carbon account email notifications.",
+  "type": "module",
+  "exports": { ".": "./index.ts" }
+}

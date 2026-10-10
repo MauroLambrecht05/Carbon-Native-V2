@@ -1,0 +1,1 @@
+{"name":"@carbon/data","version":"0.1.0","private":true,"type":"module","description":"Canonical relational data and native policy enforcement.","exports":{".":"./index.ts"},"carbon":{"kind":"service"}}

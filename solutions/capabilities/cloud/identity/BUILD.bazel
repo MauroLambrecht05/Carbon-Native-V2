@@ -21,3 +21,30 @@ bun_test(
     entry = "tests/identity.test.ts",
     srcs = [":srcs", ":tests"],
 )
+
+bun_test(
+    name = "service_assertions_test",
+    entry = "tests/service-assertions.test.ts",
+    srcs = [":srcs", ":tests"],
+    deps = ["//solutions/contracts/platform:srcs"],
+)
+
+bun_test(
+    name = "totp_test",
+    entry = "tests/totp.test.ts",
+    srcs = [":srcs", ":tests"],
+)
+
+bun_test(
+    name = "authorization_policy_test",
+    entry = "tests/authorization-policy.test.ts",
+    srcs = [":srcs", ":tests"],
+    deps = ["//solutions/contracts/platform:srcs"],
+)
+
+bun_test(
+    name = "assertion_authority_test",
+    entry = "tests/assertion-authority.test.ts",
+    srcs = [":srcs", ":tests"],
+    deps = ["//solutions/contracts/platform:srcs"],
+)

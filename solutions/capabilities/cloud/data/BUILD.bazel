@@ -1,0 +1,39 @@
+load("//.tools/orchestration/bazel/bun:defs.bzl", "bun_test")
+package(default_visibility = ["//visibility:public"])
+
+filegroup(name = "srcs", srcs = glob(["**/*.ts"], exclude = ["**/*.test.ts"]))
+
+bun_test(
+    name = "import_protocol_test",
+    entry = "tests/import-protocol.test.ts",
+    srcs = [":srcs"],
+    deps = ["//solutions/contracts/platform:srcs", "//solutions/capabilities/cloud/identity:srcs", "//solutions/capabilities/cloud/catalog:srcs"],
+)
+
+bun_test(
+    name = "import_preview_test",
+    entry = "tests/import-preview.test.ts",
+    srcs = [":srcs"],
+    deps = ["//solutions/contracts/platform:srcs"],
+)
+
+bun_test(
+    name = "generated_types_test",
+    entry = "tests/generated-types.test.ts",
+    srcs = [":srcs"],
+    deps = ["//solutions/contracts/platform:srcs"],
+)
+
+bun_test(
+    name = "native_policy_test",
+    entry = "tests/native-policy.test.ts",
+    srcs = [":srcs"],
+    deps = ["//solutions/contracts/platform:srcs", "//solutions/capabilities/cloud/catalog:srcs", "//solutions/capabilities/cloud/identity:srcs"],
+)
+
+bun_test(
+    name = "http_data_client_test",
+    entry = "tests/http-data-client.test.ts",
+    srcs = [":srcs"],
+    deps = ["//solutions/contracts/platform:srcs", "//solutions/capabilities/cloud/catalog:srcs", "//solutions/capabilities/cloud/identity:srcs"],
+)

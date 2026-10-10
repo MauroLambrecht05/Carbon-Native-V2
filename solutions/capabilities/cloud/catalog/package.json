@@ -1,0 +1,9 @@
+{
+  "name": "@carbon/catalog",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Canonical Cloud projects, environments and service provisioning.",
+  "exports": { ".": "./index.ts" },
+  "carbon": { "kind": "service" }
+}

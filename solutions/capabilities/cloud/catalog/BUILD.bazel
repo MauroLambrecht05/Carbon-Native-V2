@@ -1,0 +1,15 @@
+package(default_visibility = ["//visibility:public"])
+
+load("//.tools/orchestration/bazel/bun:defs.bzl", "bun_test")
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["**/*.ts"], exclude = ["**/*.test.ts"]),
+)
+
+bun_test(
+    name = "http_provisioner_test",
+    entry = "tests/http-provisioner.test.ts",
+    srcs = [":srcs"],
+    deps = ["//solutions/capabilities/cloud/identity:srcs", "//solutions/contracts/platform:srcs"],
+)

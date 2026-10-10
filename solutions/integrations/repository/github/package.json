@@ -1,0 +1,5 @@
+{
+  "name": "@carbon/github-repository",
+  "private": true,
+  "type": "module"
+}

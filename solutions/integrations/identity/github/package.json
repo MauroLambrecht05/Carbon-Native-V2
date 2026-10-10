@@ -1,0 +1,8 @@
+{
+  "name": "@carbon/github-identity",
+  "version": "0.1.0",
+  "private": true,
+  "description": "GitHub OAuth and verified identity adapter for Carbon accounts.",
+  "type": "module",
+  "exports": { ".": "./index.ts" }
+}
