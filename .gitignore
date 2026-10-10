@@ -86,6 +86,10 @@ zig-out/
 .env.local
 *.log
 
+# A second Cargo target directory from local runtime-patch builds — build
+# output, same reasoning as Cargo's target/ above.
+/.local/runtime-patch-target/
+
 # ── OS noise ────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
