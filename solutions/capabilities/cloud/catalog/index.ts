@@ -22,4 +22,7 @@ export { ApplyServiceLifecycle } from './application/usecases/ApplyServiceLifecy
 export { PostgresServiceLifecycleRepository } from './infrastructure/PostgresServiceLifecycleRepository.ts';
 export { PostgresDatabaseEnvironmentDriver, databaseEnvironmentIdentifiers } from './infrastructure/PostgresDatabaseEnvironmentDriver.ts';
 export { PostgresRegistryEnvironmentDriver } from './infrastructure/PostgresRegistryEnvironmentDriver.ts';
+export { ExecuteServiceRegistry } from './application/usecases/ExecuteServiceRegistry.ts';
+export { PostgresRegistryNamespaces } from './infrastructure/PostgresRegistryNamespaces.ts';
+export type { RegistryNamespaces } from './application/ports/RegistryNamespaces.ts';
 export type { EnvironmentProvisioner, ProvisioningRepository, ProvisioningWork, ProvisioningResult } from './application/ports/EnvironmentProvisioner.ts';

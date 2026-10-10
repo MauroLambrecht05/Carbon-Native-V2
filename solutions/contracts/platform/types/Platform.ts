@@ -160,6 +160,18 @@ export type DeviceAssertionExchange = { readonly "audience": "carbon-database"; 
 
 export type DeviceAssertionResponse = { readonly "tokenType": "Bearer"; readonly "token": string; readonly "expiresInSeconds": 60; };
 
+export type DeviceRegistryAssertionExchange = { readonly "audience": "carbon-registry"; readonly "scope": EnvironmentScope; readonly "permission": EnvironmentCredentialPermission; readonly "request": { readonly "method": "POST"; readonly "path": string; readonly "bodyDigest": Digest; }; };
+
+export type ServiceAccountRegistryAssertionExchange = { readonly "audience": "carbon-registry"; readonly "scope": EnvironmentScope; readonly "permission": EnvironmentCredentialPermission; readonly "request": { readonly "method": "POST"; readonly "path": string; readonly "bodyDigest": Digest; }; };
+
+export type RegistryNamespaceQuery = { readonly "kind": "namespace.get"; };
+
+export type RegistryNamespace = { readonly "id": Id; readonly "state": "active" | "paused"; readonly "revision": Revision; };
+
+export type RegistryRequest = { readonly "scope": EnvironmentScope; readonly "bindingId": Id; readonly "command": RegistryNamespaceQuery; };
+
+export type RegistryResponse = { readonly "scope": EnvironmentScope; readonly "bindingId": Id; readonly "result": RegistryNamespace; };
+
 export type ServiceAccountCreate = { readonly "name": string; readonly "scope": Scope; readonly "permissions": ReadonlyArray<EnvironmentCredentialPermission>; };
 
 export type ServiceAccountCommand = { readonly "kind": "update"; readonly "name": string; readonly "permissions": ReadonlyArray<EnvironmentCredentialPermission>; } | { readonly "kind": "disable" | "enable"; };
@@ -461,6 +473,12 @@ export interface Components {
   DeviceGrantReceipt: DeviceGrantReceipt;
   DeviceAssertionExchange: DeviceAssertionExchange;
   DeviceAssertionResponse: DeviceAssertionResponse;
+  DeviceRegistryAssertionExchange: DeviceRegistryAssertionExchange;
+  ServiceAccountRegistryAssertionExchange: ServiceAccountRegistryAssertionExchange;
+  RegistryNamespaceQuery: RegistryNamespaceQuery;
+  RegistryNamespace: RegistryNamespace;
+  RegistryRequest: RegistryRequest;
+  RegistryResponse: RegistryResponse;
   ServiceAccountCreate: ServiceAccountCreate;
   ServiceAccountCommand: ServiceAccountCommand;
   ServiceAccount: ServiceAccount;

@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { generateKeyPairSync, randomBytes } from 'node:crypto';
 import { AccountAuthentication, PostgresAccountIdentityRepository, EnvelopeMessageProtector, PostgresMfaVerification, Rfc6238Totp,
-  OrganizationAccess, PostgresOrganizationRepository, ServiceAssertionIssuer, opaqueToken, tokenDigest, bodyDigest, type AssertionTrust } from '@carbon/identity';
+  OrganizationAccess, PostgresOrganizationRepository, AccountServiceAccounts, PostgresServiceAccountRepository, ServiceAssertionIssuer, opaqueToken, tokenDigest, bodyDigest, type AssertionTrust } from '@carbon/identity';
 import { AccountCatalog, PostgresCatalogRepository, PostgresProvisioningRepository, ProvisionEnvironment, HttpEnvironmentProvisioner,
   PostgresServiceLifecycleRepository, PostgresDatabaseEnvironmentDriver, databaseEnvironmentIdentifiers, type ProvisioningWork } from '@carbon/catalog';
-import { parseComponent, serviceLifecycleBody, dataPermission, dataRequestPath } from '@carbon/contracts/platform';
+import { parseComponent, serviceLifecycleBody, dataPermission, dataRequestPath, canonicalRegistryRequest, registryRequestPath } from '@carbon/contracts/platform';
 import { HttpDataClient, AccountData, PostgresAccountDataAuthority, AccountImports, PostgresImportJobs, HttpImportClient, RunImportJobs } from '@carbon/data';
 import { migrate as migrateCloud } from '../../../products/carbon-cloud/infrastructure/persistence/Database.ts';
 import { migrate as migrateDatabase } from '../../../products/carbon-database/infrastructure/persistence/Database.ts';
@@ -67,7 +67,8 @@ async function harness() {
   await cloud`INSERT INTO account_sessions (id, account_id, token_hash, csrf_hash, security_revision, device_name, expires_at, fresh_until)
     VALUES (${session}, ${account}, ${tokenDigest(token)}, ${tokenDigest(csrf)}, 1, 'Fixture', now() + interval '8 hours', now() + interval '10 minutes')`;
   const apiHandler = createAccountRoutes(auth, origin, undefined, undefined, new OrganizationAccess(auth, new PostgresOrganizationRepository(cloud), protector), undefined, undefined, undefined,
-    new AccountCatalog(auth, new PostgresCatalogRepository(cloud), protector), new AccountData(auth, new PostgresAccountDataAuthority(cloud), new HttpDataClient(databaseServer.url.origin, issuer), protector), new AccountImports(auth, importJobs));
+    new AccountCatalog(auth, new PostgresCatalogRepository(cloud), protector), new AccountData(auth, new PostgresAccountDataAuthority(cloud), new HttpDataClient(databaseServer.url.origin, issuer), protector), new AccountImports(auth, importJobs),
+    undefined, undefined, undefined, undefined, new AccountServiceAccounts(auth, new PostgresServiceAccountRepository(cloud), protector, issuer));
   const api = (path: string, input?: unknown, revision?: string, overrides?: Record<string, string>) => apiHandler(new Request(origin + path, { method: input === undefined ? 'GET' : 'POST',
     headers: { origin, cookie: `__Host-carbon-session=${token}`, 'x-csrf-token': csrf, 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID(), ...(revision ? { 'if-match': revision } : {}), ...Object.fromEntries(new Headers(overrides)) },
     body: input === undefined ? undefined : JSON.stringify(input) }), '127.0.0.1');
@@ -471,6 +472,60 @@ suite('Cloud-to-owning-service lifecycle over real HTTP and PostgreSQL', () => {
     expect(await h.database`SELECT command_id FROM canonical_data_commands WHERE command_id = ${command.commandId}`).toHaveLength(0);
     h.interceptAuthority(); const retry = await h.signedData({ scope, bindingId, command }); expect((await fetch(retry.url, retry.init)).status).toBe(200);
     expect(await h.database`SELECT id FROM canonical_data_tables WHERE id = ${command.tableId}`).toHaveLength(1);
+  }, 30000);
+
+  test('Registry assertion exchange reaches only Registry: audiences cannot cross, replay is refused, and revocation is live', async () => {
+    const h = await harness(); const created = await h.create(); const scope = parseComponent('EnvironmentScope', created.scope);
+    expect(await h.worker.execute()).toBe(true); expect(await h.worker.execute()).toBe(true);
+    const details = parseComponent('CatalogEnvironmentDetails', await (await h.api(`/platform/v1/orgs/${scope.orgId}/projects/${scope.projectId}/environments/${scope.environmentId}`)).json());
+    const databaseBinding = details.bindings.find(b => b.owner === 'database')!.id; const registryBinding = details.bindings.find(b => b.owner === 'registry')!.id;
+    const accounts = `/platform/v1/orgs/${scope.orgId}/service-accounts`;
+    const accountResponse = await h.api(accounts, { name: 'Registry automation', scope, permissions: ['metadata.read'] }, details.environment.revision); expect(accountResponse.status).toBe(201);
+    const serviceAccount = parseComponent('ServiceAccountReceipt', await accountResponse.json()).serviceAccount;
+    const issued = parseComponent('ServiceAccountCredentialIssue', await (await h.api(`${accounts}/${serviceAccount.id}/credentials`, { name: 'CI', expiresAt: new Date(Date.now() + 86400_000).toISOString() }, serviceAccount.revision)).json());
+    const body = canonicalRegistryRequest({ scope, bindingId: registryBinding, command: { kind: 'namespace.get' } }); const path = registryRequestPath(scope, registryBinding, 'namespace.get');
+    const bound = { method: 'POST' as const, path, bodyDigest: bodyDigest(body) }; const registryExchange = { audience: 'carbon-registry' as const, scope, permission: 'metadata.read' as const, request: bound };
+    const exchange = async (route: string, input: unknown) => { const requestId = crypto.randomUUID();
+      const response = await h.api(route, input, undefined, { authorization: `Bearer ${issued.token}`, 'x-request-id': requestId }); return { response, requestId }; };
+    const assertion = async (route = '/platform/v1/service-registry-assertions', input: unknown = registryExchange) => { const { response, requestId } = await exchange(route, input); expect(response.status).toBe(200);
+      return { token: parseComponent('ServiceAccountAssertionResponse', await response.json()).token, requestId }; };
+    const send = (origin: string, proof: { token: string; requestId: string }, target = path, payload = body) => fetch(origin + target, { method: 'POST', body: payload,
+      headers: { authorization: `Bearer ${proof.token}`, 'content-type': 'application/json', 'x-request-id': proof.requestId } });
+
+    const first = await assertion(); const accepted = await send(h.registryServer.url.origin, first); expect(accepted.status).toBe(200);
+    const namespace = parseComponent('RegistryResponse', await accepted.json()); expect(namespace.scope).toEqual(scope); expect(namespace.bindingId).toBe(registryBinding);
+    expect(namespace.result).toEqual({ id: (await h.registry`SELECT id FROM registry_environment_namespaces`)[0].id, state: 'active', revision: namespace.result.revision });
+    expect((await send(h.registryServer.url.origin, first)).status).toBe(401);
+    expect((await send(h.registryServer.url.origin, { ...(await assertion()), requestId: crypto.randomUUID() })).status).toBe(400);
+    expect((await send(h.registryServer.url.origin, await assertion(), path, JSON.stringify({ ...JSON.parse(body), extra: true }))).status).toBe(400);
+
+    // Each exchange names exactly one audience and path family.
+    expect((await exchange('/platform/v1/service-assertions', registryExchange)).response.status).toBe(400);
+    const dataPath = dataRequestPath(scope, databaseBinding, 'tables.list'); const dataBody = JSON.stringify({ scope, bindingId: databaseBinding, command: { kind: 'tables.list', limit: 25 } });
+    const dataBound = { method: 'POST' as const, path: dataPath, bodyDigest: bodyDigest(dataBody) };
+    expect((await exchange('/platform/v1/service-registry-assertions', { ...registryExchange, request: dataBound })).response.status).toBe(400);
+    expect((await exchange('/platform/v1/service-registry-assertions', { ...registryExchange, audience: 'carbon-database' })).response.status).toBe(400);
+
+    // A Database assertion cannot reach Registry, even when it is bound to the exact Registry request.
+    const databaseForRegistryPath = await assertion('/platform/v1/service-assertions', { ...registryExchange, audience: 'carbon-database' });
+    expect((await send(h.registryServer.url.origin, databaseForRegistryPath)).status).toBe(401);
+    const databaseProof = await assertion('/platform/v1/service-assertions', { ...registryExchange, audience: 'carbon-database', request: dataBound });
+    expect((await send(h.registryServer.url.origin, databaseProof)).status).toBe(401);
+    expect((await send(h.databaseServer.url.origin, databaseProof, dataPath, dataBody)).status).toBe(200);
+    // A Registry assertion cannot reach Database, on Registry's path or on a data path.
+    expect((await send(h.databaseServer.url.origin, await assertion())).status).not.toBe(200);
+    expect((await send(h.databaseServer.url.origin, await assertion(), dataPath, dataBody)).status).toBe(401);
+    // A Registry assertion naming the Database binding has no live authority.
+    const foreignPath = registryRequestPath(scope, databaseBinding, 'namespace.get'); const foreignBody = canonicalRegistryRequest({ scope, bindingId: databaseBinding, command: { kind: 'namespace.get' } });
+    const foreign = await assertion('/platform/v1/service-registry-assertions', { ...registryExchange, request: { method: 'POST', path: foreignPath, bodyDigest: bodyDigest(foreignBody) } });
+    expect((await send(h.registryServer.url.origin, foreign, foreignPath, foreignBody)).status).toBe(401);
+
+    // Revocation is live at consumption and at exchange.
+    const outstanding = await assertion();
+    const disabled = await h.api(`${accounts}/${serviceAccount.id}`, { kind: 'disable' }, serviceAccount.revision); expect(disabled.status).toBe(200);
+    expect((await send(h.registryServer.url.origin, outstanding)).status).toBe(401);
+    expect((await exchange('/platform/v1/service-registry-assertions', registryExchange)).response.status).toBe(401);
+    expect(JSON.stringify(await h.registry`SELECT * FROM internal_assertion_replays`)).not.toContain(issued.token);
   }, 30000);
 
   test('ensure, pause and resume provision real native resources and preserve cross-environment PostgreSQL privilege boundaries', async () => {

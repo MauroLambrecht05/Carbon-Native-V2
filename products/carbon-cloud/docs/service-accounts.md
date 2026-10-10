@@ -39,7 +39,16 @@ credential, permission revision, resource state and Database binding again.
 Rotation overlap does not widen the assertion; disabling or revoking authority
 makes the live check fail immediately.
 
+Registry uses a separate exchange, `POST /platform/v1/service-registry-assertions`,
+with the `ServiceAccountRegistryAssertionExchange` contract: the
+`carbon-registry` audience and a canonical `/registry/` POST path only. The
+Database exchange cannot name the Registry audience. It can still sign a
+Database-audience assertion for any internal path, but Registry's verifier
+refuses that audience and Cloud's live authority refuses the mismatch. Live
+authority for a Registry assertion checks the managed account, credential,
+permission revision, resource state and the exact Registry binding.
+
 This slice establishes the service-account principal, credentials and narrow
-Database assertion exchange. Registry exchange, row-policy semantics for
-automated data access, direct CLI consumption, personal accounts and worker
-credentials remain later BE-05/BE-06/BE-12 work.
+Database and Registry assertion exchanges. Row-policy semantics for automated
+data access, direct CLI consumption, personal accounts and worker credentials
+remain later BE-05/BE-06/BE-12 work.

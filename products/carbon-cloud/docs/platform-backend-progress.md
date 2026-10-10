@@ -1238,3 +1238,55 @@ OpenAPI parsed as JSON, and scoped whitespace checks passed.
 Phase 1 stops here. Registry assertion exchange is the next isolated phase;
 personal credentials, workers, build execution and frontend work remain later
 phases in [the handoff](left-off/handoff.md).
+
+## 2026-10-10: Phase 2 — Registry assertion exchange
+
+Device (`dc_`) and managed service-account (`cs_`) credentials can now be
+exchanged for a 60-second assertion addressed to Carbon Registry. The exchange
+is a separate contract and route per credential type
+(`DeviceRegistryAssertionExchange` at `/platform/v1/device/registry-assertions`,
+`ServiceAccountRegistryAssertionExchange` at
+`/platform/v1/service-registry-assertions`). Each accepts only the
+`carbon-registry` audience and a canonical `/registry/` POST path. The existing
+Database exchange contracts are unchanged and still accept only
+`carbon-database`.
+
+Carbon Registry gained its first canonical account-facing request,
+`namespace.get` (`RegistryRequest`/`RegistryResponse`, `metadata.read`), served
+at `/internal/platform/v1/environments/{environmentId}/registry/namespace.get`.
+It verifies audience, scope, permission, method, path, body digest and request
+correlation, consumes the assertion once, and rechecks Cloud's live authority
+before answering. Cloud's `PostgresServiceAuthority` routes `/registry/` paths
+to a Registry-only check: `carbon-registry` audience, `account`/`cli` or
+`service_account`/`automation` principal with no roles, one exact grant, a ready
+or paused binding owned by Registry, and the current credential state. The
+credential-state queries are now shared with the Database data check instead of
+duplicated.
+
+Proof gate, over real HTTP and PostgreSQL:
+
+- A Database-audience assertion is refused by Registry (401), including one
+  bound to the exact Registry request.
+- A Registry-audience assertion is refused by Database (401 on a data path).
+- Neither exchange route accepts the other's audience or path family (400).
+- A Registry assertion naming the Database binding has no live authority (401).
+- A replayed assertion is refused (401); a changed body or correlation ID is
+  refused (400).
+- Disabling the service account or revoking the device grant blocks both new
+  exchanges and assertions already issued.
+- Removing the audience check from the Registry authority makes the two Cloud
+  credential tests fail, so the tests exercise the check.
+
+The affected regression passed **491 tests, 0 failures and 4,340 assertions
+across 60 files** (platform contracts, cloud identity/catalog/data capabilities,
+integrations, Carbon Cloud, Database, Registry, CLI and the cross-service
+suites). Generated contracts are current and the Solutions, Cloud, Database,
+Registry and CLI TypeScript checks pass. Both changed OpenAPI documents parse as
+JSON.
+
+Not included: a CLI command that calls Registry, dashboard-session Registry
+requests, and any Registry operation beyond `namespace.get`. Publisher, review
+and trust work remains Phase 14.
+
+Phase 2 stops here. Phase 3 (personal credentials and the legacy `cc_`
+migration path) is next in [the handoff](left-off/handoff.md).

@@ -53,6 +53,22 @@
         }
       }
     },
+    "/platform/v1/device/registry-assertions": {
+      "post": {
+        "operationId": "exchangeDeviceRegistryAssertion",
+        "security": [{ "deviceCredential": [] }],
+        "description": "Authenticates one exact-scope dc_ credential and issues a 60-second assertion bound to one canonical Registry request. Database requests and the Database audience are rejected here.",
+        "parameters": [{ "$ref": "account-api.openapi.json#/components/parameters/RequestId" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DeviceRegistryAssertionExchange" } } } },
+        "responses": {
+          "200": { "description": "Request-bound Registry assertion", "content": { "application/json": { "schema": { "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DeviceAssertionResponse" } } } },
+          "400": { "$ref": "account-api.openapi.json#/components/responses/Error" },
+          "401": { "$ref": "account-api.openapi.json#/components/responses/Error" },
+          "403": { "$ref": "account-api.openapi.json#/components/responses/Error" },
+          "500": { "$ref": "account-api.openapi.json#/components/responses/Error" }
+        }
+      }
+    },
     "/platform/v1/account/device-authorizations/review": {
       "post": {
         "operationId": "reviewDeviceAuthorization",

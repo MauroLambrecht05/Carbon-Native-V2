@@ -1,10 +1,11 @@
 import { PostgresPlatformAuthority, bodyDigest, sameScope } from '@carbon/identity';
-import { serviceLifecycleBody, serviceLifecycleStatusPath, dataRequestPath, dataPermission, dataImportPath, type DataRequest, type InternalAssertion } from '@carbon/contracts/platform';
+import { serviceLifecycleBody, serviceLifecycleStatusPath, dataRequestPath, dataPermission, dataImportPath, registryRequestPath, registryPermission, type DataRequest, type InternalAssertion, type Permission, type RegistryRequest } from '@carbon/contracts/platform';
 import type { ServiceAuthority } from '../application/ports/ServiceAuthority.ts';
 
-/** Live authority for the implemented lifecycle and signed Database data protocols. */
+/** Live authority for the implemented lifecycle, signed Database data and signed Registry protocols. */
 export class PostgresServiceAuthority extends PostgresPlatformAuthority implements ServiceAuthority {
   async isCurrent(assertion: InternalAssertion): Promise<boolean> {
+    if (/^\/internal\/platform\/v1\/environments\/[^/]+\/registry\//.test(assertion.request.path)) return this.registryAuthority(assertion);
     if (assertion.request.path.includes('/imports/')) return this.importAuthority(assertion);
     if (assertion.request.path.includes('/data/')) return this.dataAuthority(assertion);
     const scope = assertion.scope; const principal = assertion.principal;
@@ -76,27 +77,7 @@ export class PostgresServiceAuthority extends PostgresPlatformAuthority implemen
       const binding = await tx`SELECT id FROM service_bindings WHERE id = ${bindingId} AND org_id = ${scope.orgId} AND project_id = ${scope.projectId}
         AND environment_id = ${scope.environmentId} AND owner = 'database' AND remote_resource_id IS NOT NULL AND state IN ('ready', 'paused')`;
       if (!binding.length) return false;
-      if(principal.kind==='service_account'){
-        const service=(await tx`SELECT s.permission_revision::text,c.service_account_permission_revision::text AS credential_permission_revision
-          FROM service_accounts s JOIN service_account_credentials c ON c.service_account_id=s.id
-          JOIN organizations o ON o.id=s.org_id JOIN projects p ON p.id=s.project_id AND p.org_id=s.org_id
-          JOIN environments e ON e.id=s.environment_id AND e.project_id=s.project_id AND e.org_id=s.org_id
-          WHERE s.managed AND s.id=${principal.id} AND c.id=${principal.credentialId} AND s.org_id=${scope.orgId} AND s.project_id=${scope.projectId}
-            AND s.environment_id=${scope.environmentId} AND s.status='active' AND c.status='active' AND c.expires_at>now()
-            AND o.state='active' AND p.state='active' AND e.state<>'deleted' AND ${permission}=ANY(s.permissions)`)[0];
-        return !!service&&service.permission_revision===principal.permissionRevision&&service.credential_permission_revision===service.permission_revision&&assertion.roles.length===0;
-      }
-      if(principal.audience==='cli'){
-        const grant=(await tx`SELECT g.permission_revision::text AS grant_permission_revision,a.permission_revision::text AS account_permission_revision
-          FROM device_grants g JOIN accounts a ON a.id=g.account_id JOIN organizations o ON o.id=g.org_id
-          JOIN memberships m ON m.account_id=g.account_id AND m.org_id=g.org_id
-          JOIN projects p ON p.id=g.project_id AND p.org_id=g.org_id
-          JOIN environments e ON e.id=g.environment_id AND e.project_id=g.project_id AND e.org_id=g.org_id
-          WHERE g.id=${principal.credentialId} AND g.account_id=${principal.id} AND g.org_id=${scope.orgId} AND g.project_id=${scope.projectId}
-            AND g.environment_id=${scope.environmentId} AND g.status='active' AND g.expires_at>now() AND a.state='active'
-            AND o.state='active' AND m.state='active' AND p.state='active' AND e.state<>'deleted' AND ${permission}=ANY(g.permissions)`)[0];
-        return !!grant&&grant.grant_permission_revision===principal.permissionRevision&&grant.account_permission_revision===grant.grant_permission_revision&&assertion.roles.length===0;
-      }
+      if (principal.kind === 'service_account' || principal.audience === 'cli') return assertion.roles.length === 0 && this.credentialAuthority(tx, assertion, permission);
       await this.lockAccounts(tx, [principal.id], true);
       const session = (await tx`SELECT token_hash, csrf_hash, security_revision::text FROM account_sessions WHERE id = ${principal.credentialId} AND account_id = ${principal.id}`)[0];
       if (!session) return false;
@@ -110,6 +91,53 @@ export class PostgresServiceAuthority extends PostgresPlatformAuthority implemen
         const organization = await this.organization(tx, scope.orgId, principal.id);
         return access.permissions.includes(permission) && assertion.roles.length === 1 && assertion.roles[0] === organization.role;
       } catch { return false; }
+    });
+  }
+  /** Exact-scope device (dc_) and managed service-account (cs_) credentials, rechecked against current state. */
+  private async credentialAuthority(tx: Bun.TransactionSQL, assertion: InternalAssertion, permission: Permission): Promise<boolean> {
+    const scope = assertion.scope; const principal = assertion.principal;
+    if (!scope.projectId || !scope.environmentId) return false;
+    if(principal.kind==='service_account'){
+      const service=(await tx`SELECT s.permission_revision::text,c.service_account_permission_revision::text AS credential_permission_revision
+        FROM service_accounts s JOIN service_account_credentials c ON c.service_account_id=s.id
+        JOIN organizations o ON o.id=s.org_id JOIN projects p ON p.id=s.project_id AND p.org_id=s.org_id
+        JOIN environments e ON e.id=s.environment_id AND e.project_id=s.project_id AND e.org_id=s.org_id
+        WHERE s.managed AND s.id=${principal.id} AND c.id=${principal.credentialId} AND s.org_id=${scope.orgId} AND s.project_id=${scope.projectId}
+          AND s.environment_id=${scope.environmentId} AND s.status='active' AND c.status='active' AND c.expires_at>now()
+          AND o.state='active' AND p.state='active' AND e.state<>'deleted' AND ${permission}=ANY(s.permissions)`)[0];
+      return !!service&&service.permission_revision===principal.permissionRevision&&service.credential_permission_revision===service.permission_revision;
+    }
+    if(principal.audience==='cli'){
+      const grant=(await tx`SELECT g.permission_revision::text AS grant_permission_revision,a.permission_revision::text AS account_permission_revision
+        FROM device_grants g JOIN accounts a ON a.id=g.account_id JOIN organizations o ON o.id=g.org_id
+        JOIN memberships m ON m.account_id=g.account_id AND m.org_id=g.org_id
+        JOIN projects p ON p.id=g.project_id AND p.org_id=g.org_id
+        JOIN environments e ON e.id=g.environment_id AND e.project_id=g.project_id AND e.org_id=g.org_id
+        WHERE g.id=${principal.credentialId} AND g.account_id=${principal.id} AND g.org_id=${scope.orgId} AND g.project_id=${scope.projectId}
+          AND g.environment_id=${scope.environmentId} AND g.status='active' AND g.expires_at>now() AND a.state='active'
+          AND o.state='active' AND m.state='active' AND p.state='active' AND e.state<>'deleted' AND ${permission}=ANY(g.permissions)`)[0];
+      return !!grant&&grant.grant_permission_revision===principal.permissionRevision&&grant.account_permission_revision===grant.grant_permission_revision;
+    }
+    return false;
+  }
+  private async registryAuthority(assertion: InternalAssertion): Promise<boolean> {
+    const scope = assertion.scope; const principal = assertion.principal;
+    if (assertion.aud !== 'carbon-registry' || !((principal.kind === 'account' && principal.audience === 'cli') || (principal.kind === 'service_account' && principal.audience === 'automation')) || !scope.projectId || !scope.environmentId || scope.realmId || assertion.request.method !== 'POST' || assertion.roles.length !== 0) return false;
+    let bindingId: string; let permission: Permission;
+    try {
+      const url = new URL(assertion.request.path, 'https://internal.invalid');
+      const kind = url.pathname.split('/').at(-1) as RegistryRequest['command']['kind'];
+      bindingId = url.searchParams.get('bindingId')!;
+      if (assertion.request.path !== registryRequestPath({ orgId: scope.orgId, projectId: scope.projectId, environmentId: scope.environmentId }, bindingId, kind)) return false;
+      permission = registryPermission(kind);
+      if (assertion.grants.length !== 1 || assertion.grants[0]!.permission !== permission || !sameScope(assertion.grants[0]!.scope, scope)) return false;
+    } catch { return false; }
+    return this.sql.begin(async tx => {
+      await tx`SELECT id FROM organizations WHERE id = ${scope.orgId} FOR SHARE`;
+      const binding = await tx`SELECT id FROM service_bindings WHERE id = ${bindingId} AND org_id = ${scope.orgId} AND project_id = ${scope.projectId}
+        AND environment_id = ${scope.environmentId} AND owner = 'registry' AND remote_resource_id IS NOT NULL AND state IN ('ready', 'paused')`;
+      if (!binding.length) return false;
+      return this.credentialAuthority(tx, assertion, permission);
     });
   }
   private async importAuthority(assertion: InternalAssertion): Promise<boolean> {

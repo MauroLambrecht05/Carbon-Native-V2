@@ -12,7 +12,7 @@ meaningful tests pass together.
 | Phase | Bounded goal | Exit proof |
 |---|---|---|
 | 1 — complete | Make Carbon CLI complete device login, store `dc_` credentials safely, and exchange authorized CLI requests for exact Database assertions. | Completed: device flow, OS credential storage, exact Database request binding and live revocation are covered by CLI and PostgreSQL-backed tests. |
-| 2 | Extend exact short-lived assertion exchange to Registry without widening Database or credential audiences. | Cross-audience tests prove a Database grant cannot reach Registry and a Registry grant cannot reach Database; revocation is live. |
+| 2 — complete | Extend exact short-lived assertion exchange to Registry without widening Database or credential audiences. | Completed: separate Registry exchange contracts and routes, a canonical Registry request, and cross-service tests proving Database and Registry assertions cannot cross and that revocation is live. |
 | 3 | Add personal credentials and a reviewed migration/deprecation path for legacy `cc_` credentials. | Cross-tenant tests prove one-time disclosure, hash-only storage, bounded scopes, rotation/revocation, safe migration and rollback behavior. |
 | 4 | Add worker enrollment, lease-scoped worker credentials, hosted KMS/HSM custody, and short-lived build/function secret materialization. | A worker can obtain only its leased inputs; browser/data routes cannot materialize secrets; expiry, cancellation, replay, key rotation and worker loss are tested. |
 | 5 | Finish BE-01 to BE-03 lifecycle gaps: streams, audit browsing, archive/deletion/suspension/recovery, revocation propagation and adversarial tenant coverage. | Every affected resource has a tested state machine, durable events, recovery path and two-tenant denial matrix. |
@@ -30,32 +30,33 @@ meaningful tests pass together.
 | 17 | Complete production browser adapters and the Carbon frontend one vertical slice at a time. | Each frontend-plan walkthrough passes against real services; production bundles contain no mock imports or mock data. |
 | 18 | Complete observability, deployment compatibility, security review, migration reconciliation, canary rollout and cutover. | Sections 25-29 of the backend plan have recorded production evidence, including restore, rotation, rollback and no-mock-fallback drills. |
 
-## Start with Phase 2
+## Start with Phase 3
 
-Phase 1 is complete. Read these files before changing Phase 2 code:
+Phases 1 and 2 are complete. Read these files before changing Phase 3 code:
 
 - [device-authorization.md](../device-authorization.md)
 - [service-accounts.md](../service-accounts.md)
+- [environment-credentials.md](../environment-credentials.md)
 - `solutions/capabilities/cloud/identity/application/usecases/AccountDeviceAuthorization.ts`
 - `solutions/capabilities/cloud/identity/application/usecases/AccountServiceAccounts.ts`
-- `solutions/capabilities/cloud/identity/infrastructure/ServiceAssertions.ts`
-- `products/carbon-cli/` command and credential-storage composition
-- `products/carbon-registry/` service authority and HTTP composition
+- `solutions/capabilities/cloud/catalog/infrastructure/PostgresServiceAuthority.ts`
+- the legacy `cc_` token paths in `products/carbon-cloud/` and `products/carbon-cli/`
 
 Keep `dc_`, `cs_`, `ce_` and any future personal/worker tokens as distinct
 credential types and audiences. The CLI should never receive a signing key or
 manufacture a service assertion locally. Cloud authenticates the credential,
 rechecks live authority and issues a short-lived assertion bound to one audience,
 scope, permission, method, path and body digest. Receiving services still verify
-the assertion and call live Cloud authority.
+the assertion and call live Cloud authority. Database and Registry each have
+their own exchange contract and route; add a new one per audience instead of
+widening an existing one.
 
-Phase 2 should add a distinct Registry exchange contract, Cloud route and
-receiving-service authority path without widening the completed Database
-audience. Its proof gate must show that Database assertions cannot reach
-Registry, Registry assertions cannot reach Database, and device revocation is
-live at both exchange and consumption time. Stop after its tests and
-documentation; do not pull personal credentials, workers, build execution or
-frontend work into that phase.
+Phase 3 should add personal credentials with one-time disclosure, hash-only
+storage, bounded scopes, rotation and revocation, plus a reviewed migration and
+deprecation path for legacy `cc_` credentials. Its proof gate must include
+cross-tenant denial and safe migration and rollback behavior. Stop after its
+tests and documentation; do not pull workers, build execution or frontend work
+into that phase.
 
 ## Verification baseline
 
@@ -63,8 +64,9 @@ From the repository root in PowerShell:
 
 ```powershell
 $env:CARBON_PLATFORM_TEST_DATABASE_URL = 'postgres://carbon_test:carbon_test_local_only@127.0.0.1:55439/carbon_platform_test'
+$env:CARBON_SERVICE_TEST_DATABASE_URL = 'postgres://carbon_test:carbon_test_local_only@127.0.0.1:55440/carbon_service_test'
 
-bun.cmd test ./solutions/contracts/platform ./solutions/capabilities/cloud/identity/tests ./solutions/capabilities/cloud/catalog/tests ./solutions/capabilities/cloud/data/tests ./products/carbon-cloud/tests/platform/account-auth.integration.test.ts ./products/carbon-cli/tests/device-authorization.test.ts ./products/carbon-cli/tests/db.command.test.ts ./products/carbon-cli/tests/registry.test.ts --timeout 30000
+bun.cmd test ./solutions/contracts/platform ./solutions/capabilities/cloud/identity/tests ./solutions/capabilities/cloud/catalog/tests ./solutions/capabilities/cloud/data/tests ./products/carbon-cloud/tests/platform/account-auth.integration.test.ts ./products/carbon-cli/tests/device-authorization.test.ts ./products/carbon-cli/tests/db.command.test.ts ./products/carbon-cli/tests/registry.test.ts ./.tools/automation/testing/platform-lifecycle.integration.test.ts --timeout 60000
 bun.cmd .tools/automation/contracts/generate-platform-types.ts --check
 bun.cmd x tsc --noEmit -p solutions/tsconfig.json
 bun.cmd x tsc --noEmit -p products/carbon-cloud/tsconfig.json

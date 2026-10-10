@@ -39,5 +39,15 @@ binding and rechecks the device grant, account, membership, resources,
 permission revision and Database binding through live Cloud authority. Revoking
 the grant therefore blocks both new exchanges and already issued assertions.
 
-Registry assertion exchange remains Phase 2. Personal and worker credentials
-remain separate later work.
+Registry has its own exchange at `POST /platform/v1/device/registry-assertions`
+with the `DeviceRegistryAssertionExchange` contract. It accepts only the
+`carbon-registry` audience and canonical `/registry/` request paths; the
+Database exchange accepts neither. Carbon Registry verifies the audience and
+request binding, then asks Cloud's live authority to recheck the grant and the
+exact Registry binding. A Database assertion is refused by Registry, a Registry
+assertion is refused by Database, and revoking the grant blocks both the
+exchange and assertions already issued. The first canonical Registry request is
+`namespace.get`, which returns the environment's reserved namespace and requires
+`metadata.read`. The CLI does not call it yet.
+
+Personal and worker credentials remain separate later work.
