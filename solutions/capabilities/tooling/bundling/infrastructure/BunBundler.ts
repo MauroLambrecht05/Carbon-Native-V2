@@ -896,6 +896,25 @@ export async function buildBundleWithBabel(
       {
         name: "carbon-css-noop",
         setup(b) {
+          // Preserve authored CSS for Mini and inline local @imports first.
+          // Tailwind at-rules remain harmless (the runtime parser skips them),
+          // while ordinary global rules such as font-family and package CSS
+          // reach the lightweight stylesheet engine.
+          const readCssTree = (path: string, seen = new Set<string>()): string => {
+            if (seen.has(path)) return "";
+            seen.add(path);
+            let css = "";
+            try { css = readFileSync(path, "utf8"); } catch { return ""; }
+            return css.replace(
+              /@import\s+(?:url\(\s*)?["']([^"']+)["']\s*\)?\s*;/g,
+              (full, specifier: string) => {
+                if (/^(?:https?:|data:)/i.test(specifier)) return full;
+                let imported = join(dirname(path), specifier);
+                try { imported = Bun.resolveSync(specifier, dirname(path)); } catch { /* use joined path */ }
+                return readCssTree(imported, seen);
+              },
+            );
+          };
           // Resolve the .css specifier to an absolute path so onLoad can read
           // the file. App CSS (src/) is no-op'd (its utilities flow through
           // the Tailwind class resolver). PACKAGE stylesheets (node_modules —
@@ -912,15 +931,11 @@ export async function buildBundleWithBabel(
             return { path: resolved, namespace: "carbon-css-noop" };
           });
           b.onLoad({ filter: /.*/, namespace: "carbon-css-noop" }, async (args) => {
-            if (!args.path.includes("node_modules")) {
-              return { contents: "export default {};", loader: "js" as const };
-            }
-            let css = "";
-            try { css = await Bun.file(args.path).text(); } catch { /* ignore */ }
+            const css = readCssTree(args.path);
             return {
               contents:
                 `import { registerStylesheet as __cm_register_stylesheet } from ${JSON.stringify(_carbonCssEnginePath)};\n` +
-                `__cm_register_stylesheet(${JSON.stringify(css)});\nexport default {};`,
+                `__cm_register_stylesheet(${JSON.stringify(css)}, ${JSON.stringify("import:" + args.path)});\nexport default {};`,
               loader: "js" as const,
             };
           });

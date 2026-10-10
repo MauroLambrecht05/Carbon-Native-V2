@@ -37,6 +37,45 @@ const SOURCE_KEYS = new Map<string, number>();
 
 const ELEMENT_NODE = 1;
 
+// Carbon does not assign cascade layers yet, but dropping an entire @layer
+// block is worse than treating it as an ordinary author sheet: modern
+// Tailwind projects put their global reset and font rules inside `@layer
+// base`. Remove only the layer wrapper while preserving balanced nested
+// rule blocks. Other at-rules continue through the existing skip path.
+function unwrapLayerBlocks(css: string): string {
+  let out = "";
+  let cursor = 0;
+  while (cursor < css.length) {
+    const at = css.indexOf("@layer", cursor);
+    if (at < 0) {
+      out += css.slice(cursor);
+      break;
+    }
+    out += css.slice(cursor, at);
+    const open = css.indexOf("{", at + 6);
+    const semi = css.indexOf(";", at + 6);
+    if (open < 0 || (semi >= 0 && semi < open)) {
+      const end = semi >= 0 ? semi + 1 : css.length;
+      cursor = end; // a layer-order declaration has no rules to retain
+      continue;
+    }
+    let depth = 1;
+    let i = open + 1;
+    while (i < css.length && depth > 0) {
+      if (css[i] === "{") depth++;
+      else if (css[i] === "}") depth--;
+      i++;
+    }
+    if (depth !== 0) {
+      out += css.slice(at);
+      break;
+    }
+    out += unwrapLayerBlocks(css.slice(open + 1, i - 1));
+    cursor = i;
+  }
+  return out;
+}
+
 // ── parsing ─────────────────────────────────────────────────────────────────
 function parseSimple(text: string): Simple {
   const s: Simple = { tag: null, id: null, classes: [], universal: false };
@@ -103,7 +142,7 @@ export function registerStylesheet(css: string, sourceKey?: string): void {
   } else {
     source = ++SOURCE;
   }
-  const clean = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const clean = unwrapLayerBlocks(css.replace(/\/\*[\s\S]*?\*\//g, ""));
   let i = 0;
   const n = clean.length;
   while (i < n) {

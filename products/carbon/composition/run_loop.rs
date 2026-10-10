@@ -6,7 +6,97 @@
 // reordered, split, or merged.
 
 use super::*;
-use std::collections::HashMap;
+
+fn damage_pixel_bounds(
+    width: u32,
+    height: u32,
+    (x, y, rect_width, rect_height): (f32, f32, f32, f32),
+    scale: f32,
+) -> Option<(usize, usize, usize, usize)> {
+    let pixel_width = width as i32;
+    let pixel_height = height as i32;
+    let x0 = ((x * scale).floor() as i32).clamp(0, pixel_width) as usize;
+    let y0 = ((y * scale).floor() as i32).clamp(0, pixel_height) as usize;
+    let x1 = (((x + rect_width) * scale).ceil() as i32).clamp(x0 as i32, pixel_width) as usize;
+    let y1 = (((y + rect_height) * scale).ceil() as i32).clamp(y0 as i32, pixel_height) as usize;
+    (x1 > x0 && y1 > y0).then_some((x0, y0, x1, y1))
+}
+
+fn blit_damage_to_buffer(
+    pixmap: &Pixmap,
+    buffer: &mut [u32],
+    bounds: (usize, usize, usize, usize),
+) {
+    let (x0, y0, x1, y1) = bounds;
+    let stride = pixmap.width() as usize;
+    let pixels = pixmap.data();
+    for py in y0..y1 {
+        for px in x0..x1 {
+            let src = (py * stride + px) * 4;
+            buffer[py * stride + px] = ((pixels[src] as u32) << 16)
+                | ((pixels[src + 1] as u32) << 8)
+                | pixels[src + 2] as u32;
+        }
+    }
+}
+
+/// Composite only the pixels covered by a logical damage rectangle. The
+/// source is an isolated transparent repaint and the destination rectangle
+/// has already been cleared, making scoped painting safe for effects that
+/// naturally draw beyond their node's bounds.
+fn composite_damage_rect(
+    source: &Pixmap,
+    destination: &mut Pixmap,
+    (x, y, width, height): (f32, f32, f32, f32),
+    scale: f32,
+) {
+    let pixel_width = destination.width() as i32;
+    let pixel_height = destination.height() as i32;
+    let x0 = ((x * scale).floor() as i32).clamp(0, pixel_width);
+    let y0 = ((y * scale).floor() as i32).clamp(0, pixel_height);
+    let x1 = (((x + width) * scale).ceil() as i32).clamp(x0, pixel_width);
+    let y1 = (((y + height) * scale).ceil() as i32).clamp(y0, pixel_height);
+    let stride = destination.width() as usize * 4;
+    let src = source.data();
+    let dst = destination.data_mut();
+    for py in y0 as usize..y1 as usize {
+        for px in x0 as usize..x1 as usize {
+            let i = py * stride + px * 4;
+            let sa = src[i + 3] as u16;
+            if sa == 0 {
+                continue;
+            }
+            if sa == 255 {
+                dst[i..i + 4].copy_from_slice(&src[i..i + 4]);
+                continue;
+            }
+            let inv = 255 - sa;
+            for channel in 0..3 {
+                dst[i + channel] = (src[i + channel] as u16
+                    + (dst[i + channel] as u16 * inv + 127) / 255)
+                    .min(255) as u8;
+            }
+            dst[i + 3] = (sa + (dst[i + 3] as u16 * inv + 127) / 255).min(255) as u8;
+        }
+    }
+}
+
+/// Reset only the part of a retained scratch pixmap that will be repainted.
+/// Keeping the allocation alive avoids zeroing an entire window-sized image
+/// for every hover or wheel event.
+fn clear_damage_rect(pixmap: &mut Pixmap, (x, y, width, height): (f32, f32, f32, f32), scale: f32) {
+    let pixel_width = pixmap.width() as i32;
+    let pixel_height = pixmap.height() as i32;
+    let x0 = ((x * scale).floor() as i32).clamp(0, pixel_width) as usize;
+    let y0 = ((y * scale).floor() as i32).clamp(0, pixel_height) as usize;
+    let x1 = (((x + width) * scale).ceil() as i32).clamp(x0 as i32, pixel_width) as usize;
+    let y1 = (((y + height) * scale).ceil() as i32).clamp(y0 as i32, pixel_height) as usize;
+    let stride = pixmap.width() as usize * 4;
+    let data = pixmap.data_mut();
+    for py in y0..y1 {
+        data[py * stride + x0 * 4..py * stride + x1 * 4].fill(0);
+    }
+}
 
 /// Everything the old `event_loop.run(move |event, ...| { ... })` closure
 /// captured by `move`. Built once in `main()` right before the loop starts,
@@ -21,6 +111,7 @@ pub(crate) struct State {
     pub(crate) host_app: Box<host_exports::HostCarbonAppStorage>,
     pub(crate) plugin_registry: plugin_loader::PluginRegistry,
     pub(crate) paint_canvas: Option<paint::Canvas>,
+    pub(crate) damage_pixmap: Option<Pixmap>,
     pub(crate) first_paint_done: bool,
     pub(crate) mouse_pos: (f32, f32),
     pub(crate) modifiers_state: ModifiersState,
@@ -37,18 +128,6 @@ pub(crate) struct State {
     /// that module's doc comment and this file's own first-paint save-site
     /// comment for the full design.
     pub(crate) project_dir: PathBuf,
-    /// Momentum/inertia scroll: per-scrollport y velocity (px/frame),
-    /// keyed by node id. Set (overwritten, not accumulated — a new
-    /// wheel event supersedes whatever momentum was left) on each
-    /// native-scrollport wheel event; decayed by `MOMENTUM_FRICTION`
-    /// once per `RedrawRequested` frame until it drops below
-    /// `MOMENTUM_MIN_VELOCITY`, at which point the entry is dropped.
-    /// There's no gesture/momentum model anywhere else in this engine
-    /// (see `Scene::scroll_snap_target`'s doc comment for the same
-    /// caveat on scroll-snap) — Windows' wheel/touchpad events carry no
-    /// OS-simulated momentum tail the way macOS's do, so without this a
-    /// flick-scroll just stops dead the instant the input stops.
-    pub(crate) scroll_velocity: HashMap<u32, f32>,
 }
 
 /// Eval a dispatch script on the JS thread, logging (never silently
@@ -266,15 +345,14 @@ impl State {
                         // it's a `repaint_dirty` event, not a full structural
                         // dirty. Damage rect = bounding box of (old hovered,
                         // new hovered) so we only repaint those two regions.
+                        // Repaint the old and new targets. The scoped paint
+                        // path isolates this render and copies back only the
+                        // damage region, so out-of-bounds effects cannot stack.
                         if let Some(id) = prev {
-                            if let Some(b) = s.absolute_box(id) {
-                                s.add_damage(b.0, b.1, b.2, b.3);
-                            }
+                            s.add_node_damage(id);
                         }
                         if let Some(id) = hit {
-                            if let Some(b) = s.absolute_box(id) {
-                                s.add_damage(b.0, b.1, b.2, b.3);
-                            }
+                            s.add_node_damage(id);
                         }
                         s.repaint_dirty = true;
                         self.window.request_redraw();
@@ -1055,19 +1133,17 @@ impl State {
                             // Wheel-down (toward user, dy<0) increases scroll_y
                             // so content moves up; wheel-up decreases it.
                             let new_y = s.set_scroll_y(node_id, cur - dy);
+                            // Scrolling changes which row is physically under
+                            // a stationary pointer. Re-hit-test immediately so
+                            // :hover does not travel with the old row.
+                            let next_hover = s.hit_test(self.mouse_pos.0, self.mouse_pos.1);
+                            s.hovered = next_hover;
                             if std::env::var_os("CARBON_MINI_SCROLL_DEBUG").is_some() {
                                 eprintln!(
                                     "[carbon-mini-wheel] node={} {:.1} -> {:.1}",
                                     node_id, cur, new_y
                                 );
                             }
-                            // Momentum: this event's own delta becomes the
-                            // starting velocity for the coast-to-stop decay
-                            // in RedrawRequested — overwrites (not adds to)
-                            // any leftover momentum from a still-decaying
-                            // earlier flick, since actively-arriving wheel
-                            // input always supersedes it.
-                            self.scroll_velocity.insert(node_id, dy);
                             self.window.request_redraw();
                         }
                     }
@@ -1368,33 +1444,6 @@ impl State {
                     false
                 };
 
-                // ─── Momentum / inertia scroll ──────────────────────────────────
-                // Decay any active flick-scroll velocity by one frame's worth
-                // of friction, applying it through the same `set_scroll_y`
-                // path a wheel event uses (so it gets clamping AND
-                // scroll-snap for free — see `scroll_velocity`'s doc comment
-                // on `State` for why this exists at all). Self-perpetuating
-                // via `request_redraw`, same pattern as the rAF drain above,
-                // for as long as any velocity remains above the stop
-                // threshold; harmless to run against an entry that's already
-                // clamped at a scroll boundary (it just decays to removal a
-                // few frames sooner).
-                const MOMENTUM_FRICTION: f32 = 0.90;
-                const MOMENTUM_MIN_VELOCITY: f32 = 0.5;
-                if !self.scroll_velocity.is_empty() {
-                    let mut s = self.scene.lock().unwrap_or_else(|e| e.into_inner());
-                    self.scroll_velocity.retain(|&node_id, v| {
-                        let cur = s.scroll_y(node_id);
-                        s.set_scroll_y(node_id, cur - *v);
-                        *v *= MOMENTUM_FRICTION;
-                        v.abs() >= MOMENTUM_MIN_VELOCITY
-                    });
-                    drop(s);
-                    if !self.scroll_velocity.is_empty() {
-                        self.window.request_redraw();
-                    }
-                }
-
                 // ─── Damage Tracking ───────────────────────────────────────────
                 // Two damage flags: `dirty` forces a layout pass + paint;
                 // `repaint_dirty` forces only paint (cached layout reused).
@@ -1497,15 +1546,16 @@ impl State {
                         // Falling back to the full clear_white() path whenever
                         // any node currently has a box-shadow sidesteps it
                         // without having to teach dirty-rect computation about
-                        // shadow-spread overflow. Cheap: nodes is already a
-                        // flat map, and this only runs on a scoped-repaint
-                        // decision (hover transitions), not every frame.
-                        let scoped_damage = {
+                        // The scoped path paints into a transparent layer and
+                        // copies back only this rectangle. Effects outside the
+                        // rectangle are discarded instead of accumulating on
+                        // the retained frame.
+                        let (damage_rect, layout_damage_scoped) = {
                             let s = self.scene.lock().unwrap_or_else(|e| e.into_inner());
-                            !s.dirty
-                                && s.dirty_rect.is_some()
-                                && !s.nodes.values().any(|n| !n.props.box_shadow.is_empty())
+                            (s.dirty_rect, s.layout_damage_scoped)
                         };
+                        let scoped_damage =
+                            (!scene_dirty || layout_damage_scoped) && damage_rect.is_some();
                         if scoped_damage {
                             // Erase only the damage rect to white. This
                             // hard-resets pixels in the rect before paint
@@ -1514,12 +1564,7 @@ impl State {
                             // alpha-stacking artifact that "skip clear +
                             // rely on bg fills" left at edges where the
                             // bg fill didn't fully cover.
-                            if let Some((dx, dy, dw, dh)) = self
-                                .scene
-                                .lock()
-                                .unwrap_or_else(|e| e.into_inner())
-                                .dirty_rect
-                            {
+                            if let Some((dx, dy, dw, dh)) = damage_rect {
                                 // dirty_rect is in LOGICAL px (scene coords);
                                 // the pixmap is physical, so scale the erase.
                                 if let Some(rect) =
@@ -1547,12 +1592,46 @@ impl State {
                                 .dirty_rect = None;
                         }
                         let _perf_paint = std::time::Instant::now();
-                        paint::paint_scene(
-                            &self.scene.lock().unwrap_or_else(|e| e.into_inner()),
-                            &mut canvas.pixmap,
-                            scale_f,
-                            &mut self.text_engine.borrow_mut(),
-                        );
+                        if scoped_damage {
+                            let layer_ok = match &self.damage_pixmap {
+                                Some(layer) if layer.width() == w && layer.height() == h => true,
+                                _ => {
+                                    self.damage_pixmap = Pixmap::new(w, h);
+                                    self.damage_pixmap.is_some()
+                                }
+                            };
+                            if layer_ok {
+                                let layer = self.damage_pixmap.as_mut().unwrap();
+                                if let Some(rect) = damage_rect {
+                                    clear_damage_rect(layer, rect, scale_f);
+                                }
+                                paint::paint_scene(
+                                    &self.scene.lock().unwrap_or_else(|e| e.into_inner()),
+                                    layer,
+                                    scale_f,
+                                    &mut self.text_engine.borrow_mut(),
+                                );
+                                if let Some(rect) = damage_rect {
+                                    composite_damage_rect(layer, &mut canvas.pixmap, rect, scale_f);
+                                }
+                            } else {
+                                // Allocation failure is exceptional, but keep
+                                // the frame correct by repainting directly.
+                                paint::paint_scene(
+                                    &self.scene.lock().unwrap_or_else(|e| e.into_inner()),
+                                    &mut canvas.pixmap,
+                                    scale_f,
+                                    &mut self.text_engine.borrow_mut(),
+                                );
+                            }
+                        } else {
+                            paint::paint_scene(
+                                &self.scene.lock().unwrap_or_else(|e| e.into_inner()),
+                                &mut canvas.pixmap,
+                                scale_f,
+                                &mut self.text_engine.borrow_mut(),
+                            );
+                        }
                         // before_paint hands plugins the real, already-drawn
                         // RGBA8 frame — after the rasterizer has drawn the
                         // scene and before the pixmap is presented, matching
@@ -1580,7 +1659,16 @@ impl State {
                             h,
                             stride,
                         );
-                        paint::blit_to_buffer(&canvas.pixmap, &mut buffer, w, h);
+                        let present_damage = if scoped_damage && buffer.age() > 0 {
+                            damage_rect.and_then(|rect| damage_pixel_bounds(w, h, rect, scale_f))
+                        } else {
+                            None
+                        };
+                        if let Some(bounds) = present_damage {
+                            blit_damage_to_buffer(&canvas.pixmap, &mut buffer, bounds);
+                        } else {
+                            paint::blit_to_buffer(&canvas.pixmap, &mut buffer, w, h);
+                        }
                         if std::env::var_os("CARBON_PERF").is_some() {
                             let ms = _perf_paint.elapsed().as_secs_f64() * 1000.0;
                             if ms > 2.0 {
@@ -1596,6 +1684,7 @@ impl State {
                             scene_g.dirty = false;
                             scene_g.repaint_dirty = false;
                             scene_g.dirty_rect = None;
+                            scene_g.layout_damage_scoped = false;
                         }
 
                         // Mark first frame success for updater crash-counter reset.
@@ -1619,7 +1708,17 @@ impl State {
                             }
                         }
 
-                        let _ = buffer.present();
+                        let _ = if let Some((x0, y0, x1, y1)) = present_damage {
+                            let damage = softbuffer::Rect {
+                                x: x0 as u32,
+                                y: y0 as u32,
+                                width: NonZeroU32::new((x1 - x0) as u32).unwrap(),
+                                height: NonZeroU32::new((y1 - y0) as u32).unwrap(),
+                            };
+                            buffer.present_with_damage(&[damage])
+                        } else {
+                            buffer.present()
+                        };
                         self.plugin_registry.dispatch_after_paint();
 
                         // ─── First paint just hit the screen ───────────────

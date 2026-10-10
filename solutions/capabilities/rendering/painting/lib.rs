@@ -95,7 +95,7 @@ fn perf_add(slot: usize, t: std::time::Instant) {
 }
 use std::time::Instant;
 pub use tiny_skia::Pixmap;
-use tiny_skia::{Color, FillRule, Paint, PathBuilder, PixmapPaint, Rect, Transform};
+use tiny_skia::{Color, FillRule, Mask, Paint, PathBuilder, PixmapPaint, Rect, Transform};
 
 // Per-thread cache of decoded background images. Each entry maps a
 // logical path (as written in CSS / inline style) to the decoded
@@ -365,6 +365,65 @@ pub fn paint(
     blit_to_buffer(pixmap, buffer, w, h);
 }
 
+fn rects_intersect(ax: f32, ay: f32, aw: f32, ah: f32, bx: f32, by: f32, bw: f32, bh: f32) -> bool {
+    ax + aw >= bx && ax <= bx + bw && ay + ah >= by && ay <= by + bh
+}
+
+/// Returns whether this node or an overflow-visible descendant can contribute
+/// pixels inside a scoped damage rectangle. Parent layout bounds are not
+/// subtree bounds: menus/popovers commonly live below a short title bar.
+/// Treat transformed descendants conservatively because their final screen
+/// bounds may differ from Taffy's layout box.
+fn subtree_intersects_damage(
+    scene: &Scene,
+    id: u32,
+    parent_x: f32,
+    parent_y: f32,
+    damage: (f32, f32, f32, f32),
+) -> bool {
+    let Some(node) = scene.nodes.get(&id) else {
+        return false;
+    };
+    let Some(layout) = node.computed_layout else {
+        return false;
+    };
+    if node.props.transform.is_some()
+        || node.props.translate_x.is_some()
+        || node.props.translate_y.is_some()
+    {
+        return true;
+    }
+
+    let x = parent_x + layout.location.x;
+    let y = parent_y + layout.location.y;
+    let w = layout.size.width;
+    let h = layout.size.height;
+    let (dx, dy, dw, dh) = damage;
+    if rects_intersect(x, y, w, h, dx, dy, dw, dh) {
+        return true;
+    }
+
+    // Descendants cannot escape a clipping edge. If the damage lies wholly
+    // beyond such an edge, prune the subtree without scanning it.
+    let outside_x = x + w < dx || x > dx + dw;
+    let outside_y = y + h < dy || y > dy + dh;
+    if (outside_x && (node.props.overflow_y || node.props.overflow_clip_x))
+        || (outside_y && (node.props.overflow_y || node.props.overflow_clip_y))
+    {
+        return false;
+    }
+
+    let child_y = if node.props.overflow_y {
+        y - scene.scroll_y(id)
+    } else {
+        y
+    };
+    node.children.iter().any(|&child| {
+        let sticky_child_y = scene.sticky_oy(child, child_y, y, h);
+        subtree_intersects_damage(scene, child, x, sticky_child_y, damage)
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn paint_node(
     scene: &Scene,
@@ -413,6 +472,33 @@ fn paint_node(
         Some(l) => l,
         None => return,
     };
+
+    // Cull before any group-effect layer allocation. Previously opacity,
+    // filter, blend and rounded overflow each allocated a full-window pixmap
+    // before discovering that the node was outside a scoped damage region.
+    // A file-tree scroll therefore allocated layers for unrelated editor and
+    // toolbar nodes and spent ~200ms painting a ~300px-wide panel.
+    let x = parent_x + layout.location.x;
+    let y = parent_y + layout.location.y;
+    let w = layout.size.width;
+    let h = layout.size.height;
+    if y + h < clip_top || y > clip_bottom || x + w < clip_left || x > clip_right {
+        return;
+    }
+    let in_transformed_subtree = parent_transform.tx != 0.0
+        || parent_transform.ty != 0.0
+        || node.props.transform.is_some()
+        || node.props.translate_x.is_some()
+        || node.props.translate_y.is_some();
+    if !in_transformed_subtree {
+        if let Some(damage @ (dx, dy, dw, dh)) = scene.dirty_rect {
+            if !rects_intersect(x, y, w, h, dx, dy, dw, dh)
+                && !subtree_intersects_damage(scene, id, parent_x, parent_y, damage)
+            {
+                return;
+            }
+        }
+    }
 
     // ── CSS mix-blend-mode (group) ──────────────────────────────────────
     // Outermost of the three group effects: renders this node + subtree
@@ -468,6 +554,13 @@ fn paint_node(
     // opaque case (the overwhelming majority of nodes) costs nothing.
     if !ignore_opacity {
         if let Some(op) = node.props.opacity {
+            // A fully transparent group contributes no pixels. File-tree
+            // leaves use opacity-0 for their hidden chevron slot; allocating
+            // and painting a full-window layer for every such node made one
+            // scroll frame hundreds of milliseconds slower.
+            if op <= 0.0 {
+                return;
+            }
             if let Some(mut layer) = Pixmap::new(pixmap.width(), pixmap.height()) {
                 paint_node(
                     scene,
@@ -559,7 +652,10 @@ fn paint_node(
     // node's own `transform` — same accepted simplification as hit-testing
     // and text under transform elsewhere in this file; narrow edge case,
     // and strictly better than no real clip at all.
-    if !ignore_clip && node.props.overflow_y && node.props.border_radius > 0.0 {
+    if !ignore_clip
+        && (node.props.overflow_y || node.props.overflow_clip_x || node.props.overflow_clip_y)
+        && node.props.border_radius > 0.0
+    {
         let cx = parent_x + layout.location.x;
         let cy = parent_y + layout.location.y;
         let cw = layout.size.width;
@@ -588,52 +684,50 @@ fn paint_node(
                     ignore_blend,
                     true,
                 );
-                if let Some(path) = rounded_rect_path_shaped(
-                    cx,
-                    cy,
-                    cw,
-                    ch,
-                    node.props.border_radius,
-                    node.props.corner_shape,
-                ) {
-                    use tiny_skia::BlendMode;
-                    let mut mp = Paint::default();
-                    mp.set_color_rgba8(255, 255, 255, 255);
-                    mp.blend_mode = BlendMode::DestinationIn;
-                    mp.anti_alias = true;
-                    layer.fill_path(&path, &mp, FillRule::Winding, Transform::identity(), None);
+                let left = cx.max(clip_left);
+                let top = cy.max(clip_top);
+                let right = (cx + cw).min(clip_right);
+                let bottom = (cy + ch).min(clip_bottom);
+                let mask_path = if node.props.border_radius > 0.0 {
+                    rounded_rect_path_shaped(
+                        left,
+                        top,
+                        (right - left).max(0.001),
+                        (bottom - top).max(0.001),
+                        node.props.border_radius,
+                        node.props.corner_shape,
+                    )
+                } else {
+                    Rect::from_xywh(
+                        left,
+                        top,
+                        (right - left).max(0.001),
+                        (bottom - top).max(0.001),
+                    )
+                    .and_then(|rect| {
+                        let mut pb = PathBuilder::new();
+                        pb.push_rect(rect);
+                        pb.finish()
+                    })
+                };
+                if let (Some(path), Some(mut mask)) =
+                    (mask_path, Mask::new(pixmap.width(), pixmap.height()))
+                {
+                    mask.fill_path(&path, FillRule::Winding, true, parent_transform);
+                    pixmap.draw_pixmap(
+                        0,
+                        0,
+                        layer.as_ref(),
+                        &PixmapPaint::default(),
+                        Transform::identity(),
+                        Some(&mask),
+                    );
                 }
-                pixmap.draw_pixmap(
-                    0,
-                    0,
-                    layer.as_ref(),
-                    &PixmapPaint::default(),
-                    Transform::identity(),
-                    None,
-                );
             }
             return;
         }
     }
 
-    let x = parent_x + layout.location.x;
-    let y = parent_y + layout.location.y;
-    let w = layout.size.width;
-    let h = layout.size.height;
-
-    // Skip nodes whose box is fully outside the current clip — they're
-    // scrolled out of view and don't contribute pixels. For partially
-    // visible nodes we paint normally and rely on per-primitive clip.
-    if y + h < clip_top || y > clip_bottom {
-        return;
-    }
-    // Same on the X axis — `overflow:hidden` containers narrow the
-    // horizontal clip so descendants (e.g. long file-explorer item
-    // labels) are clipped to the panel instead of bleeding across the
-    // window on top of other panes.
-    if x + w < clip_left || x > clip_right {
-        return;
-    }
     // Glyph blits for this node's own text are clipped to the inherited
     // horizontal band. (Text is painted before children, which re-set
     // this for their own subtrees.)
@@ -657,19 +751,6 @@ fn paint_node(
     // or lives inside a transformed subtree (its accumulated
     // parent_transform carries a non-zero translate); overlays are cheap
     // and few, so always repainting them is fine.
-    let in_transformed_subtree = parent_transform.tx != 0.0
-        || parent_transform.ty != 0.0
-        || node.props.transform.is_some()
-        || node.props.translate_x.is_some()
-        || node.props.translate_y.is_some();
-    if !in_transformed_subtree {
-        if let Some((dx, dy, dw, dh)) = scene.dirty_rect {
-            if x + w < dx || x > dx + dw || y + h < dy || y > dy + dh {
-                return;
-            }
-        }
-    }
-
     // Compose CSS `transform` ops + Tailwind translate-x/-y around the
     // node's center, then pre-concat onto the parent's accumulated
     // transform. Applied to bg/border/bg-image/SVG/children boxes AND —
@@ -1359,17 +1440,50 @@ fn paint_node(
     // <path>/<line>/etc. which the SVG painter handles directly).
     if let NodeKind::Svg = node.kind {
         let _svgt = std::time::Instant::now();
-        crate::svg::paint_svg_tree(
-            pixmap,
-            scene,
-            id,
-            x,
-            y,
-            w,
-            h,
-            effective_color,
-            node_transform,
-        );
+        let fully_inside_clip =
+            x >= clip_left && x + w <= clip_right && y >= clip_top && y + h <= clip_bottom;
+        if fully_inside_clip {
+            crate::svg::paint_svg_tree(
+                pixmap,
+                scene,
+                id,
+                x,
+                y,
+                w,
+                h,
+                effective_color,
+                node_transform,
+                None,
+            );
+        } else if let Some(mut mask) = Mask::new(pixmap.width(), pixmap.height()) {
+            // SVG paths bypass ordinary box/text clipping. Supply the clip
+            // directly to the cached SVG blit instead of allocating a second
+            // full-frame RGBA layer for an edge icon.
+            if let Some(rect) = Rect::from_xywh(
+                clip_left,
+                clip_top,
+                (clip_right - clip_left).max(0.001),
+                (clip_bottom - clip_top).max(0.001),
+            ) {
+                let mut path = PathBuilder::new();
+                path.push_rect(rect);
+                if let Some(path) = path.finish() {
+                    mask.fill_path(&path, FillRule::Winding, false, node_transform);
+                    crate::svg::paint_svg_tree(
+                        pixmap,
+                        scene,
+                        id,
+                        x,
+                        y,
+                        w,
+                        h,
+                        effective_color,
+                        node_transform,
+                        Some(&mask),
+                    );
+                }
+            }
+        }
         perf_add(0, _svgt);
         return;
     }
@@ -1670,7 +1784,57 @@ fn paint_node(
     // already-painted background. Uses scene::editor_visual_lines so
     // soft-wrap, paint, caret, and click hit-test all see the same
     // visual layout.
-    if matches!(node.kind, NodeKind::Input | NodeKind::Textarea) {
+    let is_checkbox = matches!(node.kind, NodeKind::Input)
+        && node.props.input_type.as_deref() == Some("checkbox");
+    if is_checkbox {
+        // Paint a compact native checkbox. CSS transforms (including
+        // Tailwind's `scale-90`) are already carried by node_transform.
+        let side = w.min(h).max(1.0);
+        let bx = x + (w - side) * 0.5;
+        let by = y + (h - side) * 0.5;
+        if let Some(path) = rounded_rect_path(bx, by, side, side, 2.5) {
+            let mut control_paint = Paint::default();
+            if node.props.checked {
+                control_paint.set_color_rgba8(0x25, 0x63, 0xeb, 0xff);
+                pixmap.fill_path(
+                    &path,
+                    &control_paint,
+                    FillRule::Winding,
+                    node_transform,
+                    None,
+                );
+            } else {
+                control_paint.set_color_rgba8(0xff, 0xff, 0xff, 0xff);
+                pixmap.fill_path(
+                    &path,
+                    &control_paint,
+                    FillRule::Winding,
+                    node_transform,
+                    None,
+                );
+                let mut border_paint = Paint::default();
+                border_paint.set_color_rgba8(0x94, 0xa3, 0xb8, 0xff);
+                let mut border_stroke = tiny_skia::Stroke::default();
+                border_stroke.width = 1.0;
+                pixmap.stroke_path(&path, &border_paint, &border_stroke, node_transform, None);
+            }
+        }
+        if node.props.checked {
+            let mut check = PathBuilder::new();
+            check.move_to(bx + side * 0.24, by + side * 0.53);
+            check.line_to(bx + side * 0.43, by + side * 0.72);
+            check.line_to(bx + side * 0.78, by + side * 0.31);
+            if let Some(path) = check.finish() {
+                let mut check_paint = Paint::default();
+                check_paint.set_color_rgba8(0xff, 0xff, 0xff, 0xff);
+                let mut check_stroke = tiny_skia::Stroke::default();
+                check_stroke.width = (side * 0.13).max(1.25);
+                pixmap.stroke_path(&path, &check_paint, &check_stroke, node_transform, None);
+            }
+        }
+    }
+
+    if matches!(node.kind, NodeKind::Input | NodeKind::Textarea) && !is_checkbox {
         // Set once, before the first measurement below (selection/caret
         // math measures text too) — everything in this branch shares one
         // weight/family for the whole field.
@@ -1881,29 +2045,31 @@ fn paint_node(
     // box clips the whole (screen-shifted) menu body away and the dropdown
     // opens but shows nothing. Keep the inherited clip for these; overlays
     // are small and rarely need to actually scroll.
-    let (child_clip_top, child_clip_bottom, child_oy) = if node.props.overflow_y {
-        if in_transformed_subtree {
-            (clip_top, clip_bottom, y - scene.scroll_y(id))
+    let (child_clip_top, child_clip_bottom, child_oy) =
+        if node.props.overflow_y || node.props.overflow_clip_y {
+            if in_transformed_subtree {
+                (clip_top, clip_bottom, y - scene.scroll_y(id))
+            } else {
+                (
+                    clip_top.max(y),
+                    clip_bottom.min(y + h),
+                    y - scene.scroll_y(id),
+                )
+            }
         } else {
-            (
-                clip_top.max(y),
-                clip_bottom.min(y + h),
-                y - scene.scroll_y(id),
-            )
-        }
-    } else {
-        (clip_top, clip_bottom, y)
-    };
+            (clip_top, clip_bottom, y)
+        };
     // An `overflow` container also clips its children horizontally to its
     // own box. `overflow_x` alone isn't separately modelled — any node
     // that establishes a scroll/clip context (overflow_y is set for
     // overflow / overflow-x / overflow-y) narrows the X band too. Same
     // transform exception as the vertical band above.
-    let (child_clip_left, child_clip_right) = if node.props.overflow_y && !in_transformed_subtree {
-        (clip_left.max(x), clip_right.min(x + w))
-    } else {
-        (clip_left, clip_right)
-    };
+    let (child_clip_left, child_clip_right) =
+        if (node.props.overflow_y || node.props.overflow_clip_x) && !in_transformed_subtree {
+            (clip_left.max(x), clip_right.min(x + w))
+        } else {
+            (clip_left, clip_right)
+        };
     // Paint children in z-index order. Ascending: lowest first
     // (painted underneath), highest last (painted on top). Within
     // the same z, declaration order wins (stable sort). When no
@@ -1918,23 +2084,14 @@ fn paint_node(
     // still be painted BEFORE its later siblings in child order, so a
     // scrolled-up row would paint over (visually cover) the header that
     // just stuck in place above it.
-    let effective_z = |cid: &u32| -> i32 {
-        let n = scene.nodes.get(cid);
-        let z = n.and_then(|n| n.props.z_index).unwrap_or(0);
-        let is_sticky = n
-            .map(|n| n.props.position.as_deref() == Some("sticky"))
-            .unwrap_or(false);
-        if is_sticky {
-            z.max(1)
-        } else {
-            z
-        }
-    };
-    let needs_z_sort = node.children.iter().any(|cid| effective_z(cid) != 0);
+    let needs_z_sort = node
+        .children
+        .iter()
+        .any(|&child| scene.effective_z_index(child) != 0);
     let mut child_order: Vec<u32>;
     let children_slice: &[u32] = if needs_z_sort {
         child_order = node.children.clone();
-        child_order.sort_by_key(effective_z);
+        child_order.sort_by_key(|&child| scene.effective_z_index(child));
         &child_order[..]
     } else {
         &node.children[..]

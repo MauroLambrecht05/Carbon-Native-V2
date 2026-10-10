@@ -392,6 +392,28 @@ fn absolute_box_is_none_without_a_computed_layout() {
 }
 
 #[test]
+fn painted_box_subtracts_ancestor_scroll_offsets() {
+    let mut scene = Scene::new();
+    scene.create_node(1, "view", PaintProps::default());
+    scene.create_node(2, "view", PaintProps::default());
+    scene.create_node(3, "view", PaintProps::default());
+    scene.create_node(4, "view", PaintProps::default());
+    scene.set_root(1);
+    scene.insert_node(1, 2, None);
+    scene.insert_node(2, 3, None);
+    scene.insert_node(3, 4, None);
+    scene.nodes.get_mut(&1).unwrap().computed_layout = Some(layout(0.0, 0.0, 500.0, 500.0));
+    scene.nodes.get_mut(&2).unwrap().computed_layout = Some(layout(10.0, 20.0, 100.0, 100.0));
+    scene.nodes.get_mut(&2).unwrap().props.overflow_y = true;
+    scene.nodes.get_mut(&3).unwrap().computed_layout = Some(layout(0.0, 0.0, 100.0, 300.0));
+    scene.nodes.get_mut(&4).unwrap().computed_layout = Some(layout(0.0, 60.0, 100.0, 20.0));
+
+    assert_eq!(scene.set_scroll_y(2, 40.0), 40.0);
+    assert_eq!(scene.absolute_box(4), Some((10.0, 80.0, 100.0, 20.0)));
+    assert_eq!(scene.painted_box(4), Some((10.0, 40.0, 100.0, 20.0)));
+}
+
+#[test]
 fn content_height_is_the_furthest_child_bottom_plus_bottom_padding() {
     let mut scene = Scene::new();
     scene.create_node(1, "view", PaintProps::default());
@@ -419,6 +441,25 @@ fn set_scroll_y_clamps_to_content_minus_viewport() {
     assert_eq!(scene.set_scroll_y(1, 1000.0), 200.0);
     assert_eq!(scene.scroll_y(1), 200.0);
     assert_eq!(scene.set_scroll_y(1, -50.0), 0.0);
+}
+
+#[test]
+fn set_scroll_y_at_the_same_offset_does_not_schedule_another_paint() {
+    let mut scene = Scene::new();
+    scene.create_node(1, "view", PaintProps::default());
+    scene.create_node(2, "view", PaintProps::default());
+    scene.insert_node(1, 2, None);
+    scene.nodes.get_mut(&1).unwrap().props.overflow_y = true;
+    scene.nodes.get_mut(&1).unwrap().computed_layout = Some(layout(0.0, 0.0, 100.0, 100.0));
+    scene.nodes.get_mut(&2).unwrap().computed_layout = Some(layout(0.0, 0.0, 100.0, 300.0));
+
+    assert_eq!(scene.set_scroll_y(1, 50.0), 50.0);
+    scene.repaint_dirty = false;
+    scene.dirty_rect = None;
+
+    assert_eq!(scene.set_scroll_y(1, 50.0), 50.0);
+    assert!(!scene.repaint_dirty);
+    assert_eq!(scene.dirty_rect, None);
 }
 
 #[test]
@@ -531,6 +572,43 @@ fn hit_test_prefers_the_topmost_of_overlapping_siblings() {
     scene.nodes.get_mut(&3).unwrap().computed_layout = Some(box_);
 
     assert_eq!(scene.hit_test(50.0, 50.0), Some(3));
+}
+
+#[test]
+fn hit_test_prefers_higher_z_index_over_later_dom_sibling() {
+    let mut scene = Scene::new();
+    scene.create_node(1, "view", PaintProps::default());
+    scene.create_node(2, "button", PaintProps::default());
+    scene.create_node(3, "button", PaintProps::default());
+    scene.insert_node(1, 2, None);
+    scene.insert_node(1, 3, None);
+    scene.set_root(1);
+    let box_ = layout(0.0, 0.0, 100.0, 100.0);
+    scene.nodes.get_mut(&1).unwrap().computed_layout = Some(box_);
+    scene.nodes.get_mut(&2).unwrap().computed_layout = Some(box_);
+    scene.nodes.get_mut(&2).unwrap().props.z_index = Some(50);
+    scene.nodes.get_mut(&3).unwrap().computed_layout = Some(box_);
+
+    assert_eq!(scene.hit_test(50.0, 50.0), Some(2));
+}
+
+#[test]
+fn hit_test_reaches_overflow_visible_dropdown_outside_parent() {
+    let mut scene = Scene::new();
+    scene.create_node(1, "view", PaintProps::default());
+    scene.create_node(2, "view", PaintProps::default());
+    scene.create_node(3, "button", PaintProps::default());
+    scene.insert_node(1, 2, None);
+    scene.insert_node(2, 3, None);
+    scene.set_root(1);
+    scene.nodes.get_mut(&1).unwrap().computed_layout = Some(layout(0.0, 0.0, 300.0, 300.0));
+    scene.nodes.get_mut(&2).unwrap().computed_layout = Some(layout(0.0, 0.0, 300.0, 38.0));
+    scene.nodes.get_mut(&3).unwrap().computed_layout = Some(layout(10.0, 42.0, 180.0, 120.0));
+
+    assert_eq!(scene.hit_test(20.0, 80.0), Some(3));
+
+    scene.nodes.get_mut(&2).unwrap().props.overflow_clip_y = true;
+    assert_eq!(scene.hit_test(20.0, 80.0), None);
 }
 
 #[test]
@@ -1332,6 +1410,17 @@ fn set_prop_overflow_y_variants() {
     }
     scene.set_prop(1, "overflow", "true"); // JSON bool form, via the "overflow" alias
     assert!(scene.nodes.get(&1).unwrap().props.overflow_y);
+
+    scene.set_prop(1, "overflow", "hidden");
+    let props = &scene.nodes.get(&1).unwrap().props;
+    assert!(!props.overflow_y, "hidden must not become wheel-scrollable");
+    assert!(props.overflow_clip_x && props.overflow_clip_y);
+
+    scene.set_prop(1, "overflow-x", "hidden");
+    scene.set_prop(1, "overflow-y", "visible");
+    let props = &scene.nodes.get(&1).unwrap().props;
+    assert!(props.overflow_clip_x);
+    assert!(!props.overflow_clip_y);
 }
 
 #[test]

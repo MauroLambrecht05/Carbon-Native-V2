@@ -283,10 +283,18 @@ if (typeof (g as any).ReadableStream === "undefined") {
         return new Uint8Array(out);
       }
       encodeInto(source: string, dest: Uint8Array): { read: number; written: number } {
-        const bytes = this.encode(source);
-        const n = Math.min(bytes.length, dest.length);
-        for (let i = 0; i < n; i++) dest[i] = bytes[i];
-        return { read: source.length, written: n };
+        let read = 0;
+        let written = 0;
+        while (read < source.length) {
+          const first = source.charCodeAt(read);
+          const units = first >= 0xd800 && first <= 0xdbff && read + 1 < source.length && source.charCodeAt(read + 1) >= 0xdc00 && source.charCodeAt(read + 1) <= 0xdfff ? 2 : 1;
+          const bytes = this.encode(source.slice(read, read + units));
+          if (written + bytes.length > dest.length) break;
+          for (let i = 0; i < bytes.length; i++) dest[written + i] = bytes[i];
+          read += units;
+          written += bytes.length;
+        }
+        return { read, written };
       }
     }
     class CarbonTextDecoder {

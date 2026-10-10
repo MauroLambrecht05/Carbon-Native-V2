@@ -41,7 +41,7 @@ use tao::event::{ElementState, Event, MouseButton, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoop, EventLoopBuilder};
 use tao::keyboard::{Key, ModifiersState};
 use tao::window::WindowBuilder;
-use tiny_skia::{Paint, Rect, Transform};
+use tiny_skia::{Paint, Pixmap, Rect, Transform};
 
 /// Profiling — optional frame zone markers.
 /// When profiling feature is enabled, emits marker names for external profilers (Tracy, etc).
@@ -1036,6 +1036,9 @@ fn main() -> Result<()> {
         // plugins blit GPU readbacks here) before the rasterizer paints UI on
         // top. Reused across frames; only re-allocates on resize.
         paint_canvas: None,
+        // Retained transparent target for scoped hover/scroll damage. Only
+        // the damaged rows are cleared between frames.
+        damage_pixmap: None,
         // Paint-at-first-commit: the very first RedrawRequested paints the initial
         // (synchronously-rendered) tree WITHOUT first running the effect drain, so
         // the app is on screen ASAP. The deferred drain (useEffect / async data)
@@ -1066,7 +1069,6 @@ fn main() -> Result<()> {
         reload_path,
         reload_scene,
         t0,
-        scroll_velocity: std::collections::HashMap::new(),
         project_dir: project_dir.clone(),
     };
 

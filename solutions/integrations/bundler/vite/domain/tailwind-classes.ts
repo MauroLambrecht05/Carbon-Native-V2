@@ -20,7 +20,7 @@ const COLORS: Record<string, Record<string, string>> = {
   slate: {
     "50": "#f8fafc", "100": "#f1f5f9", "200": "#e2e8f0", "300": "#cbd5e1",
     "400": "#94a3b8", "500": "#64748b", "600": "#475569", "700": "#334155",
-    "800": "#1e293b", "900": "#0f172a",
+    "800": "#1e293b", "900": "#0f172a", "950": "#020617",
   },
   red: {
     "100": "#fee2e2", "200": "#fecaca", "300": "#fca5a5", "400": "#f87171",
@@ -53,6 +53,7 @@ const COLORS: Record<string, Record<string, string>> = {
   blue: {
     "100": "#dbeafe", "200": "#bfdbfe", "300": "#93c5fd", "400": "#60a5fa",
     "500": "#3b82f6", "600": "#2563eb", "700": "#1d4ed8", "800": "#1e40af",
+    "900": "#1e3a8a", "950": "#172554",
   },
   indigo: {
     "400": "#818cf8", "500": "#6366f1", "600": "#4f46e5",
@@ -75,7 +76,7 @@ const COLORS: Record<string, Record<string, string>> = {
 };
 
 const SPACING_SCALE: Record<string, number> = {
-  "0": 0, px: 1, "0.5": 2, "1": 4, "1.5": 6, "2": 8, "2.5": 10, "3": 12,
+  "0": 0, px: 1, "0.2": 0.8, "0.5": 2, "1": 4, "1.5": 6, "2": 8, "2.5": 10, "3": 12,
   "3.5": 14, "4": 16, "5": 20, "6": 24, "7": 28, "8": 32, "9": 36, "10": 40,
   "11": 44, "12": 48, "14": 56, "16": 64, "20": 80, "24": 96, "28": 112,
   "32": 128, "36": 144, "40": 160, "44": 176, "48": 192, "52": 208, "56": 224,
@@ -833,7 +834,8 @@ export function resolveTailwindClass(raw: string): StyleProps | null {
   if (cls === "drop-shadow-2xl") return { filter: "drop-shadow(0 12px 10px rgba(0,0,0,0.2))" };
 
   // ── Shadow approximations
-  if (cls === "shadow-sm") return { "box-shadow": "0 1px 2px 0 rgba(0,0,0,0.05)" };
+  if (cls === "shadow-2xs") return { "box-shadow": "0 1px 0 0 rgba(0,0,0,0.05)" };
+  if (cls === "shadow-xs" || cls === "shadow-sm") return { "box-shadow": "0 1px 2px 0 rgba(0,0,0,0.05)" };
   if (cls === "shadow") return { "box-shadow": "0 1px 3px 0 rgba(0,0,0,0.1)" };
   if (cls === "shadow-md") return { "box-shadow": "0 4px 6px -1px rgba(0,0,0,0.1)" };
   if (cls === "shadow-lg") return { "box-shadow": "0 10px 15px -3px rgba(0,0,0,0.1)" };

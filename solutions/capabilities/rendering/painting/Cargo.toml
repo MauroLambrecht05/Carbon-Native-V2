@@ -41,6 +41,8 @@ carbon-layout = { path = "../layout" }
 carbon-text-renderer = { path = "../text" }
 serde_json = { workspace = true }
 tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd", "png-format"] }
+resvg = { version = "0.45", default-features = false }
+usvg = { version = "0.45", default-features = false }
 
 # Parked, not actively used — carbon-gpu-canvas moved to labs/gpu-canvas
 # (standalone, out of the shared Cargo workspace), so this can no longer

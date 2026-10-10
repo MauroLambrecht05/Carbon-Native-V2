@@ -197,7 +197,7 @@ export const STDLIB_DIR = join(INTERFACE_DIR, "stdlib");
 export const RENDERERS_DIR = join(INTERFACE_DIR, "renderer");
 export const EXAMPLES_DIR = join(LABS_DIR, "examples");
 
-export const CSS_ENGINE_SRC = join(STDLIB_DIR, "dom", "css.ts");
+export const CSS_ENGINE_SRC = join(STDLIB_DIR, "dom", "shims", "css.ts");
 
 /**
  * Source directory of the Cargo package both backends share.

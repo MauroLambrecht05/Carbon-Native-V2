@@ -16,11 +16,20 @@
 // modern icon packs avoid arcs in favor of cubics, so this rarely
 // surfaces in practice.
 
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use tiny_skia::{
-    Color, FillRule, LineCap, LineJoin, Paint, Path, PathBuilder, Pixmap, Stroke, Transform,
+    Color, FillRule, LineCap, LineJoin, Mask, Paint, Path, PathBuilder, Pixmap, PixmapPaint,
+    Stroke, Transform,
 };
 
 use crate::scene::{NodeKind, Scene};
+
+thread_local! {
+    /// Inline SVGs are immutable between React prop updates. Caching the
+    /// rasterized result prevents animated non-SVG UI (cursor/pulse/etc.) from
+    /// reparsing every icon on every repaint.
+    static SVG_RASTER_CACHE: RefCell<HashMap<String, Rc<Pixmap>>> = RefCell::new(HashMap::new());
+}
 
 /// Paint the SVG subtree rooted at `svg_id` into `pixmap`. The svg's layout
 /// box is `(box_x, box_y, box_w, box_h)`; viewBox (if any) is scaled into
@@ -36,7 +45,27 @@ pub fn paint_svg_tree(
     box_h: f32,
     inherited_color: u32,
     parent_transform: Transform,
+    clip_mask: Option<&Mask>,
 ) {
+    // Full SVG first: preserve browser-grade constructs such as gradients,
+    // clip paths, filters, ellipses, opacity and element transforms. The old
+    // primitive renderer below remains a dependable fallback for malformed or
+    // unsupported documents.
+    if paint_svg_document(
+        pixmap,
+        scene,
+        svg_id,
+        box_x,
+        box_y,
+        box_w,
+        box_h,
+        inherited_color,
+        parent_transform,
+        clip_mask,
+    ) {
+        return;
+    }
+
     let svg = match scene.nodes.get(&svg_id) {
         Some(n) => n,
         None => return,
@@ -89,6 +118,154 @@ pub fn paint_svg_tree(
             parent_transform,
         );
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn paint_svg_document(
+    pixmap: &mut Pixmap,
+    scene: &Scene,
+    svg_id: u32,
+    box_x: f32,
+    box_y: f32,
+    box_w: f32,
+    box_h: f32,
+    inherited_color: u32,
+    parent_transform: Transform,
+    clip_mask: Option<&Mask>,
+) -> bool {
+    if box_w <= 0.0 || box_h <= 0.0 {
+        return true;
+    }
+    let Some(root) = scene.nodes.get(&svg_id) else {
+        return false;
+    };
+
+    // Rasterize at the SVG coordinate resolution (up to 512 px) rather than
+    // at a tiny 16/20/30 px layout size. This keeps icons crisp on HiDPI while
+    // still bounding filters and large imported viewBoxes.
+    let intrinsic = root.props.svg_view_box.map(|v| (v[2], v[3]));
+    let (mut render_w, mut render_h) = intrinsic.unwrap_or((box_w, box_h));
+    render_w = render_w.abs().max(box_w).max(1.0);
+    render_h = render_h.abs().max(box_h).max(1.0);
+    let cap_scale = (512.0 / render_w.max(render_h)).min(1.0);
+    let out_w = (render_w * cap_scale).ceil().max(1.0) as u32;
+    let out_h = (render_h * cap_scale).ceil().max(1.0) as u32;
+
+    let mut xml = String::with_capacity(2048);
+    write_svg_node(
+        scene,
+        svg_id,
+        &mut xml,
+        Some((out_w, out_h, inherited_color)),
+    );
+    let rendered = SVG_RASTER_CACHE.with(|cache| {
+        if let Some(pixmap) = cache.borrow().get(&xml).cloned() {
+            return Some(pixmap);
+        }
+        let tree = usvg::Tree::from_str(&xml, &usvg::Options::default()).ok()?;
+        let mut rendered = Pixmap::new(out_w, out_h)?;
+        let tree_size = tree.size();
+        let raster_transform = Transform::from_scale(
+            out_w as f32 / tree_size.width().max(0.001),
+            out_h as f32 / tree_size.height().max(0.001),
+        );
+        resvg::render(&tree, raster_transform, &mut rendered.as_mut());
+        let rendered = Rc::new(rendered);
+        let mut cache = cache.borrow_mut();
+        if cache.len() >= 256 {
+            cache.clear();
+        }
+        cache.insert(xml.clone(), rendered.clone());
+        Some(rendered)
+    });
+    let Some(rendered) = rendered else {
+        return false;
+    };
+
+    let transform = Transform::from_scale(box_w / out_w as f32, box_h / out_h as f32)
+        .post_translate(box_x, box_y)
+        .post_concat(parent_transform);
+    let mut paint = PixmapPaint::default();
+    paint.quality = tiny_skia::FilterQuality::Bilinear;
+    pixmap.draw_pixmap(
+        0,
+        0,
+        rendered.as_ref().as_ref(),
+        &paint,
+        transform,
+        clip_mask,
+    );
+    true
+}
+
+fn write_svg_node(scene: &Scene, id: u32, xml: &mut String, root: Option<(u32, u32, u32)>) {
+    let Some(node) = scene.nodes.get(&id) else {
+        return;
+    };
+    let tag = if root.is_some() {
+        "svg"
+    } else {
+        node.tag.as_str()
+    };
+    xml.push('<');
+    xml.push_str(tag);
+
+    if let Some((width, height, inherited_color)) = root {
+        xml.push_str(" xmlns=\"http://www.w3.org/2000/svg\"");
+        xml.push_str(" xmlns:xlink=\"http://www.w3.org/1999/xlink\"");
+        xml.push_str(&format!(" width=\"{width}\" height=\"{height}\""));
+        if !node.props.svg_attributes.contains_key("color") {
+            xml.push_str(&format!(" color=\"{}\"", argb_to_hex(inherited_color)));
+        }
+    }
+
+    for (name, value) in &node.props.svg_attributes {
+        if root.is_some() && matches!(name.as_str(), "width" | "height" | "xmlns") {
+            continue;
+        }
+        xml.push(' ');
+        xml.push_str(name);
+        xml.push_str("=\"");
+        escape_xml(value, xml);
+        xml.push('"');
+    }
+
+    if node.children.is_empty() && node.props.text.as_deref().unwrap_or("").is_empty() {
+        xml.push_str("/>");
+        return;
+    }
+    xml.push('>');
+    if let Some(text) = &node.props.text {
+        escape_xml(text, xml);
+    }
+    for &child in &node.children {
+        write_svg_node(scene, child, xml, None);
+    }
+    xml.push_str("</");
+    xml.push_str(tag);
+    xml.push('>');
+}
+
+fn escape_xml(value: &str, out: &mut String) {
+    for ch in value.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            _ => out.push(ch),
+        }
+    }
+}
+
+fn argb_to_hex(argb: u32) -> String {
+    format!(
+        "#{:02x}{:02x}{:02x}",
+        (argb >> 16) & 0xff,
+        (argb >> 8) & 0xff,
+        argb & 0xff
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -605,6 +782,7 @@ pub fn parse_path(d: &str, scale_x: f32, scale_y: f32, off_x: f32, off_y: f32) -
                 // Arc — we don't implement the elliptical-arc math. Skip
                 // its 7 args and emit a straight line to the endpoint so
                 // the path doesn't fall apart.
+                let arc_start = i;
                 while let (Some(_), Some(_), Some(_), Some(_), Some(_), Some(p)) = (
                     peek_num(&toks, i),
                     peek_num(&toks, i + 1),
@@ -623,6 +801,32 @@ pub fn parse_path(d: &str, scale_x: f32, scale_y: f32, off_x: f32, off_y: f32) -
                     pb.line_to(sx, sy);
                     cx = x;
                     cy = y;
+                }
+                // SVG permits compact arc flags to run into the endpoint
+                // (for example `0 0022 12.017`). The generic tokenizer
+                // collapses `0022` to one number, leaving fewer than seven
+                // tokens. Previously that consumed nothing and the implicit
+                // command loop spun forever. Consume the numeric run and use
+                // its final pair as the approximated line endpoint.
+                if i == arc_start {
+                    let mut end = i;
+                    while peek_num(&toks, end).is_some() {
+                        end += 1;
+                    }
+                    if end >= i + 2 {
+                        let mut x = peek_num(&toks, end - 2).unwrap_or(cx);
+                        let mut y = peek_num(&toks, end - 1).unwrap_or(cy);
+                        if cmd == b'a' {
+                            x += cx;
+                            y += cy;
+                        }
+                        let (sx, sy) = to_screen(x, y);
+                        pb.line_to(sx, sy);
+                        cx = x;
+                        cy = y;
+                    }
+                    // Always make progress, even for malformed arc data.
+                    i = end.max(i + 1).min(toks.len());
                 }
                 last_cmd = cmd;
                 last_cubic_ctrl = None;
@@ -649,4 +853,113 @@ pub fn parse_path(d: &str, scale_x: f32, scale_y: f32, off_x: f32, off_y: f32) -
     }
 
     pb.finish()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{paint_svg_tree, parse_path};
+    use crate::scene::{PaintProps, Scene};
+    use tiny_skia::{Pixmap, Transform};
+
+    #[test]
+    fn compact_arc_flags_make_progress() {
+        // GitHub's Octocat icon uses this valid compact SVG arc form. The
+        // flags and endpoint begin without separators (`0022`).
+        let path = "M12 2 A10.019 10.019 0 0022 12.017 C22 6.484 17.522 2 12 2z";
+        assert!(parse_path(path, 1.0, 1.0, 0.0, 0.0).is_some());
+    }
+
+    #[test]
+    fn full_svg_renders_gradient_clip_filter_and_ellipse_eyes() {
+        let mut scene = Scene::new();
+        for (id, tag) in [
+            (1, "svg"),
+            (2, "defs"),
+            (3, "radialGradient"),
+            (4, "stop"),
+            (5, "stop"),
+            (6, "filter"),
+            (7, "feGaussianBlur"),
+            (8, "clipPath"),
+            (9, "circle"),
+            (10, "circle"),
+            (11, "g"),
+            (12, "ellipse"),
+            (13, "ellipse"),
+            (14, "ellipse"),
+        ] {
+            scene.create_node(id, tag, PaintProps::default());
+        }
+        let mut set = |id, key, value: &str| scene.set_prop(id, key, value);
+        set(1, "viewBox", "\"0 0 100 100\"");
+        set(3, "id", "\"base\"");
+        set(4, "offset", "\"0%\"");
+        set(4, "stopColor", "\"#ffffff\"");
+        set(5, "offset", "\"100%\"");
+        set(5, "stopColor", "\"#80a090\"");
+        set(6, "id", "\"blur\"");
+        set(7, "stdDeviation", "\"2\"");
+        set(8, "id", "\"body-clip\"");
+        for id in [9, 10] {
+            set(id, "cx", "50");
+            set(id, "cy", "50");
+            set(id, "r", "44");
+        }
+        set(9, "fill", "\"#ffffff\"");
+        set(10, "fill", "\"url(#base)\"");
+        set(11, "clipPath", "\"url(#body-clip)\"");
+        set(12, "cx", "35");
+        set(12, "cy", "25");
+        set(12, "rx", "14");
+        set(12, "ry", "8");
+        set(12, "fill", "\"#ffffff\"");
+        set(12, "opacity", "0.7");
+        set(12, "filter", "\"url(#blur)\"");
+        for (id, cx) in [(13, 35), (14, 65)] {
+            set(id, "cx", &cx.to_string());
+            set(id, "cy", "59");
+            set(id, "rx", "7");
+            set(id, "ry", "8");
+            set(id, "fill", "\"#232b28\"");
+            set(id, "transform", "\"translate(-1.5 -0.75)\"");
+        }
+        drop(set);
+        for (parent, child) in [
+            (1, 2),
+            (2, 3),
+            (3, 4),
+            (3, 5),
+            (2, 6),
+            (6, 7),
+            (2, 8),
+            (8, 9),
+            (1, 10),
+            (1, 11),
+            (11, 12),
+            (1, 13),
+            (1, 14),
+        ] {
+            scene.insert_node(parent, child, None);
+        }
+
+        let mut pixmap = Pixmap::new(100, 100).unwrap();
+        paint_svg_tree(
+            &mut pixmap,
+            &scene,
+            1,
+            0.0,
+            0.0,
+            100.0,
+            100.0,
+            0xff_ffffff,
+            Transform::identity(),
+            None,
+        );
+        let body = pixmap.pixel(50, 50).unwrap();
+        let eye = pixmap.pixel(34, 58).unwrap();
+        let outside = pixmap.pixel(1, 1).unwrap();
+        assert!(body.alpha() > 200 && body.green() > 100);
+        assert!(eye.alpha() > 200 && eye.red() < 80 && eye.green() < 80);
+        assert_eq!(outside.alpha(), 0);
+    }
 }

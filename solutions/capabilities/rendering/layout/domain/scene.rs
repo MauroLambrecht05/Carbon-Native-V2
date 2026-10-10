@@ -219,6 +219,13 @@ pub struct PaintProps {
     /// events over this node update its scroll offset; children get
     /// translated up by that offset and clipped to the node's box.
     pub overflow_y: bool,
+    /// Axis clipping from `overflow: hidden` / `overflow-x/y: hidden`.
+    /// Hidden content affects flex min-size and painting, but must not become
+    /// wheel-scrollable or grow a scrollbar.
+    #[serde(default)]
+    pub overflow_clip_x: bool,
+    #[serde(default)]
+    pub overflow_clip_y: bool,
     /// Auto edge-fade on a scrollport signaling more content is
     /// scrollable above/below — the Notion/Radix-ScrollArea pattern,
     /// promoted from an app-level manual overlay to an engine primitive.
@@ -275,6 +282,13 @@ pub struct PaintProps {
     /// `<input>` / `<textarea>` placeholder, painted in `text_faint`
     /// when the value is empty. Mirrors HTML's `placeholder` attribute.
     pub placeholder: Option<String>,
+    /// HTML input subtype. Text is the implicit default; checkbox gets
+    /// native control sizing and painting instead of the text-editor path.
+    #[serde(default)]
+    pub input_type: Option<String>,
+    /// Controlled (`checked`) or initial (`defaultChecked`) checkbox state.
+    #[serde(default)]
+    pub checked: bool,
 
     // ── SVG ─────────────────────────────────────────────────────────
     // Set by `__cm_set_prop` from React JSX attrs. The SVG paint path
@@ -321,6 +335,11 @@ pub struct PaintProps {
     pub svg_rect_rx: f32,
     /// `<polyline>` / `<polygon>` `points="x,y x,y ..."`.
     pub svg_points: Option<String>,
+    /// Original SVG presentation attributes, normalized to their XML names.
+    /// This lossless bag preserves gradients, filters, clip paths, ellipses,
+    /// transforms and opacity for the full usvg/resvg paint path.
+    #[serde(default)]
+    pub svg_attributes: HashMap<String, String>,
 
     // ── Absolute positioning + z-index ───────────────────────────────
     /// CSS `position`. "static" (default — flex flow), "absolute" or
@@ -692,6 +711,10 @@ pub struct Scene {
     /// Set by `set_scroll_y` to the scrolled container's box; can be
     /// extended later for hover-only and focus-only damage too.
     pub dirty_rect: Option<(f32, f32, f32, f32)>,
+    /// True when a layout-affecting mutation is known to be fully contained
+    /// by `dirty_rect` (currently React insert/remove inside a scrollport).
+    /// This lets the paint loop recompute layout yet retain scoped painting.
+    pub layout_damage_scoped: bool,
 }
 
 impl Default for Scene {
@@ -716,6 +739,7 @@ impl Scene {
             last_layout_size: None,
             repaint_dirty: false,
             dirty_rect: None,
+            layout_damage_scoped: false,
         }
     }
 
@@ -735,6 +759,32 @@ impl Scene {
             for &c in &n.children {
                 if let Some(b) = walk(s, c, target, x, y) {
                     return Some(b);
+                }
+            }
+            None
+        }
+        walk(self, self.root, target, 0.0, 0.0)
+    }
+
+    /// Window-coordinate box at the node's current painted position. Unlike
+    /// `absolute_box`, this subtracts every ancestor scroll offset.
+    pub fn painted_box(&self, target: u32) -> Option<(f32, f32, f32, f32)> {
+        fn walk(s: &Scene, id: u32, target: u32, ox: f32, oy: f32) -> Option<(f32, f32, f32, f32)> {
+            let n = s.nodes.get(&id)?;
+            let layout = n.computed_layout?;
+            let x = ox + layout.location.x;
+            let y = oy + layout.location.y;
+            if id == target {
+                return Some((x, y, layout.size.width, layout.size.height));
+            }
+            let child_y = if n.props.overflow_y {
+                y - s.scroll_y(id)
+            } else {
+                y
+            };
+            for &child in &n.children {
+                if let Some(bounds) = walk(s, child, target, x, child_y) {
+                    return Some(bounds);
                 }
             }
             None
@@ -836,6 +886,37 @@ impl Scene {
         };
     }
 
+    /// Add damage for one node, including the pixels its paint effects can
+    /// reach outside the Taffy layout box. This is deliberately tighter than
+    /// a fixed global halo: a 12px pulsing status dot should not invalidate
+    /// the table or status bar beside it.
+    pub fn add_node_damage(&mut self, id: u32) {
+        let Some((x, y, w, h)) = self.painted_box(id) else {
+            return;
+        };
+        let Some(node) = self.nodes.get(&id) else {
+            return;
+        };
+        let mut halo = 4.0_f32.max(node.props.outline_width + node.props.outline_offset.abs());
+        for shadow in &node.props.box_shadow {
+            if !shadow.inset {
+                halo = halo.max(
+                    shadow.offset_x.abs()
+                        + shadow.offset_y.abs()
+                        + shadow.blur * 2.0
+                        + shadow.spread.abs(),
+                );
+            }
+        }
+        if node.props.transform.is_some()
+            || node.props.translate_x.is_some()
+            || node.props.translate_y.is_some()
+        {
+            halo = halo.max(16.0);
+        }
+        self.add_damage(x - halo, y - halo, w + halo * 2.0, h + halo * 2.0);
+    }
+
     /// Walk the tree depth-first from `root` and return every Input /
     /// Textarea id in DOM order. Used for Tab focus traversal — matches
     /// browser-style "next focusable element" semantics.
@@ -874,6 +955,7 @@ impl Scene {
         self.last_layout_size = None;
         self.repaint_dirty = true;
         self.dirty_rect = None;
+        self.layout_damage_scoped = false;
     }
 
     // ─── Input editing helpers ──────────────────────────────────────────
@@ -1600,7 +1682,28 @@ impl Scene {
             Ok(v) => v,
             Err(_) => serde_json::Value::String(value_json.to_string()),
         };
+        // These properties change pixels only, not Taffy geometry. This is
+        // especially important for CSS keyframes: `animate-pulse` updates
+        // opacity every frame and must not invalidate the entire layout tree.
+        let paint_only = matches!(
+            key,
+            "background"
+                | "color"
+                | "opacity"
+                | "transform"
+                | "translateX"
+                | "translate_x"
+                | "translateY"
+                | "translate_y"
+        );
         if let Some(n) = self.nodes.get_mut(&id) {
+            if let Some(name) = svg_attribute_name(key) {
+                if let Some(value) = svg_attribute_value(&v) {
+                    n.props.svg_attributes.insert(name.to_string(), value);
+                } else {
+                    n.props.svg_attributes.remove(name);
+                }
+            }
             match key {
                 "background" => {
                     // Detect `linear-gradient(...)` / `radial-gradient(...)`
@@ -2121,6 +2224,22 @@ impl Scene {
                 "placeholder" => {
                     n.props.placeholder = v.as_str().map(|s| s.to_string());
                 }
+                "type" => {
+                    n.props.input_type = v.as_str().map(|s| s.to_ascii_lowercase());
+                    if n.props.input_type.as_deref() == Some("checkbox") {
+                        n.props.cursor = Some("pointer".to_string());
+                    }
+                }
+                "checked" | "defaultChecked" | "default_checked" => {
+                    n.props.checked = match &v {
+                        serde_json::Value::Bool(value) => *value,
+                        serde_json::Value::String(value) => {
+                            !matches!(value.as_str(), "" | "false" | "0")
+                        }
+                        serde_json::Value::Null => false,
+                        _ => true,
+                    };
+                }
                 "value" => {
                     // <input value="..."> — same channel as set_text but
                     // via the prop bag, so React re-renders that swap
@@ -2199,16 +2318,25 @@ impl Scene {
                 "points" => {
                     n.props.svg_points = v.as_str().map(|s| s.to_string());
                 }
-                "overflow-y" | "overflow_y" | "overflowY" | "overflow" => {
-                    // Treat any non-empty string except "hidden"/"visible"
-                    // as scroll. `overflow: scroll` and `overflow: auto`
-                    // both turn the node into a scrollport.
-                    if let Some(s) = v.as_str() {
-                        let s = s.trim();
-                        n.props.overflow_y = matches!(s, "scroll" | "auto" | "true" | "1");
-                    } else if v.as_bool() == Some(true) {
-                        n.props.overflow_y = true;
-                    }
+                "overflow" => {
+                    let value = v.as_str().unwrap_or("").trim();
+                    let scroll = matches!(value, "scroll" | "auto" | "true" | "1")
+                        || v.as_bool() == Some(true);
+                    let hidden = value == "hidden";
+                    n.props.overflow_y = scroll;
+                    n.props.overflow_clip_x = scroll || hidden;
+                    n.props.overflow_clip_y = scroll || hidden;
+                }
+                "overflow-x" | "overflow_x" | "overflowX" => {
+                    let value = v.as_str().unwrap_or("").trim();
+                    n.props.overflow_clip_x = matches!(value, "hidden" | "scroll" | "auto");
+                }
+                "overflow-y" | "overflow_y" | "overflowY" => {
+                    let value = v.as_str().unwrap_or("").trim();
+                    let scroll = matches!(value, "scroll" | "auto" | "true" | "1")
+                        || v.as_bool() == Some(true);
+                    n.props.overflow_y = scroll;
+                    n.props.overflow_clip_y = scroll || value == "hidden";
                 }
                 "scroll-shadow" | "scroll_shadow" | "scrollShadow" => {
                     n.props.scroll_shadow = match &v {
@@ -2259,12 +2387,30 @@ impl Scene {
                 }
                 _ => {}
             }
-            self.dirty = true;
-            self.layout_valid = false;
+            if paint_only {
+                self.repaint_dirty = true;
+            } else {
+                self.dirty = true;
+                self.layout_valid = false;
+            }
+        }
+        if paint_only {
+            self.add_node_damage(id);
         }
     }
 
     pub fn insert_node(&mut self, parent_id: u32, child_id: u32, before: Option<u32>) {
+        // React expanding a tree inserts a small subtree inside an existing
+        // scrollport. Layout must be recomputed, but pixels outside that
+        // viewport cannot change. Preserve that scope before mutating links;
+        // otherwise dirty_rect stays None and a folder click repaints the
+        // entire application.
+        if self.add_nearest_scrollport_damage(parent_id) {
+            self.layout_damage_scoped = true;
+        } else {
+            self.layout_damage_scoped = false;
+            self.dirty_rect = None;
+        }
         // Reparent semantics: detach the child from EVERY current parent
         // before re-inserting. The DOM `appendChild`/`insertBefore` of an
         // already-attached node MOVES it; without this a node moved between
@@ -2311,6 +2457,14 @@ impl Scene {
     /// several edits in a row left a growing set of dead node ids sitting in
     /// `self.nodes` forever, one leaked subtree per reload.
     pub fn remove_node(&mut self, id: u32) {
+        // Capture the containing viewport while `id` is still reachable.
+        // After deletion ancestor_chain cannot recover this information.
+        if self.add_nearest_scrollport_damage(id) {
+            self.layout_damage_scoped = true;
+        } else {
+            self.layout_damage_scoped = false;
+            self.dirty_rect = None;
+        }
         let mut to_remove = Vec::new();
         let mut stack = vec![id];
         while let Some(current) = stack.pop() {
@@ -2337,10 +2491,32 @@ impl Scene {
         self.layout_valid = false;
     }
 
+    /// Scope a structural mutation to its nearest clipping/scroll viewport.
+    /// Returns without setting damage when no such ancestor exists, which
+    /// deliberately keeps the conservative full-window repaint behavior for
+    /// arbitrary root/header/editor mutations.
+    fn add_nearest_scrollport_damage(&mut self, target: u32) -> bool {
+        let port = self.ancestor_chain(target).into_iter().find(|&id| {
+            self.nodes
+                .get(&id)
+                .map(|n| n.props.overflow_y || n.props.overflow_clip_y)
+                .unwrap_or(false)
+        });
+        if let Some(port) = port {
+            if let Some((x, y, w, h)) = self.painted_box(port) {
+                self.add_damage(x, y, w, h);
+                return true;
+            }
+        }
+        false
+    }
+
     pub fn set_root(&mut self, id: u32) {
         self.root = id;
         self.dirty = true;
         self.layout_valid = false;
+        self.layout_damage_scoped = false;
+        self.dirty_rect = None;
     }
 
     /// Total height of a scrollport's content: max(child.location.y +
@@ -2451,19 +2627,20 @@ impl Scene {
         let clamped = self
             .scroll_snap_target(id, clamped, viewport_h, max_offset)
             .unwrap_or(clamped);
+        let previous = self.scroll_offsets.get(&id).copied().unwrap_or(0.0);
+        if (previous - clamped).abs() < f32::EPSILON {
+            return clamped;
+        }
         self.scroll_offsets.insert(id, clamped);
-        // Full repaint on scroll. The scoped-damage path erases only the
-        // scroll container's bounding box and relies on per-node cull
-        // to avoid double-paint elsewhere — but children with their own
-        // transforms (SVG <path>) leave streaks because the cull works
-        // off the unscrolled layout box and the in-rect clear doesn't
-        // reach pixels their paint touches. Forcing dirty=true picks
-        // the "full clear + paint" branch which is artifact-free.
-        // Optimization can come back when the cull/clip math is tight.
-        self.dirty = true;
-        self.layout_valid = false;
+        // Scrolling changes paint coordinates only; layout remains valid.
+        // Damage is exactly the viewport. `add_node_damage` intentionally adds
+        // an effects halo, but that is wrong for a clip boundary: presenting
+        // that halo allowed partially visible row icons to become persistent
+        // pixels in the fixed search/header area above a file tree.
+        if let Some((x, y, w, h)) = self.painted_box(id) {
+            self.add_damage(x, y, w, h);
+        }
         self.repaint_dirty = true;
-        self.dirty_rect = None;
         clamped
     }
 
@@ -2685,6 +2862,7 @@ impl Scene {
             let is_svg = matches!(n.kind, NodeKind::Svg);
             let is_input = matches!(n.kind, NodeKind::Input);
             let is_textarea = matches!(n.kind, NodeKind::Textarea);
+            let is_checkbox = is_input && n.props.input_type.as_deref() == Some("checkbox");
             // The font-size that applies to this node and its descendants:
             // own value if set, otherwise inherited. Used both for the
             // measure callback (so layout sees the right line height) and
@@ -2742,6 +2920,80 @@ impl Scene {
             te.cur_family = effective_family.clone();
             let mut style =
                 props_to_style_with_inherited(&n.props, is_text, te, effective_fs, effective_mono);
+
+            // HTML supplies layout semantics even when the author has not
+            // written an explicit `display` declaration.  The scene graph
+            // intentionally keeps element tags, so restore the two semantics
+            // that are most damaging when everything is treated as a
+            // flex-column: inline formatting contexts and table rows/cells.
+            // Author styles still win over every default below.
+            let inline_tag = matches!(
+                n.tag.as_str(),
+                "span" | "strong" | "b" | "em" | "i" | "code" | "kbd" | "samp" | "a" | "label"
+            );
+            let children_are_inline = !n.children.is_empty()
+                && n.children.iter().all(|child_id| {
+                    self.nodes.get(child_id).is_some_and(|child| {
+                        matches!(child.kind, NodeKind::Text)
+                            || matches!(
+                                child.tag.as_str(),
+                                "span"
+                                    | "strong"
+                                    | "b"
+                                    | "em"
+                                    | "i"
+                                    | "code"
+                                    | "kbd"
+                                    | "samp"
+                                    | "a"
+                                    | "label"
+                            )
+                    })
+                });
+
+            if n.props.display.is_none()
+                && n.props.flex_direction.is_none()
+                && (inline_tag || children_are_inline)
+            {
+                style.display = Display::Flex;
+                style.flex_direction = FlexDirection::Row;
+                style.flex_wrap = FlexWrap::NoWrap;
+            }
+
+            match n.tag.as_str() {
+                "table" | "thead" | "tbody" | "tfoot" => {
+                    if n.props.display.is_none() {
+                        style.display = Display::Flex;
+                        style.flex_direction = FlexDirection::Column;
+                    }
+                }
+                "tr" => {
+                    if n.props.display.is_none() {
+                        style.display = Display::Flex;
+                        style.flex_direction = FlexDirection::Row;
+                        style.size.width = Dimension::Percent(1.0);
+                    }
+                }
+                "th" | "td" => {
+                    if n.props.display.is_none() {
+                        style.display = Display::Flex;
+                        style.flex_direction = FlexDirection::Row;
+                    }
+                    if n.props.flex_grow.is_none() {
+                        style.flex_grow = 1.0;
+                    }
+                    if n.props.flex_basis.is_none() && n.props.width.is_none() {
+                        style.flex_basis = Dimension::Length(0.0);
+                    }
+                    // Browser table cells are allowed to shrink below their
+                    // min-content width. This keeps a row inside its table
+                    // instead of making an ancestor's percentage height grow.
+                    if n.props.min_width.is_none() {
+                        style.min_size.width = Dimension::Length(0.0);
+                    }
+                }
+                _ => {}
+            }
             // Document-root children behave like a browser <body>'s block
             // children: they keep their own heights and do NOT flex-shrink to
             // make room for an overflowing sibling. The scene root is a
@@ -2766,7 +3018,17 @@ impl Scene {
             //     the textarea expands and the parent scroller handles overflow.
             //     Min 1 line so an empty textarea still renders. Falls back to
             //     a single-line height when wrap-width is unknown.
-            if (is_input || is_textarea) && n.props.height.is_none() {
+            if is_checkbox {
+                // Native checkboxes have a UA intrinsic size. Tailwind's
+                // `scale-*` then transforms this box exactly as it would in
+                // a browser, rather than scaling a zero-height text input.
+                if n.props.width.is_none() {
+                    style.size.width = Dimension::Length(14.0);
+                }
+                if n.props.height.is_none() {
+                    style.size.height = Dimension::Length(14.0);
+                }
+            } else if (is_input || is_textarea) && n.props.height.is_none() {
                 let line_h = effective_fs * 1.2;
                 let pad = n.props.padding.unwrap_or(0.0);
                 let pad_y = n.props.padding_y.unwrap_or(pad);
@@ -2927,6 +3189,22 @@ impl Scene {
         self.hit_test_recurse(self.root, x, y, 0.0, 0.0)
     }
 
+    /// Paint-order z value shared by painting and hit testing. Sticky nodes
+    /// sit above ordinary flow content even when their author-level z-index
+    /// is `auto`, matching the paint path's sticky floor.
+    pub fn effective_z_index(&self, id: u32) -> i32 {
+        let node = self.nodes.get(&id);
+        let z = node.and_then(|node| node.props.z_index).unwrap_or(0);
+        if node
+            .map(|node| node.props.position.as_deref() == Some("sticky"))
+            .unwrap_or(false)
+        {
+            z.max(1)
+        } else {
+            z
+        }
+    }
+
     fn hit_test_recurse(&self, id: u32, x: f32, y: f32, ox: f32, oy: f32) -> Option<u32> {
         let n = self.nodes.get(&id)?;
         let layout = n.computed_layout?;
@@ -2967,7 +3245,16 @@ impl Scene {
         }
         nx += tdx;
         ny += tdy;
-        if x < nx || y < ny || x > nx + nw || y > ny + nh {
+        let inside_x = x >= nx && x <= nx + nw;
+        let inside_y = y >= ny && y <= ny + nh;
+
+        // CSS overflow is visible by default. An absolute/fixed dropdown can
+        // therefore be interactive outside the title bar (or other small
+        // ancestor) that owns it. Only a real clipping/scroll boundary may
+        // prune the subtree; otherwise descend even when this box misses.
+        let clips_x = n.props.overflow_y || n.props.overflow_clip_x;
+        let clips_y = n.props.overflow_y || n.props.overflow_clip_y;
+        if (!inside_x && clips_x) || (!inside_y && clips_y) {
             return None;
         }
         // Descend into children — if this node is a scrollport, shift the
@@ -2978,13 +3265,28 @@ impl Scene {
         } else {
             0.0
         };
-        for &c in n.children.iter().rev() {
+        // Hit-test in reverse PAINT order. DOM order alone is insufficient:
+        // a high-z title-bar menu may precede the workspace in the tree but
+        // still paint above it.
+        let needs_z_sort = n
+            .children
+            .iter()
+            .any(|&child| self.effective_z_index(child) != 0);
+        let mut sorted_children;
+        let children = if needs_z_sort {
+            sorted_children = n.children.clone();
+            sorted_children.sort_by_key(|&child| self.effective_z_index(child));
+            &sorted_children[..]
+        } else {
+            &n.children[..]
+        };
+        for &c in children.iter().rev() {
             let child_oy = self.sticky_oy(c, ny - scroll_y, ny, nh);
             if let Some(hit) = self.hit_test_recurse(c, x, y, nx, child_oy) {
                 return Some(hit);
             }
         }
-        if n.props.clickable {
+        if inside_x && inside_y && n.props.clickable {
             Some(id)
         } else {
             None
@@ -3140,6 +3442,82 @@ fn next_char_boundary(s: &str, mut i: usize) -> usize {
 /// silently failed to parse and painted nothing. Confirmed and fixed
 /// from a real repro: an icon set using `fill="rgba(...)"` rendered
 /// completely invisible.
+fn svg_attribute_value(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(value) => Some(value.clone()),
+        serde_json::Value::Number(value) => Some(value.to_string()),
+        serde_json::Value::Bool(value) => Some(value.to_string()),
+        serde_json::Value::Null => None,
+        _ => None,
+    }
+}
+
+/// React uses camelCase for several SVG attributes while XML/usvg expects
+/// their canonical spelling.
+fn svg_attribute_name(key: &str) -> Option<&'static str> {
+    Some(match key {
+        "id" => "id",
+        "viewBox" | "view_box" | "viewbox" => "viewBox",
+        "d" => "d",
+        "x" => "x",
+        "y" => "y",
+        "x1" => "x1",
+        "y1" => "y1",
+        "x2" => "x2",
+        "y2" => "y2",
+        "cx" => "cx",
+        "cy" => "cy",
+        "r" => "r",
+        "rx" => "rx",
+        "ry" => "ry",
+        "width" => "width",
+        "height" => "height",
+        "points" => "points",
+        "fill" => "fill",
+        "fillRule" | "fill_rule" | "fill-rule" => "fill-rule",
+        "fillOpacity" | "fill_opacity" | "fill-opacity" => "fill-opacity",
+        "stroke" => "stroke",
+        "strokeWidth" | "stroke_width" | "stroke-width" => "stroke-width",
+        "strokeLinecap" | "stroke_linecap" | "stroke-linecap" => "stroke-linecap",
+        "strokeLinejoin" | "stroke_linejoin" | "stroke-linejoin" => "stroke-linejoin",
+        "strokeMiterlimit" | "stroke_miterlimit" | "stroke-miterlimit" => "stroke-miterlimit",
+        "strokeDasharray" | "stroke_dasharray" | "stroke-dasharray" => "stroke-dasharray",
+        "strokeDashoffset" | "stroke_dashoffset" | "stroke-dashoffset" => "stroke-dashoffset",
+        "strokeOpacity" | "stroke_opacity" | "stroke-opacity" => "stroke-opacity",
+        "opacity" => "opacity",
+        "transform" => "transform",
+        "clipPath" | "clip_path" | "clip-path" => "clip-path",
+        "clipPathUnits" | "clip_path_units" | "clip-path-units" => "clipPathUnits",
+        "clipRule" | "clip_rule" | "clip-rule" => "clip-rule",
+        "mask" => "mask",
+        "maskUnits" | "mask_units" | "mask-units" => "maskUnits",
+        "filter" => "filter",
+        "filterUnits" | "filter_units" | "filter-units" => "filterUnits",
+        "offset" => "offset",
+        "stopColor" | "stop_color" | "stop-color" => "stop-color",
+        "stopOpacity" | "stop_opacity" | "stop-opacity" => "stop-opacity",
+        "gradientUnits" | "gradient_units" | "gradient-units" => "gradientUnits",
+        "gradientTransform" | "gradient_transform" | "gradient-transform" => "gradientTransform",
+        "spreadMethod" | "spread_method" | "spread-method" => "spreadMethod",
+        "fx" => "fx",
+        "fy" => "fy",
+        "fr" => "fr",
+        "stdDeviation" | "std_deviation" | "std-deviation" => "stdDeviation",
+        "in" => "in",
+        "in2" => "in2",
+        "result" => "result",
+        "operator" => "operator",
+        "values" => "values",
+        "type" => "type",
+        "href" => "href",
+        "xlinkHref" | "xlink_href" | "xlink:href" => "xlink:href",
+        "preserveAspectRatio" | "preserve_aspect_ratio" | "preserve-aspect-ratio" => {
+            "preserveAspectRatio"
+        }
+        _ => return None,
+    })
+}
+
 fn parse_color(v: &serde_json::Value) -> Option<u32> {
     if let Some(s) = v.as_str() {
         crate::css_parse::parse_color_str(s)
@@ -3774,6 +4152,12 @@ fn props_to_style_with_inherited(
     // and content_height == viewport_height (no overflow ever, no
     // scrollbar). Setting overflow.y = Scroll tells Taffy: lay children
     // out at their natural sizes regardless of my box height.
+    if props.overflow_clip_x {
+        style.overflow.x = Overflow::Hidden;
+    }
+    if props.overflow_clip_y {
+        style.overflow.y = Overflow::Hidden;
+    }
     if props.overflow_y {
         style.overflow.y = Overflow::Scroll;
     }
