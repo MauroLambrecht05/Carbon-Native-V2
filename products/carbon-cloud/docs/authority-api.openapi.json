@@ -1,0 +1,115 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Carbon live internal assertion authority",
+    "version": "1.0.0",
+    "description": "Cloud independently verifies the original signed proof and reads current authority. Supports lifecycle POST, lifecycle-status GET and the ten signed Database data POST operations. Does not issue assertions or authorize arbitrary service actions."
+  },
+  "paths": {
+    "/internal/platform/v1/authority": {
+      "post": {
+        "operationId": "checkInternalAssertionAuthority",
+        "security": [
+          {
+            "cloudAssertion": []
+          }
+        ],
+        "description": "Bearer contains the original signed compact assertion. Body is ignored and cancelled; clients may send {}. No cookies or browser CORS. Validates pinned database/registry audience, current session, account/membership revisions, grants, MFA and scope. Lifecycle writes additionally require the active operation, step and lease, canonical body digest and configuration revisions. Does not consume replay: the recipient owns durable replay protection. Data requests require an account principal, canonical Database path/query, a confirmed Database binding, exactly the operation-specific grant and current scoped access. App-user assertions remain denied until realm verification is implemented. Table catalog reads require metadata.read; only data mutations require fresh authentication.",
+        "responses": {
+          "200": {
+            "description": "Current authority decision; invalid or revoked proof returns current=false",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "current"
+                  ],
+                  "properties": {
+                    "current": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown path or unexpected query; current=false",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "current"
+                  ],
+                  "properties": {
+                    "current": {
+                      "type": "boolean",
+                      "const": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Authority unavailable or not configured; current=false",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "current"
+                  ],
+                  "properties": {
+                    "current": {
+                      "type": "boolean",
+                      "const": false
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "cloudAssertion": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "carbon-internal+jwt"
+      }
+    }
+  }
+}

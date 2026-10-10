@@ -1,0 +1,142 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Carbon device authorization API",
+    "version": "1.0.0",
+    "description": "Account approval and one-time issuance of exact-scope CLI device credentials."
+  },
+  "servers": [{ "url": "/" }],
+  "paths": {
+    "/platform/v1/device/authorizations": {
+      "post": {
+        "operationId": "createDeviceAuthorization",
+        "security": [],
+        "description": "Creates an expiring request. The device and user codes are disclosed only in this response.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DeviceAuthorizationCreate" } } } },
+        "responses": {
+          "201": { "description": "Device challenge", "content": { "application/json": { "schema": { "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DeviceAuthorizationChallenge" } } } },
+          "400": { "$ref": "account-api.openapi.json#/components/responses/Error" },
+          "403": { "$ref": "account-api.openapi.json#/components/responses/Error" },
+          "429": { "$ref": "account-api.openapi.json#/components/responses/Error" },
+          "500": { "$ref": "account-api.openapi.json#/components/responses/Error" }
+        }
+      }
+    },
+    "/platform/v1/device/token": {
+      "post": {
+        "operationId": "pollDeviceAuthorization",
+        "security": [],
+        "description": "Polls at the advertised interval. An approved token is disclosed once; later polls report consumed.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DeviceTokenRequest" } } } },
+        "responses": {
+          "200": { "description": "Current authorization state", "content": { "application/json": { "schema": { "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DeviceTokenResponse" } } } },
+          "400": { "$ref": "account-api.openapi.json#/components/responses/Error" },
+          "403": { "$ref": "account-api.openapi.json#/components/responses/Error" },
+          "429": { "$ref": "account-api.openapi.json#/components/responses/Error" },
+          "500": { "$ref": "account-api.openapi.json#/components/responses/Error" }
+        }
+      }
+    },
+    "/platform/v1/device/assertions": {
+      "post": {
+        "operationId": "exchangeDeviceDatabaseAssertion",
+        "security": [{ "deviceCredential": [] }],
+        "description": "Authenticates one exact-scope dc_ credential and issues a 60-second assertion bound to one canonical Database request.",
+        "parameters": [{ "$ref": "account-api.openapi.json#/components/parameters/RequestId" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DeviceAssertionExchange" } } } },
+        "responses": {
+          "200": { "description": "Request-bound Database assertion", "content": { "application/json": { "schema": { "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DeviceAssertionResponse" } } } },
+          "400": { "$ref": "account-api.openapi.json#/components/responses/Error" },
+          "401": { "$ref": "account-api.openapi.json#/components/responses/Error" },
+          "403": { "$ref": "account-api.openapi.json#/components/responses/Error" },
+          "500": { "$ref": "account-api.openapi.json#/components/responses/Error" }
+        }
+      }
+    },
+    "/platform/v1/account/device-authorizations/review": {
+      "post": {
+        "operationId": "reviewDeviceAuthorization",
+        "security": [{ "browserSession": [] }],
+        "description": "Returns the exact request after checking live metadata.read authority.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DeviceAuthorizationLookup" } } } },
+        "responses": {
+          "200": { "description": "Authorization details", "content": { "application/json": { "schema": { "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DeviceAuthorizationReview" } } } },
+          "400": { "$ref": "account-api.openapi.json#/components/responses/Error" },
+          "401": { "$ref": "account-api.openapi.json#/components/responses/Error" },
+          "403": { "$ref": "account-api.openapi.json#/components/responses/Error" },
+          "404": { "$ref": "account-api.openapi.json#/components/responses/Error" }
+        }
+      }
+    },
+    "/platform/v1/account/device-authorizations": {
+      "post": {
+        "operationId": "decideDeviceAuthorization",
+        "security": [{ "browserSession": [] }],
+        "description": "Approves or denies after fresh authentication, live delegated-permission checks, CSRF, revision matching and idempotency.",
+        "parameters": [
+          { "$ref": "account-api.openapi.json#/components/parameters/Origin" },
+          { "$ref": "account-api.openapi.json#/components/parameters/CsrfToken" },
+          { "$ref": "account-api.openapi.json#/components/parameters/IdempotencyKey" },
+          { "$ref": "account-api.openapi.json#/components/parameters/IfMatch" },
+          { "$ref": "account-api.openapi.json#/components/parameters/RequestId" }
+        ],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DeviceAuthorizationDecision" } } } },
+        "responses": {
+          "200": { "description": "Durable decision", "content": { "application/json": { "schema": { "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DeviceAuthorizationReceipt" } } } },
+          "400": { "$ref": "account-api.openapi.json#/components/responses/Error" },
+          "401": { "$ref": "account-api.openapi.json#/components/responses/Error" },
+          "403": { "$ref": "account-api.openapi.json#/components/responses/Error" },
+          "404": { "$ref": "account-api.openapi.json#/components/responses/Error" },
+          "409": { "$ref": "account-api.openapi.json#/components/responses/Error" }
+        }
+      }
+    },
+    "/platform/v1/account/devices": {
+      "get": {
+        "operationId": "listDeviceGrants",
+        "security": [{ "browserSession": [] }],
+        "description": "Returns metadata for the current account's grants without tokens or hashes.",
+        "parameters": [
+          { "$ref": "organization-api.openapi.json#/components/parameters/Limit" },
+          { "$ref": "organization-api.openapi.json#/components/parameters/Cursor" },
+          { "$ref": "organization-api.openapi.json#/components/parameters/Sort" }
+        ],
+        "responses": {
+          "200": { "description": "Bounded device-grant page", "content": { "application/json": { "schema": { "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DeviceGrantPage" } } } },
+          "400": { "$ref": "account-api.openapi.json#/components/responses/Error" },
+          "401": { "$ref": "account-api.openapi.json#/components/responses/Error" }
+        }
+      }
+    },
+    "/platform/v1/account/devices/{grantId}": {
+      "post": {
+        "operationId": "revokeDeviceGrant",
+        "security": [{ "browserSession": [] }],
+        "description": "Revokes a grant using CSRF, revision matching and an idempotency key.",
+        "parameters": [
+          { "name": "grantId", "in": "path", "required": true, "schema": { "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id" } },
+          { "$ref": "account-api.openapi.json#/components/parameters/Origin" },
+          { "$ref": "account-api.openapi.json#/components/parameters/CsrfToken" },
+          { "$ref": "account-api.openapi.json#/components/parameters/IdempotencyKey" },
+          { "$ref": "account-api.openapi.json#/components/parameters/IfMatch" },
+          { "$ref": "account-api.openapi.json#/components/parameters/RequestId" }
+        ],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DeviceGrantCommand" } } } },
+        "responses": {
+          "200": { "description": "Revoked grant metadata", "content": { "application/json": { "schema": { "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DeviceGrantReceipt" } } } },
+          "400": { "$ref": "account-api.openapi.json#/components/responses/Error" },
+          "401": { "$ref": "account-api.openapi.json#/components/responses/Error" },
+          "403": { "$ref": "account-api.openapi.json#/components/responses/Error" },
+          "404": { "$ref": "account-api.openapi.json#/components/responses/Error" },
+          "409": { "$ref": "account-api.openapi.json#/components/responses/Error" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "browserSession": { "$ref": "account-api.openapi.json#/components/securitySchemes/browserSession" },
+      "deviceCredential": { "type": "http", "scheme": "bearer", "bearerFormat": "dc_ opaque credential" }
+    }
+  }
+}

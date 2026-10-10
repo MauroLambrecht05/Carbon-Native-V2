@@ -1,0 +1,17 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Carbon Cloud GitHub repository API", "version": "1.0.0" },
+  "paths": {
+    "/platform/v1/orgs/{orgId}/repository-installations": {
+      "get": { "summary": "List GitHub App installations and repositories", "responses": { "200": { "description": "RepositoryInstallationPage" } } },
+      "post": { "summary": "Connect or refresh a GitHub App installation", "parameters": [{ "in": "header", "name": "If-Match", "required": true, "schema": { "type": "string" } }, { "in": "header", "name": "Idempotency-Key", "required": true, "schema": { "type": "string" } }], "responses": { "201": { "description": "RepositoryInstallationReceipt" } } }
+    },
+    "/platform/v1/orgs/{orgId}/projects/{projectId}/repository": {
+      "get": { "summary": "Read project repository configuration", "responses": { "200": { "description": "ProjectRepositoryConfiguration" } } },
+      "post": { "summary": "Save or clear project repository configuration", "parameters": [{ "in": "header", "name": "If-Match", "required": true, "schema": { "type": "string" } }, { "in": "header", "name": "Idempotency-Key", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "ProjectRepositoryReceipt" } } }
+    },
+    "/platform/v1/orgs/{orgId}/projects/{projectId}/repository/resolve": { "post": { "summary": "Resolve a ref to an immutable commit", "responses": { "200": { "description": "ResolvedRepositoryCommit" } } } },
+    "/platform/v1/orgs/{orgId}/projects/{projectId}/repository/proposal": { "post": { "summary": "Create an idempotent source branch and pull request", "parameters": [{ "in": "header", "name": "If-Match", "required": true, "schema": { "type": "string" } }, { "in": "header", "name": "Idempotency-Key", "required": true, "schema": { "type": "string" } }], "responses": { "201": { "description": "RepositoryProposalReceipt" } } } },
+    "/platform/v1/webhooks/github": { "post": { "summary": "Receive a signed, deduplicated GitHub App webhook", "parameters": [{ "in": "header", "name": "X-Hub-Signature-256", "required": true, "schema": { "type": "string" } }, { "in": "header", "name": "X-GitHub-Delivery", "required": true, "schema": { "type": "string" } }, { "in": "header", "name": "X-GitHub-Event", "required": true, "schema": { "type": "string" } }], "responses": { "202": { "description": "RepositoryWebhookReceipt" } } } }
+  }
+}

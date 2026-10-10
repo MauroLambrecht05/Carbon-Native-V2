@@ -1,0 +1,894 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Carbon durable data import API",
+    "version": "1.0.0",
+    "description": "Implemented Cloud queue and Database lease-bound execution and receipt reconciliation. Source and errors are bounded; see data-imports.md."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "security": [
+    {
+      "browserSession": []
+    }
+  ],
+  "paths": {
+    "/platform/v1/orgs/{orgId}/projects/{projectId}/environments/{environmentId}/data/imports": {
+      "post": {
+        "operationId": "enqueueDataImport",
+        "description": "Requires current data.write and fresh authentication. Stages encrypted bounded source; Database validates the table revision during execution. Identical command retries return the same operation. See data-imports.md for limits and recovery semantics.",
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            },
+            "description": "Must equal body commandId."
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must equal body revision; unquoted decimal or quoted entity tag."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DataImportJobCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Private, no-store response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "receipt"
+                  ],
+                  "properties": {
+                    "receipt": {
+                      "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DataImportJobReceipt"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/platform/v1/orgs/{orgId}/projects/{projectId}/environments/{environmentId}/data/imports/{operationId}/status": {
+      "post": {
+        "operationId": "readDataImport",
+        "description": "Requires metadata.read and current session/CSRF. Returns counts and safe errors, never source. failed with outcomeUnknown=true is not proof of rollback. No query parameters accepted.",
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "operationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "maxProperties": 0
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Private, no-store response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DataImportJobView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/platform/v1/orgs/{orgId}/projects/{projectId}/environments/{environmentId}/data/imports/{operationId}/cancel": {
+      "post": {
+        "operationId": "cancelDataImport",
+        "description": "Requires metadata.read and the creator or organization.manage. Use the current operation revision. Queued unclaimed jobs cancel immediately; claimed jobs reconcile Database receipts before cancellation is confirmed.",
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "operationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            },
+            "description": "Must equal body commandId."
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Must equal body revision; unquoted decimal or quoted entity tag."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DataImportJobCancel"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Private, no-store response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "receipt"
+                  ],
+                  "properties": {
+                    "receipt": {
+                      "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DataImportJobReceipt"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/platform/v1/environments/{environmentId}/imports/{operationId}/execute": {
+      "post": {
+        "operationId": "executeLeasedDataImport",
+        "description": "Owning Database endpoint. Signed POST binds the exact canonical path/query, body, operation, lease and account. Live Cloud authority checks the lease and phase. Requires data.write, original live fresh authority and Idempotency-Key equal to commandId.",
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "operationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "orgId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "bindingId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            },
+            "description": "Must equal body commandId."
+          }
+        ],
+        "security": [
+          {
+            "internalAssertion": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DataImportServiceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Private, no-store response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DataImportServiceResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/platform/v1/environments/{environmentId}/imports/{operationId}/status": {
+      "post": {
+        "operationId": "reconcileLeasedDataImport",
+        "description": "Owning Database endpoint. Signed POST binds the exact canonical path/query, body, operation, lease and account. Live Cloud authority checks the lease and phase. Requires metadata.read, a reconcile lease and no Idempotency-Key. Receipt lookup serializes with execution. Null confirms no committed matching receipt.",
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "operationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "orgId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "bindingId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "security": [
+          {
+            "internalAssertion": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DataImportServiceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Private, no-store response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DataImportServiceResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Bounded platform error; no provider diagnostics.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "browserSession": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "__Host-carbon-session"
+      },
+      "internalAssertion": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "signed Carbon internal assertion"
+      }
+    }
+  }
+}

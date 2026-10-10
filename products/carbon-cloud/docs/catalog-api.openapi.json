@@ -1,0 +1,737 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Carbon canonical catalog API",
+    "version": "1.0.0",
+    "description": "Implemented Cloud PostgreSQL catalog and durable provisioning coordinator. Receiving service lifecycle endpoints and end-to-end provisioning remain pending; no mock fallback or production readiness is claimed."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "security": [
+    {
+      "browserSession": []
+    }
+  ],
+  "paths": {
+    "/platform/v1/orgs/{orgId}/projects": {
+      "parameters": [
+        {
+          "name": "orgId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "listCatalogProjects",
+        "description": "Assigned projects only. Encrypted cursors bind session, permission revision, scope, page size, parent revision and expiry.",
+        "parameters": [
+          {
+            "$ref": "organization-api.openapi.json#/components/parameters/Limit"
+          },
+          {
+            "$ref": "organization-api.openapi.json#/components/parameters/Cursor"
+          },
+          {
+            "$ref": "organization-api.openapi.json#/components/parameters/Sort"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current canonical catalog data, never cached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/CatalogProjectPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createCatalogProject",
+        "description": "Requires projects.create and current organization revision. Commits project, development environment, creator assignment, service intents and operation atomically. Concurrent identical keys return the same receipt. Returns queued work, never fabricated readiness.",
+        "parameters": [
+          {
+            "$ref": "account-api.openapi.json#/components/parameters/Origin"
+          },
+          {
+            "$ref": "account-api.openapi.json#/components/parameters/CsrfToken"
+          },
+          {
+            "$ref": "account-api.openapi.json#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "account-api.openapi.json#/components/parameters/IfMatch"
+          },
+          {
+            "$ref": "account-api.openapi.json#/components/parameters/RequestId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/CatalogProjectCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Durable catalog receipt; Location identifies any queued operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "receipt"
+                  ],
+                  "properties": {
+                    "receipt": {
+                      "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/CatalogReceipt"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/orgs/{orgId}/projects/{projectId}": {
+      "parameters": [
+        {
+          "name": "orgId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+          }
+        },
+        {
+          "name": "projectId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getCatalogProject",
+        "description": "Requires assigned metadata.read and organization MFA. No query parameters.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Current canonical catalog data, never cached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/CatalogProject"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "commandCatalogProject",
+        "description": "Requires current project revision. update needs resources.configure. Archive/restore needs projects.create and namespace confirmation. Production policy requires Owner/Admin and confirmation. Archive preserves reads and blocks new work.",
+        "parameters": [
+          {
+            "$ref": "account-api.openapi.json#/components/parameters/Origin"
+          },
+          {
+            "$ref": "account-api.openapi.json#/components/parameters/CsrfToken"
+          },
+          {
+            "$ref": "account-api.openapi.json#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "account-api.openapi.json#/components/parameters/IfMatch"
+          },
+          {
+            "$ref": "account-api.openapi.json#/components/parameters/RequestId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/CatalogProjectCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Durable catalog receipt; Location identifies any queued operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "receipt"
+                  ],
+                  "properties": {
+                    "receipt": {
+                      "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/CatalogReceipt"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/orgs/{orgId}/projects/{projectId}/environments": {
+      "parameters": [
+        {
+          "name": "orgId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+          }
+        },
+        {
+          "name": "projectId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "listCatalogEnvironments",
+        "description": "Scoped environment summaries with lifecycle state separate from service readiness. Parent project revision invalidates changed pages.",
+        "parameters": [
+          {
+            "$ref": "organization-api.openapi.json#/components/parameters/Limit"
+          },
+          {
+            "$ref": "organization-api.openapi.json#/components/parameters/Cursor"
+          },
+          {
+            "$ref": "organization-api.openapi.json#/components/parameters/Sort"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current canonical catalog data, never cached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/CatalogEnvironmentPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createCatalogEnvironment",
+        "description": "Requires resources.configure and current project revision. Production requires project policy, namespace confirmation and explicit Developer configuration grant. Names are case-insensitively unique within a project. Commits environment and service operation atomically.",
+        "parameters": [
+          {
+            "$ref": "account-api.openapi.json#/components/parameters/Origin"
+          },
+          {
+            "$ref": "account-api.openapi.json#/components/parameters/CsrfToken"
+          },
+          {
+            "$ref": "account-api.openapi.json#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "account-api.openapi.json#/components/parameters/IfMatch"
+          },
+          {
+            "$ref": "account-api.openapi.json#/components/parameters/RequestId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/CatalogEnvironmentCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Durable catalog receipt; Location identifies any queued operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "receipt"
+                  ],
+                  "properties": {
+                    "receipt": {
+                      "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/CatalogReceipt"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/orgs/{orgId}/projects/{projectId}/environments/{environmentId}": {
+      "parameters": [
+        {
+          "name": "orgId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+          }
+        },
+        {
+          "name": "projectId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+          }
+        },
+        {
+          "name": "environmentId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getCatalogEnvironment",
+        "description": "Canonical environment and current binding state. Unknown or foreign parents return 404. Pending/degraded readiness is explicit.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Current canonical catalog data, never cached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/CatalogEnvironmentDetails"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "commandCatalogEnvironment",
+        "description": "Requires resources.configure and current environment revision. Rename returns 200. Pause/resume returns 202; production requires confirmation. Pause blocks writes immediately. Resume stays paused until all owning services confirm activation. Only one active operation per environment.",
+        "parameters": [
+          {
+            "$ref": "account-api.openapi.json#/components/parameters/Origin"
+          },
+          {
+            "$ref": "account-api.openapi.json#/components/parameters/CsrfToken"
+          },
+          {
+            "$ref": "account-api.openapi.json#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "account-api.openapi.json#/components/parameters/IfMatch"
+          },
+          {
+            "$ref": "account-api.openapi.json#/components/parameters/RequestId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/CatalogEnvironmentCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Durable catalog receipt; Location identifies any queued operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "receipt"
+                  ],
+                  "properties": {
+                    "receipt": {
+                      "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/CatalogReceipt"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "200": {
+            "description": "Durable catalog receipt; Location identifies any queued operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "receipt"
+                  ],
+                  "properties": {
+                    "receipt": {
+                      "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/CatalogReceipt"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/platform/v1/orgs/{orgId}/projects/{projectId}/environments/{environmentId}/operations/{operationId}": {
+      "parameters": [
+        {
+          "name": "orgId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+          }
+        },
+        {
+          "name": "projectId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+          }
+        },
+        {
+          "name": "environmentId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+          }
+        },
+        {
+          "name": "operationId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getCatalogOperation",
+        "description": "Returns durable steps, progress, safe errors and references to independently successful bindings. Scoped metadata access is required.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Current canonical catalog data, never cached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Operation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "commandCatalogOperation",
+        "description": "Only the original actor or Owner/Admin may retry or cancel; fresh authentication and current operation revision are required. Retry rechecks current configuration authority, preserves successful steps and rejects operations replaced by newer lifecycle work. Cancellation remains available with metadata authority after archive/suspension and retains in-flight successes; it does not delete remote resources.",
+        "parameters": [
+          {
+            "$ref": "account-api.openapi.json#/components/parameters/Origin"
+          },
+          {
+            "$ref": "account-api.openapi.json#/components/parameters/CsrfToken"
+          },
+          {
+            "$ref": "account-api.openapi.json#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "account-api.openapi.json#/components/parameters/IfMatch"
+          },
+          {
+            "$ref": "account-api.openapi.json#/components/parameters/RequestId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/CatalogOperationCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Durable catalog receipt; Location identifies any queued operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "receipt"
+                  ],
+                  "properties": {
+                    "receipt": {
+                      "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/CatalogReceipt"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "browserSession": {
+        "$ref": "account-api.openapi.json#/components/securitySchemes/browserSession"
+      }
+    }
+  }
+}

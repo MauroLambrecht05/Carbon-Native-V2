@@ -1,0 +1,1231 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Carbon Database signed data protocol",
+    "version": "1.0.0",
+    "description": "Implemented Database receiver and Cloud HTTP client for ten data/catalog operations, backed by live Cloud authority, durable replay, native PostgreSQL policies and transactionally stored command receipts. Account-facing Cloud forwarding is implemented; application realm verification remains unfinished. See signed-data.md and account-data.md."
+  },
+  "paths": {
+    "/internal/platform/v1/environments/{environmentId}/data/table.create": {
+      "post": {
+        "operationId": "table_create",
+        "description": "Implemented signed internal table.create. Body command.kind must match this endpoint. Query keys must appear exactly as orgId, projectId, bindingId, without extras or duplicates. Scope and binding in the body must match. Sign the exact POST path/query and body digest. X-Request-Id must match the proof. Idempotency-Key must equal command.commandId. Reissue the assertion for retries; a consumed assertion cannot be reused. Current authority is required even for a stored receipt. Table definitions support up to 32 managed unique/check/B-tree index descriptors with stable UUID IDs, logical names and 1-16 distinct columns. constraint.set and constraint.delete update them with native DDL, signature records, metadata and receipts atomically. Rule changes and unique/check removal require confirmation; label-only changes preserve native references. Checks accept scalar gte/lte/ne expressions, not SQL. Schema edits reject native signature drift. Foreign-key management and asynchronous/concurrent index builds remain unfinished.",
+        "security": [
+          {
+            "cloudAssertion": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "orgId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "bindingId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "Maximum 384 KiB JSON. Column-dependent values and policy semantics are validated by the native data adapter.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DataRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Scope-bound result: safe durable receipt for mutations, or a table-bound policy-filtered page for queries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DataResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/platform/v1/environments/{environmentId}/data/table.policies": {
+      "post": {
+        "operationId": "table_policies",
+        "description": "Implemented signed internal table.policies. Body command.kind must match this endpoint. Query keys must appear exactly as orgId, projectId, bindingId, without extras or duplicates. Scope and binding in the body must match. Sign the exact POST path/query and body digest. X-Request-Id must match the proof. Idempotency-Key must equal command.commandId. Reissue the assertion for retries; a consumed assertion cannot be reused. Current authority is required even for a stored receipt.",
+        "security": [
+          {
+            "cloudAssertion": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "orgId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "bindingId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "Maximum 384 KiB JSON. Column-dependent values and policy semantics are validated by the native data adapter.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DataRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Scope-bound result: safe durable receipt for mutations, or a table-bound policy-filtered page for queries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DataResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/platform/v1/environments/{environmentId}/data/rows.query": {
+      "post": {
+        "operationId": "rows_query",
+        "description": "Implemented signed internal rows.query. Body command.kind must match this endpoint. Query keys must appear exactly as orgId, projectId, bindingId, without extras or duplicates. Scope and binding in the body must match. Sign the exact POST path/query and body digest. X-Request-Id must match the proof. Idempotency-Key must be absent. Only account policy-preview access is currently enabled. Row queries accept up to 32 AND-combined typed filters (eq/ne/gt/lt/contains/is-null), optional JSON path segments, up to 100 unique projected columns and 1000 unique selected UUIDs. Native RLS applies before returning results. Empty columns returns ID/revision with empty values; empty selectedIds returns no rows. Values and paths remain parameters. Serialized selection is limited to 64 KiB. Account cursors bind filters, columns and selected IDs. See account-data.md for type/null semantics and limits. Row sort accepts column and asc/desc direction for all ten types; SQL NULL sorts last in both directions and ascending row UUID breaks ties. Text/text-array use C collation; JSON sorts as JSONB. Internal continuations require afterId and afterSort (original value, sqlNull, table revision); non-final sorted pages return nextSort. Cloud encrypts omitted sort values and binds order to the cursor. Changed table revisions reject continuation. Row cursors allow 131072 characters. Internal response limit is 2179072 bytes; row contents remain limited to 2097152 bytes. Pages are current reads, not snapshots.",
+        "security": [
+          {
+            "cloudAssertion": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "orgId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "bindingId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "Maximum 384 KiB JSON. Column-dependent values and policy semantics are validated by the native data adapter.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DataRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Scope-bound result: safe durable receipt for mutations, or a table-bound policy-filtered page for queries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DataResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/platform/v1/environments/{environmentId}/data/row.insert": {
+      "post": {
+        "operationId": "row_insert",
+        "description": "Implemented signed internal row.insert. Body command.kind must match this endpoint. Query keys must appear exactly as orgId, projectId, bindingId, without extras or duplicates. Scope and binding in the body must match. Sign the exact POST path/query and body digest. X-Request-Id must match the proof. Idempotency-Key must equal command.commandId. Reissue the assertion for retries; a consumed assertion cannot be reused. Current authority is required even for a stored receipt.",
+        "security": [
+          {
+            "cloudAssertion": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "orgId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "bindingId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "Maximum 384 KiB JSON. Column-dependent values and policy semantics are validated by the native data adapter.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DataRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Scope-bound result: safe durable receipt for mutations, or a table-bound policy-filtered page for queries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DataResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/platform/v1/environments/{environmentId}/data/row.update": {
+      "post": {
+        "operationId": "row_update",
+        "description": "Implemented signed internal row.update. Body command.kind must match this endpoint. Query keys must appear exactly as orgId, projectId, bindingId, without extras or duplicates. Scope and binding in the body must match. Sign the exact POST path/query and body digest. X-Request-Id must match the proof. Idempotency-Key must equal command.commandId. Reissue the assertion for retries; a consumed assertion cannot be reused. Current authority is required even for a stored receipt.",
+        "security": [
+          {
+            "cloudAssertion": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "orgId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "bindingId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "Maximum 384 KiB JSON. Column-dependent values and policy semantics are validated by the native data adapter.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DataRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Scope-bound result: safe durable receipt for mutations, or a table-bound policy-filtered page for queries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DataResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/platform/v1/environments/{environmentId}/data/row.delete": {
+      "post": {
+        "operationId": "row_delete",
+        "description": "Implemented signed internal row.delete. Body command.kind must match this endpoint. Query keys must appear exactly as orgId, projectId, bindingId, without extras or duplicates. Scope and binding in the body must match. Sign the exact POST path/query and body digest. X-Request-Id must match the proof. Idempotency-Key must equal command.commandId. Reissue the assertion for retries; a consumed assertion cannot be reused. Current authority is required even for a stored receipt.",
+        "security": [
+          {
+            "cloudAssertion": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "orgId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "bindingId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "Maximum 384 KiB JSON. Column-dependent values and policy semantics are validated by the native data adapter.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DataRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Scope-bound result: safe durable receipt for mutations, or a table-bound policy-filtered page for queries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DataResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/platform/v1/environments/{environmentId}/data/tables.list": {
+      "post": {
+        "operationId": "tables_list",
+        "description": "Signed internal tables.list; requires metadata.read and an account principal. Exact orgId, projectId, bindingId query order and matching body/path/scope apply. No Idempotency-Key or fresh-auth requirement for metadata reads. Rechecks current scoped authority before returning. Lists use requested keyset order, limit 1-100 (default 50), bounded summaries and an exact nextAfterId; details include current table revision, columns, defaults and policy definitions, without row contents. Table lists accept sort id/-id/name/-name (default id) and name, a case-insensitive literal substring of up to 63 printable ASCII characters; % and _ are literal. Names use fixed ASCII order with UUID tie-breaking. Changing sort or normalized search invalidates account cursors. Internal name continuations require afterName with afterId and return nextAfterName with a non-null nextAfterId. Cloud encrypts both boundary values; concurrent changes do not provide snapshot guarantees.",
+        "security": [
+          {
+            "cloudAssertion": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "orgId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "bindingId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "Maximum 384 KiB JSON. Column-dependent values and policy semantics are validated by the native data adapter.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DataRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Scope-bound result: safe durable receipt for mutations, or a table-bound policy-filtered page for queries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DataResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/platform/v1/environments/{environmentId}/data/table.get": {
+      "post": {
+        "operationId": "table_get",
+        "description": "Signed internal table.get; requires metadata.read and an account principal. Exact orgId, projectId, bindingId query order and matching body/path/scope apply. No Idempotency-Key or fresh-auth requirement for metadata reads. Rechecks current scoped authority before returning. Lists use ascending UUID keyset order, limit 1-100 (default 50), bounded summaries and an exact nextAfterId; details include current table revision, columns, defaults and policy definitions, without row contents.",
+        "security": [
+          {
+            "cloudAssertion": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "orgId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "bindingId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "Maximum 384 KiB JSON. Column-dependent values and policy semantics are validated by the native data adapter.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DataRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Scope-bound result: safe durable receipt for mutations, or a table-bound policy-filtered page for queries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DataResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/platform/v1/environments/{environmentId}/data/table.preview": {
+      "post": {
+        "operationId": "table_preview",
+        "description": "Exact signed path/body, canonical scope/binding, audience and correlation requirements apply. Requires metadata.read. Returns current table revision, proposed definition, destructive flag and affected managed policy/primary-key references. Supports logical rename and column add/edit/drop. No row scan, mutation or fresh-auth requirement. Preview is not a guarantee that commit-time casts or native dependencies permit the change. Schema change primary-key takes a column name or null to clear. Adding validates uniqueness and NOT NULL; replacing or clearing an existing key requires current table-name confirmation. Internal row UUIDs remain stable. User keys use managed UNIQUE plus NOT NULL. Clear preserves nullability. Foreign-key references or ambiguous native key state reject changes without cascade. Existing data and constraints are validated at commit; preview does not scan rows. Table definitions support up to 32 managed unique/check/B-tree index descriptors with stable UUID IDs, logical names and 1-16 distinct columns. constraint.set and constraint.delete update them with native DDL, signature records, metadata and receipts atomically. Rule changes and unique/check removal require confirmation; label-only changes preserve native references. Checks accept scalar gte/lte/ne expressions, not SQL. Schema edits reject native signature drift. Foreign-key management and asynchronous/concurrent index builds remain unfinished.",
+        "security": [
+          {
+            "cloudAssertion": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "orgId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "bindingId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "Maximum 384 KiB JSON. Column-dependent values and policy semantics are validated by the native data adapter.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DataRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Scope-bound result: safe durable receipt for mutations, or a table-bound policy-filtered page for queries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DataResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/platform/v1/environments/{environmentId}/data/table.alter": {
+      "post": {
+        "operationId": "table_alter",
+        "description": "Exact signed path/body, canonical scope/binding, audience and correlation requirements apply. Requires resources.configure and fresh account authentication. Requires commandId equal to Idempotency-Key and current table revision in the command. Supports logical rename and column add/edit/drop. Type changes and drops require confirmation equal to the current logical table name. Native DDL, policies, full-row size validation, metadata revision, audit and receipt commit atomically. No implicit dependency cascade; unsupported casts/data reject the whole transaction. Commands retain five-second statement/lock limits. Schema change primary-key takes a column name or null to clear. Adding validates uniqueness and NOT NULL; replacing or clearing an existing key requires current table-name confirmation. Internal row UUIDs remain stable. User keys use managed UNIQUE plus NOT NULL. Clear preserves nullability. Foreign-key references or ambiguous native key state reject changes without cascade. Existing data and constraints are validated at commit; preview does not scan rows. Table definitions support up to 32 managed unique/check/B-tree index descriptors with stable UUID IDs, logical names and 1-16 distinct columns. constraint.set and constraint.delete update them with native DDL, signature records, metadata and receipts atomically. Rule changes and unique/check removal require confirmation; label-only changes preserve native references. Checks accept scalar gte/lte/ne expressions, not SQL. Schema edits reject native signature drift. Foreign-key management and asynchronous/concurrent index builds remain unfinished.",
+        "security": [
+          {
+            "cloudAssertion": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "orgId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "bindingId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "Maximum 384 KiB JSON. Column-dependent values and policy semantics are validated by the native data adapter.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DataRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Scope-bound result: safe durable receipt for mutations, or a table-bound policy-filtered page for queries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DataResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/platform/v1/environments/{environmentId}/data/table.types": {
+      "post": {
+        "operationId": "generateDataTableTypes",
+        "description": "Generate TypeScript wire types from the current authorized table schema. Exact signed path/body, canonical scope/binding, audience and correlation requirements apply. Requires metadata.read; no fresh-auth or idempotency key. Optional command.revision pins the table revision and conflicts if changed. Returns DataGeneratedTypes in the DataResponse envelope: tableId, revision, language, safe filename, text/plain contentType and at most 65536 characters of source text. Integer/decimal and integer-array values use exact strings. Nullability, insert defaults, updates and selected row projections are represented; no row data, default/check literal values or credentials are included. Type declarations do not replace runtime validation or row policy enforcement.",
+        "security": [
+          {
+            "cloudAssertion": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "orgId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "bindingId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "Maximum 384 KiB JSON. Column-dependent values and policy semantics are validated by the native data adapter.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DataRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Scope-bound result: safe durable receipt for mutations, or a table-bound policy-filtered page for queries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DataResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/platform/v1/environments/{environmentId}/data/rows.import-preview": {
+      "post": {
+        "operationId": "previewDataImportStructure",
+        "description": "Review caller-supplied JSON/CSV against the authorized table schema. Exact signed path/body, scope/binding, correlation and live metadata.read authority apply. Optional command.revision rejects changed schemas. No fresh authentication, idempotency key, row reads or mutations. DataImportInput requires format, text, mapping, conflict and atomic. Source is bounded to 256 KiB UTF-8, 1000 rows and 100 distinct source columns within the 384 KiB HTTP envelope. Duplicate JSON keys, ambiguous CSV headers and target mappings fail. Exact integer/decimal values remain strings. The DataImportPreview response identifies validation as structure, with total/valid/invalid counts, at most 20 valid samples, 100 safe row errors and errorsTruncated. This does not validate policies, native constraints, existing/batch conflicts or commit feasibility. Bounded durable execution uses the separate data-import-api.openapi.json protocol; private exports remain unfinished. See account-data.md for format and null semantics.",
+        "security": [
+          {
+            "cloudAssertion": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "orgId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "bindingId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "Maximum 384 KiB JSON. Column-dependent values and policy semantics are validated by the native data adapter.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DataRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Scope-bound result: safe durable receipt for mutations, or a table-bound policy-filtered page for queries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DataResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "cloudAssertion": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "carbon-internal+jwt"
+      }
+    }
+  }
+}

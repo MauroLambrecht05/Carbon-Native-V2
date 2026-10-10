@@ -1,0 +1,185 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Carbon account data API",
+    "version": "1.0.0",
+    "description": "Implemented same-origin Cloud forwarding to signed Database operations. Account policy previews only; no mock fallback."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "security": [
+    {
+      "browserSession": []
+    }
+  ],
+  "paths": {
+    "/platform/v1/orgs/{orgId}/projects/{projectId}/environments/{environmentId}/data": {
+      "post": {
+        "operationId": "executeAccountData",
+        "description": "Cloud resolves the canonical Database binding. All requests require same-origin Origin and CSRF. Mutations additionally require fresh authentication, commandId equal to Idempotency-Key, and If-Match. For table.create use the environment revision; table.policies and row.insert use the table revision; row.update and row.delete use the row revision. Where the body has revision it must match If-Match. Row access must use policy-preview. Query cursors bind session, authority, scope, binding, table, access and page size, expire after 15 minutes, and do not guarantee snapshot isolation. Query parameters are not accepted. tables.list and table.get require metadata.read, independently of data.read; fresh authentication is not required. Table lists accept limit 1-100 (default 50) and encrypted cursor, return bounded summaries in requested order, and never expose internal continuation IDs. Table details return the current definition and revision. Table lists accept sort id/-id/name/-name (default id) and name, a case-insensitive literal substring of up to 63 printable ASCII characters; % and _ are literal. Names use fixed ASCII order with UUID tie-breaking. Changing sort or normalized search invalidates account cursors. Internal name continuations require afterName with afterId and return nextAfterName with a non-null nextAfterId. Cloud encrypts both boundary values; concurrent changes do not provide snapshot guarantees. Row queries accept up to 32 AND-combined typed filters (eq/ne/gt/lt/contains/is-null), optional JSON path segments, up to 100 unique projected columns and 1000 unique selected UUIDs. Native RLS applies before returning results. Empty columns returns ID/revision with empty values; empty selectedIds returns no rows. Values and paths remain parameters. Serialized selection is limited to 64 KiB. Account cursors bind filters, columns and selected IDs. See account-data.md for type/null semantics and limits. Row sort accepts column and asc/desc direction for all ten types; SQL NULL sorts last in both directions and ascending row UUID breaks ties. Text/text-array use C collation; JSON sorts as JSONB. Internal continuations require afterId and afterSort (original value, sqlNull, table revision); non-final sorted pages return nextSort. Cloud encrypts omitted sort values and binds order to the cursor. Changed table revisions reject continuation. Row cursors allow 131072 characters. Internal response limit is 2179072 bytes; row contents remain limited to 2097152 bytes. Pages are current reads, not snapshots. table.preview requires metadata.read and returns a managed definition preview without scanning rows. table.alter requires fresh resources.configure, command ID/header and current table revision/If-Match. Change kinds rename, column.add, column.edit and column.drop use DataSchemaChange. Type changes/drops require confirmation equal to the current table name. Definition preview does not guarantee commit-time cast/dependency feasibility. Schema change primary-key takes a column name or null to clear. Adding validates uniqueness and NOT NULL; replacing or clearing an existing key requires current table-name confirmation. Internal row UUIDs remain stable. User keys use managed UNIQUE plus NOT NULL. Clear preserves nullability. Foreign-key references or ambiguous native key state reject changes without cascade. Existing data and constraints are validated at commit; preview does not scan rows. Table definitions support up to 32 managed unique/check/B-tree index descriptors with stable UUID IDs, logical names and 1-16 distinct columns. constraint.set and constraint.delete update them with native DDL, signature records, metadata and receipts atomically. Rule changes and unique/check removal require confirmation; label-only changes preserve native references. Checks accept scalar gte/lte/ne expressions, not SQL. Schema edits reject native signature drift. Foreign-key management and asynchronous/concurrent index builds remain unfinished. table.types requires metadata.read and returns AccountDataGeneratedTypes with a revision-bound TypeScript artifact. Optional body revision rejects a changed schema. It is a metadata read requiring Origin and CSRF, without fresh authentication or mutation headers. Source is at most 65536 characters; exact integers/decimals use strings, insert defaults/nullability affect optional fields, and generated declarations do not bypass runtime validation or row policies. rows.import-preview requires metadata.read and returns AccountDataImportPreview for caller-supplied JSON/CSV with optional schema revision pinning. It performs structural validation only: no existing-row reads, policy/constraint simulation or mutation. Source is limited to 256 KiB UTF-8, 1000 rows and 100 distinct source columns, with 20 valid samples and 100 safe row errors. Source mappings and exact numeric/null semantics are documented in account-data.md; durable execution uses the separate data-import-api.openapi.json protocol.",
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required for mutations; equal to commandId.",
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "description": "Required for mutations. Positive decimal revision, optionally quoted.",
+            "schema": {
+              "type": "string",
+              "pattern": "^(?:[1-9][0-9]*|\"[1-9][0-9]*\")$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "Maximum 384 KiB JSON.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/AccountDataRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "No-store durable mutation receipt or policy-filtered row page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "receipt"
+                      ],
+                      "properties": {
+                        "receipt": {
+                          "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DataCommandReceipt"
+                        }
+                      }
+                    },
+                    {
+                      "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/AccountDataPage"
+                    },
+                    {
+                      "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/AccountDataTablesPage"
+                    },
+                    {
+                      "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/AccountDataTableDetails"
+                    },
+                    {
+                      "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/AccountDataSchemaPreview"
+                    },
+                    {
+                      "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/AccountDataGeneratedTypes"
+                    },
+                    {
+                      "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/AccountDataImportPreview"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "browserSession": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "__Host-carbon-session",
+        "description": "Secure production cookie. Loopback development uses the configured development cookie name."
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Controlled, no-store platform error. Raw SQL/provider details are not exposed.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+            }
+          }
+        }
+      }
+    }
+  }
+}

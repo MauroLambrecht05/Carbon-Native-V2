@@ -16,6 +16,7 @@ import {
   IssueWorkerTokenUseCase,
   PostgresIdentityRepository,
   VerifyTokenUseCase,
+  assertionTrustFromEnv, type AssertionTrust,
 } from "@carbon/identity";
 import {
   ConsumeMagicLinkUseCase,
@@ -35,8 +36,12 @@ import {
 } from "@carbon/billing";
 import { migrate, openDatabase } from "../infrastructure/persistence/Database.ts";
 import { buildRoutes } from "../infrastructure/http/routes.ts";
+import { accountPlatformConfigFromEnv, composeAccountPlatform, type AccountPlatformConfig } from "./account-platform.ts";
+import { composeServiceAuthority } from './service-authority.ts';
 
 export interface CarbonCloudConfig {
+  readonly assertionTrust?: AssertionTrust;
+  readonly accountPlatform?: AccountPlatformConfig;
   readonly databaseUrl: string;
   readonly port: number;
   readonly objectStore: {
@@ -67,6 +72,8 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): CarbonCloud
   };
   const stripeSecretKey = env.STRIPE_SECRET_KEY;
   return {
+    assertionTrust: assertionTrustFromEnv(env),
+    accountPlatform: accountPlatformConfigFromEnv(env),
     databaseUrl: required("DATABASE_URL"),
     port: Number(env.PORT ?? 8080),
     objectStore: {
@@ -94,6 +101,9 @@ export async function startServer(config: CarbonCloudConfig) {
   const identity = new PostgresIdentityRepository(sql);
   const billing = new PostgresBillingRepository(sql);
   const auth = new PostgresAuthRepository(sql);
+  const accountPlatform = config.accountPlatform ? composeAccountPlatform(sql, config.accountPlatform) : undefined;
+  if (config.assertionTrust && !accountPlatform) throw new Error('Internal service authority requires enabled account platform configuration');
+  const serviceAuthority = config.assertionTrust ? composeServiceAuthority(sql, config.assertionTrust) : undefined;
 
   const checkoutProvider: CheckoutSessionProvider = config.stripe
     ? new StripeCheckoutProvider({ secretKey: config.stripe.secretKey, priceIds: config.stripe.priceIds })
@@ -121,6 +131,15 @@ export async function startServer(config: CarbonCloudConfig) {
   return Bun.serve({
     port: config.port,
     routes,
-    fetch: () => new Response("not found", { status: 404 }),
+    fetch: (request, server) => {
+      if (new URL(request.url).pathname === '/internal/platform/v1/authority') return serviceAuthority ? serviceAuthority(request)
+        : Response.json({ current: false }, { status: 503, headers: { 'cache-control': 'no-store' } });
+      if (new URL(request.url).pathname.startsWith("/platform/v1/")) {
+        if (accountPlatform) return accountPlatform.handler(request, server.requestIP(request)?.address ?? "unknown");
+        const requestId = crypto.randomUUID();
+        return Response.json({ error: { code: "capability", message: "Account platform is not configured", requestId } }, { status: 501, headers: { "x-request-id": requestId, "cache-control": "no-store" } });
+      }
+      return new Response("not found", { status: 404 });
+    },
   });
 }

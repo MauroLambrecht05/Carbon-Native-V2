@@ -1,0 +1,339 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Carbon organization invitations API",
+    "version": "1.0.0",
+    "description": "Implemented real PostgreSQL invitation lifecycle with encrypted queued email through the configured provider. Shares the account browser-cookie, Origin, CSRF, no-store and safe-error protocol. Production browser adapter, scoped assignments/grants and downstream revocation publication remain pending."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "security": [
+    {
+      "browserSession": []
+    }
+  ],
+  "paths": {
+    "/platform/v1/orgs/{orgId}/invitations": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrgId"
+        }
+      ],
+      "get": {
+        "operationId": "listOrganizationInvitations",
+        "description": "Requires live members.manage and required organizational MFA. ID-ordered cursors bind session, permission revision, organization revision, page size and a 15-minute expiry. Returns safe invitation metadata, never proofs or protected mail. Expired pending invitations are projected as expired.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "$ref": "#/components/parameters/Sort"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful invitation response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitationsPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "manageOrganizationInvitations",
+        "description": "Create, resend or cancel with fresh authentication, CSRF, current organization revision and role delegation authority. Create supersedes a pending invitation for the same normalized email. Resend replaces proof/expiry/inviter membership binding and can renew an expired pending invitation. Cancel/resend/supersession erase pending mail. Exact retries return a durable receipt without additional delivery or quota. Changed key reuse returns conflict. Delivery allows 20 committed requests per one-hour window per organization, actor, destination and peer. Each new proof expires in seven days. Nonempty persisted assignments fail closed on resend; assignment/grant request fields are unsupported. Suspended/deletion-pending organizations reject writes.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Origin"
+          },
+          {
+            "$ref": "#/components/parameters/Csrf"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/RequestId"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvitationCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful invitation response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/invitations/preview": {
+      "post": {
+        "operationId": "previewAccountInvitation",
+        "description": "Read-only POST keeps the opaque proof out of the URL. Requires Origin, CSRF and a live account whose current verified email matches the destination. Does not sign in, link accounts, enroll or grant membership. Returns required MFA for enrollment before acceptance. Rechecks expiry and exact live inviter membership authority. No organization member list is disclosed.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Origin"
+          },
+          {
+            "$ref": "#/components/parameters/Csrf"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvitationProof"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful invitation response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitationPreview"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/invitations/accept": {
+      "post": {
+        "operationId": "acceptAccountInvitation",
+        "description": "Requires matching verified-account email, fresh authentication, CSRF, organizational MFA, active organization and the inviter's current bound membership revision/role. Proof alone never signs in a recipient. Atomically consumes the invitation and creates or reactivates one membership, advances permission and organization revisions, and records an invitation audit/outbox event and durable receipt. Existing active membership is never upgraded implicitly. Same-key concurrent retries return the same safe receipt while recipient authority remains valid; another key cannot reuse a consumed proof. Acceptance does not require an organization If-Match revision. Persisted scoped assignments fail with capability until the canonical catalog supports them.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Origin"
+          },
+          {
+            "$ref": "#/components/parameters/Csrf"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/RequestId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvitationProof"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful invitation response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "browserSession": {
+        "$ref": "account-api.openapi.json#/components/securitySchemes/browserSession"
+      }
+    },
+    "parameters": {
+      "Origin": {
+        "$ref": "account-api.openapi.json#/components/parameters/Origin"
+      },
+      "Csrf": {
+        "$ref": "account-api.openapi.json#/components/parameters/CsrfToken"
+      },
+      "IdempotencyKey": {
+        "$ref": "account-api.openapi.json#/components/parameters/IdempotencyKey"
+      },
+      "RequestId": {
+        "$ref": "account-api.openapi.json#/components/parameters/RequestId"
+      },
+      "OrgId": {
+        "$ref": "organization-api.openapi.json#/components/parameters/OrgId"
+      },
+      "IfMatch": {
+        "$ref": "organization-api.openapi.json#/components/parameters/IfMatch"
+      },
+      "Limit": {
+        "$ref": "organization-api.openapi.json#/components/parameters/Limit"
+      },
+      "Cursor": {
+        "$ref": "organization-api.openapi.json#/components/parameters/Cursor"
+      },
+      "Sort": {
+        "$ref": "organization-api.openapi.json#/components/parameters/Sort"
+      }
+    },
+    "schemas": {
+      "InvitationCommand": {
+        "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/InvitationCommand"
+      },
+      "InvitationProof": {
+        "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/InvitationProof"
+      },
+      "InvitationSummary": {
+        "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/InvitationSummary"
+      },
+      "InvitationsPage": {
+        "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/InvitationsPage"
+      },
+      "InvitationPreview": {
+        "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/InvitationPreview"
+      },
+      "InvitationReceipt": {
+        "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/InvitationReceipt"
+      },
+      "InvitationResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "receipt"
+        ],
+        "properties": {
+          "receipt": {
+            "$ref": "#/components/schemas/InvitationReceipt"
+          }
+        }
+      }
+    }
+  }
+}

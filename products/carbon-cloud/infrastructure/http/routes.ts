@@ -104,21 +104,12 @@ async function authenticate(
   return verified;
 }
 
-const DASHBOARD_DIR = new URL("../../presentation/", import.meta.url);
-const DASHBOARD_HTML = await Bun.file(new URL("index.html", DASHBOARD_DIR)).text();
-
-// Bundled once at startup, not per request — the dashboard is React, and a
-// build worker doesn't need Vite pulled in for one entry point when Bun's
-// own bundler already resolves JSX and node_modules the same way.
-const dashboardBuild = await Bun.build({
-  entrypoints: [Bun.fileURLToPath(new URL("src/main.tsx", DASHBOARD_DIR))],
-  target: "browser",
-  minify: true,
-});
-if (!dashboardBuild.success) {
-  throw new AggregateError(dashboardBuild.logs, "failed to build the dashboard bundle");
-}
-const DASHBOARD_JS = await dashboardBuild.outputs[0]!.text();
+// The browser now has a separate, mock-only composition. Starting this API must
+// neither bundle mock tooling nor retain the retired organization-token dashboard.
+const DASHBOARD_HTML = `<!doctype html><html lang="en"><meta charset="utf-8">
+<title>Carbon Cloud API</title><h1>Carbon Cloud API</h1>
+<p>The platform frontend runs separately in mock mode.</p>
+<p>From products/carbon-cloud run <code>bun run dev:mock</code>.</p></html>`;
 
 /** Bun.serve's `routes` object. The composition root is what calls Bun.serve. */
 export function buildRoutes(deps: RouteDeps) {
@@ -132,7 +123,7 @@ export function buildRoutes(deps: RouteDeps) {
     },
 
     "/dashboard.js": {
-      GET: () => new Response(DASHBOARD_JS, { headers: { "content-type": "text/javascript" } }),
+      GET: () => new Response("The legacy dashboard has been retired. Run the separate mock frontend.", { status: 410 }),
     },
 
     // Cross-product SSO: any other Carbon product/service (carbon-database,

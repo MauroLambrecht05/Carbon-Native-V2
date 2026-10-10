@@ -1,0 +1,276 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Carbon GitHub account API",
+    "version": "1.0.0",
+    "description": "Implemented durable OAuth code/PKCE flow, account linking and Carbon MFA through configured GitHub identity. This provider uses authenticated API identity, not an invented OIDC ID token. Production browser integration and live-provider deployment evidence remain pending."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "security": [
+    {
+      "browserProof": []
+    }
+  ],
+  "paths": {
+    "/platform/v1/auth/github/start": {
+      "post": {
+        "operationId": "startGithubAccountAuthentication",
+        "description": "Requires Origin, bootstrap browser proof and an idempotency key. Registration records current terms consent. Linking requires an existing fresh account session and CSRF. Returns the pinned GitHub authorization URL with state and S256 challenge; the verifier remains encrypted. Same-key pending retry returns the same URL. State expires in ten minutes. Durable browser/peer/account rate limits apply. Return paths are restricted to the configured origin.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Origin"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/RequestId"
+          },
+          {
+            "$ref": "#/components/parameters/LinkCsrf"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GithubAuthStart"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Navigate to the authorization URL; do not log its state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GithubAuthStartResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/auth/github/callback": {
+      "get": {
+        "operationId": "handleGithubAccountCallback",
+        "description": "Exact provider callback; permits top-level cross-site GET only with a matching browser-proof cookie and single-use state. Requires exactly one code or provider error. Duplicate/unknown query parameters and oversized queries fail. Consumes state before exchanging code with the encrypted PKCE verifier, verifies user/email, binds resolved security revision, and stores an encrypted identity. Does not issue a Carbon session. Provider failures and process loss after state consumption require restarting the flow. No callback query should enter ingress logs.",
+        "parameters": [
+          {
+            "name": "state",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^gstate_[A-Za-z0-9_-]{43}$"
+            }
+          },
+          {
+            "name": "code",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 512
+            }
+          },
+          {
+            "name": "error",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "error_description",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "error_uri",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "Redirect to the fixed completion page with a one-time continuation in its fragment.",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "^/auth/github/complete#token=go_[A-Za-z0-9_-]{43}$"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/auth/github/complete": {
+      "post": {
+        "operationId": "completeGithubAccountAuthentication",
+        "description": "Completes a verified continuation in the original browser before expiry. Carbon MFA is required when enrolled; failures and recovery-code consumption use shared durable limits. Registration never silently links an existing email account. Explicit linking requires the original fresh live session/CSRF and a matching verified GitHub email. Subject and account uniqueness are enforced. Linking rotates the actor and revokes old sessions without extending absolute expiry. Security revision changes invalidate verified continuations. Successful completion consumes the proof and commits identity/session/audit changes atomically. Inspect the resulting session after an ambiguous response instead of replaying a one-time exchange.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Origin"
+          },
+          {
+            "$ref": "#/components/parameters/RequestId"
+          },
+          {
+            "$ref": "#/components/parameters/LinkCsrf"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GithubAuthComplete"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Session and CSRF cookies issued; browser proof cleared.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GithubAuthCompleteResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "browserProof": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "__Host-carbon-browser",
+        "description": "HttpOnly Secure SameSite=Lax proof established by bootstrap; the development loopback cookie omits the __Host- prefix."
+      }
+    },
+    "parameters": {
+      "Origin": {
+        "$ref": "account-api.openapi.json#/components/parameters/Origin"
+      },
+      "IdempotencyKey": {
+        "$ref": "account-api.openapi.json#/components/parameters/IdempotencyKey"
+      },
+      "RequestId": {
+        "$ref": "account-api.openapi.json#/components/parameters/RequestId"
+      },
+      "LinkCsrf": {
+        "name": "X-CSRF-Token",
+        "in": "header",
+        "required": false,
+        "schema": {
+          "type": "string"
+        },
+        "description": "Required for link start/completion, together with the original live account session. Anonymous registration/login use browser proof and Origin."
+      }
+    },
+    "schemas": {
+      "GithubAuthStart": {
+        "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/GithubAuthStart"
+      },
+      "GithubAuthStartResponse": {
+        "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/GithubAuthStartResponse"
+      },
+      "GithubAuthComplete": {
+        "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/GithubAuthComplete"
+      },
+      "GithubAuthCompleteResponse": {
+        "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/GithubAuthCompleteResponse"
+      }
+    }
+  }
+}

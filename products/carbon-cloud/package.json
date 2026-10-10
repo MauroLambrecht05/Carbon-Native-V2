@@ -4,7 +4,17 @@
   "description": "Carbon Cloud: build, sign, package, publish and serve updates for carbon apps.",
   "type": "module",
   "scripts": {
-    "start": "bun ./composition/entrypoint.ts"
+    "migrate": "bun ./composition/migrate.ts",
+    "account-mail-worker": "bun ./composition/account-mail-worker.ts",
+    "catalog-worker": "bun ./composition/catalog-worker.ts",
+    "data-import-worker": "bun ./composition/data-import-worker.ts",
+    "start": "bun ./composition/entrypoint.ts",
+    "dev:mock": "vite --config composition/vite.mock.config.ts",
+    "build:mock": "vite build --config composition/vite.mock.config.ts",
+    "preview:mock": "vite preview --config composition/vite.mock.config.ts --host 127.0.0.1 --port 5176 --strictPort",
+    "typecheck:browser": "tsc -p presentation/tsconfig.json",
+    "test:browser": "bun test tests/browser",
+    "check:mock-assets": "node tests/browser/assets-smoke.mjs"
   },
   "engines": {
     "bun": ">=1.3.0"

@@ -1,0 +1,172 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Carbon owning-service lifecycle protocol",
+    "version": "1.0.0",
+    "description": "Implemented opt-in Database and Registry receivers. Real HTTP/PostgreSQL coverage and remaining data-plane isolation work are documented in service-lifecycle.md. Production cutover is not claimed."
+  },
+  "security": [
+    {
+      "cloudAssertion": []
+    }
+  ],
+  "paths": {
+    "/internal/platform/v1/environments/{environmentId}/lifecycle": {
+      "parameters": [
+        {
+          "name": "environmentId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "applyCanonicalEnvironmentLifecycle",
+        "description": "Verify pinned issuer/audience/key, exact scope/request digest and resources.configure; consume replay durably and check live Cloud authority before execution and before commit. Signed leaseId must match the current Cloud lease. Idempotency-Key equals stepId. Atomically store native resources, receipt and audit event. Business deduplication excludes only leaseId, allowing newly authorized leases to recover committed responses. Independently reject local scope/binding/remote-resource rebinding. Body scope.environmentId must equal the path.",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ServiceLifecycleCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Confirmed owning-service state, never a synthetic pending response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ServiceLifecycleStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      },
+      "get": {
+        "operationId": "readCanonicalEnvironmentLifecycle",
+        "description": "Sign the exact path and canonical query order orgId, projectId, bindingId with empty-body digest and metadata.read. No extra or duplicate query keys. Recheck current session, permission revision, membership, scope and MFA; consume replay durably and verify local ownership. No active operation is required.",
+        "parameters": [
+          {
+            "name": "orgId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "bindingId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Confirmed owning-service state, never a synthetic pending response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ServiceLifecycleStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "cloudAssertion": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "carbon-internal+jwt"
+      }
+    }
+  }
+}

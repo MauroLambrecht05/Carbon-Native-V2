@@ -1,0 +1,628 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Carbon organization access API",
+    "version": "1.0.0",
+    "description": "Platform-managed organization creation, membership and scoped access administration, MFA policy and accepted ownership transfer. Invitation delivery/acceptance is documented in invitation-api.openapi.json. Uses the account API same-origin opaque session and CSRF protocol."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "security": [
+    {
+      "browserSession": []
+    }
+  ],
+  "paths": {
+    "/platform/v1/orgs": {
+      "get": {
+        "operationId": "listAccountOrganizations",
+        "description": "Lists only platform-managed organizations with the caller's active membership. Legacy unclaimed and deleted organizations are excluded. Basic summaries include role and MFA requirement so an unenrolled member can discover the enrollment requirement; they grant no access to member details or customer resources. Cursors bind the session, permission revision, page size and 15-minute expiry.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "$ref": "#/components/parameters/Sort"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Organization page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createAccountOrganization",
+        "description": "Requires fresh account authentication, CSRF and an idempotency key. Atomically creates an organization, Owner membership, permission revision change, audit/outbox event and durable receipt. Never creates a legacy organization bearer token or claims an existing organization. Namespace conflicts return 409. Identical concurrent requests create once and return the same receipt.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Origin"
+          },
+          {
+            "$ref": "#/components/parameters/Csrf"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/RequestId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "$ref": "#/components/responses/Receipt"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/orgs/{orgId}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrgId"
+        }
+      ],
+      "get": {
+        "operationId": "getAccountOrganization",
+        "description": "Safe organization summary for an active member. A pending ownership transfer is visible only to its proposing owner or recipient and only with the required MFA state. Foreign, revoked and unclaimed organizations return 404.",
+        "responses": {
+          "200": {
+            "description": "Organization and optional current ownership proposal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "organization",
+                    "transfer"
+                  ],
+                  "properties": {
+                    "organization": {
+                      "$ref": "#/components/schemas/OrganizationSummary"
+                    },
+                    "transfer": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/OwnershipTransfer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/orgs/{orgId}/members": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrgId"
+        }
+      ],
+      "get": {
+        "operationId": "listOrganizationMembers",
+        "description": "Active member IDs, verified email/name, roles and revisions for members.manage callers with required MFA. ID-ordered pagination binds the session, account permission revision, organization/revision and page size. Tokens, factors and credentials are excluded. Ordinary Developer/Viewer/Billing members cannot enumerate member identity details.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "$ref": "#/components/parameters/Sort"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Member page and organization revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationMembersPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "manageOrganizationMembers",
+        "description": "Requires fresh authentication, CSRF, live scoped membership and the current organization revision. Owner/Admin settings update; Owner-only policy/ownership proposal/cancellation; member management requires members.manage and cannot delegate permissions absent from the actor's role. Owner role changes require accepted transfer. Self-removal uses leave, which cannot remove the last owner. MFA policy requires an enrolled and verified owner; MFA is enforced on management except leave. Ownership proposals expire in 24 hours; acceptance requires the named active recipient and demotes the prior owner to the proposed lesser role. Cancelled/expired/superseded proposals cannot be accepted. Member changes supersede outstanding ownership proposals. Mutations serialize on the organization, lock affected accounts in order, advance revisions and commit an event/receipt atomically. Suspended/deletion-pending organizations reject mutations. Exact retries require current authority and do not repeat committed changes. member-access replaces projectAccess, projectIds (maximum 100), and explicit grants (maximum 32). It rejects self-changes, foreign/missing projects, role-ineligible grants, duplicate permission/scope pairs, expired grants and delegation outside the current actor scope or duration. Only Owners can change another Owner access. Restricted administrators cannot assign all projects, issue organization-wide grants or promote/invite a member into broader project authority. Exact retries return the same receipt. Revocation and leave erase grants/assignments; role changes prune ineligible grants.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Origin"
+          },
+          {
+            "$ref": "#/components/parameters/Csrf"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/RequestId"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/OrganizationCommand"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "enum": [
+                          "member-role",
+                          "member-revoke",
+                          "leave",
+                          "ownership-propose",
+                          "ownership-cancel",
+                          "ownership-accept"
+                        ]
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Receipt"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/orgs/{orgId}/settings": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrgId"
+        }
+      ],
+      "post": {
+        "operationId": "manageOrganizationSettings",
+        "description": "Owner/Admin update; Owner-only policy commands. Requires fresh authentication, CSRF, the current organization revision and required MFA. Enabling MFA policy requires an enrolled, verified owner. Commits revision, audit event and idempotent receipt atomically. Suspended/deletion-pending organizations reject mutations.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Origin"
+          },
+          {
+            "$ref": "#/components/parameters/Csrf"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/RequestId"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/OrganizationCommand"
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "enum": [
+                          "update",
+                          "policy"
+                        ]
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Receipt"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/orgs/{orgId}/access": {
+      "get": {
+        "operationId": "resolveAccountScopeAccess",
+        "description": "Resolves current session, membership, assignment, role preset, explicit grant expiry and canonical resource state in one locked PostgreSQL transaction. projectId is optional; environmentId requires projectId. Owner/Admin default to all projects; other roles need assignment. Missing or foreign hierarchy returns 404. Production writes require project policy. Archived/paused/suspended scopes retain permitted reads and deny resource writes. Required MFA returns 403. Realm authority is not yet configured (501). This snapshot is advisory for UI; every command and downstream service must independently revalidate live authority.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgId"
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "environmentId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "realmId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current access; never cached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessSnapshot"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/orgs/{orgId}/members/{membershipId}/access": {
+      "get": {
+        "operationId": "getMemberAccessConfiguration",
+        "description": "Requires live Owner/Admin membership and organization MFA. Returns stored project assignments and explicit grants, including expired grants for review. This configuration is not an effective permission assertion. No query parameters. Foreign/revoked membership returns 404.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OrgId"
+          },
+          {
+            "name": "membershipId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current access; never cached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberAccess"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "browserSession": {
+        "$ref": "account-api.openapi.json#/components/securitySchemes/browserSession"
+      }
+    },
+    "parameters": {
+      "Origin": {
+        "$ref": "account-api.openapi.json#/components/parameters/Origin"
+      },
+      "Csrf": {
+        "$ref": "account-api.openapi.json#/components/parameters/CsrfToken"
+      },
+      "IdempotencyKey": {
+        "$ref": "account-api.openapi.json#/components/parameters/IdempotencyKey"
+      },
+      "RequestId": {
+        "$ref": "account-api.openapi.json#/components/parameters/RequestId"
+      },
+      "OrgId": {
+        "name": "orgId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "IfMatch": {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string"
+        },
+        "description": "Current organization revision, optionally double quoted. This is not an account or membership revision."
+      },
+      "Limit": {
+        "name": "limit",
+        "in": "query",
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 25
+        }
+      },
+      "Cursor": {
+        "name": "cursor",
+        "in": "query",
+        "schema": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        }
+      },
+      "Sort": {
+        "name": "sort",
+        "in": "query",
+        "schema": {
+          "const": "id"
+        }
+      }
+    },
+    "schemas": {
+      "OrganizationCreate": {
+        "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/OrganizationCreate"
+      },
+      "OrganizationSummary": {
+        "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/OrganizationSummary"
+      },
+      "OrganizationCommand": {
+        "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/OrganizationCommand"
+      },
+      "OrganizationReceipt": {
+        "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/OrganizationReceipt"
+      },
+      "OrganizationPage": {
+        "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/OrganizationPage"
+      },
+      "OrganizationMembersPage": {
+        "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/OrganizationMembersPage"
+      },
+      "OwnershipTransfer": {
+        "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/OwnershipTransfer"
+      },
+      "AccessSnapshot": {
+        "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/AccessSnapshot"
+      },
+      "MemberAccess": {
+        "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/MemberAccess"
+      }
+    },
+    "responses": {
+      "Error": {
+        "$ref": "account-api.openapi.json#/components/responses/Error"
+      },
+      "Receipt": {
+        "description": "Durable safe organization command receipt",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "receipt"
+              ],
+              "properties": {
+                "receipt": {
+                  "$ref": "#/components/schemas/OrganizationReceipt"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

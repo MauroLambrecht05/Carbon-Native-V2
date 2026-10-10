@@ -1,0 +1,25 @@
+load("//.tools/orchestration/bazel/bun:defs.bzl", "bun_test")
+
+package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "srcs",
+    srcs = glob(["composition/**/*.ts", "infrastructure/**/*.ts", "infrastructure/**/*.sql", "presentation/http/**/*.ts", "**/tsconfig.json"], exclude = ["infrastructure/browser/**"]),
+)
+
+# Without a configured Postgres URL, this still checks encryption/configuration.
+# Run the documented integration command for the real database scenarios.
+bun_test(
+    name = "account_auth_test",
+    entry = "tests/platform/account-auth.integration.test.ts",
+    srcs = [":srcs"],
+    deps = [
+        "//solutions/capabilities/cloud/identity:srcs",
+        "//solutions/capabilities/cloud/catalog:srcs",
+        "//solutions/capabilities/cloud/data:srcs",
+        "//solutions/contracts/platform:srcs",
+        "//solutions/integrations/notification/resend:srcs",
+        "//solutions/integrations/identity/github:srcs",
+        "//solutions/integrations/repository/github:srcs",
+    ],
+)

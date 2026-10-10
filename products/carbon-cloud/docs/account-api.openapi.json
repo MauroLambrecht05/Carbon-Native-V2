@@ -1,0 +1,917 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Carbon account API",
+    "version": "1.0.0",
+    "description": "Implemented email challenges, opaque browser sessions, session-bound fresh authentication, TOTP/recovery, profile and verified-email changes, and account session management. GitHub identity remains pending. Browser traffic uses the configured same origin."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "paths": {
+    "/platform/v1/auth/bootstrap": {
+      "get": {
+        "operationId": "bootstrapAccountAuthentication",
+        "description": "Sets a short-lived HttpOnly browser proof cookie if absent. The proof must accompany challenge creation and consumption. No email is sent.",
+        "responses": {
+          "200": {
+            "description": "Public authentication configuration and browser proof cookie",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "termsVersion",
+                    "emailAvailable",
+                    "sessionTtlSeconds",
+                    "githubAvailable"
+                  ],
+                  "properties": {
+                    "termsVersion": {
+                      "type": "string"
+                    },
+                    "emailAvailable": {
+                      "const": true
+                    },
+                    "sessionTtlSeconds": {
+                      "const": 28800
+                    },
+                    "githubAvailable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/auth/challenges": {
+      "post": {
+        "operationId": "requestAccountChallenge",
+        "description": "Commits one challenge and an encrypted email outbox job. Identical retries return the same generic receipt. Email delivery occurs in a separate worker. Public responses do not disclose account existence.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Origin"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/RequestId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountAuthRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Challenge accepted for email delivery",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "message"
+                  ],
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/auth/complete": {
+      "post": {
+        "operationId": "completeAccountChallenge",
+        "description": "Single-use credential exchange. After an ambiguous response inspect the session, then request a new challenge if no cookie was received. Browser proof and a valid challenge are required. Issues an HttpOnly session cookie and session-bound CSRF cookie. GET never consumes the challenge. Recovery increments security revision and revokes previous sessions. Active MFA requires code (TOTP or unused recovery code); omission returns 401 with fieldErrors.code=mfa_required. Incorrect MFA does not consume the challenge, but failed attempts commit and five failures lock MFA for 15 minutes across challenges. Each accepted TOTP counter and recovery code can be used only once.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Origin"
+          },
+          {
+            "$ref": "#/components/parameters/RequestId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountAuthComplete"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Session cookies issued; no credential appears in the JSON response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "returnTo"
+                  ],
+                  "properties": {
+                    "returnTo": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/account/fresh-auth/challenges": {
+      "post": {
+        "operationId": "requestFreshAccountAuthentication",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "description": "Requires a live session, session-bound CSRF and browser proof from auth/bootstrap. Sends a proof only to the current account's verified email; the caller cannot supply an email/account/session target. The challenge binds browser, current session and account security revision and expires after 15 minutes or the session's absolute expiry, whichever comes first. Email uses the configured durable outbox/worker. Exact idempotent retries enqueue once; reuse with changed input conflicts. Public and authenticated challenge requests share email/peer rate limits. The delivered fragment targets /auth/fresh.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Origin"
+          },
+          {
+            "$ref": "#/components/parameters/RequestId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountFreshAuthRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Generic accepted receipt; no proof or recipient returned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "message"
+                  ],
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/account/fresh-auth/complete": {
+      "post": {
+        "operationId": "completeFreshAccountAuthentication",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "description": "One-time fresh proof exchange with the original live session, CSRF and requesting browser. Active MFA requires a new accepted TOTP counter or unused recovery code. Missing code returns 401 fieldErrors.code=mfa_required; incorrect attempts persist account-wide lockout state. Rejects normal login proofs and stale session/security bindings. Atomically consumes the proof, revokes the old session, issues replacement session/CSRF cookies, advances account revision and audits. Freshness lasts ten minutes capped at the original absolute expiry; other sessions remain valid. Does not extend absolute session lifetime. After a lost response inspect account/session; if replacement cookies were lost, start a new login. No plaintext credential is stored for retry recovery.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Origin"
+          },
+          {
+            "$ref": "#/components/parameters/RequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountAuthComplete"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replacement cookies and validated same-origin return path",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "returnTo"
+                  ],
+                  "properties": {
+                    "returnTo": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/account/profile": {
+      "get": {
+        "operationId": "getAccountProfile",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "description": "Safe current account profile and pending email-change metadata. Avatar is local text, never a remote image URL. Pending metadata is omitted after expiry, originating-session revocation or security revision change. Rechecks live session authority and account revision.",
+        "responses": {
+          "200": {
+            "description": "Profile and pending email change or null",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountProfileView"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "updateAccountProfile",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "description": "Revision-checked, CSRF-protected and idempotent profile command. update saves a trimmed display name and local text avatar immediately without requiring renewed freshness. email-change and email-cancel require fresh authentication. An email change requires the browser proof from auth/bootstrap, supersedes any prior pending change and queues a verification link to the proposed address. The existing verified address stays active. Identical retries enqueue once; public receipts do not disclose identity conflicts. Verification has a distinct ec_ token and expires after 15 minutes or the current session's expiry. Cancelling/superseding invalidates prior proofs and erases pending delivery payloads. Rate limits include current/proposed email and socket peer. All commands advance account revision and audit atomically.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Origin"
+          },
+          {
+            "$ref": "#/components/parameters/RequestId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountProfileCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/ProfileReceipt"
+          },
+          "202": {
+            "$ref": "#/components/responses/ProfileReceipt"
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/account/email/complete": {
+      "post": {
+        "operationId": "completeAccountEmailChange",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "description": "Consumes a session/browser/security-revision-bound email-change proof. Active MFA requires a new TOTP or unused recovery code. A claimed proposed address returns 409 and never merges accounts. Atomically replaces the existing email identity and verified address, increments account/security revision, revokes all old sessions and outstanding sign-in proofs for the old/new address, then issues replacement cookies preserving absolute expiry. A durable encrypted security notice is queued to the previous address. Safe return path only; no session/plaintext proof appears in JSON. Do not blindly retry after an ambiguous response: inspect the current session, then sign in using the new verified address if replacement cookies were lost.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Origin"
+          },
+          {
+            "$ref": "#/components/parameters/RequestId"
+          },
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountEmailComplete"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Verified address and replacement cookies committed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "returnTo"
+                  ],
+                  "properties": {
+                    "returnTo": {
+                      "const": "/account/profile"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/account/session": {
+      "get": {
+        "operationId": "getAccountSession",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "description": "Rechecks account state, session expiry/revocation, account security revision and MFA requirement on every request. Returns null when no valid browser session exists.",
+        "responses": {
+          "200": {
+            "description": "Safe current session or null",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "session"
+                  ],
+                  "properties": {
+                    "session": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/AccountSession"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/account/sessions": {
+      "get": {
+        "operationId": "listAccountSessions",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "description": "Bounded active sessions for the authenticated account, ordered by ascending ID. Omits credentials and hashes. Cursors bind session, account revision and page size and expire in 15 minutes; restart after any account security/session mutation. Unknown or duplicate query parameters are rejected.",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "const": "id"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Safe session page and current account revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountSessionsPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/account/security": {
+      "post": {
+        "operationId": "updateAccountSecurity",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "description": "Atomic revision-checked security command. All commands except session-rotate require authentication within ten minutes (otherwise 403 fieldErrors.authentication=fresh_required). mfa-start returns a ten-minute enrollment once; mfa-confirm and recovery-reset return ten new recovery codes once. Confirmation, recovery replacement and MFA disable increment security revision, revoke all sessions and replace the actor's cookies. Rotation preserves original absolute expiry; plain rotation also preserves freshness. MFA disable denies active organization MFA requirements. session-revoke scopes the target to this account and rejects the current session (use signout). sessions-revoke-others retains only the current session. Durable receipts never retain one-time values. An exact enrollment retry reports oneTimeValuesUnavailable. A command that rotated cookies cannot replay through its revoked old session; if replacement cookies were lost, sign in again. Idempotency keys bind original command and If-Match revision. The identity-unlink command removes only the caller's GitHub identity, requires a verified email fallback and fresh authentication plus active MFA proof, advances security revision, revokes old sessions and rotates the current session without extending absolute expiry.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Origin"
+          },
+          {
+            "$ref": "#/components/parameters/RequestId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountSecurityCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Safe receipt, optional one-time enrollment/recovery values and replacement cookies where applicable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountSecurityResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/auth/signout": {
+      "post": {
+        "operationId": "revokeCurrentAccountSession",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "description": "Monotonic, idempotent current-session revocation. Valid sessions require the CSRF token bound to that session; invalid/expired sessions only clear cookies. Audit event and revocation commit atomically.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Origin"
+          },
+          {
+            "$ref": "#/components/parameters/RequestId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current session revoked and cookies cleared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "signedOut"
+                  ],
+                  "properties": {
+                    "signedOut": {
+                      "const": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/account/identities": {
+      "get": {
+        "operationId": "listAccountIdentities",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "description": "Lists only the current account's verified identities, immutable provider subject and ability to unlink GitHub. Requires live session and Carbon MFA when enrolled. canUnlink requires a matching verified email fallback. Returns account revision for account-security commands.",
+        "responses": {
+          "200": {
+            "description": "Safe account identities and account revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountIdentities"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "browserSession": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "__Host-carbon-session",
+        "description": "Opaque random session; Secure, HttpOnly, SameSite=Lax, Path=/. Explicit loopback HTTP development omits the __Host prefix and Secure flag."
+      }
+    },
+    "parameters": {
+      "Origin": {
+        "name": "Origin",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uri"
+        },
+        "description": "Must exactly equal CARBON_PUBLIC_ORIGIN; no wildcard CORS."
+      },
+      "RequestId": {
+        "name": "X-Request-Id",
+        "in": "header",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "description": "Valid UUIDs are retained; missing/invalid IDs are replaced. Always returned as a response header."
+      },
+      "IdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{16,128}$"
+        }
+      },
+      "CsrfToken": {
+        "name": "X-CSRF-Token",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string"
+        },
+        "description": "Value from the session-bound __Host-carbon-csrf cookie."
+      },
+      "IfMatch": {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string"
+        },
+        "description": "Current account revision from account/session or account/sessions, optionally double quoted. Stale values return 409; omission is 400."
+      }
+    },
+    "schemas": {
+      "AccountAuthRequest": {
+        "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/AccountAuthRequest"
+      },
+      "AccountProfileCommand": {
+        "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/AccountProfileCommand"
+      },
+      "AccountProfileView": {
+        "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/AccountProfileView"
+      },
+      "AccountEmailComplete": {
+        "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/AccountEmailComplete"
+      },
+      "AccountSecurityReceipt": {
+        "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/AccountSecurityReceipt"
+      },
+      "AccountFreshAuthRequest": {
+        "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/AccountFreshAuthRequest"
+      },
+      "AccountAuthComplete": {
+        "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/AccountAuthComplete"
+      },
+      "AccountSession": {
+        "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/AccountSession"
+      },
+      "AccountSessionsPage": {
+        "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/AccountSessionsPage"
+      },
+      "AccountSecurityCommand": {
+        "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/AccountSecurityCommand"
+      },
+      "AccountSecurityResponse": {
+        "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/AccountSecurityResponse"
+      },
+      "ErrorResponse": {
+        "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/ErrorResponse"
+      },
+      "AccountIdentities": {
+        "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/AccountIdentities"
+      }
+    },
+    "responses": {
+      "ProfileReceipt": {
+        "description": "Safe profile command receipt (202 for email verification request, 200 for update/cancel)",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "receipt"
+              ],
+              "properties": {
+                "receipt": {
+                  "$ref": "#/components/schemas/AccountSecurityReceipt"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Error": {
+        "description": "Structured safe error. Every response is no-store and carries X-Request-Id. Rate limits include Retry-After.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      }
+    }
+  }
+}

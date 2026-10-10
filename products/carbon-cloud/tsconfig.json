@@ -13,5 +13,5 @@
     "types": ["bun"]
   },
   "include": ["**/*.ts"],
-  "exclude": ["node_modules", "dist"]
+  "exclude": ["node_modules", "dist", "dist-mock", "presentation", "infrastructure/browser", "composition/browser.tsx", "composition/create-browser-services.ts", "composition/vite.mock.config.ts", "tests/browser"]
 }

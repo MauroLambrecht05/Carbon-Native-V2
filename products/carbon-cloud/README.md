@@ -1,5 +1,105 @@
 # carbon-cloud
 
+The real account email/session API is available behind the explicit
+`CARBON_ACCOUNT_AUTH` flag, with PostgreSQL state, encrypted delivery jobs and a
+separate Resend mail worker. See [account authentication setup](docs/account-authentication.md)
+and the [backend implementation evidence](docs/platform-backend-progress.md).
+The real [catalog and provisioning API](docs/catalog-provisioning.md) now includes
+durable project/environment creation and a separate signed provisioning worker.
+Database/Registry lifecycle receivers now provision native resources over signed
+HTTP with live Cloud authority checks; see the [service setup and limits](docs/service-lifecycle.md).
+The [account-facing Data API](docs/account-data.md) forwards table/policy and row
+operations to Database with native row policies and encrypted pagination.
+The [durable import API and worker](docs/data-imports.md) stage encrypted CSV/JSON
+and reconcile committed receipts before retrying or confirming cancellation.
+The dashboard below still uses mock services; production browser integration and
+the remaining backend workflows are in progress.
+
+## Platform frontend: Slices 1-10
+
+The React frontend runs independently in **mock mode**. Slice 1 implements
+contracts, scope-aware routing, permissions, persistent fixtures, clock,
+operations/events and mock controls. Slice 2 adds account sign-up/sign-in,
+the development challenge inbox, MFA/recovery, account and session management,
+organizations, invitations, scoped membership grants and project/environment
+provisioning. Slice 3 adds repository installations and project configuration,
+computed setup checklists, environment API settings, service and personal
+credentials, secret metadata, service accounts, CLI device authorization, and
+filtered activity. Credential values are fake, shown once, and never persisted
+as plaintext. Slice 4 adds Windows build preflight, immutable inputs, attempts,
+leases, stages/logs, workers, artifacts, signing metadata, release publication,
+channels, rollout, promotion, rollback and withdrawal. Everything remains
+simulated locally; downloads are inert fixture text and client capability
+limits are explicit.
+
+Slice 5 adds relational tables/rows, schema dependencies and constraints,
+owner/public-read policies, CSV/JSON import/export, bounded SQL fixtures,
+realm users/providers/sessions, hosted mock app sign-in and frontend/backend
+integration recipes. App sessions remain separate from Carbon account sessions.
+Existing environments without Auth bindings require explicit provisioning from
+environment overview. Slice 6 adds binary buckets/objects/versioning, scoped
+expiring transfer links, deterministic vector search and graph traversal,
+policy-authorized realtime inspection, migration planning/promotion/rollback,
+and snapshots, retention schedules and tracked partial restore operations.
+All bytes and operations stay in the local mock workspace.
+
+Slice 7 adds function source autosave, immutable deployments, named execution
+fixtures, invocation details and retries, timezone-aware schedules, secret version
+bindings, promotion and rollback. Enable Functions from environment overview.
+Source is never executed and no function endpoint is contacted.
+
+Slice 8 adds public Registry discovery, publisher package/version workflows,
+synthetic Windows archive review, immutable publication metadata, project plugin
+resolution, capability grants, mock source synchronization and build provenance.
+The fixtures never claim to be working DLLs and no repository or Registry service
+is contacted.
+
+Slice 9 adds fictional subscription and provider-event workflows, classified
+usage, budgets and hard-cap consequences, local invoice fixtures, environment
+limits, retention previews, and a separately authorized operator surface for
+jobs, managed Windows workers, Registry review, trust rotation, organization
+suspension and immutable billing adjustments. Slice 10 completes the
+consistency pass: Slice 9 mutations use the same persisted revisions,
+idempotency, audit, scope invalidation and authorization rules as earlier
+slices; quota and suspension decisions affect charged work; direct routes have
+local outcomes; session and membership changes still clear scoped data; and
+the browser composition remains mock-only with `connect-src 'none'`.
+
+From the repository root:
+
+```sh
+bun run --cwd products/carbon-cloud dev:mock
+bun run --cwd products/carbon-cloud typecheck:browser
+bun run --cwd products/carbon-cloud test:browser
+bun run --cwd products/carbon-cloud build:mock
+```
+
+Use `bun.cmd` if PowerShell blocks the `bun.ps1` shim. Open
+`http://127.0.0.1:5175` and register a fake account, following its verification
+link in Mock tools, or choose a fixture identity. No Carbon API,
+Postgres, MinIO, worker, or provider environment variables are needed.
+
+See [Slice 1 contracts, walkthrough and pending decisions](docs/platform-frontend-slice-1.md)
+and [Slice 2 identity and platform shell](docs/platform-frontend-slice-2.md),
+[Slice 3 project configuration and credentials](docs/platform-frontend-slice-3.md),
+[Slice 4 Windows builds and releases](docs/platform-frontend-slice-4.md),
+[Slice 5 relational data and app authentication](docs/platform-frontend-slice-5.md),
+[Slice 6 data extensions](docs/platform-frontend-slice-6.md),
+[Slice 7 functions](docs/platform-frontend-slice-7.md),
+[Slice 8 Registry and plugin use](docs/platform-frontend-slice-8.md),
+[Slice 9 billing and platform operators](docs/platform-frontend-slice-9.md),
+[Slice 10 consistency pass](docs/platform-frontend-slice-10.md),
+and the [complete platform plan](docs/platform-frontend-plan.md).
+The production implementation and mock-to-real cutover are specified in the
+[full platform backend plan](docs/platform-backend-plan.md).
+
+The former organization-token dashboard has been retired. The backend root page
+now points to the separate mock command; `/dashboard.js` returns 410. Backend
+capabilities and historical verification below describe the existing service,
+not functionality connected to this mock frontend.
+
+## Existing backend
+
 Carbon Cloud: push a repo, get a signed installer and a working auto-update
 — the same job Vercel does for a Next.js deploy. Self-hosted, v1.
 
@@ -8,9 +108,9 @@ composition/     the control plane's entrypoint (main.ts), each worker's
                   (worker-{linux,windows,macos}.ts, sharing worker.ts), and
                   the Dockerfiles — macOS has none, see worker-macos.ts
 infrastructure/
-  http/           the API: create/claim/complete a build, serve the dashboard
+  http/           the API: create/claim/complete a build
   persistence/    Postgres connection + migrations
-presentation/     the v1 dashboard (React) — signup, usage, deploy, status.
+presentation/     the mock platform frontend (React), independently composed.
                   No subfolder: it's the only presentation surface this
                   product has, so it sits at presentation/ directly rather
                   than presentation/dashboard/.
@@ -123,12 +223,9 @@ The Windows and macOS workers' Dockerfile/no-Dockerfile split is still
 unverified the way the Linux one now partly is — no Windows Docker host, no
 Mac in this dev sandbox.
 
-The dashboard (`presentation/`, React) covers signup, pasting an
-existing token, usage against the plan, queuing a build, a recent-builds
-list (polled every 4s — no live-update channel yet), clicking a row to see
-its full status, and looking a build up by id directly — a token typed in
-lives in the browser's localStorage for the tab's session; there's no
-cookie session yet. `carbon cloud list` is the CLI equivalent.
+The former dashboard used an organization token in localStorage for real API
+calls. It has been replaced by the independently runnable mock frontend above.
+`carbon cloud list` remains the CLI for the existing backend.
 
 `dmg`'s builder now assembles a real `.app` bundle
 (`Contents/{MacOS,Resources}` + a generated `Info.plist`) around the binary
@@ -153,8 +250,8 @@ calls Stripe's REST API directly via `fetch` — no SDK dependency — and
 signature check by hand (replay-window + constant-time compare); without
 that, anyone who finds the webhook URL could POST themselves a free
 upgrade. `FakeCheckoutSessionProvider` is still the default when
-`STRIPE_SECRET_KEY` isn't set. The dashboard has a real "Upgrade to Pro"
-button. Verified: the full billing/routes test suites, the checkout+webhook
+`STRIPE_SECRET_KEY` isn't set. The retired dashboard exposed an "Upgrade to Pro"
+button. Verified historically: the full billing/routes test suites, the checkout+webhook
 routes against a real control plane and Postgres, and the whole flow
 clicked through in a real browser — which caught a real bug live,
 `FakeCheckoutSessionProvider` producing a malformed double-`?` URL, since
