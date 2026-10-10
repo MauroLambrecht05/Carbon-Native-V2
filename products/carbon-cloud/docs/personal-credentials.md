@@ -60,4 +60,4 @@ Successful verification updates `lastUsedAt`.
 Personal credentials are not yet exchangeable for Database or Registry
 assertions, and the CLI does not use them. Device (`dc_`) and service-account
 (`cs_`) credentials remain the only inputs to those exchanges. Worker
-credentials are Phase 4.
+credentials are described in [workers.md](workers.md).

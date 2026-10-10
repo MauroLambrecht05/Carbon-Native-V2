@@ -198,6 +198,38 @@ export type LegacyOrganizationClaim = { readonly "credential": string; readonly 
 
 export type LegacyOrganizationClaimReceipt = { readonly "organizationId": Id; readonly "revision": Revision; readonly "message": string; };
 
+export type WorkerPurpose = "build" | "function";
+
+export type WorkerCapabilities = { readonly "platform": "windows" | "linux" | "macos"; readonly "arch": "x64" | "arm64"; readonly "toolchains": ReadonlyArray<string>; };
+
+export type Worker = { readonly "id": Id; readonly "orgId": Id; readonly "name": string; readonly "purposes": ReadonlyArray<WorkerPurpose>; readonly "capabilities": WorkerCapabilities | null; readonly "status": "pending" | "active" | "disabled" | "revoked"; readonly "credentialExpiresAt": Timestamp | null; readonly "lastSeenAt": Timestamp | null; readonly "revision": Revision; readonly "createdAt": Timestamp; };
+
+export type WorkerEnrollmentCreate = { readonly "name": string; readonly "purposes": ReadonlyArray<WorkerPurpose>; };
+
+export type WorkerEnrollmentIssue = { readonly "worker": Worker; readonly "code": string; readonly "expiresAt": Timestamp; };
+
+export type WorkerEnrollRequest = { readonly "code": string; readonly "capabilities": WorkerCapabilities; };
+
+export type WorkerCredentialIssue = { readonly "worker": Worker; readonly "token": string; };
+
+export type WorkerCommand = { readonly "kind": "disable" | "enable" | "revoke"; };
+
+export type WorkerReceipt = { readonly "worker": Worker; readonly "message": string; };
+
+export type WorkerPage = { readonly "items": ReadonlyArray<Worker>; readonly "nextCursor": string | null; };
+
+export type WorkerLease = { readonly "id": Id; readonly "workerId": Id | null; readonly "scope": EnvironmentScope; readonly "purpose": WorkerPurpose; readonly "subjectId": Id; readonly "attempt": number; readonly "secretNames": ReadonlyArray<string>; readonly "state": "granted" | "claimed" | "completed" | "cancelled" | "expired"; readonly "expiresAt": Timestamp; readonly "deadlineAt": Timestamp; readonly "revision": Revision; };
+
+export type WorkerLeaseOffer = { readonly "state": "none"; } | { readonly "state": "leased"; readonly "lease": WorkerLease; readonly "leaseToken": string; readonly "heartbeatSeconds": number; };
+
+export type WorkerLeaseCommand = { readonly "kind": "heartbeat" | "complete"; };
+
+export type WorkerLeaseReceipt = { readonly "lease": WorkerLease; readonly "cancelled": boolean; };
+
+export type WorkerSecretBinding = { readonly "name": string; readonly "version": number; readonly "value": string; };
+
+export type WorkerSecretBindings = { readonly "leaseId": Id; readonly "bindings": ReadonlyArray<WorkerSecretBinding>; readonly "expiresAt": Timestamp; };
+
 export type ServiceAccountCreate = { readonly "name": string; readonly "scope": Scope; readonly "permissions": ReadonlyArray<EnvironmentCredentialPermission>; };
 
 export type ServiceAccountCommand = { readonly "kind": "update"; readonly "name": string; readonly "permissions": ReadonlyArray<EnvironmentCredentialPermission>; } | { readonly "kind": "disable" | "enable"; };
@@ -518,6 +550,22 @@ export interface Components {
   LegacyTokenReceipt: LegacyTokenReceipt;
   LegacyOrganizationClaim: LegacyOrganizationClaim;
   LegacyOrganizationClaimReceipt: LegacyOrganizationClaimReceipt;
+  WorkerPurpose: WorkerPurpose;
+  WorkerCapabilities: WorkerCapabilities;
+  Worker: Worker;
+  WorkerEnrollmentCreate: WorkerEnrollmentCreate;
+  WorkerEnrollmentIssue: WorkerEnrollmentIssue;
+  WorkerEnrollRequest: WorkerEnrollRequest;
+  WorkerCredentialIssue: WorkerCredentialIssue;
+  WorkerCommand: WorkerCommand;
+  WorkerReceipt: WorkerReceipt;
+  WorkerPage: WorkerPage;
+  WorkerLease: WorkerLease;
+  WorkerLeaseOffer: WorkerLeaseOffer;
+  WorkerLeaseCommand: WorkerLeaseCommand;
+  WorkerLeaseReceipt: WorkerLeaseReceipt;
+  WorkerSecretBinding: WorkerSecretBinding;
+  WorkerSecretBindings: WorkerSecretBindings;
   ServiceAccountCreate: ServiceAccountCreate;
   ServiceAccountCommand: ServiceAccountCommand;
   ServiceAccount: ServiceAccount;

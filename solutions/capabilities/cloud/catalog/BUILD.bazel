@@ -13,3 +13,10 @@ bun_test(
     srcs = [":srcs"],
     deps = ["//solutions/capabilities/cloud/identity:srcs", "//solutions/contracts/platform:srcs"],
 )
+
+bun_test(
+    name = "aws_kms_custodian_test",
+    entry = "tests/aws-kms-custodian.test.ts",
+    srcs = [":srcs"],
+    deps = ["//solutions/capabilities/cloud/identity:srcs", "//solutions/contracts/platform:srcs"],
+)

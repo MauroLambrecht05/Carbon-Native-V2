@@ -1349,3 +1349,74 @@ migration (Phase 4).
 Phase 3 stops here. Phase 4 (worker enrollment, lease-scoped worker credentials,
 hosted key custody and secret materialization) is next in
 [the handoff](left-off/handoff.md).
+
+## 2026-10-10: Phase 4 — workers, leases, hosted custody and secret delivery
+
+**Enrollment and credentials.** Organization managers create a pending worker at
+`/platform/v1/orgs/{orgId}/workers` and receive a single-use, 15-minute `we_`
+code. The worker exchanges it at `/worker/v1/enroll` for a 30-day `wc_`
+credential and can rotate that credential itself. Managers can disable, enable
+and revoke workers. Codes and credentials are stored as hashes. The worker API
+accepts worker credentials only and refuses requests with a browser Origin.
+
+**Leases.** `WorkerLeases.grant`, callable only inside Cloud, creates a lease
+for one subject, one environment and a named list of secrets. A worker of the
+same organization, purpose and platform claims it and receives a one-time `wl_`
+lease token, renews it by heartbeat and completes it. `WorkerLeases.cancel`
+cancels a subject; `WorkerLeases.reclaim`, run by the new
+`worker-lease-sweeper`, expires overdue leases and re-offers work a worker held
+and lost as a new attempt with a new identifier and token.
+
+**Secret delivery.** `/worker/v1/leases/{id}/secrets` decrypts the current
+version of each secret the lease names, once, for the worker that holds the
+lease. It is the only place a secret value is decrypted for delivery. Missing or
+disabled secrets deliver nothing. Values are not stored or logged; the event
+records names and versions.
+
+**Hosted custody.** `AwsKmsSecretKeyCustodian` implements the existing
+`SecretKeyCustodian` port with KMS `Encrypt`/`Decrypt`, the secret identity as
+encryption context, a Carbon-key-ID to KMS-key keyring for rotation, and
+hand-written AWS Signature Version 4. `CARBON_SECRET_CUSTODY=aws-kms` selects it
+with no fallback to the local keyring. AWS KMS was chosen as the planning
+default for the open "secret/signing key custody" decision; the port keeps
+other providers possible.
+
+Proof gate, over real HTTP routes and PostgreSQL unless noted:
+
+- A worker receives only the secrets its lease names; another secret in the same
+  environment is not delivered.
+- A worker in another organization is never offered the lease and gets 404 for
+  it even with the right lease token; a build-only worker is not offered a
+  function lease; a platform requirement is honored.
+- A browser session, a request with an Origin, and `dc_`, `cs_`, `pt_`, `ce_`
+  and `wl_` bearer tokens are refused by the worker API. No account route
+  returns a value.
+- Replay: a second delivery for the same lease is refused; an enrollment code
+  works once.
+- Expiry and worker loss: an overdue lease is dead to its own token and its work
+  is re-offered up to the attempt limit; an unclaimed offer lapses.
+- Cancellation: the heartbeat reports it; the lease can neither deliver nor
+  complete.
+- Rotation: a rotated worker credential stops the old one at once; a rotated
+  secret delivers its current version; KMS key rotation keeps old envelopes
+  readable (adapter test).
+- Custody failure delivers nothing and leaves the lease deliverable.
+- Disabling, revoking, credential expiry and organization suspension all refuse
+  the worker.
+- The KMS signer reproduces the published AWS Signature Version 4 example.
+- Removing the single-use, lease-token, expiry or cancellation guard makes the
+  tests fail.
+
+The affected regression passed **505 tests, 0 failures and 4,723
+assertions across 61 files**. Generated contracts are current and the
+Solutions, Cloud, Database, Registry and CLI TypeScript checks pass.
+
+Not proven or not included: the KMS adapter has not run against a real AWS
+account; nothing grants leases in production until build orchestration exists;
+the legacy `wk_` tokens and legacy build queue are unchanged; enrollment and
+worker calls are not rate limited; moving envelopes between custody modes is
+not implemented.
+
+Phase 4 stops here. Phase 5 (lifecycle gaps: streams, audit browsing,
+archive/deletion/suspension/recovery, revocation propagation and adversarial
+tenant coverage) is next in [the handoff](left-off/handoff.md).

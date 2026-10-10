@@ -1,5 +1,5 @@
 import { canonicalRegistryRequest, dataRequestPath, parseComponent, registryRequestPath, type DeviceAuthorizationCreate, type EnvironmentScope } from "@carbon/contracts/platform";
-import { AccountCatalog, AccountEnvironmentCredentials, AccountEnvironmentSecrets, AccountRepositories, EnvelopeSecretProtector, EnvironmentCredentialAuthentication, LocalAesSecretKeyCustodian, PostgresCatalogRepository, PostgresEnvironmentCredentialRepository, PostgresEnvironmentSecretRepository, PostgresProvisioningRepository, PostgresRepositoryIntegrationRepository, PostgresServiceAuthority, ProvisionEnvironment, type ProvisioningWork, type RepositoryProvider } from '@carbon/catalog';
+import { AccountCatalog, AccountEnvironmentCredentials, AccountEnvironmentSecrets, AccountRepositories, AccountWorkers, WorkerLeases, WorkerProtocol, PostgresWorkerRepository, EnvelopeSecretProtector, EnvironmentCredentialAuthentication, LocalAesSecretKeyCustodian, PostgresCatalogRepository, PostgresEnvironmentCredentialRepository, PostgresEnvironmentSecretRepository, PostgresProvisioningRepository, PostgresRepositoryIntegrationRepository, PostgresServiceAuthority, ProvisionEnvironment, type ProvisioningWork, type RepositoryProvider } from '@carbon/catalog';
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { createHash, createHmac, randomBytes, generateKeyPairSync } from "node:crypto";
 import {
@@ -13,6 +13,7 @@ import {
 import { GitHubAccountProvider } from "@carbon/github-identity";
 import { ResendAccountNotification } from "@carbon/resend-notification";
 import { migrate } from "../../infrastructure/persistence/Database.ts";
+import { createWorkerRoutes } from "../../presentation/http/worker-routes.ts";
 import { createAccountRoutes } from "../../presentation/http/account-routes.ts";
 import { accountPlatformConfigFromEnv } from "../../composition/account-platform.ts";
 import { catalogProvisionersFromEnv } from '../../composition/catalog-worker.ts';
@@ -64,8 +65,13 @@ async function harness() {
     async createProposal(_installationId, _repositoryId, _baseBranch, proposal) { repositoryProposals++; return { pullRequestNumber: 12, url: 'https://github.com/carbon-team/desktop/pull/12', branch: proposal.branch, baseSha: 'b'.repeat(40), headSha: 'c'.repeat(40) }; },
     verifyWebhook(raw, signature, deliveryId, event) { const expected='sha256='+createHmac('sha256','repository-webhook-secret').update(raw).digest('hex'); if(signature!==expected||!deliveryId||!event) throw new Error('invalid webhook'); },
   };
-  const makeHandler = (auth: AccountAuthentication) => createAccountRoutes(auth, origin, new AccountSecurity(auth, new PostgresAccountSecurityRepository(sql, mfa), protector, totp), new AccountProfile(auth, new PostgresAccountProfileRepository(sql, mfa), protector, config), new OrganizationAccess(auth, new PostgresOrganizationRepository(sql), protector), new OrganizationInvitations(auth, new PostgresOrganizationInvitationsRepository(sql), new PostgresOrganizationRepository(sql), protector, config), new ExternalAccountAuthentication(auth, new PostgresExternalAccountRepository(sql, mfa), githubProvider, protector, config), new AccountAuthorization(auth, new PostgresPlatformAuthority(sql)), new AccountCatalog(auth, new PostgresCatalogRepository(sql), protector), undefined, undefined, new AccountEnvironmentCredentials(auth, new PostgresEnvironmentCredentialRepository(sql), protector), new AccountEnvironmentSecrets(auth, new PostgresEnvironmentSecretRepository(sql, secretProtector), protector), new AccountRepositories(auth, new PostgresRepositoryIntegrationRepository(sql), repositoryProvider, protector), new AccountDeviceAuthorization(auth,new PostgresDeviceAuthorizationRepository(sql),protector,origin,config.rateLimitKey,new DeviceCredentialAuthentication(sql),assertionIssuer),new AccountServiceAccounts(auth,new PostgresServiceAccountRepository(sql),protector,assertionIssuer),new AccountPersonalCredentials(auth,new PostgresPersonalCredentialRepository(sql),protector),new AccountLegacyTokens(auth,new PostgresLegacyTokenRepository(sql),protector,'accept'));
+  const makeHandler = (auth: AccountAuthentication) => createAccountRoutes(auth, origin, new AccountSecurity(auth, new PostgresAccountSecurityRepository(sql, mfa), protector, totp), new AccountProfile(auth, new PostgresAccountProfileRepository(sql, mfa), protector, config), new OrganizationAccess(auth, new PostgresOrganizationRepository(sql), protector), new OrganizationInvitations(auth, new PostgresOrganizationInvitationsRepository(sql), new PostgresOrganizationRepository(sql), protector, config), new ExternalAccountAuthentication(auth, new PostgresExternalAccountRepository(sql, mfa), githubProvider, protector, config), new AccountAuthorization(auth, new PostgresPlatformAuthority(sql)), new AccountCatalog(auth, new PostgresCatalogRepository(sql), protector), undefined, undefined, new AccountEnvironmentCredentials(auth, new PostgresEnvironmentCredentialRepository(sql), protector), new AccountEnvironmentSecrets(auth, new PostgresEnvironmentSecretRepository(sql, secretProtector), protector), new AccountRepositories(auth, new PostgresRepositoryIntegrationRepository(sql), repositoryProvider, protector), new AccountDeviceAuthorization(auth,new PostgresDeviceAuthorizationRepository(sql),protector,origin,config.rateLimitKey,new DeviceCredentialAuthentication(sql),assertionIssuer),new AccountServiceAccounts(auth,new PostgresServiceAccountRepository(sql),protector,assertionIssuer),new AccountPersonalCredentials(auth,new PostgresPersonalCredentialRepository(sql),protector),new AccountLegacyTokens(auth,new PostgresLegacyTokenRepository(sql),protector,'accept'),new AccountWorkers(auth,new PostgresWorkerRepository(sql,secretProtector),protector));
   let auth = makeAuth(); let handler = makeHandler(auth);
+  const workerHandler = createWorkerRoutes(new WorkerProtocol(new PostgresWorkerRepository(sql, secretProtector)), origin);
+  // Worker calls carry no Origin and no cookies unless a test adds them on purpose.
+  const workerApi = (path: string, input?: unknown, overrides: Record<string, string> = {}) => workerHandler(new Request(origin + path, { method: 'POST',
+    headers: { ...(input === undefined ? {} : { 'content-type': 'application/json' }), ...overrides }, body: input === undefined ? undefined : JSON.stringify(input) }));
+  const leases = new WorkerLeases(new PostgresWorkerRepository(sql, secretProtector));
   const mail: (AccountEmail & { idempotencyKey: string })[] = [];
   const accepted = new Set<string>(); let failProvider = false;
   const provider = new ResendAccountNotification("resend-test-only", "Carbon <auth@example.test>", (async (input, init) => {
@@ -140,7 +146,7 @@ async function harness() {
     const redirected = await githubCallback(url.searchParams.get('state')!); expect(redirected.status).toBe(303);
     return redirected.headers.get('location')!.split('#token=')[1]!;
   };
-  return { sql, protector, secretProtector, assertionPublicKey:assertionKeys.publicKey, assertionKey, mail, cookies, call, challenge, complete, token, freshRequest, freshComplete, profile, emailToken, emailComplete, createOrganization, organizationCommand, restoreCookies,
+  return { sql, protector, secretProtector, workerApi, leases, assertionPublicKey:assertionKeys.publicKey, assertionKey, mail, cookies, call, challenge, complete, token, freshRequest, freshComplete, profile, emailToken, emailComplete, createOrganization, organizationCommand, restoreCookies,
     catalogCommand, createProject,
     invitation, invitationToken, invitationProof,
     githubStart, githubCallback, githubComplete, githubBegin, githubCalls,
@@ -363,6 +369,188 @@ suite("real account authentication", () => {
     const durable = JSON.stringify({ events: await h.sql`SELECT * FROM legacy_token_events`, commands: await h.sql`SELECT * FROM legacy_token_commands` });
     expect(durable).not.toContain(legacy.apiToken); expect(durable).not.toContain(hash);
     expect((await h.sql`SELECT action FROM legacy_token_events ORDER BY sequence`).map((row: { action: string }) => row.action)).toEqual(['legacy.claimed', 'legacy.retired', 'legacy.restored']);
+  });
+
+  test('workers enroll once, are confined to their organization, and receive only their leased secrets exactly once', async () => {
+    const h = await harness(); await h.challenge('owner@example.test'); await h.deliver(); await h.complete();
+    const orgId = (await organizationResponse(h.createOrganization('Build team', 'build-team'))).receipt.id;
+    const scope = parseComponent('EnvironmentScope', parseComponent('CatalogReceipt', (await (await h.createProject(orgId)).json() as { receipt: unknown }).receipt).scope);
+    const csrf = () => h.cookies.get('__Host-carbon-csrf')!;
+    const environmentPath = `/platform/v1/orgs/${scope.orgId}/projects/${scope.projectId}/environments/${scope.environmentId}`;
+    const values = { DATABASE_URL: 'postgres://service:leased-password@example.test/db', API_KEY: 'unleased-api-key-value' };
+    for (const [name, value] of Object.entries(values)) {
+      const revision = parseComponent('CatalogEnvironmentDetails', await (await h.call(environmentPath)).json()).environment.revision;
+      expect((await h.call(`${environmentPath}/secrets`, 'POST', { name, value }, { 'if-match': revision, 'x-csrf-token': csrf() })).status).toBe(201);
+    }
+
+    // Enrollment: a manager issues a one-time code; nothing but its hash is stored.
+    const workersPath = `/platform/v1/orgs/${orgId}/workers`; const enrollment = { name: 'win-01', purposes: ['build'] };
+    expect((await h.call(workersPath, 'POST', enrollment)).status).toBe(403);
+    expect((await h.call(workersPath, 'POST', { ...enrollment, purposes: ['deploy'] }, { 'x-csrf-token': csrf() })).status).toBe(400);
+    const key = crypto.randomUUID(); const issuedResponse = await h.call(workersPath, 'POST', enrollment, { 'x-csrf-token': csrf(), 'idempotency-key': key }); expect(issuedResponse.status).toBe(201);
+    const issued = parseComponent('WorkerEnrollmentIssue', await issuedResponse.json()); expect(issued.worker.status).toBe('pending'); expect(issued.code).toMatch(/^we_[A-Za-z0-9_-]{43}$/);
+    expect((await h.call(workersPath, 'POST', enrollment, { 'x-csrf-token': csrf(), 'idempotency-key': key })).status).toBe(409);
+    expect((await h.call(workersPath, 'POST', enrollment, { 'x-csrf-token': csrf() })).status).toBe(409);
+    const pending = (await h.sql`SELECT enrollment_hash, token_hash FROM workers WHERE id = ${issued.worker.id}`)[0];
+    expect(pending).toEqual({ enrollment_hash: tokenDigest(issued.code), token_hash: null });
+    let page = parseComponent('WorkerPage', await (await h.call(workersPath)).json()); expect(page.items).toHaveLength(1); expect(JSON.stringify(page)).not.toContain(issued.code);
+
+    // The worker API takes worker credentials only: no browser, no session, no other credential type.
+    const capabilities = { platform: 'windows' as const, arch: 'x64' as const, toolchains: ['bun@1.3.10'] };
+    expect((await h.workerApi('/worker/v1/enroll', { code: issued.code, capabilities }, { origin })).status).toBe(403);
+    expect((await h.workerApi('/worker/v1/enroll', { code: 'we_' + 'A'.repeat(43), capabilities })).status).toBe(401);
+    expect((await h.workerApi('/worker/v1/leases/claim', undefined, { cookie: [...h.cookies].map(([name, value]) => `${name}=${value}`).join('; ') })).status).toBe(401);
+    for (const prefix of ['dc', 'cs', 'pt', 'ce', 'wl']) expect((await h.workerApi('/worker/v1/leases/claim', undefined, { authorization: `Bearer ${prefix}_${'A'.repeat(43)}` })).status).toBe(401);
+    const enrolledResponse = await h.workerApi('/worker/v1/enroll', { code: issued.code, capabilities }); expect(enrolledResponse.status).toBe(201);
+    const enrolled = parseComponent('WorkerCredentialIssue', await enrolledResponse.json());
+    expect(enrolled.token).toMatch(/^wc_[A-Za-z0-9_-]{43}$/); expect(enrolled.worker.status).toBe('active'); expect(enrolled.worker.capabilities).toEqual(capabilities);
+    expect((await h.workerApi('/worker/v1/enroll', { code: issued.code, capabilities })).status).toBe(401);
+    expect((await h.sql`SELECT enrollment_hash, token_hash FROM workers WHERE id = ${issued.worker.id}`)[0]).toEqual({ enrollment_hash: null, token_hash: tokenDigest(enrolled.token) });
+    const bearer = { authorization: `Bearer ${enrolled.token}` };
+    expect(parseComponent('WorkerLeaseOffer', await (await h.workerApi('/worker/v1/leases/claim', undefined, bearer)).json())).toEqual({ state: 'none' });
+
+    // A second tenant's worker.
+    const ownerCookies = new Map(h.cookies); h.cookies.clear(); await h.challenge('other@example.test'); await h.deliver(); await h.complete();
+    const otherOrg = (await organizationResponse(h.createOrganization('Other team', 'other-team'))).receipt.id;
+    expect((await h.call(workersPath)).status).toBe(404);
+    expect((await h.call(`${workersPath}/${issued.worker.id}`, 'POST', { kind: 'revoke' }, { 'if-match': enrolled.worker.revision, 'x-csrf-token': csrf() })).status).toBe(404);
+    const otherIssue = parseComponent('WorkerEnrollmentIssue', await (await h.call(`/platform/v1/orgs/${otherOrg}/workers`, 'POST', { name: 'foreign-01', purposes: ['build', 'function'] }, { 'x-csrf-token': csrf() })).json());
+    const foreign = { authorization: `Bearer ${parseComponent('WorkerCredentialIssue', await (await h.workerApi('/worker/v1/enroll', { code: otherIssue.code, capabilities })).json()).token}` };
+    h.restoreCookies(ownerCookies);
+
+    // Leases come only from Cloud's own orchestration, and name exactly what a worker may read.
+    await credentialRejection(h.leases.grant({ scope, purpose: 'build', subjectId: crypto.randomUUID(), secretNames: ['MISSING_SECRET'] }, crypto.randomUUID()), 'missing or disabled');
+    await credentialRejection(h.leases.grant({ scope: { ...scope, environmentId: crypto.randomUUID() }, purpose: 'build', subjectId: crypto.randomUUID(), secretNames: [] }, crypto.randomUUID()), 'Environment not found');
+    const subjectId = crypto.randomUUID(); const granted = await h.leases.grant({ scope, purpose: 'build', subjectId, secretNames: ['DATABASE_URL'] }, crypto.randomUUID());
+    expect(granted.state).toBe('granted'); expect(granted.workerId).toBeNull();
+    await credentialRejection(h.leases.grant({ scope, purpose: 'build', subjectId, secretNames: ['DATABASE_URL'] }, crypto.randomUUID()), 'already has a lease');
+    const functionLease = await h.leases.grant({ scope, purpose: 'function', subjectId: crypto.randomUUID(), secretNames: ['API_KEY'] }, crypto.randomUUID());
+    expect(parseComponent('WorkerLeaseOffer', await (await h.workerApi('/worker/v1/leases/claim', undefined, foreign)).json())).toEqual({ state: 'none' });
+    const offer = parseComponent('WorkerLeaseOffer', await (await h.workerApi('/worker/v1/leases/claim', undefined, bearer)).json());
+    if (offer.state !== 'leased') throw new Error('expected a lease');
+    expect(offer.lease.id).toBe(granted.id); expect(offer.lease.state).toBe('claimed'); expect(offer.lease.workerId).toBe(issued.worker.id); expect(offer.lease.secretNames).toEqual(['DATABASE_URL']);
+    expect(offer.leaseToken).toMatch(/^wl_[A-Za-z0-9_-]{43}$/);
+    // The build-only worker is never offered the function lease.
+    expect(parseComponent('WorkerLeaseOffer', await (await h.workerApi('/worker/v1/leases/claim', undefined, bearer)).json())).toEqual({ state: 'none' });
+    expect((await h.sql`SELECT state FROM worker_leases WHERE id = ${functionLease.id}`)[0].state).toBe('granted');
+
+    const secretsPath = `/worker/v1/leases/${granted.id}/secrets`; const leased = { ...bearer, 'x-carbon-lease-token': offer.leaseToken };
+    expect((await h.workerApi(secretsPath, undefined, bearer)).status).toBe(401);
+    expect((await h.workerApi(secretsPath, undefined, { ...bearer, 'x-carbon-lease-token': 'wl_' + 'A'.repeat(43) })).status).toBe(409);
+    expect((await h.workerApi(secretsPath, undefined, { ...foreign, 'x-carbon-lease-token': offer.leaseToken })).status).toBe(404);
+    expect((await h.workerApi(secretsPath, undefined, { 'x-carbon-lease-token': offer.leaseToken })).status).toBe(401);
+    expect((await h.sql`SELECT materialized_at FROM worker_leases WHERE id = ${granted.id}`)[0].materialized_at).toBeNull();
+    const deliveredResponse = await h.workerApi(secretsPath, undefined, leased); expect(deliveredResponse.status).toBe(200); expect(deliveredResponse.headers.get('cache-control')).toBe('no-store');
+    const delivered = parseComponent('WorkerSecretBindings', await deliveredResponse.json());
+    expect(delivered.bindings).toEqual([{ name: 'DATABASE_URL', version: 1, value: values.DATABASE_URL }]); expect(JSON.stringify(delivered)).not.toContain(values.API_KEY);
+    // Delivery is single use.
+    expect((await h.workerApi(secretsPath, undefined, leased)).status).toBe(409);
+
+    const beat = parseComponent('WorkerLeaseReceipt', await (await h.workerApi(`/worker/v1/leases/${granted.id}`, { kind: 'heartbeat' }, leased)).json()); expect(beat.cancelled).toBe(false);
+    expect((await h.workerApi(`/worker/v1/leases/${granted.id}`, { kind: 'heartbeat' }, { ...foreign, 'x-carbon-lease-token': offer.leaseToken })).status).toBe(404);
+    const done = parseComponent('WorkerLeaseReceipt', await (await h.workerApi(`/worker/v1/leases/${granted.id}`, { kind: 'complete' }, leased)).json()); expect(done.lease.state).toBe('completed');
+    for (const attempt of [h.workerApi(secretsPath, undefined, leased), h.workerApi(`/worker/v1/leases/${granted.id}`, { kind: 'heartbeat' }, leased), h.workerApi(`/worker/v1/leases/${granted.id}`, { kind: 'complete' }, leased)]) expect((await attempt).status).toBe(409);
+    expect((await h.sql`SELECT lease_token_hash FROM worker_leases WHERE id = ${granted.id}`)[0].lease_token_hash).toBeNull();
+
+    // No account route returns a value, and durable records hold names and versions only.
+    const account = JSON.stringify([await (await h.call(`${environmentPath}/secrets`)).json(), await (await h.call(workersPath)).json()]);
+    const durable = JSON.stringify({ events: await h.sql`SELECT * FROM worker_events`, leases: await h.sql`SELECT * FROM worker_leases`, workers: await h.sql`SELECT * FROM workers`, commands: await h.sql`SELECT * FROM worker_commands` });
+    for (const secret of [values.DATABASE_URL, values.API_KEY, enrolled.token, issued.code, offer.leaseToken]) { expect(account).not.toContain(secret); expect(durable).not.toContain(secret); }
+    expect((await h.sql`SELECT metadata FROM worker_events WHERE action = 'lease.secrets_materialized'`).map((row: { metadata: unknown }) => row.metadata)).toEqual([{ secrets: [{ name: 'DATABASE_URL', version: 1 }] }]);
+  });
+
+  test('leases fail closed on cancellation, expiry, worker loss, secret changes, custody failure, rotation and revocation', async () => {
+    const h = await harness(); await h.challenge(); await h.deliver(); await h.complete();
+    const orgId = (await organizationResponse(h.createOrganization('Lease team', 'lease-team'))).receipt.id;
+    const scope = parseComponent('EnvironmentScope', parseComponent('CatalogReceipt', (await (await h.createProject(orgId)).json() as { receipt: unknown }).receipt).scope);
+    const csrf = () => h.cookies.get('__Host-carbon-csrf')!;
+    const environmentPath = `/platform/v1/orgs/${scope.orgId}/projects/${scope.projectId}/environments/${scope.environmentId}`;
+    const revision = parseComponent('CatalogEnvironmentDetails', await (await h.call(environmentPath)).json()).environment.revision;
+    const secret = parseComponent('EnvironmentSecretReceipt', await (await h.call(`${environmentPath}/secrets`, 'POST', { name: 'SIGNING_KEY', value: 'first-signing-value' }, { 'if-match': revision, 'x-csrf-token': csrf() })).json()).secret;
+    const workersPath = `/platform/v1/orgs/${orgId}/workers`; const capabilities = { platform: 'windows', arch: 'x64', toolchains: [] };
+    const enrollment = parseComponent('WorkerEnrollmentIssue', await (await h.call(workersPath, 'POST', { name: 'win-01', purposes: ['build'] }, { 'x-csrf-token': csrf() })).json());
+    let credential = parseComponent('WorkerCredentialIssue', await (await h.workerApi('/worker/v1/enroll', { code: enrollment.code, capabilities })).json());
+    const bearer = () => ({ authorization: `Bearer ${credential.token}` });
+    const grant = (overrides: Record<string, unknown> = {}) => h.leases.grant({ scope, purpose: 'build', subjectId: crypto.randomUUID(), secretNames: ['SIGNING_KEY'], ...overrides }, crypto.randomUUID());
+    const claim = async () => { const offer = parseComponent('WorkerLeaseOffer', await (await h.workerApi('/worker/v1/leases/claim', undefined, bearer())).json()); if (offer.state !== 'leased') throw new Error('expected a lease'); return offer; };
+    const held = (offer: { leaseToken: string }) => ({ ...bearer(), 'x-carbon-lease-token': offer.leaseToken });
+    const state = async (id: string) => (await h.sql`SELECT state FROM worker_leases WHERE id = ${id}`)[0].state;
+
+    // Platform requirements are honored.
+    const linuxOnly = await grant({ requiredPlatform: 'linux' });
+    expect(parseComponent('WorkerLeaseOffer', await (await h.workerApi('/worker/v1/leases/claim', undefined, bearer())).json())).toEqual({ state: 'none' });
+    await h.leases.cancel(linuxOnly.subjectId, crypto.randomUUID());
+
+    // Cancellation: the worker is told, and the lease can neither deliver secrets nor succeed.
+    const cancelled = await grant(); let offer = await claim(); expect(offer.lease.id).toBe(cancelled.id);
+    expect((await h.leases.cancel(cancelled.subjectId, crypto.randomUUID())).map(item => item.state)).toEqual(['cancelled']);
+    expect(parseComponent('WorkerLeaseReceipt', await (await h.workerApi(`/worker/v1/leases/${cancelled.id}`, { kind: 'heartbeat' }, held(offer))).json()).cancelled).toBe(true);
+    expect((await h.workerApi(`/worker/v1/leases/${cancelled.id}/secrets`, undefined, held(offer))).status).toBe(409);
+    expect((await h.workerApi(`/worker/v1/leases/${cancelled.id}`, { kind: 'complete' }, held(offer))).status).toBe(409);
+    expect(await state(cancelled.id)).toBe('cancelled');
+
+    // Worker loss: an overdue lease is dead even to its own token, and the work is re-offered as a new attempt.
+    const lost = await grant(); offer = await claim(); expect(offer.lease.attempt).toBe(1);
+    await h.sql`UPDATE worker_leases SET expires_at = now() - interval '1 second' WHERE id = ${lost.id}`;
+    expect((await h.workerApi(`/worker/v1/leases/${lost.id}/secrets`, undefined, held(offer))).status).toBe(409);
+    expect(await state(lost.id)).toBe('expired');
+    expect((await h.workerApi(`/worker/v1/leases/${lost.id}`, { kind: 'heartbeat' }, held(offer))).status).toBe(409);
+    const second = await claim(); expect(second.lease.subjectId).toBe(lost.subjectId); expect(second.lease.attempt).toBe(2); expect(second.lease.id).not.toBe(lost.id); expect(second.leaseToken).not.toBe(offer.leaseToken);
+    expect((await h.workerApi(`/worker/v1/leases/${second.lease.id}/secrets`, undefined, { ...bearer(), 'x-carbon-lease-token': offer.leaseToken })).status).toBe(409);
+    // The sweeper does the same for a worker that simply went silent, up to the attempt limit.
+    await h.sql`UPDATE worker_leases SET expires_at = now() - interval '1 second' WHERE id = ${second.lease.id}`;
+    const successors = await h.leases.reclaim(crypto.randomUUID()); expect(successors.map(item => [item.subjectId, item.attempt, item.state])).toEqual([[lost.subjectId, 3, 'granted']]);
+    const third = await claim(); expect(third.lease.attempt).toBe(3);
+    await h.sql`UPDATE worker_leases SET expires_at = now() - interval '1 second' WHERE id = ${third.lease.id}`;
+    expect(await h.leases.reclaim(crypto.randomUUID())).toEqual([]); expect(await state(third.lease.id)).toBe('expired');
+    expect(await h.sql`SELECT id FROM worker_leases WHERE subject_id = ${lost.subjectId}`).toHaveLength(3);
+    // An offer nobody claimed lapses without a retry.
+    const unclaimed = await grant({ claimSeconds: 1 }); await h.sql`UPDATE worker_leases SET expires_at = now() - interval '1 second' WHERE id = ${unclaimed.id}`;
+    expect(await h.leases.reclaim(crypto.randomUUID())).toEqual([]); expect(await state(unclaimed.id)).toBe('expired');
+    expect(parseComponent('WorkerLeaseOffer', await (await h.workerApi('/worker/v1/leases/claim', undefined, bearer())).json())).toEqual({ state: 'none' });
+
+    // Custody failure delivers nothing and leaves the lease deliverable once custody recovers.
+    const guarded = await grant(); offer = await claim(); const path = `/worker/v1/leases/${guarded.id}/secrets`;
+    const wrongCustody = createWorkerRoutes(new WorkerProtocol(new PostgresWorkerRepository(h.sql, new EnvelopeSecretProtector(new LocalAesSecretKeyCustodian('secret-test-key', { 'secret-test-key': randomBytes(32).toString('base64') })))), origin);
+    const refused = await wrongCustody(new Request(origin + path, { method: 'POST', headers: held(offer) })); expect(refused.status).toBe(503); expect(await refused.text()).not.toContain('first-signing-value');
+    expect((await h.sql`SELECT materialized_at FROM worker_leases WHERE id = ${guarded.id}`)[0].materialized_at).toBeNull();
+    // A secret disabled after the grant is not delivered; the current version is delivered after rotation.
+    const disabled = parseComponent('EnvironmentSecretReceipt', await (await h.call(`${environmentPath}/secrets/${secret.id}`, 'POST', { kind: 'disable', disabled: true }, { 'if-match': secret.revision, 'x-csrf-token': csrf() })).json()).secret;
+    expect((await h.workerApi(path, undefined, held(offer))).status).toBe(409);
+    const enabled = parseComponent('EnvironmentSecretReceipt', await (await h.call(`${environmentPath}/secrets/${secret.id}`, 'POST', { kind: 'disable', disabled: false }, { 'if-match': disabled.revision, 'x-csrf-token': csrf() })).json()).secret;
+    expect((await h.call(`${environmentPath}/secrets/${secret.id}`, 'POST', { kind: 'rotate', value: 'second-signing-value' }, { 'if-match': enabled.revision, 'x-csrf-token': csrf() })).status).toBe(200);
+
+    // Worker credential rotation: the old credential stops at once, the lease stays with the worker.
+    const previous = credential.token; credential = parseComponent('WorkerCredentialIssue', await (await h.workerApi('/worker/v1/credential', undefined, bearer())).json());
+    expect(credential.token).not.toBe(previous);
+    expect((await h.workerApi(path, undefined, { authorization: `Bearer ${previous}`, 'x-carbon-lease-token': offer.leaseToken })).status).toBe(401);
+    const delivered = parseComponent('WorkerSecretBindings', await (await h.workerApi(path, undefined, held(offer))).json());
+    expect(delivered.bindings).toEqual([{ name: 'SIGNING_KEY', version: 2, value: 'second-signing-value' }]);
+
+    // Disabling a worker takes its lease away and re-offers the work; enabling does not give the lease back.
+    const current = parseComponent('WorkerPage', await (await h.call(workersPath)).json()).items[0]!;
+    const disabledWorker = parseComponent('WorkerReceipt', await (await h.call(`${workersPath}/${current.id}`, 'POST', { kind: 'disable' }, { 'if-match': current.revision, 'x-csrf-token': csrf() })).json()).worker;
+    expect(disabledWorker.status).toBe('disabled'); expect(await state(guarded.id)).toBe('expired');
+    expect((await h.workerApi('/worker/v1/leases/claim', undefined, bearer())).status).toBe(401);
+    const enabledWorker = parseComponent('WorkerReceipt', await (await h.call(`${workersPath}/${current.id}`, 'POST', { kind: 'enable' }, { 'if-match': disabledWorker.revision, 'x-csrf-token': csrf() })).json()).worker;
+    expect((await h.workerApi(`/worker/v1/leases/${guarded.id}`, { kind: 'complete' }, held(offer))).status).toBe(409);
+    const retry = await claim(); expect(retry.lease.subjectId).toBe(guarded.subjectId); expect(retry.lease.attempt).toBe(2);
+
+    // An expired credential, a suspended organization and a revoked worker are all refused.
+    await h.sql`UPDATE workers SET credential_expires_at = now() - interval '1 second' WHERE id = ${current.id}`;
+    expect((await h.workerApi(`/worker/v1/leases/${retry.lease.id}/secrets`, undefined, held(retry))).status).toBe(401);
+    await h.sql`UPDATE workers SET credential_expires_at = now() + interval '1 day' WHERE id = ${current.id}`;
+    await h.sql`UPDATE organizations SET state = 'suspended' WHERE id = ${orgId}`;
+    expect((await h.workerApi(`/worker/v1/leases/${retry.lease.id}/secrets`, undefined, held(retry))).status).toBe(401);
+    await h.sql`UPDATE organizations SET state = 'active' WHERE id = ${orgId}`;
+    const revokeHeaders = { 'if-match': enabledWorker.revision, 'x-csrf-token': csrf(), 'idempotency-key': crypto.randomUUID() };
+    const revoked = parseComponent('WorkerReceipt', await (await h.call(`${workersPath}/${current.id}`, 'POST', { kind: 'revoke' }, revokeHeaders)).json());
+    expect(revoked.worker.status).toBe('revoked'); expect(parseComponent('WorkerReceipt', await (await h.call(`${workersPath}/${current.id}`, 'POST', { kind: 'revoke' }, revokeHeaders)).json())).toEqual(revoked);
+    expect((await h.sql`SELECT token_hash FROM workers WHERE id = ${current.id}`)[0].token_hash).toBeNull();
+    for (const attempt of [h.workerApi('/worker/v1/leases/claim', undefined, bearer()), h.workerApi('/worker/v1/credential', undefined, bearer()), h.workerApi(`/worker/v1/leases/${retry.lease.id}/secrets`, undefined, held(retry))]) expect((await attempt).status).toBe(401);
+    expect((await h.call(`${workersPath}/${current.id}`, 'POST', { kind: 'enable' }, { 'if-match': revoked.worker.revision, 'x-csrf-token': csrf() })).status).toBe(409);
+    expect(await state(retry.lease.id)).toBe('expired');
+    const durable = JSON.stringify(await h.sql`SELECT * FROM worker_events`); for (const value of ['first-signing-value', 'second-signing-value', previous, credential.token]) expect(durable).not.toContain(value);
   });
 
   test('device authorization approves bounded CLI access, discloses once, rate-limits polling, and revokes durably', async()=>{
@@ -1915,6 +2103,27 @@ test("production configuration never selects the development inbox implicitly", 
   expect(() => accountPlatformConfigFromEnv({ CARBON_ACCOUNT_AUTH: "enabled", CARBON_ACCOUNT_EMAIL_PROVIDER: "resend" })).toThrow("RESEND_API_KEY");
 });
 
+test('secret custody and worker configuration is explicit, complete and never falls back', () => {
+  const base = { CARBON_ACCOUNT_AUTH: 'enabled', CARBON_ACCOUNT_EMAIL_PROVIDER: 'resend', RESEND_API_KEY: 're_fixture', CARBON_ACCOUNT_EMAIL_FROM: 'Carbon <auth@example.test>',
+    CARBON_ACCOUNT_ENCRYPTION_KEYS: JSON.stringify({ k: randomBytes(32).toString('base64') }), CARBON_ACCOUNT_ACTIVE_KEY_ID: 'k', CARBON_ACCOUNT_RATE_KEY: randomBytes(32).toString('base64'),
+    CARBON_PUBLIC_ORIGIN: 'https://cloud.example.test', CARBON_TERMS_VERSION: '2026-09-12' };
+  const local = { ...base, CARBON_SECRETS: 'enabled', CARBON_SECRET_ACTIVE_KEY_ID: 's', CARBON_SECRET_ENCRYPTION_KEYS: JSON.stringify({ s: randomBytes(32).toString('base64') }) };
+  expect(accountPlatformConfigFromEnv(base)).toMatchObject({ secrets: undefined, workers: false });
+  expect(accountPlatformConfigFromEnv(local)!.secrets).toMatchObject({ custody: 'local', activeKeyId: 's' });
+  expect(() => accountPlatformConfigFromEnv({ ...local, CARBON_SECRET_CUSTODY: 'vault' })).toThrow('CARBON_SECRET_CUSTODY must be local or aws-kms');
+  const key = 'arn:aws:kms:eu-west-1:111122223333:key/1234abcd-12ab-34cd-56ef-1234567890ab';
+  const kms = { ...base, CARBON_SECRETS: 'enabled', CARBON_SECRET_CUSTODY: 'aws-kms', CARBON_SECRET_ACTIVE_KEY_ID: 'k1', CARBON_SECRET_KMS_KEYS: JSON.stringify({ k1: key }),
+    CARBON_SECRET_KMS_REGION: 'eu-west-1', AWS_ACCESS_KEY_ID: 'AKIDEXAMPLE', AWS_SECRET_ACCESS_KEY: 'fixture-secret' };
+  expect(accountPlatformConfigFromEnv(kms)!.secrets).toEqual({ custody: 'aws-kms', region: 'eu-west-1', activeKeyId: 'k1', keys: { k1: key }, credentials: { accessKeyId: 'AKIDEXAMPLE', secretAccessKey: 'fixture-secret', sessionToken: undefined } });
+  // Selecting KMS never silently uses a local keyring that happens to be present.
+  for (const missing of ['CARBON_SECRET_KMS_REGION', 'CARBON_SECRET_KMS_KEYS', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY']) {
+    expect(() => accountPlatformConfigFromEnv({ ...kms, CARBON_SECRET_ENCRYPTION_KEYS: local.CARBON_SECRET_ENCRYPTION_KEYS, [missing]: '' })).toThrow(missing);
+  }
+  expect(() => accountPlatformConfigFromEnv({ ...base, CARBON_WORKERS: 'enabled' })).toThrow('CARBON_WORKERS requires CARBON_SECRETS=enabled');
+  expect(() => accountPlatformConfigFromEnv({ ...local, CARBON_WORKERS: 'yes' })).toThrow('CARBON_WORKERS must be enabled or disabled');
+  expect(accountPlatformConfigFromEnv({ ...local, CARBON_WORKERS: 'enabled' })!.workers).toBe(true);
+});
+
 test('catalog transport configuration requires explicit service origins and an active Ed25519 signing key', () => {
   expect(catalogProvisionersFromEnv({})).toEqual({});
   expect(() => catalogProvisionersFromEnv({ CARBON_PROVISIONING_DATABASE_ORIGIN: 'https://database.example.test' })).toThrow('CARBON_ASSERTION_KEY_ID');
@@ -1964,5 +2173,5 @@ test("GitHub configuration requires explicit enablement and complete separate OA
   expect(() => accountPlatformConfigFromEnv({ ...env, CARBON_SECRETS: 'enabled' })).toThrow('CARBON_SECRET_ENCRYPTION_KEYS');
   const secretKey = randomBytes(32).toString('base64');
   expect(accountPlatformConfigFromEnv({ ...env, CARBON_SECRETS: 'enabled', CARBON_SECRET_ACTIVE_KEY_ID: 'fixture',
-    CARBON_SECRET_ENCRYPTION_KEYS: JSON.stringify({ fixture: secretKey }) })!.secrets).toEqual({ activeKeyId: 'fixture', encryptionKeys: { fixture: secretKey } });
+    CARBON_SECRET_ENCRYPTION_KEYS: JSON.stringify({ fixture: secretKey }) })!.secrets).toEqual({ custody: 'local', activeKeyId: 'fixture', encryptionKeys: { fixture: secretKey } });
 });

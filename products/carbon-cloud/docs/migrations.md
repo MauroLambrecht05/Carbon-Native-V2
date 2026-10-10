@@ -90,3 +90,8 @@ rows keep their hash and default to `active`. Recovery: code from before 0021
 ignores the new columns, so a release rollback needs no schema change; it does
 treat retired legacy tokens as accepted again. See
 [legacy-tokens.md](legacy-tokens.md).
+
+0022 adds enrolled `workers`, `worker_leases`, `worker_commands` and
+`worker_events`. It is additive and touches no existing table. Recovery: code
+from before 0022 ignores these tables; dropping them loses only worker
+enrollments and lease history, never secret data.

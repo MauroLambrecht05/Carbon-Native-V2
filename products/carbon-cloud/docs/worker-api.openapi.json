@@ -1,0 +1,486 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Carbon worker API",
+    "version": "1.0.0",
+    "description": "Worker enrollment and management for organization managers, and the worker-credential protocol for leases and lease-bound secret delivery."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "paths": {
+    "/platform/v1/orgs/{orgId}/workers": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrgId"
+        }
+      ],
+      "get": {
+        "operationId": "listWorkers",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "description": "Requires organization.manage.",
+        "parameters": [
+          {
+            "$ref": "organization-api.openapi.json#/components/parameters/Limit"
+          },
+          {
+            "$ref": "organization-api.openapi.json#/components/parameters/Cursor"
+          },
+          {
+            "$ref": "organization-api.openapi.json#/components/parameters/Sort"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Worker metadata page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/WorkerPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createWorkerEnrollment",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "description": "Requires organization.manage and a fresh session. Returns a 15-minute we_ enrollment code exactly once; a retry with the same idempotency key is refused with 409.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/MutationOrigin"
+          },
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/RequestId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/WorkerEnrollmentCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The pending worker and the only code disclosure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/WorkerEnrollmentIssue"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/orgs/{orgId}/workers/{workerId}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrgId"
+        },
+        {
+          "$ref": "#/components/parameters/WorkerId"
+        }
+      ],
+      "post": {
+        "operationId": "commandWorker",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "description": "disable, enable or revoke. Disabling or revoking ends the worker's claimed leases and re-offers their work.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/MutationOrigin"
+          },
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/RequestId"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/WorkerCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated worker",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/WorkerReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/worker/v1/enroll": {
+      "post": {
+        "operationId": "enrollWorker",
+        "security": [],
+        "description": "Exchanges a one-time we_ code for the worker's wc_ credential. Requests carrying a browser Origin are refused.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/WorkerEnrollRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The active worker and the only credential disclosure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/WorkerCredentialIssue"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/worker/v1/credential": {
+      "post": {
+        "operationId": "rotateWorkerCredential",
+        "security": [
+          {
+            "workerCredential": []
+          }
+        ],
+        "description": "Replaces the wc_ credential. The previous credential stops working at once.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The worker and its new credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/WorkerCredentialIssue"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/worker/v1/leases/claim": {
+      "post": {
+        "operationId": "claimWorkerLease",
+        "security": [
+          {
+            "workerCredential": []
+          }
+        ],
+        "description": "Claims the oldest lease offered to this worker's organization, purposes and platform. The wl_ lease token is returned exactly once.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A claimed lease with its token, or none",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/WorkerLeaseOffer"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/worker/v1/leases/{leaseId}": {
+      "post": {
+        "operationId": "commandWorkerLease",
+        "security": [
+          {
+            "workerCredential": []
+          }
+        ],
+        "description": "heartbeat renews the lease window and reports cancellation; complete ends the lease. A cancelled, expired or completed lease returns 409.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/LeaseId"
+          },
+          {
+            "$ref": "#/components/parameters/LeaseToken"
+          },
+          {
+            "$ref": "#/components/parameters/RequestId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/WorkerLeaseCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The lease and whether it was cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/WorkerLeaseReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/worker/v1/leases/{leaseId}/secrets": {
+      "post": {
+        "operationId": "materializeWorkerLeaseSecrets",
+        "security": [
+          {
+            "workerCredential": []
+          }
+        ],
+        "description": "Returns the current value of each secret the lease names, once. A second request, a wrong lease token, or a cancelled, expired or completed lease returns 409. A missing or disabled secret delivers nothing.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/LeaseId"
+          },
+          {
+            "$ref": "#/components/parameters/LeaseToken"
+          },
+          {
+            "$ref": "#/components/parameters/RequestId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Secret values for this lease only",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/WorkerSecretBindings"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "browserSession": {
+        "$ref": "account-api.openapi.json#/components/securitySchemes/browserSession"
+      },
+      "workerCredential": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A wc_ worker credential."
+      }
+    },
+    "parameters": {
+      "OrgId": {
+        "name": "orgId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+        }
+      },
+      "WorkerId": {
+        "name": "workerId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+        }
+      },
+      "LeaseId": {
+        "name": "leaseId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+        }
+      },
+      "LeaseToken": {
+        "name": "x-carbon-lease-token",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^wl_[A-Za-z0-9_-]{43}$"
+        }
+      },
+      "MutationOrigin": {
+        "$ref": "account-api.openapi.json#/components/parameters/Origin"
+      },
+      "CsrfToken": {
+        "$ref": "account-api.openapi.json#/components/parameters/CsrfToken"
+      },
+      "IdempotencyKey": {
+        "$ref": "account-api.openapi.json#/components/parameters/IdempotencyKey"
+      },
+      "IfMatch": {
+        "$ref": "account-api.openapi.json#/components/parameters/IfMatch"
+      },
+      "RequestId": {
+        "$ref": "account-api.openapi.json#/components/parameters/RequestId"
+      }
+    }
+  }
+}

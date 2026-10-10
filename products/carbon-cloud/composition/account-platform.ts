@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import { AccountCatalog, AccountEnvironmentCredentials, AccountEnvironmentSecrets, AccountRepositories, EnvelopeSecretProtector, LocalAesSecretKeyCustodian, PostgresCatalogRepository, PostgresEnvironmentCredentialRepository, PostgresEnvironmentSecretRepository, PostgresRepositoryIntegrationRepository } from '@carbon/catalog';
+import { AccountCatalog, AccountEnvironmentCredentials, AccountEnvironmentSecrets, AccountRepositories, EnvelopeSecretProtector, LocalAesSecretKeyCustodian, AwsKmsSecretKeyCustodian, AccountWorkers, WorkerLeases, WorkerProtocol, PostgresWorkerRepository, PostgresCatalogRepository, PostgresEnvironmentCredentialRepository, PostgresEnvironmentSecretRepository, PostgresRepositoryIntegrationRepository } from '@carbon/catalog';
 import { AccountData, AccountImports, PostgresImportJobs, RunImportJobs, PostgresAccountDataAuthority, type DataTransport, type ImportTransport } from '@carbon/data';
 import { dataClientFromEnv, importClientFromEnv } from './data-platform.ts';
 import {
@@ -14,6 +14,7 @@ import { GitHubAccountProvider } from "@carbon/github-identity";
 import { GitHubAppRepositoryProvider } from '@carbon/github-repository';
 import { ResendAccountNotification } from "@carbon/resend-notification";
 import { DevelopmentInboxNotification } from "../infrastructure/notifications/DevelopmentInboxNotification.ts";
+import { createWorkerRoutes } from '../presentation/http/worker-routes.ts';
 import { createAccountRoutes } from "../presentation/http/account-routes.ts";
 import { serviceAssertionIssuerFromEnv } from './service-assertion-signing.ts';
 
@@ -27,7 +28,10 @@ export interface AccountPlatformConfig {
   readonly encryptionKeys: Readonly<Record<string, string>>;
   readonly notification: { kind: "resend"; apiKey: string; from: string } | { kind: "development-inbox"; directory: string };
   readonly github?: { readonly clientId: string; readonly clientSecret: string };
-  readonly secrets?: { readonly activeKeyId: string; readonly encryptionKeys: Readonly<Record<string, string>> };
+  readonly secrets?: { readonly custody?: 'local'; readonly activeKeyId: string; readonly encryptionKeys: Readonly<Record<string, string>> }
+    | { readonly custody: 'aws-kms'; readonly region: string; readonly activeKeyId: string; readonly keys: Readonly<Record<string, string>>; readonly credentials: import('@carbon/catalog').AwsCredentials };
+  /** Enrolled workers, leases and lease-bound secret delivery. Requires secrets. */
+  readonly workers?: boolean;
   readonly githubRepositories?: { readonly appId: string; readonly privateKey: string; readonly webhookSecret: string };
   readonly serviceAccountAssertions?: import('@carbon/identity').ServiceAssertionIssuer;
   readonly deviceAssertions?: import('@carbon/identity').ServiceAssertionIssuer;
@@ -68,19 +72,30 @@ export function accountPlatformConfigFromEnv(env: NodeJS.ProcessEnv = process.en
   if (env.CARBON_SECRETS && !['enabled', 'disabled'].includes(env.CARBON_SECRETS)) throw new Error('CARBON_SECRETS must be enabled or disabled');
   let secrets: AccountPlatformConfig['secrets'];
   if (env.CARBON_SECRETS === 'enabled') {
-    let secretKeys: unknown;
-    try { secretKeys = JSON.parse(required('CARBON_SECRET_ENCRYPTION_KEYS')); }
-    catch { throw new Error('CARBON_SECRET_ENCRYPTION_KEYS must be a key-ID to base64-key JSON object'); }
-    if (!secretKeys || typeof secretKeys !== 'object' || Array.isArray(secretKeys) || Object.values(secretKeys).some(value => typeof value !== 'string')) throw new Error('Invalid secret encryption keyring');
-    secrets = { activeKeyId: required('CARBON_SECRET_ACTIVE_KEY_ID'), encryptionKeys: secretKeys as Record<string, string> };
+    const custody = env.CARBON_SECRET_CUSTODY ?? 'local';
+    if (custody !== 'local' && custody !== 'aws-kms') throw new Error('CARBON_SECRET_CUSTODY must be local or aws-kms');
+    const keyring = (name: string): Record<string, string> => {
+      let parsed: unknown;
+      try { parsed = JSON.parse(required(name)); } catch { throw new Error(`${name} must be a key-ID JSON object`); }
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || Object.values(parsed).some(value => typeof value !== 'string')) throw new Error('Invalid secret encryption keyring');
+      return parsed as Record<string, string>;
+    };
+    // There is no fallback between custody modes: the selected one must be fully configured.
+    secrets = custody === 'aws-kms'
+      ? { custody, region: required('CARBON_SECRET_KMS_REGION'), activeKeyId: required('CARBON_SECRET_ACTIVE_KEY_ID'), keys: keyring('CARBON_SECRET_KMS_KEYS'),
+          credentials: { accessKeyId: required('AWS_ACCESS_KEY_ID'), secretAccessKey: required('AWS_SECRET_ACCESS_KEY'), sessionToken: env.AWS_SESSION_TOKEN || undefined } }
+      : { custody, encryptionKeys: keyring('CARBON_SECRET_ENCRYPTION_KEYS'), activeKeyId: required('CARBON_SECRET_ACTIVE_KEY_ID') };
   }
+  if (env.CARBON_WORKERS && !['enabled', 'disabled'].includes(env.CARBON_WORKERS)) throw new Error('CARBON_WORKERS must be enabled or disabled');
+  const workers = env.CARBON_WORKERS === 'enabled';
+  if (workers && !secrets) throw new Error('CARBON_WORKERS requires CARBON_SECRETS=enabled');
   if(env.CARBON_SERVICE_ACCOUNT_ASSERTIONS&& !['enabled','disabled'].includes(env.CARBON_SERVICE_ACCOUNT_ASSERTIONS))throw new Error('CARBON_SERVICE_ACCOUNT_ASSERTIONS must be enabled or disabled');
   const serviceAccountAssertions=env.CARBON_SERVICE_ACCOUNT_ASSERTIONS==='enabled'?serviceAssertionIssuerFromEnv(env):undefined;
   if(env.CARBON_DEVICE_ASSERTIONS&& !['enabled','disabled'].includes(env.CARBON_DEVICE_ASSERTIONS))throw new Error('CARBON_DEVICE_ASSERTIONS must be enabled or disabled');
   const deviceAssertions=env.CARBON_DEVICE_ASSERTIONS==='enabled'?serviceAssertionIssuerFromEnv(env):undefined;
   return {
     origin, termsVersion: required("CARBON_TERMS_VERSION"), rateLimitKey,
-    activeKeyId: required("CARBON_ACCOUNT_ACTIVE_KEY_ID"), encryptionKeys: keys as Record<string, string>, notification, github, githubRepositories, secrets, serviceAccountAssertions, deviceAssertions, legacyTokens: legacyTokenConfigFromEnv(env), data: dataClientFromEnv(env), imports: importClientFromEnv(env),
+    activeKeyId: required("CARBON_ACCOUNT_ACTIVE_KEY_ID"), encryptionKeys: keys as Record<string, string>, notification, github, githubRepositories, secrets, workers, serviceAccountAssertions, deviceAssertions, legacyTokens: legacyTokenConfigFromEnv(env), data: dataClientFromEnv(env), imports: importClientFromEnv(env),
   };
 }
 
@@ -94,8 +109,11 @@ export function composeAccountPlatform(sql: Bun.SQL, config: AccountPlatformConf
   const security = new AccountSecurity(auth, new PostgresAccountSecurityRepository(sql, mfa), protector, totp);
   const externalAccounts = new PostgresExternalAccountRepository(sql, mfa);
   const environmentCredentials = new PostgresEnvironmentCredentialRepository(sql);
-  const environmentSecrets = config.secrets ? new PostgresEnvironmentSecretRepository(sql,
-    new EnvelopeSecretProtector(new LocalAesSecretKeyCustodian(config.secrets.activeKeyId, config.secrets.encryptionKeys))) : undefined;
+  const secretProtector = config.secrets ? new EnvelopeSecretProtector(config.secrets.custody === 'aws-kms'
+    ? new AwsKmsSecretKeyCustodian(config.secrets.region, config.secrets.activeKeyId, config.secrets.keys, config.secrets.credentials)
+    : new LocalAesSecretKeyCustodian(config.secrets.activeKeyId, config.secrets.encryptionKeys)) : undefined;
+  const environmentSecrets = secretProtector ? new PostgresEnvironmentSecretRepository(sql, secretProtector) : undefined;
+  const workerRepository = config.workers && secretProtector ? new PostgresWorkerRepository(sql, secretProtector) : undefined;
   const github = config.github ? new ExternalAccountAuthentication(auth, externalAccounts,
     new GitHubAccountProvider(config.github.clientId, config.github.clientSecret, config.origin + "/platform/v1/auth/github/callback"), protector, config) : undefined;
   const accountRepositories = config.githubRepositories ? new AccountRepositories(auth, new PostgresRepositoryIntegrationRepository(sql),
@@ -104,7 +122,9 @@ export function composeAccountPlatform(sql: Bun.SQL, config: AccountPlatformConf
     ? new ResendAccountNotification(config.notification.apiKey, config.notification.from)
     : new DevelopmentInboxNotification(config.notification.directory);
   return {
-    handler: createAccountRoutes(auth, config.origin, security, new AccountProfile(auth, new PostgresAccountProfileRepository(sql, mfa), protector, config), new OrganizationAccess(auth, new PostgresOrganizationRepository(sql), protector), new OrganizationInvitations(auth, new PostgresOrganizationInvitationsRepository(sql), new PostgresOrganizationRepository(sql), protector, config), github, new AccountAuthorization(auth, new PostgresPlatformAuthority(sql)), new AccountCatalog(auth, new PostgresCatalogRepository(sql), protector), config.data ? new AccountData(auth, new PostgresAccountDataAuthority(sql), config.data, protector) : undefined, importJobs ? new AccountImports(auth, importJobs) : undefined, new AccountEnvironmentCredentials(auth, environmentCredentials, protector), environmentSecrets ? new AccountEnvironmentSecrets(auth, environmentSecrets, protector) : undefined, accountRepositories, new AccountDeviceAuthorization(auth,new PostgresDeviceAuthorizationRepository(sql),protector,config.origin,config.rateLimitKey,new DeviceCredentialAuthentication(sql),config.deviceAssertions),new AccountServiceAccounts(auth,new PostgresServiceAccountRepository(sql),protector,config.serviceAccountAssertions),new AccountPersonalCredentials(auth,new PostgresPersonalCredentialRepository(sql),protector),new AccountLegacyTokens(auth,new PostgresLegacyTokenRepository(sql),protector,config.legacyTokens?.policy??'issue')),
+    handler: createAccountRoutes(auth, config.origin, security, new AccountProfile(auth, new PostgresAccountProfileRepository(sql, mfa), protector, config), new OrganizationAccess(auth, new PostgresOrganizationRepository(sql), protector), new OrganizationInvitations(auth, new PostgresOrganizationInvitationsRepository(sql), new PostgresOrganizationRepository(sql), protector, config), github, new AccountAuthorization(auth, new PostgresPlatformAuthority(sql)), new AccountCatalog(auth, new PostgresCatalogRepository(sql), protector), config.data ? new AccountData(auth, new PostgresAccountDataAuthority(sql), config.data, protector) : undefined, importJobs ? new AccountImports(auth, importJobs) : undefined, new AccountEnvironmentCredentials(auth, environmentCredentials, protector), environmentSecrets ? new AccountEnvironmentSecrets(auth, environmentSecrets, protector) : undefined, accountRepositories, new AccountDeviceAuthorization(auth,new PostgresDeviceAuthorizationRepository(sql),protector,config.origin,config.rateLimitKey,new DeviceCredentialAuthentication(sql),config.deviceAssertions),new AccountServiceAccounts(auth,new PostgresServiceAccountRepository(sql),protector,config.serviceAccountAssertions),new AccountPersonalCredentials(auth,new PostgresPersonalCredentialRepository(sql),protector),new AccountLegacyTokens(auth,new PostgresLegacyTokenRepository(sql),protector,config.legacyTokens?.policy??'issue'),workerRepository?new AccountWorkers(auth,workerRepository,protector):undefined),
+    workerHandler: workerRepository ? createWorkerRoutes(new WorkerProtocol(workerRepository), config.origin) : undefined,
+    workerLeases: workerRepository ? new WorkerLeases(workerRepository) : undefined,
     runImports: importJobs && config.imports ? new RunImportJobs(importJobs, config.imports) : undefined,
     deliverMail: new DeliverAccountMail(new PostgresAccountMailQueue(sql), protector, notification),
     expireAccountProofs: () => externalAccounts.expire(),

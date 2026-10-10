@@ -34,6 +34,36 @@ CARBON_SECRET_ACTIVE_KEY_ID=2026-09
 CARBON_SECRET_ENCRYPTION_KEYS={"2026-09":"BASE64_32_RANDOM_BYTES"}
 ```
 
-Account mail and staged import keys remain separate. Build/function lease
-authorization and short-lived materialized bindings are still required before a
-worker may receive values; no browser or generic data route can decrypt them.
+## Hosted custody in AWS KMS
+
+`CARBON_SECRET_CUSTODY=aws-kms` keeps the wrapping key in AWS KMS. Each data key
+is wrapped and unwrapped with KMS `Encrypt` and `Decrypt`; the wrapping key never
+leaves KMS. The secret and version identity is sent as KMS encryption context, so
+a wrapped key cannot be unwrapped for a different secret or version.
+
+```dotenv
+CARBON_SECRETS=enabled
+CARBON_SECRET_CUSTODY=aws-kms
+CARBON_SECRET_KMS_REGION=eu-west-1
+CARBON_SECRET_ACTIVE_KEY_ID=2026-10
+CARBON_SECRET_KMS_KEYS={"2026-10":"arn:aws:kms:eu-west-1:111122223333:key/..."}
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+```
+
+`CARBON_SECRET_KMS_KEYS` maps Carbon key IDs to KMS key ARNs, key IDs or
+aliases. To rotate, add a new entry and make it the active ID; keep old entries
+for as long as envelopes written under them exist. Selecting `aws-kms` requires
+every variable above and never falls back to the local keyring. KMS error bodies
+are not logged or returned. Moving existing envelopes between custody modes is
+not implemented: choose the mode before storing secrets.
+
+The adapter is tested against the published AWS Signature Version 4 example and
+a KMS stand-in. It has not been run against a real AWS account.
+
+## Delivery to workers
+
+Account mail and staged import keys remain separate. Secret values are
+decrypted in exactly one place: delivery to an enrolled worker that holds a
+lease naming those secrets, once per lease. See [workers.md](workers.md). No
+browser route, data route or other credential type can decrypt them.

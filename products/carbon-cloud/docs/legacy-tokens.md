@@ -29,7 +29,9 @@ behavior before this change. `CARBON_LEGACY_TOKEN_SUNSET` (a date) adds a
 
 Carbon Database and Carbon Registry verify legacy tokens through Cloud's
 `/v1/auth/verify`, so the stage applies to them without a change on their side.
-Worker tokens are outside this policy until worker enrollment exists (Phase 4).
+Worker tokens are outside this policy. Enrolled workers ([workers.md](workers.md))
+exist, but the legacy build queue still authenticates with `wk_` until build
+orchestration moves to leases (Phase 7).
 
 ## Owner path
 

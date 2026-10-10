@@ -137,6 +137,11 @@ export async function startServer(config: CarbonCloudConfig) {
     fetch: (request, server) => {
       if (new URL(request.url).pathname === '/internal/platform/v1/authority') return serviceAuthority ? serviceAuthority(request)
         : Response.json({ current: false }, { status: 503, headers: { 'cache-control': 'no-store' } });
+      if (new URL(request.url).pathname.startsWith("/worker/v1/")) {
+        if (accountPlatform?.workerHandler) return accountPlatform.workerHandler(request);
+        const requestId = crypto.randomUUID();
+        return Response.json({ error: { code: "capability", message: "Workers are not configured", requestId } }, { status: 501, headers: { "x-request-id": requestId, "cache-control": "no-store" } });
+      }
       if (new URL(request.url).pathname.startsWith("/platform/v1/")) {
         if (accountPlatform) return accountPlatform.handler(request, server.requestIP(request)?.address ?? "unknown");
         const requestId = crypto.randomUUID();
