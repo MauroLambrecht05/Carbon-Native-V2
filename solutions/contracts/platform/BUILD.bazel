@@ -1,0 +1,12 @@
+load("//solutions/contracts:defs.bzl", "json_schema_subject")
+load("//.tools/orchestration/bazel/bun:defs.bzl", "bun_test")
+
+package(default_visibility = ["//visibility:public"])
+
+json_schema_subject(name = "platform")
+
+bun_test(
+    name = "conformance_test",
+    entry = "tests/conformance.test.ts",
+    srcs = [":srcs"],
+)

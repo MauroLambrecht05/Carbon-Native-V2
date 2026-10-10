@@ -26,7 +26,7 @@ def validate_workspace(root: Path) -> bool:
     # See solutions/README.md.
     CONTRACT_SUBJECTS = [
         "core", "app", "plugin", "host", "security", "versioning", "update",
-        "distribution", "toolchain", "runtime",
+        "distribution", "toolchain", "runtime", "platform",
     ]
     # capabilities/ has a category layer now: <category>/<capability>, every
     # category and every capability name a single word — no exceptions, no

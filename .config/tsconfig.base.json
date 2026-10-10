@@ -1,5 +1,5 @@
 {
-  "//": "Internal package wiring for the whole workspace. This replaces bun workspaces: instead of `bun install` building a node_modules symlink farm from a `workspaces` array, every @carbon/* specifier is mapped straight to its source file. Paths are relative to THIS file's directory (.config/) — no baseUrl, which TypeScript 7 drops. Bun scopes paths to the tsconfig nearest the IMPORTING file, so each tree that imports @carbon/* needs its own tsconfig extending this one: currently products/ and solutions/.",
+  "//": "Internal package wiring for the whole workspace. This replaces bun workspaces: instead of `bun install` building a node_modules symlink farm from a `workspaces` array, every @carbon/* specifier is mapped straight to its source file. Paths are relative to THIS file's directory (.config/) \u00e2\u20ac\u201d no baseUrl, which TypeScript 7 drops. Bun scopes paths to the tsconfig nearest the IMPORTING file, so each tree that imports @carbon/* needs its own tsconfig extending this one: currently products/ and solutions/.",
   "//layout": "solutions/ has five categories ordered by dependency direction: contracts (agreements) -> foundation (universal primitives, none yet) -> capabilities (what carbon does) -> infrastructure (vendor-neutral technical services) -> integrations (named outside technologies, role/vendor) -> interface (shared presentation). See solutions/README.md.",
   "compilerOptions": {
     "paths": {
@@ -108,6 +108,18 @@
       "@carbon/auth": [
         "../solutions/capabilities/cloud/auth/index.ts"
       ],
+      "@carbon/resend-notification": [
+        "../solutions/integrations/notification/resend/index.ts"
+      ],
+      "@carbon/github-identity": [
+        "../solutions/integrations/identity/github/index.ts"
+      ],
+      "@carbon/github-repository": [
+        "../solutions/integrations/repository/github/index.ts"
+      ],
+      "@carbon/contracts/platform": [
+        "../solutions/contracts/platform/index.ts"
+      ],
       "@carbon/contracts/app": [
         "../solutions/contracts/app/types/CarbonManifest.ts"
       ],
@@ -200,6 +212,12 @@
       ],
       "@carbon/workspace": [
         "../solutions/infrastructure/workspace/index.ts"
+      ],
+      "@carbon/catalog": [
+        "../solutions/capabilities/cloud/catalog/index.ts"
+      ],
+      "@carbon/data": [
+        "../solutions/capabilities/cloud/data/index.ts"
       ]
     }
   }
