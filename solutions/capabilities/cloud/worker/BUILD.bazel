@@ -21,3 +21,9 @@ bun_test(
     entry = "tests/run-job.test.ts",
     srcs = [":srcs", ":tests"],
 )
+
+bun_test(
+    name = "cloud_workers_leased_build_test",
+    entry = "tests/leased-build.test.ts",
+    srcs = [":srcs", ":tests"],
+)

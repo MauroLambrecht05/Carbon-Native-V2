@@ -2,15 +2,15 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { WorkerLeaseInput } from '@carbon/catalog';
 import {
   PlatformFault, parseComponent, type Build, type BuildArtifact, type BuildArtifactDeclare, type BuildCommand, type BuildCreate, type BuildDetails, type BuildLogAppend, type BuildLogPage,
-  type BuildPage, type BuildReceipt, type BuildSource, type CommandOptions, type EnvironmentScope, type PageRequest, type WorkerBuildComplete, type WorkerBuildInput,
+  type BuildPage, type BuildProvenance, type BuildReceipt, type BuildSource, type CommandOptions, type EnvironmentScope, type PageRequest, type WorkerBuildComplete, type WorkerBuildInput,
 } from '@carbon/contracts/platform';
 import { tokenDigest, tokenMatches, type AccountAuthentication, type MessageProtector, type OrganizationActor } from '@carbon/identity';
-import type { PlatformBuildRepository } from '../ports/PlatformBuildRepository.ts';
+import type { ArtifactVerifier, PlatformBuildRepository } from '../ports/PlatformBuildRepository.ts';
 
 /** The exact bytes a build's digest covers: keys in a fixed order, lists sorted, nothing optional left implicit. */
 export function canonicalBuildSource(input: BuildSource): { source: BuildSource; digest: string } {
   const value = parseComponent('BuildSource', input);
-  const source: BuildSource = { commitSha: value.commitSha, platform: value.platform, ...(value.repositoryId ? { repositoryId: value.repositoryId } : {}),
+  const source: BuildSource = { commitSha: value.commitSha, platform: value.platform, ...(value.repositoryId ? { repositoryId: value.repositoryId } : {}), repositoryUrl: value.repositoryUrl,
     secretNames: [...value.secretNames].sort(), targets: [...value.targets].sort() };
   return { source, digest: createHash('sha256').update(JSON.stringify(source)).digest('hex') };
 }
@@ -61,6 +61,12 @@ export class AccountBuilds {
     return parseComponent('BuildLogPage', { items, nextSequence: rows.length > limit ? items.at(-1)!.sequence : null });
   }
 
+  /** The provenance of a succeeded build: its input, the worker's reported materials and the artifacts Cloud verified. */
+  async provenance(token: string, input: EnvironmentScope, buildId: string): Promise<BuildProvenance> {
+    const scope = parseComponent('EnvironmentScope', input); parseComponent('Id', buildId);
+    return this.repository.provenance(await this.actor(token), scope, buildId);
+  }
+
   async command(token: string, csrf: string, input: EnvironmentScope, buildId: string, value: BuildCommand, options: CommandOptions, requestId: string): Promise<BuildReceipt> {
     const scope = parseComponent('EnvironmentScope', input); parseComponent('Id', buildId); parseComponent('BuildCommand', value); parseComponent('CommandOptions', options); parseComponent('Id', requestId);
     if (!options.expectedRevision) throw new PlatformFault('validation', 'A current revision is required');
@@ -71,7 +77,7 @@ export class AccountBuilds {
 
 /** What the worker holding a build's lease can do: read the input, append logs, declare outputs, and finish. */
 export class WorkerBuilds {
-  constructor(private readonly repository: PlatformBuildRepository) {}
+  constructor(private readonly repository: PlatformBuildRepository, private readonly artifacts: ArtifactVerifier) {}
 
   private lease(authorization: string, leaseId: string, leaseToken: string, requestId: string): WorkerLeaseInput {
     parseComponent('Id', leaseId); parseComponent('Id', requestId);
@@ -90,7 +96,16 @@ export class WorkerBuilds {
     return this.repository.declareArtifact(this.lease(authorization, leaseId, leaseToken, requestId), artifact);
   }
   async complete(authorization: string, leaseId: string, leaseToken: string, value: WorkerBuildComplete, requestId: string): Promise<Build> {
-    return this.repository.complete(this.lease(authorization, leaseId, leaseToken, requestId), parseComponent('WorkerBuildComplete', value));
+    const result = parseComponent('WorkerBuildComplete', value); const lease = this.lease(authorization, leaseId, leaseToken, requestId);
+    if (result.outcome === 'succeeded') {
+      // A worker's word is not enough: every declared artifact must be in object storage, byte for byte, before the
+      // build can succeed. Declarations cannot change afterwards, so what was verified is what is recorded.
+      for (const artifact of await this.repository.declared(lease)) {
+        const verified = await this.artifacts.verify(artifact).catch(() => { throw new PlatformFault('unavailable', 'Artifact storage could not be reached'); });
+        if (!verified) throw new PlatformFault('conflict', 'A declared artifact is missing from storage or does not match its size and digest');
+      }
+    }
+    return this.repository.complete(lease, result);
   }
 }
 

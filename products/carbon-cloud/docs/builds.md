@@ -3,16 +3,19 @@
 A build turns one exact commit into declared artifacts for an environment. It
 runs on an enrolled worker through a lease ([workers.md](workers.md)), which is
 also how the worker gets the secrets the build names. The wire contract is in
-[build-api.openapi.json](build-api.openapi.json); storage is Cloud migration
-`0026_platform_builds.sql`. Builds exist when `CARBON_WORKERS=enabled`.
+[build-api.openapi.json](build-api.openapi.json); storage is Cloud migrations
+`0026_platform_builds.sql` and `0027_build_provenance.sql`. Builds exist when
+`CARBON_WORKERS=enabled`, which also requires the `OBJECT_STORE_*` settings. The
+worker side is in [build-worker.md](build-worker.md).
 
 These are the canonical, environment-scoped builds. The legacy organization-wide
 queue (`/v1/builds`, `wk_` tokens) is separate and unchanged.
 
 ## Creating a build
 
-`POST .../environments/{id}/builds` with a commit SHA, targets, the names of the
-secrets the build needs, and the worker platform. It needs `release.publish`,
+`POST .../environments/{id}/builds` with the repository URL, a commit SHA,
+targets, the names of the secrets the build needs, and the worker platform. The
+repository URL must be `https://` and carry no credentials. It needs `release.publish`,
 CSRF and an idempotency key.
 
 In one transaction Cloud:
@@ -55,12 +58,48 @@ build holds at most 5,000 segments and 16 MiB. Anything shaped like a credential
 this platform issues is stored as `[redacted]`. Developers read logs with
 `GET .../builds/{id}/logs?after=N`.
 
-**Artifacts** are declared per target with an object key, size and SHA-256. A
-declaration cannot be changed. A build can succeed only when every target has
-one. A build's outputs are those of the attempt that succeeded.
+**Artifacts** are declared per target with an object key, size and SHA-256. The
+key must be under `artifacts/{buildId}/{attempt}/`, so a build cannot claim
+another build's object and a retry cannot claim a lost attempt's. A declaration
+cannot be changed. A build can succeed only when every target has one. A build's
+outputs are those of the attempt that succeeded.
 
-**Completion** ends the lease, the attempt and the build together and settles
-quota from the time attempts actually ran, rounded up to whole minutes.
+**Completion.** A success must carry the build's *materials*: the commit that
+was actually checked out, the digest of the dependency lockfiles, the digest of
+the project configuration, the tool versions, and a statement that the workspace
+was erased. Before accepting it, Cloud:
+
+1. reads every declared artifact back from object storage and compares its size
+   and SHA-256 with the declaration;
+2. checks that the built commit is the commit in the input.
+
+If an object is missing or different, or the commit differs, the request is
+refused with 409 and the build stays running; the worker then reports failure.
+If storage cannot be reached the answer is 503 and nothing changes. Completion
+ends the lease, the attempt and the build together and settles quota from the
+time attempts actually ran, rounded up to whole minutes.
+
+## Provenance
+
+`GET .../builds/{id}/provenance` returns one record for a succeeded build,
+written in the same transaction as the success and never changed afterwards:
+
+- the build, environment, attempt and worker;
+- the immutable input and its digest;
+- the materials the worker reported;
+- every artifact with the key, size and SHA-256 Cloud verified in storage;
+- `statementDigest`, the SHA-256 of the statement exactly as serialized;
+- `signature`: Ed25519 over those same bytes, with a key identifier, when
+  `CARBON_PROVENANCE_PRIVATE_KEY` and `CARBON_PROVENANCE_KEY_ID` are set, and
+  `null` otherwise.
+
+`verifyBuildProvenance(provenance, publicKey, keyId)` from `@carbon/orchestration`
+checks the digest and the signature. An unsigned record does not verify.
+
+What the record proves: Cloud saw these exact bytes in storage for this build,
+and this worker said it built them from this commit with these locks. Cloud does
+not rebuild anything, so the materials are the worker's claim, signed by Cloud as
+received. A build that failed or was cancelled has no provenance.
 
 ## When things go wrong
 
@@ -87,9 +126,9 @@ Build events (`build.queued`, `build.attempt_started`, `build.succeeded`,
 
 ## Not included
 
-See [gaps.md](left-off/gaps.md), entries G-27 to G-35. In short: Cloud does not
-verify that declared artifacts exist or match their digest; the input is a
-commit and targets, not a full snapshot of configuration, toolchain and
-dependency locks; a commit is not resolved from a branch here; there is no
-dedicated build permission; secret values are not removed from logs by Cloud;
-logs are polled, not streamed; and the legacy `wk_` queue is still separate.
+See [gaps.md](left-off/gaps.md), entries G-28 to G-34 and G-36 to G-45. In
+short: the materials are recorded after the build, they are not a toolchain
+pinned before it; a commit is not resolved from a branch here; there is no
+dedicated build permission; logs are polled, not streamed; there is no public
+endpoint that publishes the provenance verification key; and the legacy `wk_`
+queue is still separate.

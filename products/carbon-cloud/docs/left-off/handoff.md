@@ -18,7 +18,7 @@ meaningful tests pass together.
 | 5 — complete | Finish BE-01 to BE-03 lifecycle gaps: streams, audit browsing, archive/deletion/suspension/recovery, revocation propagation and adversarial tenant coverage. | Completed: unified event log, audit listing and SSE stream, scheduled recoverable deletion for environments, projects and organizations, operator suspension, credential revocation matrix, and a 69-case two-tenant denial matrix. |
 | 6 — complete | Implement BE-04 application authentication realms, app users, identities, providers, challenges and sessions. | Completed: realm per environment, generic single-use magic links, OIDC with PKCE and verified ID tokens, exact redirect allowlist, rate limits, session rotation and revocation, and app-user Database row access proven end to end. |
 | 7 — complete | Implement BE-06 build orchestration: immutable source snapshots, quota reservations, attempts, leases, heartbeats, cancellation and ordered logs. | Completed: builds on worker leases with an immutable digested input, serialized quota reservation, attempts with lost-worker retry, gapless append-only logs, immutable artifact declarations, cancellation and deadlines, all proven durably. Artifact verification and a worker runtime are Phase 8 (G-27, G-35). |
-| 8 | Implement disposable Windows x64 execution, dependency locks, NSIS/WiX packaging, signing and provenance. | A clean Windows worker builds a pinned commit under resource/egress limits and emits verified immutable artifacts and provenance. |
+| 8 — partly complete | Implement disposable Windows x64 execution, dependency locks, NSIS/WiX packaging, signing and provenance. | Done and proven: Cloud verifies declared artifacts against object storage, signed provenance, a worker runtime with pinned checkout, required lockfile, log redaction, disposable workspace and cancellation. Not proven: a real NSIS/WiX build, Authenticode signing, and resource or egress limits (G-36 to G-38). The gate is not met until those are. |
 | 9 | Implement BE-07 releases, channel revisions, rollout/promotion/withdrawal and updater compatibility. | Publisher, TypeScript, standalone and Rust consumers pass shared digest/signature, rollback and channel-transition conformance. |
 | 10 | Finish BE-08 relational work: private exports, foreign keys, impact previews, asynchronous schema work, migration promotion and restricted SQL. | Authorization, cancellation, resumability, dependency impact and large-job recovery pass real Database integration tests. |
 | 11 | Implement BE-09 blob storage with private objects, signed bounded transfers, metadata authority, retention and cleanup. | Two-tenant upload/download/delete, interrupted transfer, expiry, quota and orphan cleanup scenarios pass. |
@@ -30,29 +30,35 @@ meaningful tests pass together.
 | 17 | Complete production browser adapters and the Carbon frontend one vertical slice at a time. | Each frontend-plan walkthrough passes against real services; production bundles contain no mock imports or mock data. |
 | 18 | Complete observability, deployment compatibility, security review, migration reconciliation, canary rollout and cutover. | Sections 25-29 of the backend plan have recorded production evidence, including restore, rotation, rollback and no-mock-fallback drills. |
 
-## Start with Phase 8
+## Start with Phase 9
 
-Phases 1 to 7 are complete. Read these files before changing Phase 8 code:
+Phases 1 to 7 are complete and Phase 8 is partly complete. Read these files
+before changing Phase 9 code:
 
-- section 12 of [the backend plan](../platform-backend-plan.md), "Execution" and its proof gate
-- [builds.md](../builds.md) and [workers.md](../workers.md): the protocol a worker must speak
-- [gaps.md](gaps.md), entries G-27 to G-35: what Phase 7 left for this phase
-- `solutions/capabilities/cloud/worker/` (the legacy worker runtime: `RealLocalPipeline`, `GitRepoFetcher`, `S3ArtifactUploader`)
-- `solutions/capabilities/distribution/` (packaging, signing, publishing)
-- `solutions/capabilities/cloud/orchestration/application/usecases/PlatformBuilds.ts`
+- the releases section of [the backend plan](../platform-backend-plan.md) and its proof gate
+- [builds.md](../builds.md), "Provenance": a release is made from a succeeded build's verified artifacts
+- [gaps.md](gaps.md), G-41 (provenance key publication) and G-42 (artifact immutability): both touch releases
+- `solutions/capabilities/distribution/` (publishing, signing, the update manifest)
+- `solutions/capabilities/cloud/orchestration/infrastructure/PostgresPlatformBuildRepository.ts`
 
-Phase 8 makes a build real: a worker runtime that enrolls, claims a build lease,
-fetches the exact commit, locks dependencies, compiles, packages NSIS and WiX,
-signs where configured, uploads, declares artifacts with provenance, and erases
-its workspace and secrets. Cloud must verify declared objects and digests before
-accepting success (G-27), and the build input should grow into the full snapshot
-(G-28, G-29).
+Phase 9 turns verified build artifacts into releases: channel revisions,
+rollout, promotion, withdrawal, and updater compatibility across the
+TypeScript, standalone and Rust consumers.
 
-Its proof gate needs a clean Windows worker building a pinned commit under
-resource and egress limits and emitting verified immutable artifacts and
-provenance. That needs a Windows build host with the toolchain, and a signing
-certificate for the Authenticode part: record what could not be proven on the
-available machine in the gap ledger rather than claiming it.
+## Finishing Phase 8
+
+This needs things the development machine did not have:
+
+1. A clean Windows x64 host with bun, the Rust toolchain, NSIS and WiX. Run
+   `composition/build-worker.ts` there against a real lease and a sample Carbon
+   app (G-36).
+2. A code-signing certificate, bound as the `WINDOWS_CERTIFICATE` and
+   `WINDOWS_CERTIFICATE_PASSWORD` secrets (G-37).
+3. A decision on isolation: job objects with a restricted user, or a VM per
+   build. Then CPU, memory, disk and egress limits (G-38).
+
+After those, G-39 (subprocess output into the log), G-40 (private repositories)
+and G-48 (killing a running step on cancellation) are the next most useful.
 
 ## Verification baseline
 
@@ -62,7 +68,7 @@ From the repository root in PowerShell:
 $env:CARBON_PLATFORM_TEST_DATABASE_URL = 'postgres://carbon_test:carbon_test_local_only@127.0.0.1:55439/carbon_platform_test'
 $env:CARBON_SERVICE_TEST_DATABASE_URL = 'postgres://carbon_test:carbon_test_local_only@127.0.0.1:55440/carbon_service_test'
 
-bun.cmd test ./solutions/contracts/platform ./solutions/capabilities/cloud/identity/tests ./solutions/capabilities/cloud/catalog/tests ./solutions/capabilities/cloud/data/tests ./products/carbon-cloud/tests/platform/account-auth.integration.test.ts ./products/carbon-cli/tests/device-authorization.test.ts ./products/carbon-cli/tests/db.command.test.ts ./products/carbon-cli/tests/registry.test.ts ./.tools/automation/testing/platform-lifecycle.integration.test.ts --timeout 60000
+bun.cmd test ./solutions/contracts/platform ./solutions/capabilities/cloud/identity/tests ./solutions/capabilities/cloud/catalog/tests ./solutions/capabilities/cloud/data/tests ./solutions/capabilities/cloud/worker ./products/carbon-cloud/tests/platform/account-auth.integration.test.ts ./products/carbon-cli/tests/device-authorization.test.ts ./products/carbon-cli/tests/db.command.test.ts ./products/carbon-cli/tests/registry.test.ts ./.tools/automation/testing/platform-lifecycle.integration.test.ts --timeout 60000
 bun.cmd .tools/automation/contracts/generate-platform-types.ts --check
 bun.cmd x tsc --noEmit -p solutions/tsconfig.json
 bun.cmd x tsc --noEmit -p products/carbon-cloud/tsconfig.json

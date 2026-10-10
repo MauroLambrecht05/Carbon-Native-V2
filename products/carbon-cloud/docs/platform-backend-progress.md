@@ -1654,3 +1654,80 @@ protocol yet, and the legacy `wk_` queue is still separate.
 Phase 7 stops here. Phase 8 (disposable Windows x64 execution, dependency locks,
 NSIS/WiX packaging, signing and provenance) is next in
 [the handoff](left-off/handoff.md).
+
+## 2026-10-10: Phase 8, build execution (partly complete)
+
+Phase 8 made a build real on both sides of the lease, as far as this machine
+allows. It is **not** reported as complete: its proof gate asks for a clean
+Windows worker under resource and egress limits producing real installers, and
+that part is unproven (G-36 to G-38).
+
+What was built:
+
+- **Cloud verifies artifacts.** Before a build can succeed, Cloud reads every
+  declared object back from object storage and compares its size and SHA-256.
+  Object keys must be under `artifacts/{buildId}/{attempt}/`. The worker must
+  report the commit it actually built, and it must be the commit in the input.
+  `CARBON_WORKERS=enabled` now requires the `OBJECT_STORE_*` settings.
+- **Provenance.** Migration `0027_build_provenance.sql` stores one append-only
+  record per succeeded build: input, reported materials (resolved commit,
+  lockfile digest, configuration digest, tool versions), verified artifacts,
+  the statement digest and an optional Ed25519 signature. Read with
+  `GET .../builds/{id}/provenance`; checked with `verifyBuildProvenance`.
+- **The build input names its repository.** `repositoryUrl` is required,
+  `https://` only, with no embedded credentials, and is part of the digest.
+- **A worker runtime** in `solutions/capabilities/cloud/worker`:
+  `RunLeasedBuildUseCase` with `HttpBuildProtocol`, `GitSourceCheckout`,
+  `DisposableWorkspaces` and `CarbonBuildPipeline`, and the entry point
+  `products/carbon-cloud/composition/build-worker.ts`. It clears the workspace
+  root before claiming, checks out the exact commit, requires a bun lockfile,
+  redacts secrets from logs before sending, uploads and declares, erases the
+  workspace, and only then reports success. Documented in
+  [build-worker.md](build-worker.md).
+
+Proof, over the real worker and account HTTP handlers and PostgreSQL:
+
+- **A whole build by the real runtime:** the worker enrolls through its own
+  client, claims, checks a real git repository out at a pinned commit, runs a
+  stand-in pipeline, uploads, declares, erases and completes. Cloud's record
+  then shows the artifacts, a signed provenance whose lockfile digest equals the
+  repository's, and a log with the secret and the worker credential redacted.
+- **Refusals by the worker:** a commit without a lockfile and a commit the
+  repository does not contain fail before any project code runs; an installer
+  written outside the workspace is not uploaded.
+- **Refusals by Cloud:** an artifact declared but not stored, stored with
+  different bytes of the same size, or stored at a different size; a key outside
+  the build and attempt (another build's, a later attempt's, a lost attempt's);
+  a built commit that is not the input's; and unreachable storage (503, build
+  still running).
+- **Nothing left behind:** the workspace root is empty after success, every
+  failure and cancellation, and leftovers from a simulated crash are removed
+  before the next claim. A workspace that cannot be erased is reported as a
+  failure, never a success.
+- **Cancellation** reaches the running worker through its heartbeat; it stops,
+  erases and reports nothing.
+- **Provenance** verifies with the right key and fails for a changed statement,
+  a changed digest, another key, another key identifier and a missing
+  signature; the stored record cannot be updated or deleted by direct SQL.
+- **Real object storage:** the worker's uploader and Cloud's verifier agree
+  against a local MinIO container, including a same-size replaced object. This
+  test needs `CARBON_OBJECT_STORE_TEST_*` and does not run in CI (G-44).
+- Fourteen mutation checks each make a test fail: no redaction, commit mismatch
+  ignored, lockfile not required, success without erasing, workspace never
+  erased, outputs outside the workspace, reset not clearing leftovers,
+  cancellation ignored, artifacts not verified, key prefix not enforced, built
+  commit not compared, a wrong provenance signature, and the verifier ignoring
+  the digest or the key identifier. The MinIO test was not mutation-checked.
+
+The affected regression passed **578 tests, 0 failures and 5,728 assertions across 67 files**. Generated contracts are
+current and the TypeScript checks pass.
+
+Closed: G-27 (artifact verification), G-31 (secret redaction), G-35 (worker
+runtime). New: G-36 to G-49. The ones that keep Phase 8 open are G-36 (no real
+NSIS or WiX build has run), G-37 (Authenticode never run) and G-38 (no
+isolation or resource limits). G-42 matters for security: workers can write
+anywhere in the artifact bucket and objects are verified once.
+
+Phase 8 stops here, partly complete. Finishing it needs a Windows build host
+with NSIS, WiX and a signing certificate. Phase 9 (releases) is next in
+[the handoff](left-off/handoff.md) and does not depend on those.

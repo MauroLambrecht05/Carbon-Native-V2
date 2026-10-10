@@ -3,10 +3,10 @@ import { DEFAULT_PLAN, PLANS, type PlanId } from '@carbon/billing';
 import type { HeldLease, LeaseOutcome, PostgresWorkerRepository, WorkerLeaseInput } from '@carbon/catalog';
 import {
   PlatformFault, parseComponent, type Build, type BuildArtifact, type BuildArtifactDeclare, type BuildLogAppend, type BuildLogSegment, type BuildSource, type EnvironmentScope,
-  type WorkerBuildComplete,
+  type BuildProvenance, type WorkerBuildComplete,
 } from '@carbon/contracts/platform';
 import { PostgresPlatformAuthority, type OrganizationActor } from '@carbon/identity';
-import type { BuildCancellation, BuildCreation, PlatformBuildRepository } from '../application/ports/PlatformBuildRepository.ts';
+import type { BuildCancellation, BuildCreation, PlatformBuildRepository, ProvenanceSigner } from '../application/ports/PlatformBuildRepository.ts';
 
 type Row = Record<string, any>;
 type Tx = Bun.TransactionSQL;
@@ -31,7 +31,7 @@ function artifact(row: Row): BuildArtifact {
 }
 
 export class PostgresPlatformBuildRepository extends PostgresPlatformAuthority implements PlatformBuildRepository {
-  constructor(sql: Bun.SQL, private readonly workers: PostgresWorkerRepository) { super(sql); }
+  constructor(sql: Bun.SQL, private readonly workers: PostgresWorkerRepository, private readonly signer?: ProvenanceSigner) { super(sql); }
 
   private event(tx: Tx, row: Row, action: string, requestId: string, ids: { accountId?: string | null; workerId?: string | null } = {}) {
     return tx`INSERT INTO build_events (id, org_id, project_id, environment_id, build_id, actor_account_id, worker_id, action, revision, request_id)
@@ -213,6 +213,8 @@ export class PostgresPlatformBuildRepository extends PostgresPlatformAuthority i
       const started = await this.started(tx, held); if ('fault' in started) return started;
       const { row, attempt } = started.value;
       if (!(row.source.targets as string[]).includes(declared.target)) return { fault: new PlatformFault('validation', 'This build does not produce that target') };
+      // An artifact lives under its own build and attempt, so one build can never claim another's object.
+      if (!declared.objectKey.startsWith(`artifacts/${row.id}/${attempt.number}/`)) return { fault: new PlatformFault('validation', 'The artifact key must be under this build attempt') };
       const existing = (await tx<Row[]>`SELECT f.*, ${attempt.number}::integer AS number FROM build_artifacts f WHERE f.attempt_id = ${attempt.id} AND f.target = ${declared.target}`)[0];
       if (existing) {
         if (existing.object_key === declared.objectKey && Number(existing.size_bytes) === declared.sizeBytes && existing.sha256 === declared.sha256) return { value: artifact(existing) };
@@ -224,6 +226,14 @@ export class PostgresPlatformBuildRepository extends PostgresPlatformAuthority i
     });
   }
 
+  async declared(lease: WorkerLeaseInput) {
+    return this.workers.withHeldLease(lease, async (tx, held) => {
+      const started = await this.started(tx, held); if ('fault' in started) return started;
+      const rows = await tx<Row[]>`SELECT f.*, ${started.value.attempt.number}::integer AS number FROM build_artifacts f WHERE f.attempt_id = ${started.value.attempt.id} ORDER BY f.target`;
+      return { value: rows.map(artifact) };
+    });
+  }
+
   async complete(lease: WorkerLeaseInput, result: WorkerBuildComplete) {
     return this.workers.withHeldLease(lease, async (tx, held) => {
       const started = await this.started(tx, held); if ('fault' in started) return started;
@@ -231,13 +241,46 @@ export class PostgresPlatformBuildRepository extends PostgresPlatformAuthority i
       if (result.outcome === 'succeeded') {
         const declared = (await tx<{ target: string }[]>`SELECT target FROM build_artifacts WHERE attempt_id = ${attempt.id}`).map(item => item.target);
         if ((row.source.targets as string[]).some(target => !declared.includes(target))) return { fault: new PlatformFault('conflict', 'Every target needs a declared artifact before the build can succeed') };
+        // The worker must have built the commit it was given.
+        if (result.materials.resolvedCommit !== row.source.commitSha) return { fault: new PlatformFault('conflict', 'The built commit does not match the build input') };
       }
       await this.workers.completeIn(tx, held.lease, lease.requestId);
+      if (result.outcome === 'succeeded') await this.attest(tx, row, attempt, held.worker.id, result.materials);
       const updated = result.outcome === 'succeeded'
         ? await this.finish(tx, row, 'succeeded', 'succeeded', null, lease.requestId, { workerId: held.worker.id })
         // A failure the worker reports is the build's own failure and is not retried; only a lost worker is.
         : await this.finish(tx, row, 'failed', 'failed', result.errorCategory, lease.requestId, { workerId: held.worker.id });
       return { value: build(updated) };
+    });
+  }
+
+  /** Records what was built, from what, and the verified outputs, in a fixed key order so the digest and signature are reproducible. */
+  private async attest(tx: Tx, row: Row, attempt: Row, workerId: string, materials: Extract<WorkerBuildComplete, { outcome: 'succeeded' }>['materials']) {
+    const artifacts = await tx<Row[]>`SELECT target, object_key, size_bytes, sha256 FROM build_artifacts WHERE attempt_id = ${attempt.id} ORDER BY target`;
+    const source = row.source as BuildSource;
+    const statement = {
+      version: 1 as const, buildId: row.id as string, scope: scopeOf(row), attempt: attempt.number as number, workerId,
+      source: { commitSha: source.commitSha, platform: source.platform, ...(source.repositoryId ? { repositoryId: source.repositoryId } : {}), repositoryUrl: source.repositoryUrl, secretNames: source.secretNames, targets: source.targets },
+      sourceDigest: row.source_digest as string,
+      materials: { resolvedCommit: materials.resolvedCommit, dependencyLockDigest: materials.dependencyLockDigest, configurationDigest: materials.configurationDigest,
+        tools: [...materials.tools].sort((a, b) => a.name.localeCompare(b.name)).map(tool => ({ name: tool.name, version: tool.version })), workspaceErased: materials.workspaceErased },
+      artifacts: artifacts.map(item => ({ target: item.target as string, objectKey: item.object_key as string, sizeBytes: Number(item.size_bytes), sha256: item.sha256 as string })),
+      startedAt: (attempt.started_at as Date).toISOString(), finishedAt: new Date().toISOString(),
+    };
+    const canonical = JSON.stringify(statement); const digest = createHash('sha256').update(canonical).digest('hex');
+    await tx`INSERT INTO build_provenance (build_id, attempt_id, statement, statement_digest, canonical_statement, key_id, signature)
+      VALUES (${row.id}, ${attempt.id}, ${canonical}::text::jsonb, ${digest}, ${canonical}, ${this.signer?.keyId ?? null}, ${this.signer ? this.signer.sign(canonical) : null})`;
+  }
+
+  async provenance(input: OrganizationActor, scope: EnvironmentScope, id: string): Promise<BuildProvenance> {
+    return this.sql.begin(async tx => {
+      await this.authorize(tx, input, scope, 'metadata.read');
+      const row = await this.row(tx, scope, id);
+      const record = (await tx<Row[]>`SELECT canonical_statement, statement_digest, key_id, signature FROM build_provenance WHERE build_id = ${row.id}`)[0];
+      if (!record) throw new PlatformFault('not_found', 'This build has no provenance');
+      // The stored canonical text is returned as written: re-serializing could change the bytes the signature covers.
+      return parseComponent('BuildProvenance', { statement: JSON.parse(record.canonical_statement), statementDigest: record.statement_digest,
+        signature: record.signature ? { keyId: record.key_id, algorithm: 'ed25519', value: record.signature } : null });
     });
   }
 

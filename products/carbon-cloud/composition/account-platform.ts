@@ -16,7 +16,7 @@ import { ResendAccountNotification } from "@carbon/resend-notification";
 import { DevelopmentInboxNotification } from "../infrastructure/notifications/DevelopmentInboxNotification.ts";
 import { AccountRealms, AppAuthentication, HttpOidcClient, PostgresAppAuthRepository, PostgresAppMailQueue } from '@carbon/auth';
 import { createAppRoutes } from '../infrastructure/http/app-routes.ts';
-import { AccountBuilds, BuildOrchestration, PostgresPlatformBuildRepository, WorkerBuilds } from '@carbon/orchestration';
+import { AccountBuilds, BuildOrchestration, Ed25519ProvenanceSigner, PostgresPlatformBuildRepository, S3ArtifactVerifier, WorkerBuilds } from '@carbon/orchestration';
 import { createWorkerRoutes } from '../infrastructure/http/worker-routes.ts';
 import { createAccountRoutes } from "../infrastructure/http/account-routes.ts";
 import { serviceAssertionIssuerFromEnv } from './service-assertion-signing.ts';
@@ -33,8 +33,12 @@ export interface AccountPlatformConfig {
   readonly github?: { readonly clientId: string; readonly clientSecret: string };
   readonly secrets?: { readonly custody?: 'local'; readonly activeKeyId: string; readonly encryptionKeys: Readonly<Record<string, string>> }
     | { readonly custody: 'aws-kms'; readonly region: string; readonly activeKeyId: string; readonly keys: Readonly<Record<string, string>>; readonly credentials: import('@carbon/catalog').AwsCredentials };
-  /** Enrolled workers, leases and lease-bound secret delivery. Requires secrets. */
+  /** Enrolled workers, leases, lease-bound secret delivery and builds. Requires secrets and the artifact store. */
   readonly workers?: boolean;
+  /** Where workers upload artifacts; Cloud reads them back to verify declarations. */
+  readonly artifactStore?: import('@carbon/orchestration').ArtifactStoreConfig;
+  /** Signs build provenance. Without it provenance is recorded unsigned. */
+  readonly provenance?: { readonly keyId: string; readonly privateKey: string };
   readonly githubRepositories?: { readonly appId: string; readonly privateKey: string; readonly webhookSecret: string };
   readonly serviceAccountAssertions?: import('@carbon/identity').ServiceAssertionIssuer;
   readonly deviceAssertions?: import('@carbon/identity').ServiceAssertionIssuer;
@@ -96,6 +100,9 @@ export function accountPlatformConfigFromEnv(env: NodeJS.ProcessEnv = process.en
   if (env.CARBON_WORKERS && !['enabled', 'disabled'].includes(env.CARBON_WORKERS)) throw new Error('CARBON_WORKERS must be enabled or disabled');
   const workers = env.CARBON_WORKERS === 'enabled';
   if (workers && !secrets) throw new Error('CARBON_WORKERS requires CARBON_SECRETS=enabled');
+  // Builds cannot succeed without reading artifacts back, so the store is required with workers, not optional.
+  const artifactStore = workers ? { endpoint: required('OBJECT_STORE_ENDPOINT'), bucket: required('OBJECT_STORE_BUCKET'), accessKeyId: required('OBJECT_STORE_ACCESS_KEY_ID'), secretAccessKey: required('OBJECT_STORE_SECRET_ACCESS_KEY') } : undefined;
+  const provenance = env.CARBON_PROVENANCE_PRIVATE_KEY ? { keyId: required('CARBON_PROVENANCE_KEY_ID'), privateKey: env.CARBON_PROVENANCE_PRIVATE_KEY.replace(/\\n/g, '\n') } : undefined;
   if(env.CARBON_SERVICE_ACCOUNT_ASSERTIONS&& !['enabled','disabled'].includes(env.CARBON_SERVICE_ACCOUNT_ASSERTIONS))throw new Error('CARBON_SERVICE_ACCOUNT_ASSERTIONS must be enabled or disabled');
   const serviceAccountAssertions=env.CARBON_SERVICE_ACCOUNT_ASSERTIONS==='enabled'?serviceAssertionIssuerFromEnv(env):undefined;
   if(env.CARBON_DEVICE_ASSERTIONS&& !['enabled','disabled'].includes(env.CARBON_DEVICE_ASSERTIONS))throw new Error('CARBON_DEVICE_ASSERTIONS must be enabled or disabled');
@@ -106,7 +113,7 @@ export function accountPlatformConfigFromEnv(env: NodeJS.ProcessEnv = process.en
   const personalAssertions = env.CARBON_PERSONAL_ASSERTIONS === 'enabled' ? serviceAssertionIssuerFromEnv(env) : undefined;
   return {
     origin, termsVersion: required("CARBON_TERMS_VERSION"), rateLimitKey,
-    activeKeyId: required("CARBON_ACCOUNT_ACTIVE_KEY_ID"), encryptionKeys: keys as Record<string, string>, notification, github, githubRepositories, secrets, workers, serviceAccountAssertions, deviceAssertions, legacyTokens: legacyTokenConfigFromEnv(env), appAssertions, personalAssertions, data: dataClientFromEnv(env), imports: importClientFromEnv(env),
+    activeKeyId: required("CARBON_ACCOUNT_ACTIVE_KEY_ID"), encryptionKeys: keys as Record<string, string>, notification, github, githubRepositories, secrets, workers, artifactStore, provenance, serviceAccountAssertions, deviceAssertions, legacyTokens: legacyTokenConfigFromEnv(env), appAssertions, personalAssertions, data: dataClientFromEnv(env), imports: importClientFromEnv(env),
   };
 }
 
@@ -128,7 +135,8 @@ export function composeAccountPlatform(sql: Bun.SQL, config: AccountPlatformConf
   const appRepository = new PostgresAppAuthRepository(sql);
   const workerRepository = config.workers && secretProtector ? new PostgresWorkerRepository(sql, secretProtector) : undefined;
   // Builds run on worker leases, so they exist exactly when workers do.
-  const buildRepository = workerRepository ? new PostgresPlatformBuildRepository(sql, workerRepository) : undefined;
+  const buildRepository = workerRepository && config.artifactStore ? new PostgresPlatformBuildRepository(sql, workerRepository,
+    config.provenance ? new Ed25519ProvenanceSigner(config.provenance.keyId, config.provenance.privateKey) : undefined) : undefined;
   const github = config.github ? new ExternalAccountAuthentication(auth, externalAccounts,
     new GitHubAccountProvider(config.github.clientId, config.github.clientSecret, config.origin + "/platform/v1/auth/github/callback"), protector, config) : undefined;
   const accountRepositories = config.githubRepositories ? new AccountRepositories(auth, new PostgresRepositoryIntegrationRepository(sql),
@@ -144,7 +152,7 @@ export function composeAccountPlatform(sql: Bun.SQL, config: AccountPlatformConf
     deliverAppMail: new DeliverAccountMail(new PostgresAppMailQueue(sql), protector, notification),
     organizationLifecycle: new OrganizationLifecycle(auditLog),
     catalogLifecycle: new CatalogLifecycle(new PostgresCatalogRepository(sql)),
-    workerHandler: workerRepository ? createWorkerRoutes(new WorkerProtocol(workerRepository, config.rateLimitKey), config.origin, buildRepository ? new WorkerBuilds(buildRepository) : undefined) : undefined,
+    workerHandler: workerRepository ? createWorkerRoutes(new WorkerProtocol(workerRepository, config.rateLimitKey), config.origin, buildRepository && config.artifactStore ? new WorkerBuilds(buildRepository, new S3ArtifactVerifier(config.artifactStore)) : undefined) : undefined,
     workerLeases: workerRepository ? new WorkerLeases(workerRepository) : undefined,
     runImports: importJobs && config.imports ? new RunImportJobs(importJobs, config.imports) : undefined,
     deliverMail: new DeliverAccountMail(new PostgresAccountMailQueue(sql), protector, notification),

@@ -1,6 +1,11 @@
 import { canonicalRegistryRequest, dataRequestPath, parseComponent, registryRequestPath, type DeviceAuthorizationCreate, type EnvironmentScope } from "@carbon/contracts/platform";
 import { AccountCatalog, AccountEnvironmentCredentials, AccountEnvironmentSecrets, AccountRepositories, AccountWorkers, WorkerLeases, WorkerProtocol, PostgresWorkerRepository, CatalogLifecycle, PostgresProviderSecretReader, EnvelopeSecretProtector, EnvironmentCredentialAuthentication, LocalAesSecretKeyCustodian, PostgresCatalogRepository, PostgresEnvironmentCredentialRepository, PostgresEnvironmentSecretRepository, PostgresProvisioningRepository, PostgresRepositoryIntegrationRepository, PostgresServiceAuthority, ProvisionEnvironment, type ProvisioningWork, type RepositoryProvider } from '@carbon/catalog';
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { nodeProcessRunner } from "@carbon/process";
+import { DisposableWorkspaces, GitSourceCheckout, HttpBuildProtocol, RunLeasedBuildUseCase, digestDependencyLocks, type BuildPipeline } from "@carbon/worker";
 import { createHash, createHmac, randomBytes, generateKeyPairSync } from "node:crypto";
 import {
   AccountAuthentication, AccountDeviceAuthorization, AccountServiceAccounts, AccountAudit, OrganizationLifecycle, PostgresAuditLog, AccountPersonalCredentials, PersonalCredentialAuthentication, PersonalCredentialExchange, PostgresPersonalCredentialRepository, AccountLegacyTokens, PostgresLegacyTokenRepository, PostgresIdentityRepository, CreateOrganizationUseCase, IssueWorkerTokenUseCase, VerifyTokenUseCase, DeviceCredentialAuthentication, DeliverAccountMail, EnvelopeMessageProtector, PostgresAccountIdentityRepository, PostgresDeviceAuthorizationRepository, PostgresServiceAccountRepository, ServiceAccountAuthentication, ServiceAssertionIssuer, ServiceAssertionVerifier,
@@ -13,13 +18,14 @@ import {
 import { GitHubAccountProvider } from "@carbon/github-identity";
 import { ResendAccountNotification } from "@carbon/resend-notification";
 import { migrate } from "../../infrastructure/persistence/Database.ts";
-import { AccountBuilds, BuildOrchestration, PostgresPlatformBuildRepository, WorkerBuilds } from "@carbon/orchestration";
+import { AccountBuilds, BuildOrchestration, Ed25519ProvenanceSigner, PostgresPlatformBuildRepository, WorkerBuilds, verifyBuildProvenance } from "@carbon/orchestration";
 import { SignJWT } from "jose";
 import { AccountRealms, AppAuthentication, HttpOidcClient, PostgresAppAuthRepository, PostgresAppMailQueue } from "@carbon/auth";
 import { createAppRoutes } from "../../infrastructure/http/app-routes.ts";
 import { createWorkerRoutes } from "../../infrastructure/http/worker-routes.ts";
 import { createAccountRoutes } from "../../infrastructure/http/account-routes.ts";
 import { accountPlatformConfigFromEnv } from "../../composition/account-platform.ts";
+import { takeSetting } from "../../composition/build-worker.ts";
 import { catalogProvisionersFromEnv } from '../../composition/catalog-worker.ts';
 import { dataClientFromEnv, importClientFromEnv } from '../../composition/data-platform.ts';
 
@@ -69,7 +75,12 @@ async function harness() {
     async createProposal(_installationId, _repositoryId, _baseBranch, proposal) { repositoryProposals++; return { pullRequestNumber: 12, url: 'https://github.com/carbon-team/desktop/pull/12', branch: proposal.branch, baseSha: 'b'.repeat(40), headSha: 'c'.repeat(40) }; },
     verifyWebhook(raw, signature, deliveryId, event) { const expected='sha256='+createHmac('sha256','repository-webhook-secret').update(raw).digest('hex'); if(signature!==expected||!deliveryId||!event) throw new Error('invalid webhook'); },
   };
-  const buildRepository = new PostgresPlatformBuildRepository(sql, new PostgresWorkerRepository(sql, secretProtector)); const builds = new BuildOrchestration(buildRepository);
+  const provenanceSigner = new Ed25519ProvenanceSigner('test-key-1', generateKeyPairSync('ed25519').privateKey);
+  // Stands in for object storage: what a worker uploaded, by key. Cloud's verifier reads the stored bytes back.
+  const objects = new Map<string, Uint8Array>(); let storeAvailable = true;
+  const store = { objects, put(key: string, bytes: string | Uint8Array) { const value = typeof bytes === 'string' ? new TextEncoder().encode(bytes) : bytes; objects.set(key, value); return { objectKey: key, sizeBytes: value.byteLength, sha256: createHash('sha256').update(value).digest('hex') }; }, setAvailable(value: boolean) { storeAvailable = value; } };
+  const artifactVerifier = { async verify(artifact: { objectKey: string; sizeBytes: number; sha256: string }) { if (!storeAvailable) throw new Error('store down'); const value = objects.get(artifact.objectKey); return !!value && value.byteLength === artifact.sizeBytes && createHash('sha256').update(value).digest('hex') === artifact.sha256; } };
+  const buildRepository = new PostgresPlatformBuildRepository(sql, new PostgresWorkerRepository(sql, secretProtector), provenanceSigner); const builds = new BuildOrchestration(buildRepository);
   const makeHandler = (auth: AccountAuthentication) => createAccountRoutes(auth, origin, new AccountSecurity(auth, new PostgresAccountSecurityRepository(sql, mfa), protector, totp), new AccountProfile(auth, new PostgresAccountProfileRepository(sql, mfa), protector, config), new OrganizationAccess(auth, new PostgresOrganizationRepository(sql), protector), new OrganizationInvitations(auth, new PostgresOrganizationInvitationsRepository(sql), new PostgresOrganizationRepository(sql), protector, config), new ExternalAccountAuthentication(auth, new PostgresExternalAccountRepository(sql, mfa), githubProvider, protector, config), new AccountAuthorization(auth, new PostgresPlatformAuthority(sql)), new AccountCatalog(auth, new PostgresCatalogRepository(sql), protector), undefined, undefined, new AccountEnvironmentCredentials(auth, new PostgresEnvironmentCredentialRepository(sql), protector), new AccountEnvironmentSecrets(auth, new PostgresEnvironmentSecretRepository(sql, secretProtector), protector), new AccountRepositories(auth, new PostgresRepositoryIntegrationRepository(sql), repositoryProvider, protector), new AccountDeviceAuthorization(auth,new PostgresDeviceAuthorizationRepository(sql),protector,origin,config.rateLimitKey,new DeviceCredentialAuthentication(sql),assertionIssuer),new AccountServiceAccounts(auth,new PostgresServiceAccountRepository(sql),protector,assertionIssuer),new AccountPersonalCredentials(auth,new PostgresPersonalCredentialRepository(sql),protector),new AccountLegacyTokens(auth,new PostgresLegacyTokenRepository(sql),protector,'accept'),new AccountWorkers(auth,new PostgresWorkerRepository(sql,secretProtector),protector),new AccountAudit(auth,new PostgresAuditLog(sql),protector,{pollMs:15,heartbeatMs:120,maxMs:900}),new AccountRealms(auth,new PostgresAppAuthRepository(sql),protector),new PersonalCredentialExchange(new PersonalCredentialAuthentication(sql),assertionIssuer),new AccountBuilds(auth,buildRepository,protector));
   let auth = makeAuth(); let handler = makeHandler(auth);
   // A stand-in identity provider: real discovery, token and key endpoints over the OIDC client's transport, a real signing key.
@@ -98,7 +109,9 @@ async function harness() {
   // App calls carry no cookie and no Origin unless a test adds them on purpose.
   const app = (path: string, method = 'GET', input?: unknown, overrides: Record<string, string> = {}, peer = '203.0.113.10') => appHandler(new Request(origin + path, { method,
     headers: { ...(input === undefined ? {} : { 'content-type': 'application/json' }), ...overrides }, body: input === undefined ? undefined : JSON.stringify(input) }), peer);
-  const workerHandler = createWorkerRoutes(new WorkerProtocol(new PostgresWorkerRepository(sql, secretProtector), config.rateLimitKey), origin, new WorkerBuilds(buildRepository));
+  const workerHandler = createWorkerRoutes(new WorkerProtocol(new PostgresWorkerRepository(sql, secretProtector), config.rateLimitKey), origin, new WorkerBuilds(buildRepository, artifactVerifier));
+  // The worker runtime's HTTP client, pointed at the same handler.
+  const workerFetch = ((input: string | URL | Request, init?: RequestInit) => workerHandler(new Request(String(input), init), '203.0.113.20')) as typeof fetch;
   // Worker calls carry no Origin and no cookies unless a test adds them on purpose.
   const workerApi = (path: string, input?: unknown, overrides: Record<string, string> = {}, peer = '203.0.113.20') => workerHandler(new Request(origin + path, { method: 'POST',
     headers: { ...(input === undefined ? {} : { 'content-type': 'application/json' }), ...overrides }, body: input === undefined ? undefined : JSON.stringify(input) }), peer);
@@ -179,7 +192,7 @@ async function harness() {
     const redirected = await githubCallback(url.searchParams.get('state')!); expect(redirected.status).toBe(303);
     return redirected.headers.get('location')!.split('#token=')[1]!;
   };
-  return { sql, protector, secretProtector, workerApi, leases, builds, organizationLifecycle, catalogLifecycle, app, idp, deliverApp, assertionPublicKey:assertionKeys.publicKey, assertionKey, mail, cookies, call, challenge, complete, token, freshRequest, freshComplete, profile, emailToken, emailComplete, createOrganization, organizationCommand, restoreCookies,
+  return { sql, protector, secretProtector, workerApi, workerFetch, store, provenancePublicKey: provenanceSigner.publicKey(), leases, builds, organizationLifecycle, catalogLifecycle, app, idp, deliverApp, assertionPublicKey:assertionKeys.publicKey, assertionKey, mail, cookies, call, challenge, complete, token, freshRequest, freshComplete, profile, emailToken, emailComplete, createOrganization, organizationCommand, restoreCookies,
     catalogCommand, createProject,
     invitation, invitationToken, invitationProof,
     githubStart, githubCallback, githubComplete, githubBegin, githubCalls,
@@ -1248,7 +1261,8 @@ suite("real account authentication", () => {
     const held = (offer: { leaseToken: string }) => ({ ...bearer, 'x-carbon-lease-token': offer.leaseToken });
     const on = (offer: { lease: { id: string }; leaseToken: string }, suffix = '', body?: unknown) => h.workerApi(`/worker/v1/leases/${offer.lease.id}/build${suffix}`, body, held(offer));
     const details = async (id: string) => parseComponent('BuildDetails', await (await h.call(`${buildsPath}/${id}`)).json());
-    const request = { commitSha: 'c'.repeat(40), targets: ['nsis', 'msi'], secretNames: ['SIGNING_KEY'], platform: 'windows' };
+    const request = { repositoryUrl: 'https://github.com/carbon-team/desktop.git', commitSha: 'c'.repeat(40), targets: ['nsis', 'msi'], secretNames: ['SIGNING_KEY'], platform: 'windows' };
+    const materials = (commit = 'c') => ({ resolvedCommit: commit.repeat(40), dependencyLockDigest: createHash('sha256').update('bun.lock').digest('hex'), configurationDigest: null, tools: [{ name: 'git', version: '2.45.0' }, { name: 'bun', version: '1.3.10' }], workspaceErased: true });
     const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 
     // Creating a build.
@@ -1260,8 +1274,9 @@ suite("real account authentication", () => {
     const key = crypto.randomUUID(); const createdResponse = await post(buildsPath, request, undefined, { 'idempotency-key': key }); expect(createdResponse.status).toBe(201);
     const created = parseComponent('BuildReceipt', await createdResponse.json()).build;
     // The stored input is canonical, and its digest covers exactly those bytes.
-    expect(created).toMatchObject({ scope, state: 'queued', attempt: 0, reservedMinutes: 30, usedMinutes: null, source: { commitSha: request.commitSha, platform: 'windows', secretNames: ['SIGNING_KEY'], targets: ['msi', 'nsis'] } });
-    expect(created.sourceDigest).toBe(digest(JSON.stringify({ commitSha: request.commitSha, platform: 'windows', secretNames: ['SIGNING_KEY'], targets: ['msi', 'nsis'] })));
+    expect(created).toMatchObject({ scope, state: 'queued', attempt: 0, reservedMinutes: 30, usedMinutes: null, source: { commitSha: request.commitSha, platform: 'windows', repositoryUrl: request.repositoryUrl, secretNames: ['SIGNING_KEY'], targets: ['msi', 'nsis'] } });
+    expect(created.sourceDigest).toBe(digest(JSON.stringify({ commitSha: request.commitSha, platform: 'windows', repositoryUrl: request.repositoryUrl, secretNames: ['SIGNING_KEY'], targets: ['msi', 'nsis'] })));
+    for (const repositoryUrl of ['http://github.com/carbon-team/desktop.git', 'https://token@github.com/carbon-team/desktop.git', 'git@github.com:carbon-team/desktop.git', undefined]) expect((await post(buildsPath, { ...request, repositoryUrl })).status).toBe(400);
     expect(parseComponent('BuildReceipt', await (await post(buildsPath, request, undefined, { 'idempotency-key': key })).json()).build).toEqual(created);
     expect((await post(buildsPath, { ...request, commitSha: 'd'.repeat(40) }, undefined, { 'idempotency-key': key })).status).toBe(409);
     expect(await h.sql`SELECT id FROM platform_builds`).toHaveLength(1);
@@ -1296,23 +1311,57 @@ suite("real account authentication", () => {
     expect((await h.call(`${buildsPath}/${created.id}/logs?limit=0`)).status).toBe(400);
 
     // Artifacts: declared per target, immutable, and required for success.
-    const nsis = { target: 'nsis', objectKey: `builds/${created.id}/setup.exe`, sizeBytes: 4096, sha256: digest('setup.exe') };
+    const prefix = `artifacts/${created.id}/1`;
+    const nsis = { target: 'nsis', ...h.store.put(`${prefix}/nsis/setup.exe`, 'nsis installer bytes') };
     expect((await on(offer, '/artifacts', { ...nsis, target: 'deb' })).status).toBe(400);
-    expect((await on(offer, '/artifacts', { ...nsis, objectKey: 'builds/../../etc/passwd' })).status).toBe(400);
+    expect((await on(offer, '/artifacts', { ...nsis, objectKey: `${prefix}/../../etc/passwd` })).status).toBe(400);
+    // A key outside this build and attempt is refused: another build's object, a later attempt's, or no prefix at all.
+    for (const objectKey of [`artifacts/${second.id}/1/nsis/setup.exe`, `artifacts/${created.id}/2/nsis/setup.exe`, `builds/${created.id}/setup.exe`]) expect((await on(offer, '/artifacts', { ...nsis, objectKey })).status).toBe(400);
     const declared = await on(offer, '/artifacts', nsis); expect(declared.status).toBe(201);
     expect(parseComponent('BuildArtifact', await (await on(offer, '/artifacts', nsis)).json())).toEqual(parseComponent('BuildArtifact', await declared.json()));
     expect((await on(offer, '/artifacts', { ...nsis, sha256: digest('swapped') })).status).toBe(409);
-    expect((await on(offer, '/complete', { outcome: 'succeeded' })).status).toBe(409);
-    expect((await on(offer, '/artifacts', { target: 'msi', objectKey: `builds/${created.id}/setup.msi`, sizeBytes: 8192, sha256: digest('setup.msi') })).status).toBe(201);
+    expect((await on(offer, '/complete', { outcome: 'succeeded' })).status).toBe(400);
+    expect((await on(offer, '/complete', { outcome: 'succeeded', materials: { ...materials(), workspaceErased: false } })).status).toBe(400);
+    expect((await on(offer, '/complete', { outcome: 'succeeded', materials: materials() })).status).toBe(409);
+    // The second artifact is declared before its object exists, so success is refused until storage really holds those bytes.
+    const msiBytes = 'msi installer bytes'; const msi = { target: 'msi', objectKey: `${prefix}/msi/setup.msi`, sizeBytes: msiBytes.length, sha256: digest(msiBytes) };
+    expect((await on(offer, '/artifacts', msi)).status).toBe(201);
     expect((await details(created.id)).artifacts).toEqual([]);
+    expect((await on(offer, '/complete', { outcome: 'succeeded', materials: materials() })).status).toBe(409);
+    h.store.put(msi.objectKey, 'msi installer bytez'); expect((await on(offer, '/complete', { outcome: 'succeeded', materials: materials() })).status).toBe(409);
+    h.store.put(msi.objectKey, msiBytes + ' and more'); expect((await on(offer, '/complete', { outcome: 'succeeded', materials: materials() })).status).toBe(409);
+    h.store.put(msi.objectKey, msiBytes);
+    h.store.setAvailable(false); expect((await on(offer, '/complete', { outcome: 'succeeded', materials: materials() })).status).toBe(503); h.store.setAvailable(true);
+    // The worker must have built the commit it was given.
+    expect((await on(offer, '/complete', { outcome: 'succeeded', materials: materials('d') })).status).toBe(409);
+    expect((await details(created.id)).build.state).toBe('running'); expect((await h.call(`${buildsPath}/${created.id}/provenance`)).status).toBe(404);
+    expect(await h.sql`SELECT build_id FROM build_provenance`).toHaveLength(0);
 
     // Completion settles quota from the time the attempt really ran.
     await h.sql`UPDATE build_attempts SET started_at = now() - interval '150 seconds' WHERE build_id = ${created.id}`;
-    const finished = parseComponent('Build', await (await on(offer, '/complete', { outcome: 'succeeded' })).json());
+    const finished = parseComponent('Build', await (await on(offer, '/complete', { outcome: 'succeeded', materials: materials() })).json());
     expect(finished).toMatchObject({ state: 'succeeded', usedMinutes: 3, errorCategory: null }); expect(finished.completedAt).not.toBeNull();
-    for (const attempt of [on(offer, '/complete', { outcome: 'succeeded' }), on(offer, '/logs', { sequence: 4, text: 'late' }), on(offer, '/artifacts', nsis), on(offer)]) expect((await attempt).status).toBe(409);
+    for (const attempt of [on(offer, '/complete', { outcome: 'succeeded', materials: materials() }), on(offer, '/logs', { sequence: 4, text: 'late' }), on(offer, '/artifacts', nsis), on(offer)]) expect((await attempt).status).toBe(409);
     const done = await details(created.id);
-    expect(done.artifacts.map(item => [item.target, item.attempt, item.sizeBytes])).toEqual([['msi', 1, 8192], ['nsis', 1, 4096]]);
+    expect(done.artifacts.map(item => [item.target, item.attempt, item.sizeBytes])).toEqual([['msi', 1, msi.sizeBytes], ['nsis', 1, nsis.sizeBytes]]);
+
+    // Provenance: what was built, from what, by whom, and the outputs Cloud verified, signed over the exact stored bytes.
+    const provenance = parseComponent('BuildProvenance', await (await h.call(`${buildsPath}/${created.id}/provenance`)).json());
+    expect(provenance.statement).toMatchObject({ version: 1, buildId: created.id, scope, attempt: 1, workerId: worker.worker.id, source: created.source, sourceDigest: created.sourceDigest,
+      materials: { ...materials(), tools: [{ name: 'bun', version: '1.3.10' }, { name: 'git', version: '2.45.0' }] },
+      artifacts: [{ target: 'msi', objectKey: msi.objectKey, sizeBytes: msi.sizeBytes, sha256: msi.sha256 }, { target: 'nsis', objectKey: nsis.objectKey, sizeBytes: nsis.sizeBytes, sha256: nsis.sha256 }] });
+    expect(provenance.statementDigest).toBe(digest(JSON.stringify(provenance.statement))); expect(provenance.signature?.keyId).toBe('test-key-1');
+    expect(verifyBuildProvenance(provenance, h.provenancePublicKey, 'test-key-1')).toBe(true);
+    // Any change to the statement, a different key, or a missing signature fails verification.
+    expect(verifyBuildProvenance({ ...provenance, statement: { ...provenance.statement, artifacts: [{ ...provenance.statement.artifacts[0]!, sha256: digest('swapped') }, provenance.statement.artifacts[1]!] } }, h.provenancePublicKey, 'test-key-1')).toBe(false);
+    const tampered = { ...provenance.statement, materials: { ...provenance.statement.materials, resolvedCommit: 'd'.repeat(40) } };
+    expect(verifyBuildProvenance({ ...provenance, statement: tampered, statementDigest: digest(JSON.stringify(tampered)) }, h.provenancePublicKey, 'test-key-1')).toBe(false);
+    expect(verifyBuildProvenance(provenance, generateKeyPairSync('ed25519').publicKey, 'test-key-1')).toBe(false);
+    expect(verifyBuildProvenance(provenance, h.provenancePublicKey, 'other-key')).toBe(false);
+    expect(verifyBuildProvenance({ ...provenance, statementDigest: digest('another statement') }, h.provenancePublicKey, 'test-key-1')).toBe(false);
+    expect(verifyBuildProvenance({ ...provenance, signature: null }, h.provenancePublicKey, 'test-key-1')).toBe(false);
+    expect(parseComponent('BuildProvenance', await (await h.call(`${buildsPath}/${created.id}/provenance`)).json())).toEqual(provenance);
+    expect((await h.call(`${buildsPath}/${second.id}/provenance`)).status).toBe(404);
     expect((await h.sql`SELECT duration_ms::text FROM usage_records WHERE build_id = ${created.id}`)[0].duration_ms).toBe('180000');
     expect((await h.sql`SELECT state FROM worker_leases WHERE subject_id = ${created.id}`)[0].state).toBe('completed');
     // 3 minutes used and 30 still held by the second build leave no room for another 30; cancelling the second frees it.
@@ -1327,17 +1376,113 @@ suite("real account authentication", () => {
     expect(await refusal(h.sql`UPDATE build_log_segments SET content = 'edited' WHERE build_id = ${created.id}`)).toContain('build_record_append_only');
     expect(await refusal(h.sql`DELETE FROM build_log_segments WHERE build_id = ${created.id}`)).toContain('build_record_append_only');
     expect(await refusal(h.sql`UPDATE build_artifacts SET sha256 = ${digest('swapped')} WHERE build_id = ${created.id}`)).toContain('build_record_append_only');
+    expect(await refusal(h.sql`UPDATE build_provenance SET signature = NULL, key_id = NULL WHERE build_id = ${created.id}`)).toContain('build_record_append_only');
+    expect(await refusal(h.sql`DELETE FROM build_provenance WHERE build_id = ${created.id}`)).toContain('build_record_append_only');
     expect((await details(created.id)).build.sourceDigest).toBe(created.sourceDigest);
 
     // Another organization sees none of it.
     const ownerCookies = new Map(h.cookies); h.cookies.clear(); await h.challenge('other@example.test'); await h.deliver(); await h.complete(); await organizationResponse(h.createOrganization('Other builds', 'other-builds'));
-    for (const attempt of [h.call(buildsPath), h.call(`${buildsPath}/${created.id}`), h.call(`${buildsPath}/${created.id}/logs`), h.call(buildsPath, 'POST', request, { 'x-csrf-token': csrf() }),
+    for (const attempt of [h.call(buildsPath), h.call(`${buildsPath}/${created.id}`), h.call(`${buildsPath}/${created.id}/logs`), h.call(`${buildsPath}/${created.id}/provenance`), h.call(buildsPath, 'POST', request, { 'x-csrf-token': csrf() }),
       h.call(`${buildsPath}/${created.id}`, 'POST', { kind: 'cancel' }, { 'x-csrf-token': csrf(), 'if-match': '1' })]) expect((await attempt).status).toBe(404);
     h.restoreCookies(ownerCookies);
     const audit = (await h.sql`SELECT action, actor_kind FROM platform_events WHERE org_id = ${org} AND resource_kind = 'build' AND resource_id = ${created.id} ORDER BY transaction_id, sequence`).map((row: { action: string; actor_kind: string }) => [row.action, row.actor_kind]);
     expect(audit).toEqual([['build.queued', 'account'], ['build.attempt_started', 'worker'], ['build.succeeded', 'worker']]);
     const durable = JSON.stringify({ logs: await h.sql`SELECT * FROM build_log_segments`, events: await h.sql`SELECT * FROM build_events`, builds: await h.sql`SELECT * FROM platform_builds` });
     for (const secret of ['signing-key-value', worker.token, offer.leaseToken]) expect(durable).not.toContain(secret);
+  });
+
+  test('a worker runs a leased build in a disposable workspace: the pinned commit, a required lockfile, redacted logs, verified artifacts and nothing left behind', async () => {
+    const h = await harness(); await h.challenge('owner@example.test'); await h.deliver(); await h.complete();
+    const org = (await organizationResponse(h.createOrganization('Runner team', 'runner-team'))).receipt.id;
+    const scope = parseComponent('EnvironmentScope', parseComponent('CatalogReceipt', (await (await h.createProject(org)).json() as { receipt: unknown }).receipt).scope);
+    const csrf = () => h.cookies.get('__Host-carbon-csrf')!; const envPath = `/platform/v1/orgs/${org}/projects/${scope.projectId}/environments/${scope.environmentId}`; const buildsPath = `${envPath}/builds`;
+    const post = (path: string, body: unknown, revision?: string) => h.call(path, 'POST', body, { 'x-csrf-token': csrf(), ...(revision ? { 'if-match': revision } : {}) });
+    const environmentRevision = parseComponent('CatalogEnvironmentDetails', await (await h.call(envPath)).json()).environment.revision;
+    expect((await post(`${envPath}/secrets`, { name: 'SIGNING_KEY', value: 'signing-key-value' }, environmentRevision)).status).toBe(201);
+    await h.sql`INSERT INTO org_plans (org_id, plan) VALUES (${org}, 'pro')`;
+    const enrollment = parseComponent('WorkerEnrollmentIssue', await (await post(`/platform/v1/orgs/${org}/workers`, { name: 'win-01', purposes: ['build'] })).json());
+    // The worker enrolls through its own client, as the real entry point does.
+    const token = await HttpBuildProtocol.enroll(origin, enrollment.code, { platform: 'windows', arch: 'x64', toolchains: [] }, h.workerFetch);
+    const details = async (id: string) => parseComponent('BuildDetails', await (await h.call(`${buildsPath}/${id}`)).json());
+    const repositoryUrl = 'https://github.com/carbon-team/desktop.git';
+    const start = async (commitSha: string) => parseComponent('BuildReceipt', await (await post(buildsPath, { repositoryUrl, commitSha, targets: ['nsis', 'wix'], secretNames: ['SIGNING_KEY'], platform: 'windows' })).json()).build;
+
+    // A real repository with two commits: the first has no lockfile, the second does.
+    const root = mkdtempSync(join(tmpdir(), 'carbon-worker-test-')); const repo = join(root, 'repo'); const workRoot = join(root, 'work'); mkdirSync(repo);
+    try {
+      const git = (...args: string[]) => {
+        const result = Bun.spawnSync(['git', '-c', 'user.name=Test', '-c', 'user.email=test@example.test', '-c', 'commit.gpgsign=false', '-c', 'core.autocrlf=false', ...args], { cwd: repo });
+        if (result.exitCode !== 0) throw new Error(result.stderr.toString()); return result.stdout.toString().trim();
+      };
+      git('init', '-q', '-b', 'main'); writeFileSync(join(repo, 'package.json'), '{"name":"desktop"}\n'); git('add', '.'); git('commit', '-q', '-m', 'no lockfile'); const unlocked = git('rev-parse', 'HEAD');
+      writeFileSync(join(repo, 'bun.lock'), '{"lockfileVersion":1}\n'); git('add', '.'); git('commit', '-q', '-m', 'locked'); const locked = git('rev-parse', 'HEAD');
+
+      let mode: 'build' | 'tamper' | 'outside' | 'wait' = 'build'; const runs: string[] = []; const fetched: string[] = [];
+      const pipeline: BuildPipeline = { async run(input) {
+        runs.push(input.sourceDirectory);
+        // Only this attempt's workspace exists, and it holds exactly the requested commit.
+        expect(readdirSync(workRoot)).toHaveLength(1);
+        expect(readFileSync(join(input.sourceDirectory, 'bun.lock'), 'utf8')).toBe('{"lockfileVersion":1}\n');
+        expect(input.secrets).toEqual({ SIGNING_KEY: 'signing-key-value' });
+        input.log(`signing with ${input.secrets.SIGNING_KEY}`); input.log(`worker credential ${token}`);
+        writeFileSync(join(input.scratchDirectory, 'signing.pfx'), input.secrets.SIGNING_KEY!);
+        if (mode === 'wait') await new Promise<void>(resolve => input.signal.addEventListener('abort', () => resolve()));
+        const outputs = input.source.targets.map(target => {
+          const directory = join(mode === 'outside' ? root : input.outputDirectory, target); mkdirSync(directory, { recursive: true });
+          const path = join(directory, `Desktop Setup.${target === 'nsis' ? 'exe' : 'msi'}`); writeFileSync(path, `${target} installer for ${input.source.commitSha}`); return { target, path };
+        });
+        return { outputs, tools: [{ name: 'bun', version: '1.3.10' }], configurationDigest: null };
+      } };
+      const uploader = { async upload(localPath: string, key: string) { const bytes = readFileSync(localPath); h.store.put(key, mode === 'tamper' ? Buffer.concat([bytes, Buffer.from('!')]) : bytes); return { url: key }; } };
+      const checkout = new GitSourceCheckout(nodeProcessRunner);
+      // The build names an https repository; the test serves that repository from disk.
+      const source = { checkout: (url: string, commitSha: string, directory: string) => { fetched.push(url); return checkout.checkout(repo, commitSha, directory); } };
+      const run = () => new RunLeasedBuildUseCase(new HttpBuildProtocol(origin, token, h.workerFetch), source, new DisposableWorkspaces(workRoot), pipeline, uploader, { heartbeatMs: 25, redact: [token] }).execute();
+
+      // Nothing to do: the worker still clears what a crashed run left behind before it asks for work.
+      mkdirSync(join(workRoot, 'left-by-a-crash'), { recursive: true }); writeFileSync(join(workRoot, 'left-by-a-crash', 'signing.pfx'), 'old secret');
+      expect(await run()).toBe('idle'); expect(readdirSync(workRoot)).toEqual([]);
+
+      // A whole build.
+      const first = await start(locked); expect(await run()).toBe('succeeded');
+      const done = await details(first.id); expect(done.build).toMatchObject({ state: 'succeeded', attempt: 1, errorCategory: null });
+      expect(done.artifacts.map(item => [item.target, item.objectKey])).toEqual([['nsis', `artifacts/${first.id}/1/nsis/Desktop_Setup.exe`], ['wix', `artifacts/${first.id}/1/wix/Desktop_Setup.msi`]]);
+      for (const item of done.artifacts) expect(Buffer.from(h.store.objects.get(item.objectKey)!).toString()).toBe(`${item.target} installer for ${locked}`);
+      expect(fetched).toEqual([repositoryUrl]); expect(readdirSync(workRoot)).toEqual([]);
+      const provenance = parseComponent('BuildProvenance', await (await h.call(`${buildsPath}/${first.id}/provenance`)).json());
+      expect(provenance.statement.materials).toEqual({ resolvedCommit: locked, dependencyLockDigest: digestDependencyLocks(repo)!, configurationDigest: null,
+        tools: [{ name: 'bun', version: '1.3.10' }, { name: 'git', version: expect.stringMatching(/^\d+\.\d+/) }], workspaceErased: true });
+      expect(provenance.statement.artifacts.map(item => item.sha256)).toEqual(done.artifacts.map(item => item.sha256));
+      expect(verifyBuildProvenance(provenance, h.provenancePublicKey, 'test-key-1')).toBe(true);
+      const text = parseComponent('BuildLogPage', await (await h.call(`${buildsPath}/${first.id}/logs`)).json()).items.map(item => item.text).join('');
+      // Secrets are removed on the worker, before the text is sent.
+      expect(text).toContain('signing with [redacted]'); expect(text).toContain('worker credential [redacted]'); expect(text).not.toContain('signing-key-value'); expect(text).not.toContain(token);
+      expect(text.indexOf(`checking out ${locked}`)).toBeLessThan(text.indexOf('Uploaded nsis')); expect(text.indexOf('Uploaded wix')).toBeLessThan(text.indexOf('Workspace erased'));
+
+      // Failures end the build with a category, leave nothing on disk and produce no provenance.
+      const failing = async (commitSha: string, errorCategory: string) => {
+        const build = await start(commitSha); expect(await run()).toBe('failed');
+        expect((await details(build.id)).build).toMatchObject({ state: 'failed', errorCategory, attempt: 1 }); expect(readdirSync(workRoot)).toEqual([]);
+        expect((await h.call(`${buildsPath}/${build.id}/provenance`)).status).toBe(404); return build;
+      };
+      let before = runs.length;
+      // No lockfile and a commit the repository does not have: the project's code never runs.
+      await failing(unlocked, 'dependencies.unlocked'); await failing('f'.repeat(40), 'source.commit_missing'); expect(runs.length).toBe(before);
+      mode = 'outside'; await failing(locked, 'package.outside_workspace');
+      // What reaches storage differs from what was built: Cloud reads it back and refuses the build.
+      mode = 'tamper'; const rejected = await failing(locked, 'completion.rejected'); expect((await details(rejected.id)).artifacts).toEqual([]);
+
+      // Cancellation reaches the worker through its heartbeat and stops the work.
+      mode = 'wait'; const stopped = await start(locked); before = runs.length; const pending = run();
+      while (runs.length === before) await Bun.sleep(10);
+      const running = (await details(stopped.id)).build; expect(running.state).toBe('running');
+      expect(parseComponent('BuildReceipt', await (await post(`${buildsPath}/${stopped.id}`, { kind: 'cancel' }, running.revision)).json()).build.state).toBe('cancelled');
+      expect(await pending).toBe('cancelled'); expect(readdirSync(workRoot)).toEqual([]);
+      expect((await details(stopped.id)).build).toMatchObject({ state: 'cancelled', errorCategory: 'cancelled' });
+      expect(await run()).toBe('idle');
+      const durable = JSON.stringify({ logs: await h.sql`SELECT * FROM build_log_segments`, events: await h.sql`SELECT * FROM build_events`, provenance: await h.sql`SELECT * FROM build_provenance` });
+      for (const secret of ['signing-key-value', token]) expect(durable).not.toContain(secret);
+    } finally { rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
   });
 
   test('builds survive lost workers within the attempt limit, and cancellation, reported failure, no worker and deadlines each end them cleanly', async () => {
@@ -1355,7 +1500,8 @@ suite("real account authentication", () => {
     const held = (offer: { leaseToken: string }) => ({ ...bearer, 'x-carbon-lease-token': offer.leaseToken });
     const on = (offer: { lease: { id: string }; leaseToken: string }, suffix = '', body?: unknown) => h.workerApi(`/worker/v1/leases/${offer.lease.id}/build${suffix}`, body, held(offer));
     const details = async (id: string) => parseComponent('BuildDetails', await (await h.call(`${buildsPath}/${id}`)).json());
-    const request = { commitSha: 'c'.repeat(40), targets: ['nsis', 'msi'], secretNames: ['SIGNING_KEY'], platform: 'windows' };
+    const request = { repositoryUrl: 'https://github.com/carbon-team/desktop.git', commitSha: 'c'.repeat(40), targets: ['nsis', 'msi'], secretNames: ['SIGNING_KEY'], platform: 'windows' };
+    const materials = (commit = 'c') => ({ resolvedCommit: commit.repeat(40), dependencyLockDigest: createHash('sha256').update('bun.lock').digest('hex'), configurationDigest: null, tools: [{ name: 'git', version: '2.45.0' }, { name: 'bun', version: '1.3.10' }], workspaceErased: true });
     const digest = (value: string) => createHash('sha256').update(value).digest('hex');
     await h.sql`INSERT INTO org_plans (org_id, plan) VALUES (${org}, 'pro')`;
     const start = async (commit: string) => parseComponent('BuildReceipt', await (await post(buildsPath, { ...request, commitSha: commit.repeat(40) })).json()).build;
@@ -1365,22 +1511,25 @@ suite("real account authentication", () => {
     // A lost worker: the same input runs again as the next attempt, on a new lease, with the log continuing.
     const resilient = await start('1'); let offer = await claim(); expect(parseComponent('WorkerBuildInput', await (await on(offer)).json()).attempt).toBe(1);
     expect((await on(offer, '/logs', { sequence: 1, text: 'attempt one started' })).status).toBe(200);
-    expect((await on(offer, '/artifacts', { target: 'nsis', objectKey: 'builds/a1/setup.exe', sizeBytes: 10, sha256: digest('attempt-1') })).status).toBe(201);
+    expect((await on(offer, '/artifacts', { target: 'nsis', ...h.store.put(`artifacts/${resilient.id}/1/nsis/setup.exe`, 'attempt-1') })).status).toBe(201);
     await lose(offer.lease.id);
     expect((await h.leases.reclaim(crypto.randomUUID())).map(lease => [lease.subjectId, lease.attempt])).toEqual([[resilient.id, 2]]);
     // The lost worker comes back: its lease is gone, so it can do nothing more.
-    for (const attempt of [on(offer, '/logs', { sequence: 2, text: 'ghost' }), on(offer, '/complete', { outcome: 'succeeded' }), on(offer)]) expect((await attempt).status).toBe(409);
+    for (const attempt of [on(offer, '/logs', { sequence: 2, text: 'ghost' }), on(offer, '/complete', { outcome: 'succeeded', materials: materials('1') }), on(offer)]) expect((await attempt).status).toBe(409);
     expect(await h.builds.reconcile(crypto.randomUUID())).toEqual([]);
     const retry = await claim(); expect(retry.lease).toMatchObject({ subjectId: resilient.id, attempt: 2 }); expect(retry.lease.id).not.toBe(offer.lease.id);
     const again = parseComponent('WorkerBuildInput', await (await on(retry)).json());
     expect(again).toMatchObject({ attempt: 2, nextLogSequence: 2, sourceDigest: resilient.sourceDigest, source: resilient.source });
     expect((await h.sql`SELECT number, state FROM build_attempts WHERE build_id = ${resilient.id} ORDER BY number`) as unknown[]).toEqual([{ number: 1, state: 'lost' }, { number: 2, state: 'running' }]);
     expect((await on(retry, '/logs', { sequence: 2, text: 'attempt two started' })).status).toBe(200);
-    for (const target of ['msi', 'nsis']) expect((await on(retry, '/artifacts', { target, objectKey: `builds/a2/setup.${target}`, sizeBytes: 20, sha256: digest(`attempt-2-${target}`) })).status).toBe(201);
-    expect(parseComponent('Build', await (await on(retry, '/complete', { outcome: 'succeeded' })).json())).toMatchObject({ state: 'succeeded', attempt: 2 });
+    // The retry cannot claim what the lost attempt uploaded.
+    expect((await on(retry, '/artifacts', { target: 'nsis', ...h.store.put(`artifacts/${resilient.id}/1/nsis/setup.exe`, 'attempt-1') })).status).toBe(400);
+    for (const target of ['msi', 'nsis']) expect((await on(retry, '/artifacts', { target, ...h.store.put(`artifacts/${resilient.id}/2/${target}/setup.${target}`, `attempt-2-${target}`) })).status).toBe(201);
+    expect(parseComponent('Build', await (await on(retry, '/complete', { outcome: 'succeeded', materials: materials('1') })).json())).toMatchObject({ state: 'succeeded', attempt: 2 });
+    expect(parseComponent('BuildProvenance', await (await h.call(`${buildsPath}/${resilient.id}/provenance`)).json()).statement).toMatchObject({ attempt: 2, artifacts: [{ target: 'msi' }, { target: 'nsis' }] });
     const recovered = await details(resilient.id);
     // The build's outputs are the successful attempt's; what the lost attempt declared is not an output.
-    expect(recovered.artifacts.map(item => [item.target, item.attempt, item.objectKey])).toEqual([['msi', 2, 'builds/a2/setup.msi'], ['nsis', 2, 'builds/a2/setup.nsis']]);
+    expect(recovered.artifacts.map(item => [item.target, item.attempt, item.objectKey])).toEqual([['msi', 2, `artifacts/${resilient.id}/2/msi/setup.msi`], ['nsis', 2, `artifacts/${resilient.id}/2/nsis/setup.nsis`]]);
     expect(parseComponent('BuildLogPage', await (await h.call(`${buildsPath}/${resilient.id}/logs`)).json()).items.map(item => [item.sequence, item.attempt])).toEqual([[1, 1], [2, 2]]);
 
     // Lost on every allowed attempt: the build fails as worker_lost and gives its quota back.
@@ -1408,7 +1557,7 @@ suite("real account authentication", () => {
     expect(parseComponent('BuildReceipt', await (await post(`${buildsPath}/${stopped.id}`, { kind: 'cancel' }, running.revision, { 'idempotency-key': cancelKey })).json())).toEqual(cancelled);
     expect((await post(`${buildsPath}/${stopped.id}`, { kind: 'cancel' }, cancelled.build.revision)).status).toBe(409);
     expect(parseComponent('WorkerLeaseReceipt', await (await h.workerApi(`/worker/v1/leases/${offer.lease.id}`, { kind: 'heartbeat' }, held(offer))).json()).cancelled).toBe(true);
-    for (const attempt of [on(offer, '/complete', { outcome: 'succeeded' }), on(offer, '/logs', { sequence: 1, text: 'after cancel' }), h.workerApi(`/worker/v1/leases/${offer.lease.id}/secrets`, undefined, held(offer))]) expect((await attempt).status).toBe(409);
+    for (const attempt of [on(offer, '/complete', { outcome: 'succeeded', materials: materials('4') }), on(offer, '/logs', { sequence: 1, text: 'after cancel' }), h.workerApi(`/worker/v1/leases/${offer.lease.id}/secrets`, undefined, held(offer))]) expect((await attempt).status).toBe(409);
     expect((await details(stopped.id)).build.state).toBe('cancelled');
     expect((await h.sql`SELECT state FROM build_attempts WHERE build_id = ${stopped.id}`)[0].state).toBe('cancelled');
 
@@ -1423,7 +1572,7 @@ suite("real account authentication", () => {
     const slow = await start('6'); offer = await claim(); expect((await on(offer)).status).toBe(200);
     await h.sql`UPDATE platform_builds SET deadline_at = now() - interval '1 second' WHERE id = ${slow.id}`;
     expect((await h.builds.reconcile(crypto.randomUUID())).map(build => [build.id, build.errorCategory])).toEqual([[slow.id, 'deadline_exceeded']]);
-    expect((await on(offer, '/complete', { outcome: 'succeeded' })).status).toBe(409);
+    expect((await on(offer, '/complete', { outcome: 'succeeded', materials: materials('6') })).status).toBe(409);
     expect((await h.sql`SELECT state FROM worker_leases WHERE id = ${offer.lease.id}`)[0].state).toBe('cancelled');
 
     // Only the creator, or a member who may cancel any build, can cancel.
@@ -3011,7 +3160,28 @@ test('secret custody and worker configuration is explicit, complete and never fa
   }
   expect(() => accountPlatformConfigFromEnv({ ...base, CARBON_WORKERS: 'enabled' })).toThrow('CARBON_WORKERS requires CARBON_SECRETS=enabled');
   expect(() => accountPlatformConfigFromEnv({ ...local, CARBON_WORKERS: 'yes' })).toThrow('CARBON_WORKERS must be enabled or disabled');
-  expect(accountPlatformConfigFromEnv({ ...local, CARBON_WORKERS: 'enabled' })!.workers).toBe(true);
+  // Builds cannot succeed without reading artifacts back, so workers need the artifact store.
+  const store = { OBJECT_STORE_ENDPOINT: 'http://localhost:9000', OBJECT_STORE_BUCKET: 'carbon-artifacts', OBJECT_STORE_ACCESS_KEY_ID: 'store-id', OBJECT_STORE_SECRET_ACCESS_KEY: 'store-secret' };
+  for (const missing of Object.keys(store)) expect(() => accountPlatformConfigFromEnv({ ...local, ...store, CARBON_WORKERS: 'enabled', [missing]: '' })).toThrow(missing);
+  const withWorkers = accountPlatformConfigFromEnv({ ...local, ...store, CARBON_WORKERS: 'enabled' })!;
+  expect(withWorkers).toMatchObject({ workers: true, provenance: undefined, artifactStore: { endpoint: 'http://localhost:9000', bucket: 'carbon-artifacts', accessKeyId: 'store-id', secretAccessKey: 'store-secret' } });
+  expect(accountPlatformConfigFromEnv(local)!.artifactStore).toBeUndefined();
+  const pem = generateKeyPairSync('ed25519').privateKey.export({ type: 'pkcs8', format: 'pem' }) as string;
+  expect(() => accountPlatformConfigFromEnv({ ...local, ...store, CARBON_WORKERS: 'enabled', CARBON_PROVENANCE_PRIVATE_KEY: pem })).toThrow('CARBON_PROVENANCE_KEY_ID');
+  // The key may arrive with escaped newlines, as single-line environment files require.
+  const signing = accountPlatformConfigFromEnv({ ...local, ...store, CARBON_WORKERS: 'enabled', CARBON_PROVENANCE_PRIVATE_KEY: pem.replace(/\n/g, '\\n'), CARBON_PROVENANCE_KEY_ID: '2026-10' })!.provenance!;
+  expect(signing).toEqual({ keyId: '2026-10', privateKey: pem });
+  const signer = new Ed25519ProvenanceSigner(signing.keyId, signing.privateKey); expect(signer.sign('statement')).toMatch(/^[A-Za-z0-9_-]{86}$/);
+  expect(() => new Ed25519ProvenanceSigner('2026-10', 'not a key')).toThrow('Invalid provenance signing key');
+  expect(() => new Ed25519ProvenanceSigner('2026-10', generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey)).toThrow('Invalid provenance signing key');
+  expect(() => new Ed25519ProvenanceSigner('bad id', pem)).toThrow('Invalid provenance key identifier');
+});
+
+test('a build worker takes its credentials out of the environment its builds inherit', () => {
+  const env: Record<string, string | undefined> = { CARBON_WORKER_TOKEN: 'wc_token', OBJECT_STORE_SECRET_ACCESS_KEY: 'store-secret', PATH: '/usr/bin' };
+  expect(takeSetting(env, 'CARBON_WORKER_TOKEN')).toBe('wc_token'); expect(takeSetting(env, 'OBJECT_STORE_SECRET_ACCESS_KEY')).toBe('store-secret');
+  expect(env).toEqual({ PATH: '/usr/bin' });
+  expect(() => takeSetting(env, 'CARBON_CLOUD_URL')).toThrow('CARBON_CLOUD_URL is required'); expect(takeSetting(env, 'CARBON_WORKER_WORKSPACE', false)).toBe('');
 });
 
 test('catalog transport configuration requires explicit service origins and an active Ed25519 signing key', () => {

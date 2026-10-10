@@ -108,3 +108,8 @@ values when the lease ends.
 - Authenticated worker calls are not rate limited; only enrollment attempts are.
 - Worker attestation, network isolation and workspace erasure belong to the
   Windows execution phase.
+
+## The build worker
+
+The process that enrolls, claims build leases and runs them is described in
+[build-worker.md](build-worker.md).

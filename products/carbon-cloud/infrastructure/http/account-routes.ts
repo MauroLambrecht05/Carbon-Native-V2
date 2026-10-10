@@ -116,11 +116,12 @@ export function createAccountRoutes(auth: AccountAuthentication, origin: string,
         if(request.method==='POST'&&id&&credentialsSegment&&credentialId){const input=parseComponent('ServiceAccountCredentialCommand',await body());const options=parseComponent('CommandOptions',{idempotencyKey:request.headers.get('idempotency-key')??'',expectedRevision:request.headers.get('if-match')?.replace(/^"([1-9][0-9]*)"$/,'$1')});return json(await serviceAccounts.credentialCommand(token,request.headers.get('x-csrf-token')??'',orgId,id,credentialId,input,options,requestId));}}
       if(url.pathname===`${BASE}/account/device-authorizations/review`&&request.method==='POST'){if(!devices)throw new PlatformFault('capability','Device authorization is not configured');const input=parseComponent('DeviceAuthorizationLookup',await body());return json(await devices.review(cookieValue(request,names.session),input.userCode));}
       if(url.pathname===`${BASE}/account/device-authorizations`&&request.method==='POST'){if(!devices)throw new PlatformFault('capability','Device authorization is not configured');const input=parseComponent('DeviceAuthorizationDecision',await body());const options=parseComponent('CommandOptions',{idempotencyKey:request.headers.get('idempotency-key')??'',expectedRevision:request.headers.get('if-match')?.replace(/^"([1-9][0-9]*)"$/,'$1')});return json(await devices.decide(cookieValue(request,names.session),request.headers.get('x-csrf-token')??'',input,options,requestId));}
-      const buildRoute = new RegExp(`^${BASE}/orgs/([^/]+)/projects/([^/]+)/environments/([^/]+)/builds(?:/([^/]+)(/logs)?)?$`).exec(url.pathname);
+      const buildRoute = new RegExp(`^${BASE}/orgs/([^/]+)/projects/([^/]+)/environments/([^/]+)/builds(?:/([^/]+)(/logs|/provenance)?)?$`).exec(url.pathname);
       if (buildRoute) {
         if (!builds) throw new PlatformFault('capability', 'Builds are not configured');
         const scope = parseComponent('EnvironmentScope', { orgId: buildRoute[1], projectId: buildRoute[2], environmentId: buildRoute[3] });
         const session = cookieValue(request, names.session); const csrf = request.headers.get('x-csrf-token') ?? ''; const buildId = buildRoute[4];
+        if (request.method === 'GET' && buildRoute[5] === '/provenance') return json(await builds.provenance(session, scope, buildId!));
         if (request.method === 'GET' && buildRoute[5]) {
           for (const key of url.searchParams.keys()) if (!['after', 'limit'].includes(key) || url.searchParams.getAll(key).length !== 1) throw new PlatformFault('validation', 'Unsupported log query');
           return json(await builds.logs(session, scope, buildId!, Number(url.searchParams.get('after') ?? '0'), Number(url.searchParams.get('limit') ?? '100')));

@@ -25,5 +25,7 @@ export { PostgresBuildRepository } from "./infrastructure/PostgresBuildRepositor
 // Canonical, environment-scoped builds on worker leases: the supported path.
 // The classes above are the legacy organization-wide wk_ queue.
 export { AccountBuilds, BuildOrchestration, WorkerBuilds, canonicalBuildSource } from "./application/usecases/PlatformBuilds.ts";
-export type { PlatformBuildRepository } from "./application/ports/PlatformBuildRepository.ts";
+export type { ArtifactVerifier, PlatformBuildRepository, ProvenanceSigner } from "./application/ports/PlatformBuildRepository.ts";
+export { Ed25519ProvenanceSigner, verifyBuildProvenance } from "./infrastructure/BuildProvenanceSigning.ts";
+export { S3ArtifactVerifier, type ArtifactStoreConfig } from "./infrastructure/S3ArtifactVerifier.ts";
 export { PostgresPlatformBuildRepository } from "./infrastructure/PostgresPlatformBuildRepository.ts";

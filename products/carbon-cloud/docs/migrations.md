@@ -124,3 +124,9 @@ with triggers that make a build's input, a finished state, and stored logs and
 artifacts unchangeable, and a trigger that copies build events into
 `platform_events`. It is additive and leaves the legacy `builds` table of 0001
 untouched. Recovery: code from before 0026 ignores these tables.
+
+0027 adds `build_provenance`: one row per succeeded build holding the provenance
+statement, its exact serialized text, its SHA-256 and, when a signing key is
+configured, an Ed25519 signature and key identifier. Rows cannot be updated or
+deleted. It is additive. Recovery: code from before 0027 ignores the table, but
+that code also accepts a build without verifying its artifacts.

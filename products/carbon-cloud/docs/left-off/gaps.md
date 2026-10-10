@@ -54,15 +54,36 @@ would close it.
 
 | # | Gap | Why open | Owner |
 |---|---|---|---|
-| G-27 | Cloud does not verify that a declared artifact exists in object storage or matches its size and SHA-256 before accepting success | Needs object-store access from Cloud and a real upload path | Phase 8 |
-| G-28 | A build's input is a commit, targets, secret names and platform; it is not a full snapshot of configuration, toolchain and dependency locks | Those are produced by real execution | Phase 8 |
-| G-29 | The commit SHA is supplied by the caller; a build is not created from a branch or tag through the repository integration, and `repositoryId` is optional | Resolution exists (`RepositoryCommitResolve`) but is not chained into build creation | Phase 8 |
+| G-28 | A build's input is a repository, commit, targets, secret names and platform. The lockfile digest, configuration digest and tool versions are recorded in provenance after the build; the toolchain is not pinned before it, so two attempts can use different tool versions | Pinning needs a toolchain manifest in the input and workers that install exactly it | Needs a Windows build host (with G-36) |
+| G-29 | The repository URL and commit SHA are supplied by the caller; a build is not created from a branch or tag through the repository integration, `repositoryId` is optional, and the URL is not checked against the project's bound repository | Resolution exists (`RepositoryCommitResolve`) but is not chained into build creation | Do together with G-40 |
 | G-30 | There is no dedicated build permission; creating a build needs `release.publish` | Adding one changes the permission vocabulary and role presets | Needs a decision |
-| G-31 | Cloud removes only credentials shaped like its own from logs; it does not know secret values and cannot remove them | By design Cloud keeps no plaintext secrets; the worker must redact what it was given | Phase 8 (worker runtime) |
 | G-32 | Build logs are read by polling `?after=N`; they are not on the event stream | The stream carries events, not log text | Phase 17 decides the UI need |
 | G-33 | The reservation is a fixed 30 minutes, the deadline equals it, and attempts are fixed at three | No per-plan or per-build policy yet | Phase 16 (quotas) |
 | G-34 | Quota reads the legacy `org_plans` and `usage_records` tables, whose organization column is text | Billing is rebuilt in Phase 16 | Phase 16 |
-| G-35 | No worker runtime speaks the canonical build protocol; `solutions/capabilities/cloud/worker` still implements the legacy queue | Real execution is the next phase | Phase 8 |
+
+## Open: from Phase 8 (build execution)
+
+Phase 8's proof gate is "a clean Windows worker builds a pinned commit under
+resource and egress limits and emits verified immutable artifacts and
+provenance". The pinned commit, verified artifacts and provenance are proven.
+The rest of the gate is not, and is listed here.
+
+| # | Gap | Why open | Closes when |
+|---|---|---|---|
+| G-36 | No real Carbon app has been compiled or packaged by the build worker. `CarbonBuildPipeline` hands off to `RealLocalPipeline` (bun install, runtime build, NSIS, WiX), and that path has never run under the worker; the tests use a stand-in pipeline. The worker has also only run on Windows 11 on a developer machine, not a clean host | The development machine has no NSIS (`makensis`) or WiX, and a real build was not attempted | A clean Windows x64 host with the toolchain builds a sample app to a working `nsis` and `wix` installer through a real lease |
+| G-37 | Authenticode signing from lease secrets (`WINDOWS_CERTIFICATE`, `WINDOWS_CERTIFICATE_PASSWORD`) has never run | No signing certificate and no `signtool` run | A signed installer from the worker passes `signtool verify` |
+| G-38 | A build is not isolated or limited. It runs as the worker's own user with that user's files and network, with no CPU, memory, disk or egress limit, and not in a container or VM. Only the workspace directory is disposable | Needs an isolation mechanism (Windows job objects and a restricted user, or a VM per build) and a decision on which | The proof gate's "resource and egress limits" passes on a real host |
+| G-39 | Compiler, installer and `bun install` output is not captured into the build log: those processes write to the worker's own console. Only the worker's stage lines reach Cloud, and nothing redacts the console | `RealLocalPipeline` runs subprocesses with inherited output | The pipeline streams subprocess output through the worker's redacting log |
+| G-40 | Private repositories cannot be built: the checkout uses no credential | Needs a short-lived repository token (GitHub App installation token) delivered with the lease | A private repository bound to the project builds |
+| G-41 | The provenance signing key has no published public key, no rotation list and no revocation; consumers must be given the key out of band. The statement is Carbon's own format, not in-toto or SLSA | Publishing keys belongs with release signing | Phase 9 (releases) |
+| G-42 | The worker holds write access to the whole artifact bucket. Cloud verifies an object once, before accepting success; an object replaced afterwards is not detected, and a worker could overwrite another build's objects. Objects are not write-once | Needs per-build upload grants (presigned URLs under the build's prefix) and object immutability or versioning in the bucket | Phase 11 (blob storage) or sooner if workers are not all trusted |
+| G-43 | Cloud verifies an artifact by reading the whole object inside the completion request. Large installers make that request slow, and there is no size-based timeout or background verification | Simple first implementation | Verification moves to a job, or measured limits are documented |
+| G-44 | The artifact store test runs only when `CARBON_OBJECT_STORE_TEST_*` is set. It passed against a local MinIO container; CI does not run it, and it has not run against AWS S3 or Cloudflare R2 | CI has no object store service | CI starts MinIO, and one run against a real provider is recorded |
+| G-45 | The lockfile rule covers a bun lockfile at the repository root only. A project in a subdirectory or a workspace package is not supported, and `Cargo.lock` is digested when present but not required | Carbon apps today are root-level bun projects | A project layout that needs it |
+| G-46 | Log redaction removes exact secret values and the lines of multi-line values. An encoded form of a secret (base64, URL-encoded, split across lines) is not removed | Exact matching only | A decision on which encodings to cover |
+| G-47 | Objects uploaded by failed, cancelled and lost attempts stay in the bucket forever | No cleanup job | Phase 11 (retention and cleanup) |
+| G-48 | Cancellation stops the worker between steps. A compile or package step already running is not killed, so a cancelled build can keep using the machine until that step ends | `RealLocalPipeline` does not take the abort signal | Subprocesses are terminated on cancellation |
+| G-49 | The worker removes only its own settings from the environment. Any other secret in the worker machine's environment is inherited by builds. The worker credential is not rotated automatically, and the `build-worker.ts` loop has no test beyond its settings handling | Depends on G-38 for a real boundary | With G-38 |
 
 ## Open: local environment
 
@@ -77,6 +98,9 @@ would close it.
 
 | Gap | From | Closed by |
 |---|---|---|
+| G-27: Cloud did not verify declared artifacts | Phase 7 | Phase 8: every declared object is read back and its size and SHA-256 compared before success; keys are confined to the build and attempt |
+| G-31: secret values were not removed from build logs | Phase 7 | Phase 8: the worker redacts lease secrets and its own credentials before sending (encoded forms remain open as G-46) |
+| G-35: no worker runtime spoke the canonical build protocol | Phase 7 | Phase 8: `RunLeasedBuildUseCase` and `build-worker.ts` (real packaging remains open as G-36) |
 | Worker leases had no production caller | Phase 4 | Phase 7: creating a build grants its lease in the same transaction |
 | HTTP route files lived under `presentation/http/`, against the rule that `presentation/` is UI only | Inherited, and continued in Phases 4 and 6 | Moved to `infrastructure/http/` in all three services, 2026-10-10 |
 | Personal credentials could not be exchanged for assertions | Phase 3 | `7502ee9` |

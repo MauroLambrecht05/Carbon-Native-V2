@@ -20,3 +20,13 @@ export { HttpControlPlaneClient, ControlPlaneRequestError } from "./infrastructu
 export { GitRepoFetcher, GitCloneError, GitCheckoutError } from "./infrastructure/GitRepoFetcher.ts";
 export { RealLocalPipeline, type SigningKey } from "./infrastructure/RealLocalPipeline.ts";
 export { S3ArtifactUploader, UploadFailedError } from "./infrastructure/S3ArtifactUploader.ts";
+
+// Builds on worker leases (the platform worker protocol, /worker/v1).
+export { RunLeasedBuildUseCase, digestDependencyLocks, redactor, type LeasedBuildOptions, type LeasedBuildOutcome } from "./application/usecases/RunLeasedBuildUseCase.ts";
+export {
+  BuildFailure, LeaseLostError, type BuildPipeline, type BuildProtocol, type BuildResult, type BuildRun, type BuildWorkspace, type HeldBuildLease, type SourceCheckout, type ToolVersion, type WorkspaceProvider,
+} from "./application/ports/LeasedBuild.ts";
+export { HttpBuildProtocol, WorkerProtocolError } from "./infrastructure/HttpBuildProtocol.ts";
+export { GitSourceCheckout } from "./infrastructure/GitSourceCheckout.ts";
+export { DisposableWorkspaces, WorkspaceNotErasedError } from "./infrastructure/DisposableWorkspaces.ts";
+export { CarbonBuildPipeline, WINDOWS_CERTIFICATE_PASSWORD_SECRET, WINDOWS_CERTIFICATE_SECRET } from "./infrastructure/CarbonBuildPipeline.ts";

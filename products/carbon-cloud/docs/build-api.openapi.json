@@ -305,6 +305,52 @@
         }
       }
     },
+    "/platform/v1/orgs/{orgId}/projects/{projectId}/environments/{environmentId}/builds/{buildId}/provenance": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrgId"
+        },
+        {
+          "$ref": "#/components/parameters/ProjectId"
+        },
+        {
+          "$ref": "#/components/parameters/EnvironmentId"
+        },
+        {
+          "$ref": "#/components/parameters/BuildId"
+        }
+      ],
+      "get": {
+        "operationId": "readBuildProvenance",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "description": "What a succeeded build was made from and what it produced: the immutable input, the materials the worker reported, and the artifacts Cloud read back from object storage. The signature, when present, is Ed25519 over the UTF-8 bytes of the statement serialized exactly as returned. A build that has not succeeded has no provenance.",
+        "responses": {
+          "200": {
+            "description": "The build's provenance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/BuildProvenance"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/worker/v1/leases/{leaseId}/build": {
       "post": {
         "operationId": "getWorkerBuildInput",
@@ -430,7 +476,7 @@
             "workerCredential": []
           }
         ],
-        "description": "Declares one output of this attempt. A declaration cannot be changed.",
+        "description": "Declares one output. The object key must be under artifacts/{buildId}/{attempt}/.",
         "parameters": [
           {
             "$ref": "#/components/parameters/LeaseId"
@@ -486,7 +532,7 @@
             "workerCredential": []
           }
         ],
-        "description": "Reports success (every target must be declared) or failure with an error category. Ends the lease, the attempt and the build.",
+        "description": "Reports the build's outcome. A success carries the materials the worker built from and is accepted only after Cloud has read every declared artifact back from object storage and matched its size and SHA-256, and only when the built commit is the commit in the input. A refusal leaves the build running.",
         "parameters": [
           {
             "$ref": "#/components/parameters/LeaseId"
@@ -529,6 +575,9 @@
             "$ref": "account-api.openapi.json#/components/responses/Error"
           },
           "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "503": {
             "$ref": "account-api.openapi.json#/components/responses/Error"
           }
         }

@@ -1,6 +1,6 @@
 # Carbon platform left-off checkpoint
 
-Checkpoint: 2026-10-10, after Phase 7: build orchestration.
+Checkpoint: 2026-10-10, after Phase 8: build execution (partly complete).
 
 The overall platform plan remains unfinished. The rough scope estimate is about
 **30% of the complete backend-and-frontend goal**, with backend foundations in
@@ -44,6 +44,11 @@ the **low 40% range** and the requested production frontend redesign still at
   OIDC providers, app sessions, and Database row access as a verified app user.
 - Build orchestration on worker leases: immutable input, quota reservation,
   attempts, ordered logs, declared artifacts, cancellation and recovery.
+- Build execution, in part: Cloud verifies every declared artifact against
+  object storage and records signed provenance; a worker runtime checks out the
+  pinned commit into a disposable workspace, requires a lockfile, redacts
+  secrets from logs and erases the workspace before reporting success. Real
+  NSIS/WiX packaging, Authenticode signing and build isolation are unproven.
 
 The service-account implementation is described in
 [service-accounts.md](../service-accounts.md), its wire surface in
@@ -54,11 +59,13 @@ legacy permissions are inferred.
 
 ## Last verified state
 
-- Affected Bun regression: **562 tests, 5,534 assertions, 0 failures across 65
-  files**, including the real HTTP/PostgreSQL cross-service suites.
+- Affected Bun regression: **578 tests, 5,728 assertions across 67 files, 0 failures**,
+  including the real HTTP/PostgreSQL cross-service suites.
+- The artifact store test passed against a local MinIO container (not in CI).
 - Solutions, Carbon Cloud, Database, Registry and CLI TypeScript checks passed.
 - Generated platform types are current.
 - The build OpenAPI document parses as JSON.
+- CI was green at the Phase 7 commit; check the Phase 8 commit's run.
 - A full local `bazel build //...` passed on 2026-10-10 before Phases 2 to 7. Local
   `bazel test //...` is unreliable while `defs.bzl` runs `cargo sweep` after
   every Cargo invocation: parallel Rust tests delete each other's build output
@@ -82,8 +89,10 @@ workers that receive leased secrets, a browsable and streamable organization
 event log, recoverable deletion, and application authentication with Database
 row access for app users. Personal credentials exchange for Database and
 Registry assertions, and the CLI can read its Registry namespace. Builds are
-orchestrated on worker leases, but no worker runtime speaks that protocol yet
-and declared artifacts are not verified. The
+orchestrated on worker leases, verified against object storage and given signed
+provenance, and a worker runtime runs them in a disposable workspace. That
+runtime has never compiled, packaged or signed a real Carbon app, and it does
+not isolate or limit a build (G-36 to G-38). The
 AWS KMS adapter and the OIDC client are tested against stand-ins, not real
 providers. Final deletion marks rows and destroys no owning-service data.
 Suspension has no operator route. Legacy `cc_` and `wk_` tokens, the legacy
@@ -91,8 +100,13 @@ build queue and the legacy end-user routes still work as before. Existing legacy
 implementations elsewhere in the repository still need review against the new
 isolation, durability and trust requirements before they count as complete.
 
-The next bounded goal is **Phase 8: disposable Windows x64 execution, dependency
-locks, NSIS/WiX packaging, signing and provenance**. Continue with
-exactly one phase from [handoff.md](handoff.md) per future work
-session. Finish that phase's proof gate, update both checkpoint documents, and
-stop before beginning the next phase unless the user explicitly combines them.
+Phase 8 is **partly complete**. What remains needs a Windows build host with
+NSIS, WiX and a signing certificate, and a decision on how builds are isolated
+(gaps G-36 to G-38, and G-39 to G-49 around them).
+
+The next bounded goal is **Phase 9: releases, channel revisions,
+rollout/promotion/withdrawal and updater compatibility**, which does not depend
+on those. Continue with exactly one phase from [handoff.md](handoff.md) per
+future work session. Finish that phase's proof gate, update both checkpoint
+documents, and stop before beginning the next phase unless the user explicitly
+combines them.
