@@ -46,7 +46,7 @@ export function parseFilter(key: string, rawVal: string): PostgrestFilter | null
       return { column: key, operator: "in", value: items };
     }
     default:
-      return { column: key, operator: "eq", value: parseLiteral(val) };
+      throw new Error('Unsupported row filter operator');
   }
 }
 
@@ -81,6 +81,7 @@ export async function handlePostgrestRequest(
   let offset = 0;
 
   for (const [key, value] of url.searchParams.entries()) {
+    if (key === 'projectId') continue; // Routing scope is not a row filter.
     if (key === "select") {
       selectColumns = value.split(",").map((c) => c.trim());
       continue;
@@ -103,6 +104,8 @@ export async function handlePostgrestRequest(
     const parsed = parseFilter(key, value);
     if (parsed) filters.push(parsed);
   }
+
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1000 || !Number.isSafeInteger(offset) || offset < 0) return Response.json({ error: 'Invalid row pagination' }, { status: 400 });
 
   if (method === "GET") {
     // Only "eq" filters push down to SQL today (DatabaseEngine.queryRows'
@@ -180,10 +183,7 @@ export async function handlePostgrestRequest(
   if (method === "POST") {
     const body = await req.json();
     const rowsToInsert = Array.isArray(body) ? body : [body];
-    const insertedRows: Record<string, unknown>[] = [];
-    for (const item of rowsToInsert) {
-      insertedRows.push(await db.insertRow(projectId, tableName, item, rlsContext));
-    }
+    const insertedRows = await db.insertRows(projectId, tableName, rowsToInsert, rlsContext);
     return Response.json(Array.isArray(body) ? insertedRows : insertedRows[0], {
       status: 201,
       headers: { "Content-Type": "application/json" },
@@ -191,6 +191,7 @@ export async function handlePostgrestRequest(
   }
 
   if (method === "PATCH") {
+    if (filters.some(filter => filter.operator !== 'eq')) return Response.json({ error: 'This mutation requires equality filters' }, { status: 400 });
     const updates = (await req.json()) as Record<string, unknown>;
     const simpleFilter: Record<string, unknown> = {};
     for (const f of filters) if (f.operator === "eq") simpleFilter[f.column] = f.value;
@@ -199,6 +200,7 @@ export async function handlePostgrestRequest(
   }
 
   if (method === "DELETE") {
+    if (filters.some(filter => filter.operator !== 'eq')) return Response.json({ error: 'This mutation requires equality filters' }, { status: 400 });
     const simpleFilter: Record<string, unknown> = {};
     for (const f of filters) if (f.operator === "eq") simpleFilter[f.column] = f.value;
     const count = await db.deleteRows(projectId, tableName, simpleFilter, rlsContext);

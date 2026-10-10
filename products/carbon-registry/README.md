@@ -1,5 +1,11 @@
 # carbon-registry
 
+Canonical environment lifecycle is now available through opt-in signed internal
+HTTP endpoints, backed by scoped PostgreSQL namespaces and durable command receipts.
+See [configuration, integration evidence and limits](../carbon-cloud/docs/service-lifecycle.md).
+Package publishing still needs integration with those namespaces; the legacy API
+and signing behavior described below remain separate migration work.
+
 The official Plugin & Component Registry / Marketplace for Carbon Native.
 Self-hosted, v1.
 

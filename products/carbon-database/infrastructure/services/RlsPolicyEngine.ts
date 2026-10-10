@@ -1,178 +1,100 @@
-// Row-Level Security (RLS) Policy Engine: Declarative access control
-// evaluated against verified Carbon Identity tokens.
-//
-// PERSISTED, WRITE-THROUGH CACHED: policies and enabled/disabled state are
-// real rows in Postgres (rls_settings/rls_policies — see 0001_init.sql),
-// but `canSelect`/`canInsert`/`canUpdate`/`canDelete` stay SYNCHRONOUS: they
-// run once per ROW inside DatabaseEngine's already-async query/mutation
-// methods, and making each individual row-check its own await would be
-// both slower and unnecessary — the policy SET for a table changes rarely
-// (an explicit `POST .../rls` call), unlike the rows being checked
-// against it. `loadAll()` populates the cache once at startup (called
-// from composition, same as running migrations once); every write method
-// updates Postgres AND the cache together so the two never drift apart
-// within a running process.
-//
-// `check` is NOT an arbitrary expression language — `ruleExpression` is
-// one of a small, known set of canned forms (see buildCheckFn), matching
-// what the HTTP layer has ever accepted for `POST .../policies`. This is
-// the same scope the in-memory version had; only persistence changed.
-
+// Legacy policy compatibility adapter. Policies are read inside the row transaction
+// under a shared advisory lock; policy writes take the matching exclusive lock.
+// Canonical application identity and native PostgreSQL RLS remain separate work.
 export type RlsAction = "SELECT" | "INSERT" | "UPDATE" | "DELETE" | "ALL";
-
-export interface RlsContext {
-  readonly orgId: string;
-  readonly userId?: string;
-  readonly role?: string; // e.g. "admin", "authenticated", "anon"
-}
-
+export interface RlsContext { readonly orgId: string; readonly userId?: string; readonly role?: string }
 export interface RlsPolicy {
-  readonly id: string;
-  readonly name: string;
-  readonly action: RlsAction;
+  readonly id: string; readonly name: string; readonly action: RlsAction;
   readonly ruleExpression?: string;
   readonly check: (context: RlsContext, record: Record<string, unknown>) => boolean;
 }
+export class InvalidRlsPolicyError extends Error {
+  constructor() { super('Unsupported RLS policy; use an explicit supported rule and action'); }
+}
+export function compileLegacyPolicy(expression: string | undefined): RlsPolicy['check'] {
+  switch (expression) {
+    case 'true': return () => true;
+    case 'false': return () => false;
+    case 'auth.orgId == record.orgId': return (context, record) => context.role !== 'anon' && !!context.orgId && context.orgId === record.orgId;
+    case 'auth.userId == record.userId': return (context, record) => context.role !== 'anon' && !!context.userId && context.userId === record.userId;
+    case 'record.is_public == true': return (_context, record) => record.is_public === true;
+    default: throw new InvalidRlsPolicyError();
+  }
+}
+const actions = new Set<string>(['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'ALL']);
 
-/** The small, known set of rule forms `POST .../policies` has ever accepted. */
-function buildCheckFn(ruleExpression: string | undefined): RlsPolicy["check"] {
-  if (!ruleExpression) return () => true;
-  if (ruleExpression === "auth.orgId == record.orgId") {
-    return (ctx, record) => ctx.orgId === record.orgId;
+export class RlsPolicySnapshot {
+  constructor(readonly enabled: boolean, readonly policies: readonly RlsPolicy[], private readonly valid: boolean) {}
+  allows(action: Exclude<RlsAction, 'ALL'>, context: RlsContext, record: Record<string, unknown>): boolean {
+    // Public compatibility access requires explicit RLS enablement. Administrative
+    // routes omit policy context only after their separate ownership check.
+    if (!this.enabled || !this.valid) return false;
+    return this.policies.some(policy => {
+      if (policy.action !== action && policy.action !== 'ALL') return false;
+      try { return policy.check(context, record) === true; } catch { return false; }
+    });
   }
-  if (ruleExpression === "record.is_public == true") {
-    return (_ctx, record) => record.is_public === true;
-  }
-  return () => true;
 }
 
 export class RlsPolicyEngine {
-  private readonly rlsEnabled = new Map<string, boolean>(); // "projectId:tableName" -> enabled
-  private readonly policies = new Map<string, RlsPolicy[]>(); // "projectId:tableName" -> policies
-
   constructor(private readonly sql: Bun.SQL) {}
-
-  private tableKey(projectId: string, tableName: string): string {
-    return `${projectId}:${tableName}`;
+  // Retained for compatibility with the composition root. No process-local cache.
+  async loadAll(): Promise<void> { await this.sql`SELECT 1 FROM rls_settings LIMIT 1`; }
+  private async lock(tx: Bun.TransactionSQL, projectId: string, tableName: string, exclusive: boolean) {
+    const key = JSON.stringify([projectId, tableName]);
+    if (exclusive) await tx`SELECT pg_advisory_xact_lock(1128354373, hashtext(${key}))`;
+    else await tx`SELECT pg_advisory_xact_lock_shared(1128354373, hashtext(${key}))`;
   }
-
-  /** Populates the in-memory cache from Postgres. Call once at startup. */
-  async loadAll(): Promise<void> {
-    const settings = await this.sql<Array<{ project_id: string; table_name: string; enabled: boolean }>>`
-      SELECT project_id, table_name, enabled FROM rls_settings
-    `;
-    for (const s of settings) {
-      this.rlsEnabled.set(this.tableKey(s.project_id, s.table_name), s.enabled);
-    }
-
-    const policyRows = await this.sql<
-      Array<{
-        id: string;
-        project_id: string;
-        table_name: string;
-        name: string;
-        action: RlsAction;
-        rule_expression: string | null;
-      }>
-    >`SELECT id, project_id, table_name, name, action, rule_expression FROM rls_policies`;
-    for (const p of policyRows) {
-      const key = this.tableKey(p.project_id, p.table_name);
-      const list = this.policies.get(key) ?? [];
-      list.push({
-        id: p.id,
-        name: p.name,
-        action: p.action,
-        ruleExpression: p.rule_expression ?? undefined,
-        check: buildCheckFn(p.rule_expression ?? undefined),
-      });
-      this.policies.set(key, list);
-    }
+  private async requireTable(tx: Bun.TransactionSQL, projectId: string, tableName: string) {
+    if (!(await tx`SELECT 1 FROM carbon_tables WHERE project_id = ${projectId} AND table_name = ${tableName}`).length) throw new Error('Table not found');
   }
-
+  async snapshot(tx: Bun.TransactionSQL, projectId: string, tableName: string): Promise<RlsPolicySnapshot> {
+    await this.lock(tx, projectId, tableName, false);
+    const settings = await tx`SELECT enabled FROM rls_settings WHERE project_id = ${projectId} AND table_name = ${tableName}`;
+    const rows = await tx<Array<{ id: string; name: string; action: RlsAction; rule_expression: string | null }>>`SELECT id, name, action, rule_expression FROM rls_policies WHERE project_id = ${projectId} AND table_name = ${tableName} ORDER BY id`;
+    let valid = true;
+    const policies: RlsPolicy[] = rows.map(row => {
+      let check: RlsPolicy['check'] = () => false;
+      try { if (!actions.has(row.action)) throw new InvalidRlsPolicyError(); check = compileLegacyPolicy(row.rule_expression ?? undefined); }
+      catch { valid = false; }
+      return { id: row.id, name: row.name, action: row.action, ruleExpression: row.rule_expression ?? undefined, check };
+    });
+    return new RlsPolicySnapshot(settings[0]?.enabled === true, policies, valid);
+  }
+  async describe(projectId: string, tableName: string) {
+    return this.sql.begin(async tx => {
+      const snapshot = await this.snapshot(tx, projectId, tableName);
+      return { enabled: snapshot.enabled, policies: snapshot.policies };
+    });
+  }
+  async isRlsEnabled(projectId: string, tableName: string): Promise<boolean> { return (await this.describe(projectId, tableName)).enabled; }
+  async listPolicies(projectId: string, tableName: string): Promise<readonly RlsPolicy[]> { return (await this.describe(projectId, tableName)).policies; }
   async setRlsEnabled(projectId: string, tableName: string, enabled: boolean): Promise<void> {
-    await this.sql`
-      INSERT INTO rls_settings (project_id, table_name, enabled) VALUES (${projectId}, ${tableName}, ${enabled})
-      ON CONFLICT (project_id, table_name) DO UPDATE SET enabled = EXCLUDED.enabled
-    `;
-    this.rlsEnabled.set(this.tableKey(projectId, tableName), enabled);
-  }
-
-  isRlsEnabled(projectId: string, tableName: string): boolean {
-    return this.rlsEnabled.get(this.tableKey(projectId, tableName)) ?? false;
-  }
-
-  async addPolicy(
-    projectId: string,
-    tableName: string,
-    policy: { id: string; name: string; action: RlsAction; ruleExpression?: string },
-  ): Promise<void> {
-    await this.sql`
-      INSERT INTO rls_policies (id, project_id, table_name, name, action, rule_expression)
-      VALUES (${policy.id}, ${projectId}, ${tableName}, ${policy.name}, ${policy.action}, ${policy.ruleExpression ?? null})
-    `;
-    const key = this.tableKey(projectId, tableName);
-    const list = this.policies.get(key) ?? [];
-    list.push({
-      id: policy.id,
-      name: policy.name,
-      action: policy.action,
-      ruleExpression: policy.ruleExpression,
-      check: buildCheckFn(policy.ruleExpression),
+    if (typeof enabled !== 'boolean') throw new InvalidRlsPolicyError();
+    await this.sql.begin(async tx => {
+      await this.lock(tx, projectId, tableName, true); await this.requireTable(tx, projectId, tableName);
+      await tx`INSERT INTO rls_settings (project_id, table_name, enabled) VALUES (${projectId}, ${tableName}, ${enabled})
+        ON CONFLICT (project_id, table_name) DO UPDATE SET enabled = EXCLUDED.enabled`;
     });
-    this.policies.set(key, list);
   }
-
-  listPolicies(projectId: string, tableName: string): RlsPolicy[] {
-    return this.policies.get(this.tableKey(projectId, tableName)) || [];
+  async addPolicy(projectId: string, tableName: string, policy: { id: string; name: string; action: RlsAction; ruleExpression?: string }): Promise<void> {
+    compileLegacyPolicy(policy.ruleExpression);
+    if (!actions.has(policy.action) || !policy.id || !policy.name || policy.id.length > 128 || policy.name.length > 128) throw new InvalidRlsPolicyError();
+    await this.sql.begin(async tx => {
+      await this.lock(tx, projectId, tableName, true); await this.requireTable(tx, projectId, tableName);
+      await tx`INSERT INTO rls_policies (id, project_id, table_name, name, action, rule_expression)
+        VALUES (${policy.id}, ${projectId}, ${tableName}, ${policy.name}, ${policy.action}, ${policy.ruleExpression!})`;
+    });
   }
-
   async removePolicy(projectId: string, tableName: string, policyId: string): Promise<boolean> {
-    const key = this.tableKey(projectId, tableName);
-    const existing = this.policies.get(key);
-    if (!existing) return false;
-    const initialLen = existing.length;
-    const filtered = existing.filter((p) => p.id !== policyId);
-    this.policies.set(key, filtered);
-    if (filtered.length < initialLen) {
-      await this.sql`DELETE FROM rls_policies WHERE id = ${policyId}`;
-      return true;
-    }
-    return false;
-  }
-
-  private evaluateAction(
-    projectId: string,
-    tableName: string,
-    action: RlsAction,
-    context: RlsContext,
-    record: Record<string, unknown>,
-  ): boolean {
-    if (!this.isRlsEnabled(projectId, tableName)) return true;
-
-    const key = this.tableKey(projectId, tableName);
-    const tablePolicies = this.policies.get(key) || [];
-    const applicable = tablePolicies.filter((p) => p.action === action || p.action === "ALL");
-    if (applicable.length === 0) return false; // enabled, no policy for this action: default deny
-
-    return applicable.some((p) => {
-      try {
-        return p.check(context, record);
-      } catch {
-        return false;
-      }
+    return this.sql.begin(async tx => {
+      await this.lock(tx, projectId, tableName, true);
+      return (await tx`DELETE FROM rls_policies WHERE id = ${policyId} AND project_id = ${projectId} AND table_name = ${tableName} RETURNING id`).length > 0;
     });
   }
-
-  canSelect(projectId: string, tableName: string, context: RlsContext, record: Record<string, unknown>): boolean {
-    return this.evaluateAction(projectId, tableName, "SELECT", context, record);
-  }
-  canInsert(projectId: string, tableName: string, context: RlsContext, record: Record<string, unknown>): boolean {
-    return this.evaluateAction(projectId, tableName, "INSERT", context, record);
-  }
-  canUpdate(projectId: string, tableName: string, context: RlsContext, record: Record<string, unknown>): boolean {
-    return this.evaluateAction(projectId, tableName, "UPDATE", context, record);
-  }
-  canDelete(projectId: string, tableName: string, context: RlsContext, record: Record<string, unknown>): boolean {
-    return this.evaluateAction(projectId, tableName, "DELETE", context, record);
+  async clearTablePolicies(tx: Bun.TransactionSQL, projectId: string, tableName: string): Promise<void> {
+    await this.lock(tx, projectId, tableName, true);
+    await tx`DELETE FROM rls_policies WHERE project_id = ${projectId} AND table_name = ${tableName}`;
+    await tx`DELETE FROM rls_settings WHERE project_id = ${projectId} AND table_name = ${tableName}`;
   }
 }

@@ -1,0 +1,552 @@
+import { afterEach, describe, expect, test } from 'bun:test';
+import { generateKeyPairSync, randomBytes } from 'node:crypto';
+import { AccountAuthentication, PostgresAccountIdentityRepository, EnvelopeMessageProtector, PostgresMfaVerification, Rfc6238Totp,
+  OrganizationAccess, PostgresOrganizationRepository, ServiceAssertionIssuer, opaqueToken, tokenDigest, bodyDigest, type AssertionTrust } from '@carbon/identity';
+import { AccountCatalog, PostgresCatalogRepository, PostgresProvisioningRepository, ProvisionEnvironment, HttpEnvironmentProvisioner,
+  PostgresServiceLifecycleRepository, PostgresDatabaseEnvironmentDriver, databaseEnvironmentIdentifiers, type ProvisioningWork } from '@carbon/catalog';
+import { parseComponent, serviceLifecycleBody, dataPermission, dataRequestPath } from '@carbon/contracts/platform';
+import { HttpDataClient, AccountData, PostgresAccountDataAuthority, AccountImports, PostgresImportJobs, HttpImportClient, RunImportJobs } from '@carbon/data';
+import { migrate as migrateCloud } from '../../../products/carbon-cloud/infrastructure/persistence/Database.ts';
+import { migrate as migrateDatabase } from '../../../products/carbon-database/infrastructure/persistence/Database.ts';
+import { migrate as migrateRegistry } from '../../../products/carbon-registry/infrastructure/persistence/Database.ts';
+import { createAccountRoutes } from '../../../products/carbon-cloud/presentation/http/account-routes.ts';
+import { composeServiceAuthority } from '../../../products/carbon-cloud/composition/service-authority.ts';
+import { composeLifecyclePlatform as composeDatabase } from '../../../products/carbon-database/composition/lifecycle-platform.ts';
+import { composeLifecyclePlatform as composeRegistry } from '../../../products/carbon-registry/composition/lifecycle-platform.ts';
+
+const databaseUrl = process.env.CARBON_SERVICE_TEST_DATABASE_URL;
+const suite = databaseUrl ? describe : describe.skip;
+const cleanups: (() => Promise<void>)[] = [];
+afterEach(async () => { while (cleanups.length) { await cleanups.at(-1)!(); cleanups.pop(); } }, 30000);
+
+async function harness() {
+  const url = new URL(databaseUrl!); if (url.pathname !== '/carbon_service_test') throw new Error('Requires dedicated carbon_service_test database');
+  const admin = new Bun.SQL(url.href, { max: 1 }); const id = crypto.randomUUID().replaceAll('-', '');
+  const stores: { name: string; sql: Bun.SQL; owner: string }[] = []; const servers: ReturnType<typeof Bun.serve>[] = [];
+  cleanups.push(async () => {
+    for (const server of servers) await server.stop(true);
+    for (const store of stores) {
+      const exists = await store.sql`SELECT to_regclass('public.platform_environments') AS name`;
+      const roles: string[] = store.owner === 'database' && exists[0].name ? (await store.sql<{ environment_id: string }[]>`SELECT environment_id FROM platform_environments`).map(row => databaseEnvironmentIdentifiers(row.environment_id).role) : [];
+      await store.sql.close();
+      if (!new RegExp(`^carbon_service_test_${id}_(cloud|database|registry)$`).test(store.name)) throw new Error('Unsafe test database cleanup');
+      await admin.unsafe(`DROP DATABASE "${store.name}"`);
+      for (const role of roles) { if (!/^ce_[a-f0-9]{32}$/.test(role)) throw new Error('Unsafe role cleanup'); await admin.unsafe(`DROP ROLE "${role}"`); }
+    }
+    await admin.close();
+  });
+  for (const owner of ['cloud', 'database', 'registry']) {
+    const name = `carbon_service_test_${id}_${owner}`; await admin.unsafe(`CREATE DATABASE "${name}"`);
+    const target = new URL(url); target.pathname = '/' + name; stores.push({ owner, name, sql: new Bun.SQL(target.href, { max: 3 }) });
+  }
+  const [cloud, database, registry] = stores.map(store => store.sql) as [Bun.SQL, Bun.SQL, Bun.SQL];
+  await migrateCloud(cloud); await migrateDatabase(database); await migrateRegistry(registry);
+  const origin = 'https://cloud.example.test'; const { privateKey, publicKey } = generateKeyPairSync('ed25519'); const now = Date.now() / 1000;
+  const key = { id: 'test-key', notBefore: now - 60, notAfter: now + 3600 }; const trust: AssertionTrust = { issuer: origin, keys: [{ ...key, key: publicKey }] };
+  const issuer = new ServiceAssertionIssuer(origin, { ...key, key: privateKey });
+  let authorityCalls = 0; let beforeAuthority: ((call: number) => Promise<void>) | undefined;
+  let authority = composeServiceAuthority(cloud, trust);
+  const cloudServer = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async request => { authorityCalls++; await beforeAuthority?.(authorityCalls); return authority(request); } }); servers.push(cloudServer);
+  let databaseHandler = composeDatabase(database, { trust, authorityOrigin: cloudServer.url.origin });
+  let registryHandler = composeRegistry(registry, { trust, authorityOrigin: cloudServer.url.origin });
+  const databaseServer = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: request => databaseHandler(request) }); servers.push(databaseServer);
+  const registryServer = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: request => registryHandler(request) }); servers.push(registryServer);
+  const repo = new PostgresProvisioningRepository(cloud);
+  const databaseProvider = new HttpEnvironmentProvisioner('database', databaseServer.url.origin, issuer);
+  const registryProvider = new HttpEnvironmentProvisioner('registry', registryServer.url.origin, issuer);
+  const worker = new ProvisionEnvironment(repo, { database: databaseProvider, registry: registryProvider });
+  const protector = new EnvelopeMessageProtector('test', { test: randomBytes(32).toString('base64') });
+  const config = { origin, termsVersion: 'fixture', rateLimitKey: randomBytes(32).toString('base64') };
+  const mfa = new PostgresMfaVerification(protector, new Rfc6238Totp());
+  const auth = new AccountAuthentication(new PostgresAccountIdentityRepository(cloud, mfa), protector, config);
+  const importJobs = new PostgresImportJobs(cloud, protector); const importClient = new HttpImportClient(databaseServer.url.origin, issuer);
+  const importWorker = new RunImportJobs(importJobs, importClient);
+  const account = crypto.randomUUID(); const session = crypto.randomUUID(); const token = opaqueToken('as'); const csrf = opaqueToken('csrf');
+  // Verified account/session fixture; all catalog and remote identities are created through the real APIs below.
+  await cloud`INSERT INTO accounts (id, primary_email, name, verified_at, terms_version) VALUES (${account}, 'owner@example.test', 'Owner', now(), 'fixture')`;
+  await cloud`INSERT INTO account_sessions (id, account_id, token_hash, csrf_hash, security_revision, device_name, expires_at, fresh_until)
+    VALUES (${session}, ${account}, ${tokenDigest(token)}, ${tokenDigest(csrf)}, 1, 'Fixture', now() + interval '8 hours', now() + interval '10 minutes')`;
+  const apiHandler = createAccountRoutes(auth, origin, undefined, undefined, new OrganizationAccess(auth, new PostgresOrganizationRepository(cloud), protector), undefined, undefined, undefined,
+    new AccountCatalog(auth, new PostgresCatalogRepository(cloud), protector), new AccountData(auth, new PostgresAccountDataAuthority(cloud), new HttpDataClient(databaseServer.url.origin, issuer), protector), new AccountImports(auth, importJobs));
+  const api = (path: string, input?: unknown, revision?: string, overrides?: Record<string, string>) => apiHandler(new Request(origin + path, { method: input === undefined ? 'GET' : 'POST',
+    headers: { origin, cookie: `__Host-carbon-session=${token}`, 'x-csrf-token': csrf, 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID(), ...(revision ? { 'if-match': revision } : {}), ...Object.fromEntries(new Headers(overrides)) },
+    body: input === undefined ? undefined : JSON.stringify(input) }), '127.0.0.1');
+  const organization = parseComponent('OrganizationReceipt', (await (await api('/platform/v1/orgs', { name: 'Integration', slug: 'integration' })).json() as { receipt: unknown }).receipt);
+  const create = async (slug = 'app', services = ['database', 'registry']) => {
+    const current = await (await api(`/platform/v1/orgs/${organization.id}`)).json() as { organization: { revision: string } };
+    const response = await api(`/platform/v1/orgs/${organization.id}/projects`, { name: slug, slug, services }, current.organization.revision);
+    expect(response.status).toBe(202); return parseComponent('CatalogReceipt', (await response.json() as { receipt: unknown }).receipt);
+  };
+  const signed = async (work: ProvisioningWork) => {
+    const body = serviceLifecycleBody({ scope: parseComponent('EnvironmentScope', work.scope), bindingId: work.bindingId, operationId: work.operationId, stepId: work.stepId, leaseId: work.leaseId, action: work.action, remoteResourceId: work.remoteResourceId });
+    const path = `/internal/platform/v1/environments/${work.scope.environmentId}/lifecycle`;
+    const proof = await issuer.issue({ aud: work.owner === 'database' ? 'carbon-database' : 'carbon-registry', principal: work.principal, scope: work.scope, roles: [work.role],
+      grants: work.grants.filter(g => g.permission === 'resources.configure'), requestId: work.requestId, request: { method: 'POST', path, bodyDigest: bodyDigest(body) } });
+    return { url: (work.owner === 'database' ? databaseServer.url.origin : registryServer.url.origin) + path,
+      init: { method: 'POST', body, headers: { authorization: `Bearer ${proof}`, 'content-type': 'application/json', 'idempotency-key': work.stepId, 'x-request-id': work.requestId } } };
+  };
+  const signedData = async (input: unknown, audience: 'carbon-database' | 'carbon-registry' = 'carbon-database') => {
+    const request = parseComponent('DataRequest', input); const body = JSON.stringify(request); const requestId = crypto.randomUUID();
+    const current = (await cloud`SELECT permission_revision::text FROM accounts WHERE id = ${account}`)[0];
+    const principal = { id: account, kind: 'account' as const, audience: 'dashboard' as const, credentialId: session, permissionRevision: current.permission_revision };
+    const path = dataRequestPath(request.scope, request.bindingId, request.command.kind);
+    const proof = await issuer.issue({ aud: audience, principal, scope: request.scope, roles: ['Owner'], grants: [{ permission: dataPermission(request.command.kind), scope: request.scope }], requestId,
+      request: { method: 'POST', path, bodyDigest: bodyDigest(body) } });
+    return { url: databaseServer.url.origin + path, init: { method: 'POST', body, headers: { authorization: `Bearer ${proof}`, 'content-type': 'application/json', 'x-request-id': requestId,
+      ...('commandId' in request.command ? { 'idempotency-key': request.command.commandId } : {}) } } };
+  };
+  const dataClient = new HttpDataClient(databaseServer.url.origin, issuer);
+  const clientData = async (input: unknown) => dataClient.execute(parseComponent('DataRequest', input), {
+    principal: { id: account, kind: 'account', audience: 'dashboard', credentialId: session, permissionRevision: (await cloud`SELECT permission_revision::text FROM accounts WHERE id = ${account}`)[0].permission_revision },
+    role: 'Owner', requestId: crypto.randomUUID(),
+  });
+  return { cloud, database, registry, worker, repo, api, create, signed, signedData, clientData, account, organization, databaseProvider, registryProvider, databaseServer, registryServer,
+    importJobs, importClient, importWorker, restartImports: () => new PostgresImportJobs(cloud, protector),
+    interceptAuthority: (callback?: (call: number) => Promise<void>) => { authorityCalls = 0; beforeAuthority = callback; },
+    restart: () => { authority = composeServiceAuthority(cloud, trust); databaseHandler = composeDatabase(database, { trust, authorityOrigin: cloudServer.url.origin }); registryHandler = composeRegistry(registry, { trust, authorityOrigin: cloudServer.url.origin }); },
+  };
+}
+
+suite('Cloud-to-owning-service lifecycle over real HTTP and PostgreSQL', () => {
+  test('durable import API stages encrypted input, enforces browser authority, and commits partial results once', async () => {
+    const h = await harness(); const created = await h.create('import-api', ['database']); expect(await h.worker.execute()).toBe(true);
+    const scope = parseComponent('EnvironmentScope', created.scope);
+    const envPath = `/platform/v1/orgs/${scope.orgId}/projects/${scope.projectId}/environments/${scope.environmentId}`;
+    const path = envPath + '/data'; const imports = path + '/imports'; const tableId = crypto.randomUUID();
+    const env = parseComponent('CatalogEnvironmentDetails', await (await h.api(envPath)).json());
+    const create = { kind: 'table.create', commandId: crypto.randomUUID(), tableId, definition: { name: 'imported', columns: [{ name: 'owner', type: 'uuid', nullable: false, default: { kind: 'literal', value: h.account } }, { name: 'body', type: 'text', nullable: false }], policies: { enabled: true, rules: [{ id: crypto.randomUUID(), name: 'Owner', kind: 'owner', ownerColumn: 'owner', operations: ['select', 'insert', 'update', 'delete'] }] } } };
+    expect((await h.api(path, create, env.environment.revision, { 'idempotency-key': create.commandId })).status).toBe(200);
+    const command = { kind: 'import.enqueue', commandId: crypto.randomUUID(), tableId, revision: '1', access: { mode: 'policy-preview', userId: h.account },
+      input: { format: 'json', text: '[{"body":"private staged source"},{}]', mapping: {}, conflict: 'error', atomic: false } };
+    const headers = { 'idempotency-key': command.commandId };
+    expect((await h.api(imports, command, '1', { ...headers, cookie: '' })).status).toBe(401);
+    expect((await h.api(imports, command, '1', { ...headers, 'x-csrf-token': 'bad' })).status).toBe(403);
+    expect((await h.api(imports, command, '1', { ...headers, origin: 'https://foreign.example.test' })).status).toBe(403);
+    expect((await h.api(imports, command, '2', headers)).status).toBe(400);
+    const queued = await Promise.all([h.api(imports, command, '1', headers), h.api(imports, command, '1', headers)]);
+    expect(queued.map(response => response.status)).toEqual([202, 202]);
+    const receipt = parseComponent('DataImportJobReceipt', (await queued[0]!.json() as { receipt: unknown }).receipt);
+    expect((await queued[1]!.json() as { receipt: unknown }).receipt).toEqual(receipt);
+    expect((await h.api(imports, { ...command, input: { ...command.input, text: '[]' } }, '1', headers)).status).toBe(409);
+    const stored = (await h.cloud`SELECT * FROM data_import_jobs WHERE id = ${receipt.operationId}`)[0];
+    expect(stored.sealed_execution.length).toBeGreaterThan(100); expect(JSON.stringify(stored)).not.toContain('private staged source');
+    const statusPath = `${imports}/${receipt.operationId}/status`;
+    const before = parseComponent('DataImportJobView', await (await h.api(statusPath, {})).json());
+    expect(before.operation.state).toBe('queued'); expect(before.result).toBeNull(); expect(JSON.stringify(before)).not.toContain('authority_actor');
+    expect((await h.api(statusPath, {}, undefined, { 'x-csrf-token': '' })).status).toBe(403);
+    expect((await h.api(statusPath + '?orgId=' + scope.orgId, {})).status).toBe(400);
+    expect(await h.importWorker.execute()).toBe(true);
+    const after = parseComponent('DataImportJobView', await (await h.api(statusPath, {})).json());
+    expect(after.operation.state).toBe('partially_succeeded'); expect(after.outcomeUnknown).toBe(false);
+    expect(after.result).toMatchObject({ total: 2, inserted: 1, updated: 0, skipped: 0, failed: 1 });
+    expect((await h.cloud`SELECT sealed_execution FROM data_import_jobs WHERE id = ${receipt.operationId}`)[0].sealed_execution).toBe('');
+    expect(JSON.stringify(await h.cloud`SELECT detail FROM data_import_job_events WHERE operation_id = ${receipt.operationId}`)).not.toContain('private staged source');
+    expect(await h.importWorker.execute()).toBe(false);
+    expect((await h.database`SELECT count(*)::int AS count FROM canonical_data_commands WHERE command_id = ${command.commandId}`)[0].count).toBe(1);
+    const cancelled = { ...command, commandId: crypto.randomUUID() };
+    const cancelReceipt = parseComponent('DataImportJobReceipt', (await (await h.api(imports, cancelled, '1', { 'idempotency-key': cancelled.commandId })).json() as { receipt: unknown }).receipt);
+    const cancel = { commandId: crypto.randomUUID(), revision: cancelReceipt.revision }; const cancelPath = `${imports}/${cancelReceipt.operationId}/cancel`;
+    const cancelResponse = await h.api(cancelPath, cancel, cancel.revision, { 'idempotency-key': cancel.commandId }); expect(cancelResponse.status).toBe(202);
+    expect(await (await h.api(cancelPath, cancel, cancel.revision, { 'idempotency-key': cancel.commandId })).json()).toEqual(await cancelResponse.json());
+    expect(parseComponent('DataImportJobView', await (await h.api(`${imports}/${cancelReceipt.operationId}/status`, {})).json()).operation.state).toBe('cancelled');
+    expect(await h.importWorker.execute()).toBe(false);
+  }, 30000);
+  test('import workers reconcile lost replies and expired leases before cancellation or re-execution', async () => {
+    const h = await harness(); const created = await h.create('import-recovery', ['database']); expect(await h.worker.execute()).toBe(true);
+    const scope = parseComponent('EnvironmentScope', created.scope); const envPath = `/platform/v1/orgs/${scope.orgId}/projects/${scope.projectId}/environments/${scope.environmentId}`;
+    const path = envPath + '/data'; const imports = path + '/imports'; const tableId = crypto.randomUUID();
+    const env = parseComponent('CatalogEnvironmentDetails', await (await h.api(envPath)).json());
+    const create = { kind: 'table.create', commandId: crypto.randomUUID(), tableId, definition: { name: 'recovered', columns: [{ name: 'owner', type: 'uuid', nullable: false, default: { kind: 'literal', value: h.account } }, { name: 'body', type: 'text', nullable: false }], policies: { enabled: true, rules: [{ id: crypto.randomUUID(), name: 'Owner', kind: 'owner', ownerColumn: 'owner', operations: ['select', 'insert', 'update', 'delete'] }] } } };
+    expect((await h.api(path, create, env.environment.revision, { 'idempotency-key': create.commandId })).status).toBe(200);
+    const enqueue = async () => {
+      const command = { kind: 'import.enqueue', commandId: crypto.randomUUID(), tableId, revision: '1', access: { mode: 'policy-preview', userId: h.account }, input: { format: 'json', text: '[{"body":"recover"}]', mapping: {}, conflict: 'error', atomic: true } };
+      return parseComponent('DataImportJobReceipt', (await (await h.api(imports, command, '1', { 'idempotency-key': command.commandId })).json() as { receipt: unknown }).receipt);
+    };
+    const status = async (id: string) => parseComponent('DataImportJobView', await (await h.api(`${imports}/${id}/status`, {})).json());
+    const receipt = await enqueue();
+    const lost = new RunImportJobs(h.importJobs, { status: work => h.importClient.status(work), execute: async work => { await h.importClient.execute(work); throw new Error('response lost'); } });
+    expect(await lost.execute()).toBe(true);
+    const interrupted = await status(receipt.operationId); expect(interrupted.operation.state).toBe('running'); expect(interrupted.result).toBeNull();
+    const cancel = { commandId: crypto.randomUUID(), revision: interrupted.operation.revision };
+    expect((await h.api(`${imports}/${receipt.operationId}/cancel`, cancel, cancel.revision, { 'idempotency-key': cancel.commandId })).status).toBe(202);
+    await h.cloud`UPDATE data_import_jobs SET next_attempt_at = now() WHERE id = ${receipt.operationId}`;
+    expect(await new RunImportJobs(h.restartImports(), h.importClient).execute()).toBe(true);
+    const recovered = await status(receipt.operationId); expect(recovered.operation.state).toBe('succeeded'); expect(recovered.operation.cancellationRequested).toBe(true);
+    expect(recovered.result?.inserted).toBe(1); expect(recovered.outcomeUnknown).toBe(false);
+    const second = await enqueue(); const old = await h.importJobs.claim(); if (!old || old === 'settled') throw new Error('Missing initial lease');
+    await h.cloud`UPDATE data_import_jobs SET lease_expires_at = now() - interval '1 second' WHERE id = ${second.operationId}`;
+    const replacement = await h.restartImports().claim(); if (!replacement || replacement === 'settled') throw new Error('Missing recovery lease');
+    expect(replacement.phase).toBe('reconcile'); expect(replacement.request.leaseId).not.toBe(old.request.leaseId);
+    let rejected: unknown; try { await h.importClient.execute(old); } catch (error) { rejected = error; } expect(rejected).toBeDefined();
+    expect(await h.importClient.status(replacement)).toBeNull();
+    const approved = await h.importJobs.allowExecution(replacement); if (!approved) throw new Error('Missing execution approval');
+    const secondResult = await h.importClient.execute(approved);
+    expect(await h.importJobs.finish(approved, secondResult)).toBe(true);
+    expect(await h.importJobs.finish(old, secondResult)).toBe(false);
+    expect((await status(second.operationId)).operation.state).toBe('succeeded');
+    expect((await h.database`SELECT count(*)::int AS count FROM canonical_data_commands WHERE table_id = ${tableId} AND result ? 'inserted'`)[0].count).toBe(2);
+    // A revoked session cannot inspect the receipt: retain an explicit unknown outcome.
+    const unknown = await enqueue(); expect(await lost.execute()).toBe(true);
+    await h.cloud`UPDATE account_sessions SET revoked_at = now() WHERE account_id = ${h.account}`;
+    await h.cloud`UPDATE data_import_jobs SET next_attempt_at = now() WHERE id = ${unknown.operationId}`;
+    expect(await new RunImportJobs(h.restartImports(), h.importClient).execute()).toBe(true);
+    const review = (await h.cloud`SELECT state, outcome_unknown, result, sealed_execution FROM data_import_jobs WHERE id = ${unknown.operationId}`)[0];
+    expect(review).toMatchObject({ state: 'failed', outcome_unknown: true, result: null }); expect(review.sealed_execution.length).toBeGreaterThan(100);
+    expect((await h.database`SELECT count(*)::int AS count FROM canonical_data_commands WHERE command_id = ${unknown.commandId}`)[0].count).toBe(1);
+  }, 30000);
+  test('import cancellation and permission revocation roll back in-flight writes and reconcile without write access', async () => {
+    const h = await harness(); const created = await h.create('import-revoked', ['database']); expect(await h.worker.execute()).toBe(true);
+    const scope = parseComponent('EnvironmentScope', created.scope); const envPath = `/platform/v1/orgs/${scope.orgId}/projects/${scope.projectId}/environments/${scope.environmentId}`;
+    const path = envPath + '/data'; const imports = path + '/imports'; const tableId = crypto.randomUUID();
+    const env = parseComponent('CatalogEnvironmentDetails', await (await h.api(envPath)).json());
+    const create = { kind: 'table.create', commandId: crypto.randomUUID(), tableId, definition: { name: 'revoked_import',
+      columns: [{ name: 'owner', type: 'uuid', nullable: false, default: { kind: 'literal', value: h.account } }, { name: 'body', type: 'text', nullable: false }],
+      policies: { enabled: true, rules: [{ id: crypto.randomUUID(), name: 'Owner', kind: 'owner', ownerColumn: 'owner', operations: ['select', 'insert'] }] } } };
+    expect((await h.api(path, create, env.environment.revision, { 'idempotency-key': create.commandId })).status).toBe(200);
+    const enqueue = async (revision = '1') => {
+      const command = { kind: 'import.enqueue', commandId: crypto.randomUUID(), tableId, revision, access: { mode: 'policy-preview', userId: h.account }, input: { format: 'json', text: '[{"body":"must roll back"}]', mapping: {}, conflict: 'error', atomic: true } };
+      return parseComponent('DataImportJobReceipt', (await (await h.api(imports, command, revision, { 'idempotency-key': command.commandId })).json() as { receipt: unknown }).receipt);
+    };
+    const status = async (id: string) => parseComponent('DataImportJobView', await (await h.api(`${imports}/${id}/status`, {})).json());
+    const cancelReceipt = await enqueue(); let checks = 0;
+    h.interceptAuthority(async call => {
+      checks = call;
+      if (call === 4) {
+        const current = await status(cancelReceipt.operationId); const cancel = { commandId: crypto.randomUUID(), revision: current.operation.revision };
+        expect((await h.api(`${imports}/${cancelReceipt.operationId}/cancel`, cancel, cancel.revision, { 'idempotency-key': cancel.commandId })).status).toBe(202);
+      }
+    });
+    expect(await h.importWorker.execute()).toBe(true); expect(checks).toBe(4); h.interceptAuthority();
+    expect((await status(cancelReceipt.operationId)).operation.state).toBe('cancel_requested');
+    await h.cloud`UPDATE data_import_jobs SET next_attempt_at = now() WHERE id = ${cancelReceipt.operationId}`;
+    expect(await h.importWorker.execute()).toBe(true);
+    expect(await status(cancelReceipt.operationId)).toMatchObject({ operation: { state: 'cancelled' }, outcomeUnknown: false, result: null });
+    expect((await h.database`SELECT count(*)::int AS count FROM canonical_data_commands WHERE command_id = ${cancelReceipt.commandId}`)[0].count).toBe(0);
+    const stale = await enqueue('999'); expect(await h.importWorker.execute()).toBe(true);
+    await h.cloud`UPDATE data_import_jobs SET next_attempt_at = now() WHERE id = ${stale.operationId}`;
+    expect(await h.importWorker.execute()).toBe(true);
+    expect(await status(stale.operationId)).toMatchObject({ operation: { state: 'failed' }, outcomeUnknown: false, result: null });
+    const revoked = await enqueue();
+    const owner = crypto.randomUUID();
+    await h.cloud`INSERT INTO accounts (id, primary_email, name, verified_at, terms_version) VALUES (${owner}, 'import-owner@example.test', 'Owner', now(), 'fixture')`;
+    await h.cloud`INSERT INTO memberships (id, account_id, org_id, role, state) VALUES (${crypto.randomUUID()}, ${owner}, ${scope.orgId}, 'Owner', 'active')`;
+    h.interceptAuthority(async call => {
+      if (call === 4) {
+        await h.cloud`UPDATE memberships SET role = 'Viewer', revision = revision + 1 WHERE account_id = ${h.account} AND org_id = ${scope.orgId}`;
+        await h.cloud`UPDATE accounts SET permission_revision = permission_revision + 1 WHERE id = ${h.account}`;
+      }
+    });
+    expect(await h.importWorker.execute()).toBe(true); h.interceptAuthority();
+    await h.cloud`UPDATE data_import_jobs SET next_attempt_at = now() WHERE id = ${revoked.operationId}`;
+    expect(await new RunImportJobs(h.restartImports(), h.importClient).execute()).toBe(true);
+    expect(await status(revoked.operationId)).toMatchObject({ operation: { state: 'failed' }, outcomeUnknown: false, result: null });
+    expect((await h.database`SELECT count(*)::int AS count FROM canonical_data_commands WHERE command_id = ${revoked.commandId}`)[0].count).toBe(0);
+  }, 30000);
+  test('table catalog is paginated, scoped and available to metadata-only accounts with current schema policies', async () => {
+    const h = await harness(); const created = await h.create('catalog-data', ['database']); expect(await h.worker.execute()).toBe(true);
+    const scope = parseComponent('EnvironmentScope', created.scope);
+    const envPath = `/platform/v1/orgs/${scope.orgId}/projects/${scope.projectId}/environments/${scope.environmentId}`;
+    const path = envPath + '/data'; const env = parseComponent('CatalogEnvironmentDetails', await (await h.api(envPath)).json());
+    const ids = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()].sort();
+    const definition = { name: 'notes', columns: [{ name: 'body', type: 'text', nullable: false }], policies: { enabled: true, rules: [] } };
+    for (const [index, id] of ids.entries()) {
+      const command = { kind: 'table.create', commandId: crypto.randomUUID(), tableId: id, definition: { ...definition, name: 'notes_' + index } };
+      expect((await h.api(path, command, env.environment.revision, { 'idempotency-key': command.commandId })).status).toBe(200);
+    }
+    const first = parseComponent('AccountDataTablesPage', await (await h.api(path, { kind: 'tables.list', limit: 2 })).json());
+    expect(first.tables.map(table => table.id)).toEqual(ids.slice(0, 2)); expect(first.nextCursor).not.toBeNull();
+    expect(first.tables[0]).toEqual({ id: ids[0], revision: '1', name: 'notes_0', columnCount: 1, policiesEnabled: true });
+    const last = parseComponent('AccountDataTablesPage', await (await h.api(path, { kind: 'tables.list', limit: 2, cursor: first.nextCursor })).json());
+    expect(last.tables.map(table => table.id)).toEqual(ids.slice(2)); expect(last.nextCursor).toBeNull();
+    const namedQuery = { kind: 'tables.list', sort: '-name', name: 'NOTES_', limit: 2 };
+    const named = parseComponent('AccountDataTablesPage', await (await h.api(path, namedQuery)).json());
+    expect(named.tables.map(table => table.name)).toEqual(['notes_2', 'notes_1']);
+    const namedLast = parseComponent('AccountDataTablesPage', await (await h.api(path, { ...namedQuery, name: 'notes_', cursor: named.nextCursor })).json());
+    expect(namedLast.tables.map(table => table.name)).toEqual(['notes_0']); expect(namedLast.nextCursor).toBeNull();
+    expect((await h.api(path, { ...namedQuery, sort: 'name', cursor: named.nextCursor })).status).toBe(400);
+    expect((await h.api(path, { ...namedQuery, name: 'notes_1', cursor: named.nextCursor })).status).toBe(400);
+    expect((await h.api(path, { kind: 'tables.list', limit: 1, cursor: first.nextCursor })).status).toBe(400);
+    expect((await h.api(path, { kind: 'rows.query', tableId: ids[0], access: { mode: 'policy-preview' }, limit: 2, cursor: first.nextCursor })).status).toBe(400);
+    const policies = { kind: 'table.policies', commandId: crypto.randomUUID(), tableId: ids[0], revision: '1', policies: { enabled: false, rules: [] } };
+    expect((await h.api(path, policies, '1', { 'idempotency-key': policies.commandId })).status).toBe(200);
+    const details = parseComponent('AccountDataTableDetails', await (await h.api(path, { kind: 'table.get', tableId: ids[0] })).json());
+    expect(details.table.revision).toBe('2'); expect(details.table.definition.policies.enabled).toBe(false);
+    const typesQuery = { kind: 'table.types', tableId: ids[0], revision: '2' };
+    const typesResponse = await h.api(path, typesQuery); expect(typesResponse.status).toBe(200);
+    expect(typesResponse.headers.get('cache-control')).toBe('no-store');
+    const types = parseComponent('AccountDataGeneratedTypes', await typesResponse.json());
+    expect(types.scope).toEqual(scope); expect(types.artifact.tableId).toBe(ids[0]); expect(types.artifact.revision).toBe('2');
+    expect(types.artifact.filename).toBe('notes_0-2.ts'); expect(types.artifact.text).toContain('"body": string;');
+    const importQuery = { kind: 'rows.import-preview', tableId: ids[0], revision: '2', input: { format: 'json', text: '[{"body":"review only"},{}]', mapping: {}, conflict: 'error', atomic: true } };
+    const beforeImportReview = await h.database`SELECT (SELECT count(*)::text FROM canonical_data_events WHERE table_id = ${ids[0]!}) AS events,
+      (SELECT count(*)::text FROM canonical_data_commands WHERE table_id = ${ids[0]!}) AS commands`;
+    const importResponse = await h.api(path, importQuery); expect(importResponse.status).toBe(200);
+    expect(importResponse.headers.get('cache-control')).toBe('no-store');
+    const importReview = parseComponent('AccountDataImportPreview', await importResponse.json());
+    expect(importReview.scope).toEqual(scope); expect(importReview.preview).toMatchObject({ tableId: ids[0], revision: '2', validation: 'structure', total: 2, valid: 1, invalid: 1 });
+    expect(importReview.preview.samples).toEqual([{ row: 1, values: { body: 'review only' } }]);
+    expect(importReview.preview.errors[0]).toMatchObject({ row: 2, code: 'missing_column', column: 'body' });
+    expect(await h.database`SELECT (SELECT count(*)::text FROM canonical_data_events WHERE table_id = ${ids[0]!}) AS events,
+      (SELECT count(*)::text FROM canonical_data_commands WHERE table_id = ${ids[0]!}) AS commands`).toEqual(beforeImportReview);
+    expect((await h.api(path, { ...importQuery, input: { ...importQuery.input, text: '[{"body":"a","body":"b"}]' } })).status).toBe(400);
+    expect((await h.api(path, { ...typesQuery, revision: '1' })).status).toBe(409);
+    expect((await h.api(path, { ...typesQuery, revision: '0' })).status).toBe(400);
+    const change = { kind: 'column.add', column: { name: 'extra', type: 'text', nullable: true } };
+    const previewResponse = await h.api(path, { kind: 'table.preview', tableId: ids[0], change }); expect(previewResponse.status).toBe(200);
+    const preview = parseComponent('AccountDataSchemaPreview', await previewResponse.json()); expect(preview.preview.revision).toBe('2'); expect(preview.preview.destructive).toBe(false);
+    const alteration = { kind: 'table.alter', tableId: ids[0], commandId: crypto.randomUUID(), revision: '2', change };
+    expect((await h.api(path, alteration, '2', { 'idempotency-key': alteration.commandId })).status).toBe(200);
+    expect((await h.api(path, alteration, '2', { 'idempotency-key': alteration.commandId })).status).toBe(200);
+    expect((await h.api(path, typesQuery)).status).toBe(409);
+    expect((await h.api(path, importQuery)).status).toBe(409);
+    const changedTypes = parseComponent('AccountDataGeneratedTypes', await (await h.api(path, { ...typesQuery, revision: '3' })).json());
+    expect(changedTypes.artifact.revision).toBe('3'); expect(changedTypes.artifact.text).toContain('"extra"?: string | null;');
+    const uuidColumn = { ...alteration, commandId: crypto.randomUUID(), revision: '3', confirmation: 'notes_0', change: { kind: 'column.edit', original: 'extra', column: { name: 'extra', type: 'uuid', nullable: true } } };
+    expect((await h.api(path, uuidColumn, '3', { 'idempotency-key': uuidColumn.commandId })).status).toBe(200);
+    const invalidCast = { ...uuidColumn, commandId: crypto.randomUUID(), revision: '4', change: { ...uuidColumn.change, column: { name: 'extra', type: 'boolean', nullable: true } } };
+    expect((await h.api(path, invalidCast, '4', { 'idempotency-key': invalidCast.commandId })).status).toBe(400);
+    expect(parseComponent('AccountDataTableDetails', await (await h.api(path, { kind: 'table.get', tableId: ids[0] })).json()).table.revision).toBe('4');
+    const keyChange = { kind: 'primary-key', column: 'extra' };
+    const keyPreview = parseComponent('AccountDataSchemaPreview', await (await h.api(path, { kind: 'table.preview', tableId: ids[0], change: keyChange })).json());
+    expect(keyPreview.preview.definition.primaryKey).toBe('extra'); expect(keyPreview.preview.destructive).toBe(false);
+    const keyCommand = { ...alteration, commandId: crypto.randomUUID(), revision: '4', change: keyChange };
+    expect((await h.api(path, keyCommand, '4', { 'idempotency-key': keyCommand.commandId })).status).toBe(200);
+    const clearKey = { ...keyCommand, commandId: crypto.randomUUID(), revision: '5', change: { kind: 'primary-key', column: null } };
+    expect((await h.api(path, clearKey, '5', { 'idempotency-key': clearKey.commandId })).status).toBe(400);
+    expect((await h.api(path, { ...clearKey, confirmation: 'notes_0' }, '5', { 'idempotency-key': clearKey.commandId })).status).toBe(200);
+    const index = { id: crypto.randomUUID(), name: 'extra_index', kind: 'index', columns: ['extra'] };
+    const indexCommand = { ...alteration, commandId: crypto.randomUUID(), revision: '6', change: { kind: 'constraint.set', constraint: index } };
+    expect((await h.api(path, { kind: 'table.preview', tableId: ids[0], change: indexCommand.change })).status).toBe(200);
+    expect((await h.api(path, indexCommand, '6', { 'idempotency-key': indexCommand.commandId })).status).toBe(200);
+    expect((await h.api(path, indexCommand, '6', { 'idempotency-key': indexCommand.commandId })).status).toBe(200);
+    const removeIndex = { ...alteration, commandId: crypto.randomUUID(), revision: '7', change: { kind: 'constraint.delete', constraintId: index.id } };
+    expect((await h.api(path, removeIndex, '7', { 'idempotency-key': removeIndex.commandId })).status).toBe(200);
+    const other = await h.create('other-catalog', ['database']); expect(await h.worker.execute()).toBe(true);
+    const otherPath = `/platform/v1/orgs/${scope.orgId}/projects/${other.scope.projectId}/environments/${other.scope.environmentId}/data`;
+    expect((await h.api(otherPath, { kind: 'table.get', tableId: ids[0] })).status).toBe(404);
+    expect((await h.api(otherPath, { kind: 'table.types', tableId: ids[0] })).status).toBe(404);
+    expect((await h.api(otherPath, { ...importQuery, revision: undefined })).status).toBe(404);
+    expect(parseComponent('AccountDataTablesPage', await (await h.api(otherPath, { kind: 'tables.list' })).json()).tables).toHaveLength(0);
+    // Fixture permission change leaves only metadata access. No fresh proof is needed for these reads.
+    const remainingOwner = crypto.randomUUID();
+    await h.cloud`INSERT INTO accounts (id, primary_email, name, verified_at, terms_version) VALUES (${remainingOwner}, 'remaining-owner@example.test', 'Remaining owner', now(), 'fixture')`;
+    await h.cloud`INSERT INTO memberships (id, account_id, org_id, role, state) VALUES (${crypto.randomUUID()}, ${remainingOwner}, ${scope.orgId}, 'Owner', 'active')`;
+    await h.cloud`UPDATE memberships SET role = 'Viewer', project_access = 'all', revision = revision + 1 WHERE org_id = ${scope.orgId} AND account_id = ${h.account}`;
+    await h.cloud`UPDATE accounts SET permission_revision = permission_revision + 1 WHERE id = ${h.account}`;
+    await h.cloud`UPDATE account_sessions SET fresh_until = now() - interval '1 second' WHERE account_id = ${h.account}`;
+    expect((await h.api(path, { kind: 'tables.list', limit: 2, cursor: first.nextCursor })).status).toBe(400);
+    expect((await h.api(path, { kind: 'table.get', tableId: ids[0] })).status).toBe(200);
+    expect((await h.api(path, { kind: 'table.types', tableId: ids[0] })).status).toBe(200);
+    expect((await h.api(path, { ...importQuery, revision: undefined })).status).toBe(200);
+    expect((await h.api(path, { kind: 'table.preview', tableId: ids[0], change: { kind: 'rename', name: 'preview_only' } })).status).toBe(200);
+    expect((await h.api(path, { kind: 'tables.list' })).status).toBe(200);
+    expect((await h.api(path, { kind: 'rows.query', tableId: ids[0], access: { mode: 'policy-preview' } })).status).toBe(403);
+    h.interceptAuthority(async call => { if (call === 3) await h.cloud`UPDATE accounts SET permission_revision = permission_revision + 1 WHERE id = ${h.account}`; });
+    expect((await h.api(path, { kind: 'table.get', tableId: ids[0] })).status).toBe(403);
+    h.interceptAuthority();
+    h.interceptAuthority(async call => { if (call === 3) await h.cloud`UPDATE accounts SET permission_revision = permission_revision + 1 WHERE id = ${h.account}`; });
+    expect((await h.api(path, { kind: 'table.types', tableId: ids[0] })).status).toBe(403);
+    h.interceptAuthority();
+    h.interceptAuthority(async call => { if (call === 3) await h.cloud`UPDATE accounts SET permission_revision = permission_revision + 1 WHERE id = ${h.account}`; });
+    expect((await h.api(path, { ...importQuery, revision: undefined })).status).toBe(403);
+    h.interceptAuthority();
+  }, 30000);
+  test('Cloud account data forwarding requires session, CSRF, current revisions and fresh mutations, and binds encrypted cursors', async () => {
+    const h = await harness(); const created = await h.create('browser-data', ['database']); expect(await h.worker.execute()).toBe(true);
+    const scope = parseComponent('EnvironmentScope', created.scope);
+    const envPath = `/platform/v1/orgs/${scope.orgId}/projects/${scope.projectId}/environments/${scope.environmentId}`; const path = envPath + '/data';
+    const env = parseComponent('CatalogEnvironmentDetails', await (await h.api(envPath)).json());
+    const tableId = crypto.randomUUID(); const creation = { kind: 'table.create', commandId: crypto.randomUUID(), tableId,
+      definition: { name: 'notes', columns: [{ name: 'owner', type: 'uuid', nullable: false }, { name: 'body', type: 'text', nullable: false }],
+        policies: { enabled: true, rules: [{ id: crypto.randomUUID(), name: 'Owned', kind: 'owner', ownerColumn: 'owner', operations: ['select','insert','update','delete'] }] } } };
+    const headers = { 'idempotency-key': creation.commandId };
+    expect((await h.api(path, creation, env.environment.revision, { ...headers, cookie: '' })).status).toBe(401);
+    expect((await h.api(path, creation, env.environment.revision, { ...headers, 'x-csrf-token': 'invalid' })).status).toBe(403);
+    expect((await h.api(path, creation, env.environment.revision, { ...headers, origin: 'https://foreign.example.test' })).status).toBe(403);
+    expect((await h.api(path, creation, '999', headers)).status).toBe(409);
+    const response = await h.api(path, creation, env.environment.revision, headers); expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    const access = { mode: 'policy-preview', userId: h.account };
+    for (const body of ['first', 'second']) {
+      const command = { kind: 'row.insert', commandId: crypto.randomUUID(), tableId, revision: '1', access, values: { owner: h.account, body } };
+      expect((await h.api(path, command, '1', { 'idempotency-key': command.commandId })).status).toBe(200);
+      expect((await h.api(path, command, '2', { 'idempotency-key': command.commandId })).status).toBe(400);
+    }
+    const query = { kind: 'rows.query', tableId, access, limit: 1 };
+    const firstResponse = await h.api(path, query); expect(firstResponse.status).toBe(200); const first = parseComponent('AccountDataPage', await firstResponse.json());
+    expect(first.rows).toHaveLength(1); expect(first.nextCursor).not.toBeNull(); expect(first.nextCursor).not.toContain(first.rows[0]!.id);
+    const next = await h.api(path, { ...query, cursor: first.nextCursor }); expect(next.status).toBe(200); const second = parseComponent('AccountDataPage', await next.json());
+    expect(second.rows).toHaveLength(1); expect(second.rows[0]!.id).not.toBe(first.rows[0]!.id);
+    const sortedQuery = { ...query, sort: { column: 'body', direction: 'desc' }, columns: [] };
+    const sortedResponse = await h.api(path, sortedQuery); expect(sortedResponse.status).toBe(200);
+    const sorted = parseComponent('AccountDataPage', await sortedResponse.json()); expect(sorted.rows[0]!.values).toEqual({});
+    expect(JSON.stringify(sorted)).not.toContain('second');
+    const sortedLast = parseComponent('AccountDataPage', await (await h.api(path, { ...sortedQuery, cursor: sorted.nextCursor })).json());
+    expect(sortedLast.rows[0]!.id).not.toBe(sorted.rows[0]!.id); expect(sortedLast.nextCursor).toBeNull();
+    expect((await h.api(path, { ...sortedQuery, sort: { column: 'body', direction: 'asc' }, cursor: sorted.nextCursor })).status).toBe(400);
+    const selected = await h.api(path, { ...query, columns: ['body'], selectedIds: [first.rows[0]!.id], filters: [{ column: 'body', operator: 'eq', value: first.rows[0]!.values.body }] });
+    expect(selected.status).toBe(200);
+    expect(parseComponent('AccountDataPage', await selected.json()).rows).toEqual([{ ...first.rows[0]!, values: { body: first.rows[0]!.values.body } }]);
+    for (const changed of [{ columns: ['body'] }, { selectedIds: [first.rows[0]!.id] }, { filters: [{ column: 'body', operator: 'contains', value: 'first' }] }])
+      expect((await h.api(path, { ...query, ...changed, cursor: first.nextCursor })).status).toBe(400);
+    expect((await h.api(path, { ...query, limit: 2, cursor: first.nextCursor })).status).toBe(400);
+    expect((await h.api(path, { ...query, access: { ...access, userId: crypto.randomUUID() }, cursor: first.nextCursor })).status).toBe(400);
+    expect((await h.api(path, { ...query, access: { mode: 'application' } })).status).toBe(403);
+    const large = { kind: 'row.insert', commandId: crypto.randomUUID(), tableId, revision: '1', access, values: { owner: h.account, body: 'z'.repeat(16000) } };
+    expect((await h.api(path, large, '1', { 'idempotency-key': large.commandId })).status).toBe(200);
+    const largePage = parseComponent('AccountDataPage', await (await h.api(path, sortedQuery)).json());
+    expect(largePage.nextCursor!.length).toBeGreaterThan(4096); expect(largePage.rows[0]!.values).toEqual({});
+    expect((await h.api(path, { ...sortedQuery, cursor: largePage.nextCursor })).status).toBe(200);
+    const staleInsert = { kind: 'row.insert', commandId: crypto.randomUUID(), tableId, revision: '2', access, values: { owner: h.account, body: 'stale schema' } };
+    expect((await h.api(path, staleInsert, '2', { 'idempotency-key': staleInsert.commandId })).status).toBe(409);
+    expect(await h.database`SELECT command_id FROM canonical_data_commands WHERE command_id = ${staleInsert.commandId}`).toHaveLength(0);
+    const expiring = { ...creation, commandId: crypto.randomUUID(), tableId: crypto.randomUUID(), definition: { ...creation.definition, name: 'expired_create' } };
+    h.interceptAuthority(async call => { if (call === 4) await h.cloud`UPDATE account_sessions SET fresh_until = now() - interval '1 second' WHERE account_id = ${h.account}`; });
+    expect((await h.api(path, expiring, env.environment.revision, { 'idempotency-key': expiring.commandId })).status).toBe(403);
+    expect(await h.database`SELECT id FROM canonical_data_tables WHERE id = ${expiring.tableId}`).toHaveLength(0);
+    expect(await h.database`SELECT command_id FROM canonical_data_commands WHERE command_id = ${expiring.commandId}`).toHaveLength(0);
+    h.interceptAuthority();
+    await h.cloud`UPDATE account_sessions SET fresh_until = now() + interval '10 minutes' WHERE account_id = ${h.account}`;
+    await h.cloud`UPDATE accounts SET permission_revision = permission_revision + 1 WHERE id = ${h.account}`;
+    expect((await h.api(path, { ...query, cursor: first.nextCursor })).status).toBe(400);
+    await h.cloud`UPDATE account_sessions SET fresh_until = now() - interval '1 second' WHERE account_id = ${h.account}`;
+    const denied = { kind: 'row.insert', commandId: crypto.randomUUID(), tableId, revision: '1', access, values: { owner: h.account, body: 'no fresh proof' } };
+    expect((await h.api(path, denied, '1', { 'idempotency-key': denied.commandId })).status).toBe(403);
+    expect(await h.database`SELECT command_id FROM canonical_data_commands WHERE command_id = ${denied.commandId}`).toHaveLength(0);
+    expect((await h.api(path, query)).status).toBe(200);
+    expect((await h.api(`/platform/v1/orgs/${crypto.randomUUID()}/projects/${scope.projectId}/environments/${scope.environmentId}/data`, query)).status).toBe(404);
+  }, 30000);
+
+  test('signed data requests enforce live scope and native row policies while receipts survive lost responses and concurrent retries', async () => {
+    const h = await harness(); const created = await h.create('data', ['database']); expect(await h.worker.execute()).toBe(true);
+    const scope = parseComponent('EnvironmentScope', created.scope);
+    const bindingId = (await h.cloud`SELECT id FROM service_bindings WHERE environment_id = ${scope.environmentId} AND owner = 'database'`)[0].id;
+    const tableId = crypto.randomUUID();
+    const send = async (command: unknown) => { const call = await h.signedData({ scope, bindingId, command }); return fetch(call.url, call.init); };
+    const result = async (response: Response) => parseComponent('DataResponse', await response.json()).result;
+    const definition = { name: 'notes', columns: [{ name: 'owner', type: 'uuid', nullable: false }, { name: 'body', type: 'text', nullable: false }],
+      policies: { enabled: true, rules: [{ id: crypto.randomUUID(), name: 'Owner', kind: 'owner', ownerColumn: 'owner', operations: ['select', 'insert', 'update', 'delete'] }] } };
+    const createCommand = { kind: 'table.create', commandId: crypto.randomUUID(), tableId, definition };
+    const createResponse = await send(createCommand); expect(createResponse.status).toBe(200); expect(createResponse.headers.get('cache-control')).toBe('no-store');
+    const createdTable = parseComponent('DataCommandReceipt', await result(createResponse)); expect(createdTable.revision).toBe('1');
+    const access = { mode: 'policy-preview', userId: h.account };
+    const insert = { kind: 'row.insert', commandId: crypto.randomUUID(), tableId, revision: '1', access, values: { owner: h.account, body: 'sensitive-row-value' } };
+    const firstCall = await h.signedData({ scope, bindingId, command: insert });
+    const first = await fetch(firstCall.url, firstCall.init); expect(first.status).toBe(200);
+    const receipt = parseComponent('DataCommandReceipt', await result(first)); expect(JSON.stringify(receipt)).not.toContain('sensitive-row-value');
+    expect((await fetch(firstCall.url, firstCall.init)).status).toBe(401);
+    h.restart();
+    const retried = await Promise.all([send(insert), send(insert)]);
+    for (const response of retried) { expect(response.status).toBe(200); expect(await result(response)).toEqual(receipt); }
+    expect((await h.clientData({ scope, bindingId, command: insert })).result).toEqual(receipt);
+    const stored = await h.database`SELECT result FROM canonical_data_commands WHERE command_id = ${insert.commandId}`;
+    expect(stored).toHaveLength(1); expect(JSON.stringify(stored)).not.toContain('sensitive-row-value');
+    const events = await h.database`SELECT id FROM canonical_data_events WHERE table_id = ${tableId} AND action = 'rows.write'`;
+    expect(events).toHaveLength(1);
+    expect((await send({ ...insert, values: { ...insert.values, body: 'different' } })).status).toBe(409);
+    const query = { kind: 'rows.query', tableId, access, limit: 10 };
+    const read = await send(query); expect(read.status).toBe(200); const rows = parseComponent('DataQueryResult', await result(read));
+    expect(rows.rows).toHaveLength(1); expect(rows.rows[0]!.values.body).toBe('sensitive-row-value');
+    expect(parseComponent('DataQueryResult', (await h.clientData({ scope, bindingId, command: query })).result).rows).toHaveLength(1);
+    const hidden = await send({ ...query, access: { ...access, userId: crypto.randomUUID() } }); expect(hidden.status).toBe(200); expect(parseComponent('DataQueryResult', await result(hidden)).rows).toHaveLength(0);
+    const transfer = await send({ kind: 'row.update', commandId: crypto.randomUUID(), tableId, access, rowId: receipt.rowId, revision: receipt.revision, values: { owner: crypto.randomUUID() } });
+    expect(transfer.status).toBe(403); expect(await transfer.text()).not.toContain('sensitive-row-value');
+    const wrongAudience = await h.signedData({ scope, bindingId, command: query }, 'carbon-registry'); expect((await fetch(wrongAudience.url, wrongAudience.init)).status).toBe(401);
+    const tampered = await h.signedData({ scope, bindingId, command: insert });
+    expect((await fetch(tampered.url, { ...tampered.init, body: JSON.stringify({ scope, bindingId, command: { ...insert, values: { ...insert.values, body: 'tampered' } } }) })).status).toBe(401);
+    const stale = await h.signedData({ scope, bindingId, command: query }); await h.cloud`UPDATE accounts SET permission_revision = permission_revision + 1 WHERE id = ${h.account}`;
+    expect((await fetch(stale.url, stale.init)).status).toBe(401);
+    const remove = await send({ kind: 'row.delete', commandId: crypto.randomUUID(), tableId, access, rowId: receipt.rowId, revision: receipt.revision }); expect(remove.status).toBe(200);
+    expect(parseComponent('DataQueryResult', await result(await send(query))).rows).toHaveLength(0);
+  }, 30000);
+
+  test('signed data command authority loss before commit rolls back resources and receipts and permits a fresh retry', async () => {
+    const h = await harness(); const created = await h.create('data-revocation', ['database']); expect(await h.worker.execute()).toBe(true);
+    const scope = parseComponent('EnvironmentScope', created.scope); const bindingId = (await h.cloud`SELECT id FROM service_bindings WHERE environment_id = ${scope.environmentId}`)[0].id;
+    const command = { kind: 'table.create', commandId: crypto.randomUUID(), tableId: crypto.randomUUID(), definition: { name: 'notes', columns: [{ name: 'body', type: 'text', nullable: false }], policies: { enabled: true, rules: [] } } };
+    // Verification, outer transaction, inner native transaction, then pre-commit check.
+    h.interceptAuthority(async call => { if (call === 4) await h.cloud`UPDATE accounts SET permission_revision = permission_revision + 1 WHERE id = ${h.account}`; });
+    const call = await h.signedData({ scope, bindingId, command }); const response = await fetch(call.url, call.init); expect(response.status).toBe(403);
+    expect(await h.database`SELECT id FROM canonical_data_tables WHERE id = ${command.tableId}`).toHaveLength(0);
+    expect(await h.database`SELECT command_id FROM canonical_data_commands WHERE command_id = ${command.commandId}`).toHaveLength(0);
+    h.interceptAuthority(); const retry = await h.signedData({ scope, bindingId, command }); expect((await fetch(retry.url, retry.init)).status).toBe(200);
+    expect(await h.database`SELECT id FROM canonical_data_tables WHERE id = ${command.tableId}`).toHaveLength(1);
+  }, 30000);
+
+  test('ensure, pause and resume provision real native resources and preserve cross-environment PostgreSQL privilege boundaries', async () => {
+    const h = await harness(); const created = await h.create(); const scope = created.scope;
+    const base = `/platform/v1/orgs/${scope.orgId}/projects/${scope.projectId}`; const envPath = `${base}/environments/${scope.environmentId}`;
+    expect(await h.worker.execute()).toBe(true); expect(await h.worker.execute()).toBe(true);
+    let details = parseComponent('CatalogEnvironmentDetails', await (await h.api(envPath)).json()); expect(details.environment.provisioning).toBe('ready');
+    expect(await h.database`SELECT id FROM platform_environments`).toHaveLength(1); expect(await h.registry`SELECT id FROM registry_environment_namespaces`).toHaveLength(1);
+    const p = parseComponent('CatalogProject', await (await h.api(base)).json());
+    const second = parseComponent('CatalogReceipt', (await (await h.api(`${base}/environments`, { name: 'Other', kind: 'development', services: ['database'] }, p.revision)).json() as { receipt: unknown }).receipt);
+    expect(await h.worker.execute()).toBe(true);
+    const firstNames = databaseEnvironmentIdentifiers(scope.environmentId!); const secondNames = databaseEnvironmentIdentifiers(second.scope.environmentId!);
+    await h.database.unsafe(`CREATE TABLE "${firstNames.schema}".records (id integer PRIMARY KEY, value text)`);
+    await h.database.unsafe(`CREATE TABLE "${secondNames.schema}".records (id integer PRIMARY KEY, value text)`);
+    const query = (statement: string) => h.database.begin(async tx => { await tx.unsafe(`SET LOCAL ROLE "${firstNames.role}"`); return tx.unsafe(statement); });
+    await query(`INSERT INTO "${firstNames.schema}".records VALUES (1, 'own data')`);
+    expect(await query(`SELECT value FROM "${firstNames.schema}".records`)).toHaveLength(1);
+    const denied = async (statement: string) => { let failure: unknown; try { await query(statement); } catch (error) { failure = error; } expect((failure as { errno?: string }).errno).toBe('42501'); };
+    await denied(`SELECT * FROM "${secondNames.schema}".records`); await denied(`CREATE TABLE "${firstNames.schema}".forbidden (id int)`);
+    const role = (await h.database`SELECT rolsuper, rolcreatedb, rolcreaterole, rolcanlogin, rolbypassrls FROM pg_roles WHERE rolname = ${firstNames.role}`)[0];
+    expect(Object.values(role).every(value => value === false)).toBe(true);
+    details = parseComponent('CatalogEnvironmentDetails', await (await h.api(envPath)).json());
+    expect((await h.api(envPath, { kind: 'pause', paused: true }, details.environment.revision)).status).toBe(202);
+    expect(await h.worker.execute()).toBe(true); expect(await h.worker.execute()).toBe(true);
+    await denied(`INSERT INTO "${firstNames.schema}".records VALUES (2, 'paused')`);
+    expect(await query(`SELECT * FROM "${firstNames.schema}".records`)).toHaveLength(1);
+    expect((await h.registry`SELECT state FROM registry_environment_namespaces`)[0].state).toBe('paused');
+    h.restart(); details = parseComponent('CatalogEnvironmentDetails', await (await h.api(envPath)).json());
+    expect((await h.api(envPath, { kind: 'pause', paused: false }, details.environment.revision)).status).toBe(202);
+    expect(await h.worker.execute()).toBe(true); expect(await h.worker.execute()).toBe(true);
+    await query(`INSERT INTO "${firstNames.schema}".records VALUES (2, 'resumed')`);
+    expect(await query(`SELECT * FROM "${firstNames.schema}".records`)).toHaveLength(2);
+    expect(parseComponent('CatalogEnvironmentDetails', await (await h.api(envPath)).json()).environment.state).toBe('active');
+    expect((await h.registry`SELECT state FROM registry_environment_namespaces`)[0].state).toBe('active');
+  }, 30000);
+
+  test('receivers reject replay, wrong audience, tampered scope and stale leases while preserving durable idempotency after response loss', async () => {
+    const h = await harness(); await h.create('replay', ['database']);
+    const work = await h.repo.claim() as ProvisioningWork; const request = await h.signed(work);
+    const first = await fetch(request.url, request.init); expect(first.status).toBe(200); const status = parseComponent('ServiceLifecycleStatus', await first.json());
+    expect((await fetch(request.url, request.init)).status).toBe(401);
+    expect((await fetch(request.url.replace(h.databaseServer.url.origin, h.registryServer.url.origin), request.init)).status).toBe(401);
+    const tampered = { ...request.init, body: request.init.body.replace(work.scope.orgId, crypto.randomUUID()) };
+    expect((await fetch(request.url, tampered)).status).toBe(401);
+    h.restart(); await h.cloud`UPDATE operations SET lease_expires_at = now() - interval '1 second' WHERE id = ${work.operationId}`;
+    const next = await h.repo.claim() as ProvisioningWork; expect(next.stepId).toBe(work.stepId); expect(next.leaseId).not.toBe(work.leaseId);
+    const stale = await h.signed(work); expect((await fetch(stale.url, stale.init)).status).toBe(401);
+    const retried = await h.databaseProvider.apply(next, new AbortController().signal); expect(retried.remoteResourceId).toBe(status.remoteResourceId);
+    expect(await h.database`SELECT id FROM platform_environments`).toHaveLength(1); expect(await h.database`SELECT id FROM platform_security_events`).toHaveLength(1);
+    expect(await h.repo.complete(work, { value: retried })).toBe(false); expect(await h.repo.complete(next, { value: retried })).toBe(true);
+    const read = await h.databaseProvider.status(next, new AbortController().signal);
+    expect(read.remoteResourceId).toBe(status.remoteResourceId); expect(read.state).toBe('active');
+    await h.cloud`UPDATE accounts SET permission_revision = permission_revision + 1 WHERE id = ${h.account}`;
+    let staleRead: unknown; try { await h.databaseProvider.status(next, new AbortController().signal); } catch (error) { staleRead = error; }
+    expect(staleRead).toHaveProperty('code', 'unavailable');
+    const ended = await h.signed(next); expect((await fetch(ended.url, ended.init)).status).toBe(401);
+    const native = new PostgresServiceLifecycleRepository(h.database, new PostgresDatabaseEnvironmentDriver());
+    let conflict: unknown;
+    try { await native.execute({ scope: { ...parseComponent('EnvironmentScope', work.scope), orgId: crypto.randomUUID() }, bindingId: work.bindingId, operationId: work.operationId,
+      stepId: crypto.randomUUID(), leaseId: crypto.randomUUID(), action: 'ensure', remoteResourceId: status.remoteResourceId }, work.principal, work.requestId, async () => true); } catch (error) { conflict = error; }
+    expect(conflict).toHaveProperty('code', 'conflict');
+  }, 30000);
+
+  test('a live authority change before receiver commit rolls back native DDL and grants, then a reviewed retry succeeds', async () => {
+    const h = await harness(); const created = await h.create('recheck', ['database']);
+    h.interceptAuthority(async call => { if (call === 2) await h.cloud`UPDATE accounts SET permission_revision = permission_revision + 1 WHERE id = ${h.account}`; });
+    expect(await h.worker.execute()).toBe(true);
+    expect(await h.database`SELECT id FROM platform_environments`).toHaveLength(0);
+    const names = databaseEnvironmentIdentifiers(created.scope.environmentId!);
+    expect(await h.database`SELECT rolname FROM pg_roles WHERE rolname = ${names.role}`).toHaveLength(0);
+    expect(await h.database`SELECT nspname FROM pg_namespace WHERE nspname = ${names.schema}`).toHaveLength(0);
+    const envPath = `/platform/v1/orgs/${created.scope.orgId}/projects/${created.scope.projectId}/environments/${created.scope.environmentId}`;
+    const opPath = `${envPath}/operations/${created.operationId}`;
+    const operation = parseComponent('Operation', await (await h.api(opPath)).json()); expect(operation.state).toBe('failed');
+    h.interceptAuthority(); expect((await h.api(opPath, { kind: 'retry' }, operation.revision)).status).toBe(202);
+    expect(await h.worker.execute()).toBe(true);
+    expect(parseComponent('CatalogEnvironmentDetails', await (await h.api(envPath)).json()).environment.provisioning).toBe('ready');
+  }, 30000);
+});

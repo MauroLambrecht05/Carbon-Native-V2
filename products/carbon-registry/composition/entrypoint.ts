@@ -5,7 +5,8 @@
 // see HttpIdentityClient's own header comment), constructs the real
 // RegistryEngine, attaches HTTP routes, and launches the server.
 
-import { HttpIdentityClient } from "@carbon/identity";
+import { HttpIdentityClient, assertionTrustFromEnv } from "@carbon/identity";
+import { composeLifecyclePlatform, type LifecyclePlatformConfig } from './lifecycle-platform.ts';
 import { migrate, openDatabase } from "../infrastructure/persistence/Database.ts";
 import { RegistryEngine } from "../infrastructure/services/RegistryEngine.ts";
 import { TrustSigner } from "../infrastructure/services/TrustSigner.ts";
@@ -13,6 +14,7 @@ import { buildRegistryRoutes } from "../infrastructure/http/routes.ts";
 import { startRegistryServer } from "../infrastructure/http/server.ts";
 
 export interface CarbonRegistryConfig {
+  readonly internalPlatform?: LifecyclePlatformConfig;
   readonly port: number;
   readonly databaseUrl: string;
   readonly controlPlaneUrl: string;
@@ -30,7 +32,9 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): CarbonRegis
     if (!value) throw new Error(`missing required env var ${name}`);
     return value;
   };
+  const trust = assertionTrustFromEnv(env);
   return {
+    internalPlatform: trust ? { trust, authorityOrigin: required('CARBON_AUTHORITY_ORIGIN') } : undefined,
     port: Number(env.PORT ?? 54323),
     databaseUrl: required("DATABASE_URL"),
     controlPlaneUrl: required("CONTROL_PLANE_URL"),
@@ -77,7 +81,11 @@ export async function buildRegistrySystem(config: CarbonRegistryConfig) {
   await registryEngine.seedIfEmpty();
 
   const deps = { sql, controlPlaneUrl: config.controlPlaneUrl, verifyToken, registryEngine };
-  const handler = buildRegistryRoutes(deps);
+  const legacyHandler = buildRegistryRoutes(deps);
+  const lifecycle = config.internalPlatform ? composeLifecyclePlatform(sql, config.internalPlatform) : undefined;
+  const handler = (request: Request) => new URL(request.url).pathname.startsWith('/internal/platform/v1/')
+    ? lifecycle ? lifecycle(request) : Promise.resolve(Response.json({ error: { code: 'capability', message: 'Internal platform is not configured', requestId: crypto.randomUUID() } }, { status: 501, headers: { 'cache-control': 'no-store' } }))
+    : legacyHandler(request);
 
   return { deps, handler };
 }

@@ -35,6 +35,7 @@ export function startDatabaseServer(config: ServerConfig): Server<WebSocketData>
 
       // Pass API, PostgREST and storage requests to router
       if (
+        url.pathname.startsWith("/internal/platform/v1/") ||
         url.pathname.startsWith("/api") ||
         url.pathname.startsWith("/rest") ||
         url.pathname.startsWith("/storage")

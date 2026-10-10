@@ -1,5 +1,16 @@
 # carbon-database
 
+Canonical environment lifecycle is now available through opt-in signed internal
+HTTP endpoints, backed by PostgreSQL schemas, roles and durable command receipts.
+See [configuration, integration evidence and limits](../carbon-cloud/docs/service-lifecycle.md).
+The [native table adapter](../carbon-cloud/docs/native-data.md) now enforces
+PostgreSQL RLS for structured operations. Its [signed internal data API](../carbon-cloud/docs/signed-data.md)
+now supports durable commands. Browser-facing Cloud integration and general SQL
+isolation remain unfinished; the legacy API below has not yet been migrated.
+The legacy API's [policy safety changes](../carbon-cloud/docs/legacy-database-policy.md)
+reject unsupported rules, recheck policies per transaction and enforce local
+project ownership. They do not complete canonical data-plane isolation.
+
 An open-source, all-in-one developer data platform (Supabase-like) built
 natively for Carbon: relational SQL, vector search (pgvector), a property
 graph, serverless edge functions, and object storage, behind one REST API.
@@ -77,9 +88,9 @@ code):
   `executeRawSql` is genuinely `sql.unsafe(...)` scoped to the project's
   own schema via `SET LOCAL search_path` — not a hand-rolled regex SQL
   parser (what the prototype had). RLS is enforced in the application
-  layer against real fetched rows (`RlsPolicyEngine`), not native
-  Postgres RLS — a deliberate, documented scope decision (see
-  `DatabaseEngine`'s own header comment).
+  layer against real fetched rows (`RlsPolicyEngine`). The separate canonical
+  `PostgresNativeTables` adapter uses native RLS; this legacy engine still needs
+  replacement in the API.
 - **`VectorEngine`** — real `pgvector`, cosine similarity via the `<=>`
   operator, verified with a real 3-point/3-dimension collection: the
   identical vector scored `1.0`, a near-orthogonal one scored `~0`, the
@@ -96,13 +107,11 @@ code):
 - **`StorageEngine`** — real S3-compatible storage via Bun's own
   `S3Client` (MinIO in dev); verified with a real upload, then a real
   download over plain HTTP returning the exact bytes back.
-- **`RlsPolicyEngine`** — real Postgres-backed policies with an
-  in-process write-through cache (`loadAll()` populates it once at
-  startup); verified end to end: enabled RLS on a table, added a
-  `record.is_public == true` policy, confirmed an anonymous PostgREST
-  read only returned the public row — **then restarted the container and
-  confirmed the SAME filtering still applied**, proving the policy
-  reload-from-Postgres path is real, not just the write path.
+- **`RlsPolicyEngine`** — PostgreSQL-backed policies read in each row transaction.
+  Shared/exclusive advisory locks serialize policy changes with policy-dependent
+  reads and writes. Unknown or missing rules deny access; explicit supported rules
+  are required at creation. Tests cover multiple service instances, old/proposed
+  row checks, triggers, atomic batch rollback and post-commit notifications.
 
 **Two real bugs found by actually running this, not by review**, both
 the same double-JSON-encoding class carbon-cloud's own README documents
@@ -130,7 +139,7 @@ Postgres image to `pgvector/pgvector:pg16`.
 Full service/characteristic-style discovery isn't the shape here, but
 worth naming explicitly: no dynamic bucket-per-app-developer-bucket in
 S3 (one shared bucket, key-prefixed by project — see `StorageEngine`'s
-own header comment), no native Postgres RLS (see above), no PostgREST
+own header comment), no native Postgres RLS in the legacy routes (see above), no PostgREST
 operator pushdown beyond `eq` (everything else — `gt`/`like`/`in`/etc. —
 filters client-side after an `eq`-filtered fetch; see `postgrest.ts`'s
 own comment). The web studio (`presentation/`) still has its own signup
@@ -144,8 +153,8 @@ dashboards" experience is a deliberate follow-up, not done here.
 bun test products/carbon-database
 ```
 
-Only pure logic is unit-tested here (`identifiers.ts`'s SQL-injection
-guard, `postgrest.ts`'s `parseFilter`, `RealtimeEngine`'s in-process
-pub/sub) — same posture as carbon-cloud's own test suite, which doesn't
-unit-test its Postgres repos either. The engines themselves are verified
-by actually running the stack (see "What's real" above), not `bun test`.
+Pure tests cover identifiers, filters, policy syntax and realtime topic delivery.
+Set `CARBON_SERVICE_TEST_DATABASE_URL` to the dedicated pgvector test service to
+also run `tests/rls-policy.integration.test.ts` against real PostgreSQL. Without
+that variable those cases skip. See the [policy runbook](../carbon-cloud/docs/legacy-database-policy.md)
+and the separate [cross-service lifecycle tests](../carbon-cloud/docs/service-lifecycle.md).

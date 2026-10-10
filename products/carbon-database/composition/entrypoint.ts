@@ -5,7 +5,9 @@
 // see HttpIdentityClient's own header comment), constructs every real
 // engine, attaches HTTP routes, and launches the server.
 
-import { HttpIdentityClient } from "@carbon/identity";
+import { HttpIdentityClient, assertionTrustFromEnv } from "@carbon/identity";
+import { PostgresNativeTables } from '@carbon/data';
+import { composeLifecyclePlatform, type LifecyclePlatformConfig } from './lifecycle-platform.ts';
 import { migrate, openDatabase } from "../infrastructure/persistence/Database.ts";
 import { DatabaseEngine } from "../infrastructure/services/DatabaseEngine.ts";
 import { VectorEngine } from "../infrastructure/services/VectorEngine.ts";
@@ -20,6 +22,7 @@ import { buildDatabaseRoutes } from "../infrastructure/http/routes.ts";
 import { startDatabaseServer } from "../infrastructure/http/server.ts";
 
 export interface CarbonDatabaseConfig {
+  readonly internalPlatform?: LifecyclePlatformConfig;
   readonly port: number;
   readonly databaseUrl: string;
   readonly controlPlaneUrl: string;
@@ -37,7 +40,9 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): CarbonDatab
     if (!value) throw new Error(`missing required env var ${name}`);
     return value;
   };
+  const trust = assertionTrustFromEnv(env);
   return {
+    internalPlatform: trust ? { trust, authorityOrigin: required('CARBON_AUTHORITY_ORIGIN') } : undefined,
     port: Number(env.PORT ?? 54321),
     databaseUrl: required("DATABASE_URL"),
     controlPlaneUrl: required("CONTROL_PLANE_URL"),
@@ -75,6 +80,7 @@ export async function buildDatabaseSystem(config: CarbonDatabaseConfig) {
   const snapshotEngine = new SnapshotEngine(databaseEngine, vectorEngine, graphEngine, edgeFunctionsEngine, storageEngine);
 
   const deps = {
+    nativeTables: new PostgresNativeTables(sql),
     sql,
     controlPlaneUrl: config.controlPlaneUrl,
     verifyToken,
@@ -88,7 +94,11 @@ export async function buildDatabaseSystem(config: CarbonDatabaseConfig) {
     snapshotEngine,
   };
 
-  const handler = buildDatabaseRoutes(deps);
+  const legacyHandler = buildDatabaseRoutes(deps);
+  const lifecycle = config.internalPlatform ? composeLifecyclePlatform(sql, config.internalPlatform) : undefined;
+  const handler = (request: Request) => new URL(request.url).pathname.startsWith('/internal/platform/v1/')
+    ? lifecycle ? lifecycle(request) : Promise.resolve(Response.json({ error: { code: 'capability', message: 'Internal platform is not configured', requestId: crypto.randomUUID() } }, { status: 501, headers: { 'cache-control': 'no-store' } }))
+    : legacyHandler(request);
   return { deps, handler, realtime };
 }
 

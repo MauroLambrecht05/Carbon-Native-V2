@@ -72,7 +72,7 @@ export function buildDatabaseRoutes(deps: DatabaseRouteDeps) {
     }
     const rawToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : authHeader;
     const verified = await deps.verifyToken.execute(rawToken);
-    if (!verified) throw new Error("invalid token");
+    if (!verified || verified.scope !== 'org') throw new Error("invalid token");
     return verified;
   }
 
@@ -182,6 +182,15 @@ export function buildDatabaseRoutes(deps: DatabaseRouteDeps) {
         return json(project, 201);
       }
 
+      // Legacy project routes still require local ownership, even when their
+      // engine does not consult identity. Never trust a caller's path alone.
+      const projectScope = /^\/api\/projects\/([^/]+)(?:\/|$)/.exec(path);
+      if (projectScope) {
+        const verified = await authenticate(req);
+        const owned = await deps.sql`SELECT 1 FROM projects WHERE id = ${projectScope[1]!} AND org_id = ${verified.orgId}`;
+        if (!owned.length) return json({ error: 'Project not found' }, 404);
+      }
+
       // 5. Database & Tables: /api/projects/:projectId/tables
       const tablesMatch = path.match(/^\/api\/projects\/([^/]+)\/tables$/);
       if (tablesMatch) {
@@ -215,10 +224,8 @@ export function buildDatabaseRoutes(deps: DatabaseRouteDeps) {
       if (postgrestMatch) {
         const tableName = postgrestMatch[1]!;
         let verified: VerifiedToken | undefined;
-        try {
+        if (req.headers.has('authorization') || req.headers.has('x-carbon-token')) {
           verified = await authenticate(req);
-        } catch {
-          // Allow anonymous access if no token; RLS policies decide access
         }
 
         const projectId =
@@ -227,6 +234,7 @@ export function buildDatabaseRoutes(deps: DatabaseRouteDeps) {
           (verified ? (await findOrgProject(verified.orgId))?.id : undefined) ||
           "default";
 
+        if (verified && !(await deps.sql`SELECT 1 FROM projects WHERE id = ${projectId} AND org_id = ${verified.orgId}`).length) return json({ error: 'Project not found' }, 404);
         const rlsContext: RlsContext = verified
           ? { orgId: verified.orgId, role: "authenticated" }
           : { orgId: "anon", role: "anon" };
@@ -241,12 +249,12 @@ export function buildDatabaseRoutes(deps: DatabaseRouteDeps) {
         const tableName = rlsMatch[2]!;
         await authenticate(req);
         if (method === "GET") {
-          return json({ enabled: rls.isRlsEnabled(projectId, tableName), policies: rls.listPolicies(projectId, tableName) });
+          return json(await rls.describe(projectId, tableName));
         }
         if (method === "POST") {
           const body = (await req.json()) as { enabled: boolean };
-          await rls.setRlsEnabled(projectId, tableName, Boolean(body.enabled));
-          return json({ success: true, enabled: Boolean(body.enabled) });
+          await rls.setRlsEnabled(projectId, tableName, body.enabled);
+          return json({ success: true, enabled: body.enabled });
         }
       }
 
@@ -255,7 +263,7 @@ export function buildDatabaseRoutes(deps: DatabaseRouteDeps) {
         const projectId = policiesMatch[1]!;
         const tableName = policiesMatch[2]!;
         await authenticate(req);
-        if (method === "GET") return json(rls.listPolicies(projectId, tableName));
+        if (method === "GET") return json(await rls.listPolicies(projectId, tableName));
         if (method === "POST") {
           const body = (await req.json()) as {
             name: string;

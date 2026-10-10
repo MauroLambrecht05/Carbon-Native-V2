@@ -16,7 +16,7 @@ export function startRegistryServer(config: ServerConfig): Server<undefined> {
       const url = new URL(req.url);
 
       // Pass API requests to router
-      if (url.pathname.startsWith("/api")) {
+      if (url.pathname.startsWith("/api") || url.pathname.startsWith('/internal/platform/v1/')) {
         return await config.handler(req);
       }
 

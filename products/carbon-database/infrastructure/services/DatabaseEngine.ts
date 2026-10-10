@@ -21,16 +21,13 @@
 //
 // RLS: enforced in the application layer (RlsPolicyEngine), evaluated
 // against real rows fetched from Postgres — not native Postgres RLS. This
-// is a deliberate scope decision: native RLS needs a `SET LOCAL` session
-// variable inside the SAME transaction as every query, which is real,
-// buildable work, but a materially larger piece than this pass — the
-// CURRENT policy engine (canSelect/canInsert/canUpdate/canDelete) was
-// already a legitimate, correct authorization layer before this file
-// changed; only the rows it evaluates against are now real.
+// adapter reads policies under a transaction-scoped lock and checks existing
+// and actual proposed rows. Unknown rules fail closed. Native RLS and restricted
+// SQL execution remain required before canonical production data-plane cutover.
 
 import { assertValidIdentifier, quoteIdent, projectSchema } from "../persistence/identifiers.ts";
 import { RealtimeEngine } from "./RealtimeEngine.ts";
-import { RlsPolicyEngine, type RlsContext } from "./RlsPolicyEngine.ts";
+import { RlsPolicyEngine, type RlsContext, type RlsPolicySnapshot } from "./RlsPolicyEngine.ts";
 
 export type ColumnType = "string" | "number" | "boolean" | "json" | "timestamp";
 
@@ -136,8 +133,8 @@ export class DatabaseEngine {
     return { name: tableName, columns: finalColumns, createdAt };
   }
 
-  async getTable(projectId: string, tableName: string): Promise<TableMeta | undefined> {
-    const rows = await this.sql<Array<{ columns: ColumnDefinition[]; created_at: Date }>>`
+  async getTable(projectId: string, tableName: string, query: Bun.SQL | Bun.TransactionSQL = this.sql): Promise<TableMeta | undefined> {
+    const rows = await query<Array<{ columns: ColumnDefinition[]; created_at: Date }>>`
       SELECT columns, created_at FROM carbon_tables WHERE project_id = ${projectId} AND table_name = ${tableName}
     `;
     const row = rows[0];
@@ -168,12 +165,15 @@ export class DatabaseEngine {
   }
 
   async dropTable(projectId: string, tableName: string): Promise<boolean> {
-    const existing = await this.getTable(projectId, tableName);
-    if (!existing) return false;
-    const schema = projectSchema(projectId);
-    await this.sql.unsafe(`DROP TABLE IF EXISTS "${schema}".${quoteIdent(tableName, "table name")}`);
-    await this.sql`DELETE FROM carbon_tables WHERE project_id = ${projectId} AND table_name = ${tableName}`;
-    return true;
+    return this.sql.begin(async tx => {
+      await this.rls.clearTablePolicies(tx, projectId, tableName);
+      const existing = await this.getTable(projectId, tableName, tx);
+      if (!existing) return false;
+      const schema = projectSchema(projectId);
+      await tx.unsafe(`DROP TABLE IF EXISTS "${schema}".${quoteIdent(tableName, "table name")}`);
+      await tx`DELETE FROM carbon_tables WHERE project_id = ${projectId} AND table_name = ${tableName}`;
+      return true;
+    });
   }
 
   private pkColumn(meta: TableMeta): ColumnDefinition {
@@ -186,7 +186,23 @@ export class DatabaseEngine {
     data: Record<string, unknown>,
     rlsContext?: RlsContext,
   ): Promise<Record<string, unknown>> {
-    const meta = await this.getTable(projectId, tableName);
+    return (await this.insertRows(projectId, tableName, [data], rlsContext))[0]!;
+  }
+
+  async insertRows(projectId: string, tableName: string, rows: Record<string, unknown>[], rlsContext?: RlsContext): Promise<Record<string, unknown>[]> {
+    if (!Array.isArray(rows) || rows.length < 1 || rows.length > 1000 || rows.some(row => !row || typeof row !== 'object' || Array.isArray(row))) throw new Error('Invalid row batch');
+    const inserted = await this.sql.begin(async tx => {
+      const policy = rlsContext ? await this.rls.snapshot(tx, projectId, tableName) : undefined;
+      const results: Record<string, unknown>[] = [];
+      for (const row of rows) results.push(await this.insertOne(tx, projectId, tableName, row, rlsContext, policy));
+      return results;
+    });
+    for (const row of inserted) this.realtime.notifyDatabaseChange(projectId, tableName, 'INSERT', row, null);
+    return inserted;
+  }
+
+  private async insertOne(tx: Bun.TransactionSQL, projectId: string, tableName: string, data: Record<string, unknown>, rlsContext?: RlsContext, policy?: RlsPolicySnapshot): Promise<Record<string, unknown>> {
+    const meta = await this.getTable(projectId, tableName, tx);
     if (!meta) throw new Error(`Table "${tableName}" not found`);
 
     const row: Record<string, unknown> = { ...data };
@@ -216,10 +232,6 @@ export class DatabaseEngine {
       // Bun.SQL's jsonb-awareness applies to both, not only templates.
     }
 
-    if (rlsContext && !this.rls.canInsert(projectId, tableName, rlsContext, row)) {
-      throw new Error(`RLS violation: new row violates row-level security policy for table "${tableName}"`);
-    }
-
     const schema = projectSchema(projectId);
     const cols = meta.columns.map((c) => c.name);
     const colIdents = cols.map((c) => quoteIdent(c, "column name")).join(", ");
@@ -228,11 +240,12 @@ export class DatabaseEngine {
 
     let inserted: Record<string, unknown>;
     try {
-      const result = await this.sql.unsafe<Record<string, unknown>[]>(
+      const result = await tx.unsafe<Record<string, unknown>[]>(
         `INSERT INTO "${schema}".${quoteIdent(tableName, "table name")} (${colIdents}) VALUES (${placeholders}) RETURNING *`,
         values,
       );
       inserted = result[0]!;
+      if (rlsContext && !policy!.allows('INSERT', rlsContext, inserted)) throw new Error('RLS violation: proposed row is not permitted');
     } catch (err) {
       if (err instanceof Error && /duplicate key|unique constraint/i.test(err.message)) {
         throw new Error(`Primary key conflict: value "${row[pkCol.name]}" already exists`);
@@ -240,7 +253,6 @@ export class DatabaseEngine {
       throw err;
     }
 
-    this.realtime.notifyDatabaseChange(projectId, tableName, "INSERT", inserted, null);
     return inserted;
   }
 
@@ -273,18 +285,15 @@ export class DatabaseEngine {
       query += ` ORDER BY ${quoteIdent(options.orderBy, "column name")} ${options.orderDirection === "desc" ? "DESC" : "ASC"}`;
     }
 
-    const allMatching = await this.sql.unsafe<Record<string, unknown>[]>(query, where.values);
-    const total = allMatching.length;
-
-    let rows = allMatching;
-    if (rlsContext) {
-      rows = rows.filter((r) => this.rls.canSelect(projectId, tableName, rlsContext, r));
-    }
-    const total2 = rlsContext ? rows.length : total;
-
     const offset = options.offset ?? 0;
     const limit = options.limit ?? 100;
-    return { rows: rows.slice(offset, offset + limit), total: total2 };
+    if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1) throw new Error('Invalid row pagination');
+    return this.sql.begin(async tx => {
+      const policy = rlsContext ? await this.rls.snapshot(tx, projectId, tableName) : undefined;
+      const allMatching = await tx.unsafe<Record<string, unknown>[]>(query, where.values);
+      const rows = rlsContext ? allMatching.filter(row => policy!.allows('SELECT', rlsContext, row)) : allMatching;
+      return { rows: rows.slice(offset, offset + limit), total: rows.length };
+    });
   }
 
   async updateRows(
@@ -301,7 +310,9 @@ export class DatabaseEngine {
     const tableIdent = quoteIdent(tableName, "table name");
     const pkIdent = quoteIdent(pkCol.name, "column name");
 
-    return await this.sql.begin(async (tx) => {
+    const events: { oldRow: Record<string, unknown>; newRow: Record<string, unknown> }[] = [];
+    const count = await this.sql.begin(async (tx) => {
+      const policy = rlsContext ? await this.rls.snapshot(tx, projectId, tableName) : undefined;
       const where = this.buildWhere(filter);
       const matching = await tx.unsafe<Record<string, unknown>[]>(
         `SELECT * FROM "${schema}".${tableIdent} WHERE ${where.clause} FOR UPDATE`,
@@ -311,7 +322,7 @@ export class DatabaseEngine {
       const updateCols = Object.keys(updates);
       let count = 0;
       for (const oldRow of matching) {
-        if (rlsContext && !this.rls.canUpdate(projectId, tableName, rlsContext, oldRow)) continue;
+        if (rlsContext && (!policy!.allows('SELECT', rlsContext, oldRow) || !policy!.allows('UPDATE', rlsContext, oldRow))) continue;
         if (updateCols.length === 0) continue;
 
         const setClause = updateCols.map((c, i) => `${quoteIdent(c, "column name")} = $${i + 1}`).join(", ");
@@ -321,11 +332,15 @@ export class DatabaseEngine {
           `UPDATE "${schema}".${tableIdent} SET ${setClause} WHERE ${pkIdent} = $${updateCols.length + 1} RETURNING *`,
           [...values, pkValue],
         );
+        const proposed = newRows[0]!;
+        if (rlsContext && !policy!.allows('UPDATE', rlsContext, proposed)) throw new Error('RLS violation: proposed row is not permitted');
         count++;
-        this.realtime.notifyDatabaseChange(projectId, tableName, "UPDATE", newRows[0] ?? null, oldRow);
+        events.push({ oldRow, newRow: proposed });
       }
       return count;
     });
+    for (const event of events) this.realtime.notifyDatabaseChange(projectId, tableName, "UPDATE", event.newRow, event.oldRow);
+    return count;
   }
 
   async deleteRows(
@@ -341,7 +356,9 @@ export class DatabaseEngine {
     const tableIdent = quoteIdent(tableName, "table name");
     const pkIdent = quoteIdent(pkCol.name, "column name");
 
-    return await this.sql.begin(async (tx) => {
+    const events: Record<string, unknown>[] = [];
+    const count = await this.sql.begin(async (tx) => {
+      const policy = rlsContext ? await this.rls.snapshot(tx, projectId, tableName) : undefined;
       const where = this.buildWhere(filter);
       const matching = await tx.unsafe<Record<string, unknown>[]>(
         `SELECT * FROM "${schema}".${tableIdent} WHERE ${where.clause} FOR UPDATE`,
@@ -350,23 +367,22 @@ export class DatabaseEngine {
 
       let count = 0;
       for (const oldRow of matching) {
-        if (rlsContext && !this.rls.canDelete(projectId, tableName, rlsContext, oldRow)) continue;
+        if (rlsContext && (!policy!.allows('SELECT', rlsContext, oldRow) || !policy!.allows('DELETE', rlsContext, oldRow))) continue;
         await tx.unsafe(`DELETE FROM "${schema}".${tableIdent} WHERE ${pkIdent} = $1`, [oldRow[pkCol.name]]);
         count++;
-        this.realtime.notifyDatabaseChange(projectId, tableName, "DELETE", null, oldRow);
+        events.push(oldRow);
       }
       return count;
     });
+    for (const oldRow of events) this.realtime.notifyDatabaseChange(projectId, tableName, "DELETE", null, oldRow);
+    return count;
   }
 
   /**
-   * Runs real SQL against the project's own schema — no regex parsing, no
-   * simulated command subset. `search_path` is set for this connection's
-   * session only (a fresh session per call via a transaction, so it can't
-   * leak into a pooled connection reused by a different project) and
-   * restricted to that project's schema, so an app's own SQL naturally
-   * addresses its own tables by bare name (`SELECT * FROM users`) the way
-   * a real single-tenant Postgres database would.
+   * Legacy administrative SQL. Transaction-local search_path supplies default
+   * name resolution only; it does not restrict qualified names, role changes,
+   * functions or catalogs. This path is not the canonical SQL execution adapter
+   * and must not be treated as a tenant isolation boundary.
    */
   async executeRawSql(projectId: string, rawSql: string): Promise<RawSqlResult> {
     const schema = await this.ensureSchema(projectId);

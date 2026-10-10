@@ -5,6 +5,8 @@
 # filegroup rather than lumped into `:srcs` because the rule needs a single
 # file, not a set — `allow_single_file` rejects a multi-file target.
 
+load("//.tools/orchestration/bazel/bun:defs.bzl", "bun_test")
+
 package(default_visibility = ["//visibility:public"])
 
 filegroup(
@@ -15,4 +17,28 @@ filegroup(
 filegroup(
     name = "srcs",
     srcs = glob(["src/**/*.ts"]) + ["package.json"],
+)
+
+# Real PostgreSQL scenarios require CARBON_SERVICE_TEST_DATABASE_URL; see the
+# Cloud service-lifecycle runbook for the dedicated pgvector test database.
+bun_test(
+    name = "platform_lifecycle_test",
+    entry = "platform-lifecycle.integration.test.ts",
+    deps = [
+        "//products/carbon-cloud:srcs",
+        "//products/carbon-database:srcs",
+        "//products/carbon-registry:srcs",
+        "//solutions/capabilities/cloud/catalog:srcs",
+        "//solutions/capabilities/cloud/data:srcs",
+        "//solutions/capabilities/cloud/identity:srcs",
+        "//solutions/contracts/platform:srcs",
+        "//solutions/integrations/identity/github:srcs",
+        "//solutions/integrations/notification/resend:srcs",
+    ],
+)
+
+bun_test(
+    name = "platform_service_migrations_test",
+    entry = "platform-service-migrations.integration.test.ts",
+    deps = ["//products/carbon-database:srcs", "//products/carbon-registry:srcs"],
 )

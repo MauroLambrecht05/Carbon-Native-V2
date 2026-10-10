@@ -38,7 +38,7 @@ describe("parseFilter", () => {
     });
   });
 
-  test("an unrecognized operator prefix falls back to eq on the literal", () => {
-    expect(parseFilter("x", "bogus.5")).toEqual({ column: "x", operator: "eq", value: 5 });
+  test("an unrecognized operator prefix is rejected", () => {
+    expect(() => parseFilter("x", "bogus.5")).toThrow('Unsupported row filter operator');
   });
 });
