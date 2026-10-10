@@ -9,6 +9,7 @@ describe("ResolveThreadComponent", () => {
     const mockThread = {
       isThread: () => true,
       name: "flatbuffers schema generation",
+      ownerId: "user-helper",
       setName: mock(() => Promise.resolve()),
       setLocked: mock(() => Promise.resolve()),
       setArchived: mock(() => Promise.resolve()),

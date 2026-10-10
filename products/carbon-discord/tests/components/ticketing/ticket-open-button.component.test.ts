@@ -16,7 +16,7 @@ describe("TicketOpenButtonComponent", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           custom_id: "modal:ticket-create",
-          title: "Open Support Ticket",
+          title: "Open a private support request",
         }),
       }),
     );

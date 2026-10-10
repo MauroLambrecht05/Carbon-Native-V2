@@ -1,5 +1,6 @@
 import type { ChatInputCommandInteraction, ThreadChannel } from "discord.js";
 import { Command, type CommandMeta } from "../../framework/command.ts";
+import { hasStaffCapability } from "../../security/authorization.ts";
 
 export class ResolveThreadCommand extends Command {
   readonly meta: CommandMeta = {
@@ -14,6 +15,10 @@ export class ResolveThreadCommand extends Command {
         content: "The `/resolve` command can only be used inside a thread.",
         ephemeral: true,
       });
+      return;
+    }
+    if (thread.ownerId !== interaction.user.id && !hasStaffCapability(interaction, "moderation")) {
+      await interaction.reply({ content: "Only the thread author or a moderator can resolve this thread.", ephemeral: true });
       return;
     }
 

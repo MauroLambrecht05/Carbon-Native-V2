@@ -4,7 +4,7 @@
 // PingCommand alone.
 
 import { describe, expect, mock, test } from "bun:test";
-import type { ChatInputCommandInteraction } from "discord.js";
+import { PermissionsBitField, type ChatInputCommandInteraction } from "discord.js";
 import { CommandRouter } from "../presentation/framework/command-router.ts";
 import { CommandRegistry } from "../presentation/framework/command-registry.ts";
 import { buildCommandRegistry } from "../composition/commands.ts";
@@ -12,6 +12,8 @@ import { buildCommandRegistry } from "../composition/commands.ts";
 function fakeInteraction(commandName: string): ChatInputCommandInteraction {
   return {
     commandName,
+    user: { id: "staff-1" },
+    memberPermissions: new PermissionsBitField(PermissionsBitField.Flags.Administrator),
     replied: false,
     deferred: false,
     reply: mock(() => Promise.resolve()),

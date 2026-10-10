@@ -1,15 +1,9 @@
-// Tracks community suggestion votes per message to ensure 1 vote per user,
-// support vote toggling, and live counter updates.
+import { database } from "../../../infrastructure/state/database.ts";
 
 export type VoteType = "up" | "down";
 
-interface SuggestionVoteState {
-  userVotes: Map<string, VoteType>;
-}
-
 export class SuggestionVoteStore {
   private static instance: SuggestionVoteStore;
-  private readonly store = new Map<string, SuggestionVoteState>();
 
   static getInstance(): SuggestionVoteStore {
     if (!SuggestionVoteStore.instance) {
@@ -22,50 +16,40 @@ export class SuggestionVoteStore {
     messageId: string,
     userId: string,
     type: VoteType,
+    guildId = "unknown",
   ): { upVotes: number; downVotes: number; userVote: VoteType | null } {
-    let state = this.store.get(messageId);
-    if (!state) {
-      state = { userVotes: new Map() };
-      this.store.set(messageId, state);
-    }
-
-    const currentVote = state.userVotes.get(userId);
+    const db = database();
+    const row = db.query("SELECT vote FROM suggestion_votes WHERE message_id = $messageId AND user_id = $userId")
+      .get({ messageId, userId }) as { vote: VoteType } | null;
+    const currentVote = row?.vote;
     let newVote: VoteType | null = null;
 
     if (currentVote === type) {
-      // Toggle off existing vote
-      state.userVotes.delete(userId);
+      db.query("DELETE FROM suggestion_votes WHERE message_id = $messageId AND user_id = $userId")
+        .run({ messageId, userId });
       newVote = null;
     } else {
-      // Cast new vote or switch vote
-      state.userVotes.set(userId, type);
+      db.query(`
+        INSERT INTO suggestion_votes(message_id, guild_id, user_id, vote, updated_at)
+        VALUES ($messageId, $guildId, $userId, $vote, $updatedAt)
+        ON CONFLICT(message_id, user_id) DO UPDATE SET vote = excluded.vote, updated_at = excluded.updated_at
+      `).run({ messageId, guildId, userId, vote: type, updatedAt: new Date().toISOString() });
       newVote = type;
     }
-
-    let upVotes = 0;
-    let downVotes = 0;
-    for (const v of state.userVotes.values()) {
-      if (v === "up") upVotes++;
-      else if (v === "down") downVotes++;
-    }
-
-    return { upVotes, downVotes, userVote: newVote };
+    return { ...this.getCounts(messageId), userVote: newVote };
   }
 
   getCounts(messageId: string): { upVotes: number; downVotes: number } {
-    const state = this.store.get(messageId);
-    if (!state) return { upVotes: 0, downVotes: 0 };
-
-    let upVotes = 0;
-    let downVotes = 0;
-    for (const v of state.userVotes.values()) {
-      if (v === "up") upVotes++;
-      else if (v === "down") downVotes++;
-    }
-    return { upVotes, downVotes };
+    const rows = database().query(`
+      SELECT vote, COUNT(*) AS count FROM suggestion_votes WHERE message_id = $messageId GROUP BY vote
+    `).all({ messageId }) as Array<{ vote: VoteType; count: number }>;
+    return {
+      upVotes: rows.find((row) => row.vote === "up")?.count ?? 0,
+      downVotes: rows.find((row) => row.vote === "down")?.count ?? 0,
+    };
   }
 
   clear(): void {
-    this.store.clear();
+    database().exec("DELETE FROM suggestion_votes");
   }
 }

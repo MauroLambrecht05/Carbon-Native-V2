@@ -1,79 +1,46 @@
-import {
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-  EmbedBuilder,
-  type MessageComponentInteraction,
-} from "discord.js";
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, type MessageComponentInteraction } from "discord.js";
+import { recordAudit } from "../../../infrastructure/state/audit-log.ts";
+import { IssueStore, type CommunityIssue } from "../../commands/community/issue-store.ts";
 import { Component, type ComponentMeta } from "../../framework/component.ts";
-import { IssueStore } from "../../commands/community/issue-store.ts";
+import { requireStaff } from "../../security/authorization.ts";
+
+const ACTIONS: Readonly<Record<string, { status: CommunityIssue["status"]; label: string; color: number }>> = {
+  confirm: { status: "Confirmed", label: "Confirmed bug", color: 0xff4444 },
+  info: { status: "Needs Info", label: "Needs more information", color: 0xffaa00 },
+  resolve: { status: "Resolved", label: "Resolved", color: 0x00e599 },
+};
 
 export class IssueActionsComponent extends Component {
   readonly meta: ComponentMeta = { customId: "issue:", isPrefix: true };
 
   async execute(interaction: MessageComponentInteraction): Promise<void> {
-    const parts = interaction.customId.split(":");
-    // format: issue:<action>:<id>
-    const action = parts[1];
-    const issueId = parts[2];
-
-    if (!action || !issueId) {
-      await interaction.reply({ content: "Invalid issue action format.", ephemeral: true });
+    const [, action, issueId] = interaction.customId.split(":");
+    const transition = action ? ACTIONS[action] : undefined;
+    if (!transition || !issueId) {
+      await interaction.reply({ content: "Invalid or expired issue action.", ephemeral: true });
       return;
     }
-
-    const store = IssueStore.getInstance();
-    let newStatus: "Confirmed" | "Needs Info" = "Confirmed";
-    let statusText = "🔴 **Confirmed Bug**";
-    let color = 0xff4444;
-
-    if (action === "info") {
-      newStatus = "Needs Info";
-      statusText = "🟠 **Needs More Info**";
-      color = 0xffaa00;
+    if (!(await requireStaff(interaction, "moderation", `issue.${action}`))) return;
+    if (!IssueStore.getInstance().updateStatus(issueId, transition.status)) {
+      await interaction.reply({ content: "That issue no longer exists in the Carbon issue index.", ephemeral: true });
+      return;
     }
-
-    store.updateStatus(issueId, newStatus);
+    recordAudit({ guildId: interaction.guildId, actorId: interaction.user.id, action: `issue.${action}`, targetId: issueId, outcome: "allowed" });
 
     const originalEmbed = interaction.message.embeds[0];
-    if (originalEmbed) {
-      const updatedEmbed = EmbedBuilder.from(originalEmbed);
-      updatedEmbed.setColor(color);
-      const fields = (originalEmbed.fields || []).map((f) => {
-        if (f.name === "Status") {
-          return { name: "Status", value: statusText, inline: true };
-        }
-        return f;
-      });
-      updatedEmbed.setFields(fields);
-
-      const updatedRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder()
-          .setCustomId(`issue:confirm:${issueId}`)
-          .setLabel("Confirmed")
-          .setStyle(newStatus === "Confirmed" ? ButtonStyle.Success : ButtonStyle.Secondary)
-          .setDisabled(newStatus === "Confirmed")
-          .setEmoji("✅"),
-        new ButtonBuilder()
-          .setCustomId(`issue:info:${issueId}`)
-          .setLabel("Needs Info")
-          .setStyle(newStatus === "Needs Info" ? ButtonStyle.Primary : ButtonStyle.Secondary)
-          .setDisabled(newStatus === "Needs Info")
-          .setEmoji("❓"),
-      );
-
-      if (interaction.update) {
-        await interaction.update({
-          embeds: [updatedEmbed],
-          components: [updatedRow],
-        });
-        return;
-      }
+    if (!originalEmbed) {
+      await interaction.reply({ content: `Issue **${issueId}** is now **${transition.status}**.`, ephemeral: true });
+      return;
     }
-
-    await interaction.reply({
-      content: `Issue **${issueId}** marked as **${newStatus}** by <@${interaction.user.id}>.`,
-      ephemeral: true,
-    });
+    const updatedEmbed = EmbedBuilder.from(originalEmbed).setColor(transition.color);
+    updatedEmbed.setFields((originalEmbed.fields ?? []).map((field) =>
+      field.name === "Status" ? { name: "Status", value: transition.label, inline: true } : field,
+    ));
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(`issue:confirm:${issueId}`).setLabel("Confirm").setStyle(ButtonStyle.Danger).setDisabled(action === "confirm"),
+      new ButtonBuilder().setCustomId(`issue:info:${issueId}`).setLabel("Needs info").setStyle(ButtonStyle.Secondary).setDisabled(action === "info"),
+      new ButtonBuilder().setCustomId(`issue:resolve:${issueId}`).setLabel("Resolve").setStyle(ButtonStyle.Success).setDisabled(action === "resolve"),
+    );
+    await interaction.update({ embeds: [updatedEmbed], components: [row] });
   }
 }

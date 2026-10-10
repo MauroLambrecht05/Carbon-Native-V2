@@ -9,6 +9,7 @@ function fakeInteraction(isAdmin = true): ChatInputCommandInteraction {
   return {
     commandName: "setup-verification",
     memberPermissions: permissions,
+    user: { id: "staff-1" },
     channel: {
       send: mock(() => Promise.resolve()),
     },
@@ -24,7 +25,7 @@ describe("SetupVerificationCommand", () => {
     await cmd.execute(interaction);
 
     expect(interaction.reply).toHaveBeenCalledWith({
-      content: "You need Administrator permissions to deploy the verification panel.",
+      content: "This action is restricted to authorized Carbon staff.",
       ephemeral: true,
     });
     expect((interaction.channel as any).send).not.toHaveBeenCalled();
@@ -38,7 +39,7 @@ describe("SetupVerificationCommand", () => {
 
     expect((interaction.channel as any).send).toHaveBeenCalled();
     expect(interaction.reply).toHaveBeenCalledWith({
-      content: "Verification panel deployed successfully.",
+      content: "Community access panel deployed.",
       ephemeral: true,
     });
   });

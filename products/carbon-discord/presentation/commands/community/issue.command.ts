@@ -91,7 +91,7 @@ export class IssueCommand extends Command {
     if (subcommand === "search") {
       const query = interaction.options.getString("query", true);
       const store = IssueStore.getInstance();
-      const issue = store.getIssue(query) || store.searchIssues(query)[0];
+      const issue = store.getIssue(query, interaction.guildId) || store.searchIssues(query, interaction.guildId)[0];
 
       if (!issue) {
         await interaction.reply({

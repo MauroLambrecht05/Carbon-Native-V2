@@ -1,4 +1,5 @@
-import type { GuildMember, MessageComponentInteraction, Role } from "discord.js";
+import type { GuildMember, MessageComponentInteraction } from "discord.js";
+import { recordAudit } from "../../../infrastructure/state/audit-log.ts";
 import { Component, type ComponentMeta } from "../../framework/component.ts";
 
 export const DEFAULT_MIN_ACCOUNT_AGE_HOURS = 72;
@@ -8,58 +9,34 @@ export class VerifyRulesComponent extends Component {
 
   async execute(interaction: MessageComponentInteraction): Promise<void> {
     const member = interaction.member as GuildMember | null;
-    if (!member) {
+    if (!member || !interaction.guild) {
+      await interaction.reply({ content: "Rules can only be acknowledged inside the server.", ephemeral: true });
+      return;
+    }
+    const configuredAge = Number(process.env.MIN_ACCOUNT_AGE_HOURS ?? DEFAULT_MIN_ACCOUNT_AGE_HOURS);
+    const minAgeHours = Number.isFinite(configuredAge) && configuredAge >= 0 ? configuredAge : DEFAULT_MIN_ACCOUNT_AGE_HOURS;
+    const accountAgeHours = (Date.now() - interaction.user.createdTimestamp) / 3_600_000;
+    if (accountAgeHours < minAgeHours) {
+      recordAudit({ guildId: interaction.guildId, actorId: interaction.user.id ?? "unknown", action: "verification.rules", outcome: "denied", metadata: { reason: "account_age", accountAgeHours: Math.floor(accountAgeHours) } });
       await interaction.reply({
-        content: "Verification must be performed within a server.",
+        content: `Your Discord account must be at least ${minAgeHours} hours old before it can receive community access. A moderator can review legitimate exceptions.`,
         ephemeral: true,
       });
       return;
     }
-
-    // Anti-raid check: ensure account is old enough
-    const minAgeHours = Number(process.env.MIN_ACCOUNT_AGE_HOURS) || DEFAULT_MIN_ACCOUNT_AGE_HOURS;
-    const accountAgeMs = Date.now() - interaction.user.createdTimestamp;
-    const minAgeMs = minAgeHours * 60 * 60 * 1000;
-
-    if (accountAgeMs < minAgeMs) {
-      const hoursOld = Math.floor(accountAgeMs / (1000 * 60 * 60));
-      await interaction.reply({
-        content:
-          `🛡️ **Anti-Raid Protection**: Your Discord account is only ${hoursOld} hours old. ` +
-          `Accounts must be at least ${minAgeHours} hours old to quick-verify. ` +
-          `Alternatively, you can click **Link Carbon Identity** to authenticate with your Carbon Cloud developer token.`,
-        ephemeral: true,
-      });
+    const roleId = process.env.MEMBER_ROLE_ID?.trim();
+    const role = roleId ? interaction.guild.roles.cache.get(roleId) : undefined;
+    if (!role) {
+      recordAudit({ guildId: interaction.guildId, actorId: interaction.user.id ?? "unknown", action: "verification.rules", outcome: "failed", metadata: { reason: "member_role_not_configured" } });
+      await interaction.reply({ content: "Community access is temporarily unavailable because the member role is not configured.", ephemeral: true });
       return;
     }
-
-    const guild = interaction.guild;
-    const targetRoleId = process.env.MEMBER_ROLE_ID;
-    let role: Role | undefined;
-
-    if (guild) {
-      if (targetRoleId) {
-        role = guild.roles.cache.get(targetRoleId);
-      } else {
-        role = guild.roles.cache.find((r) => r.name.toLowerCase() === "member");
-      }
+    if (member.roles.cache.has(role.id)) {
+      await interaction.reply({ content: "You already have community access.", ephemeral: true });
+      return;
     }
-
-    if (role && member.roles && "add" in member.roles) {
-      if (member.roles.cache?.has(role.id)) {
-        await interaction.reply({
-          content: "You are already verified as a member!",
-          ephemeral: true,
-        });
-        return;
-      }
-      await member.roles.add(role);
-    }
-
-    await interaction.reply({
-      content:
-        "✅ **Verification Complete!** You have accepted the server rules and received the **@Member** role. Full channels are now unlocked. Welcome to Carbon Native!",
-      ephemeral: true,
-    });
+    await member.roles.add(role);
+    recordAudit({ guildId: interaction.guildId, actorId: interaction.user.id ?? "unknown", action: "verification.rules", targetId: role.id, outcome: "allowed" });
+    await interaction.reply({ content: "You accepted the server rules and now have community access.", ephemeral: true });
   }
 }

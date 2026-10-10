@@ -9,6 +9,7 @@ describe("ResolveThreadCommand", () => {
     const mockThread = {
       isThread: () => true,
       name: "linker error on msvc",
+      ownerId: "user-author",
       setName: mock(() => Promise.resolve()),
       setLocked: mock(() => Promise.resolve()),
       setArchived: mock(() => Promise.resolve()),

@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import type { MessageComponentInteraction } from "discord.js";
 import { VerifyRulesComponent } from "../../../presentation/components/onboarding/verify-rules.component.ts";
 
@@ -28,7 +28,7 @@ function fakeInteraction(options: {
 
   return {
     customId: "verify:rules",
-    user: { createdTimestamp },
+    user: { id: "user-1", createdTimestamp },
     member,
     guild: {
       roles: {
@@ -43,6 +43,8 @@ function fakeInteraction(options: {
 }
 
 describe("VerifyRulesComponent", () => {
+  beforeEach(() => { process.env.MEMBER_ROLE_ID = "role-member-123"; });
+  afterEach(() => { delete process.env.MEMBER_ROLE_ID; });
   test("blocks accounts created too recently (anti-raid trigger)", async () => {
     const component = new VerifyRulesComponent();
     // 10 hours old, below 72h default
@@ -52,7 +54,7 @@ describe("VerifyRulesComponent", () => {
 
     expect(interaction.reply).toHaveBeenCalledWith(
       expect.objectContaining({
-        content: expect.stringContaining("Anti-Raid Protection"),
+        content: expect.stringContaining("at least 72 hours old"),
         ephemeral: true,
       }),
     );
@@ -68,7 +70,7 @@ describe("VerifyRulesComponent", () => {
     expect((interaction.member as any).roles.add).toHaveBeenCalled();
     expect(interaction.reply).toHaveBeenCalledWith(
       expect.objectContaining({
-        content: expect.stringContaining("Verification Complete!"),
+        content: expect.stringContaining("community access"),
         ephemeral: true,
       }),
     );
@@ -81,7 +83,7 @@ describe("VerifyRulesComponent", () => {
     await component.execute(interaction);
 
     expect(interaction.reply).toHaveBeenCalledWith({
-      content: "You are already verified as a member!",
+      content: "You already have community access.",
       ephemeral: true,
     });
   });

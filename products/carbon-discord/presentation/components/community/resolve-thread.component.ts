@@ -1,5 +1,6 @@
 import type { MessageComponentInteraction, ThreadChannel } from "discord.js";
 import { Component, type ComponentMeta } from "../../framework/component.ts";
+import { hasStaffCapability } from "../../security/authorization.ts";
 
 export class ResolveThreadComponent extends Component {
   readonly meta: ComponentMeta = { customId: "thread:resolve" };
@@ -11,6 +12,10 @@ export class ResolveThreadComponent extends Component {
         content: "This action can only be performed inside a thread.",
         ephemeral: true,
       });
+      return;
+    }
+    if (thread.ownerId !== interaction.user.id && !hasStaffCapability(interaction, "moderation")) {
+      await interaction.reply({ content: "Only the thread author or a moderator can resolve this thread.", ephemeral: true });
       return;
     }
 

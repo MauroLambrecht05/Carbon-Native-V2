@@ -1,5 +1,5 @@
 import { describe, expect, mock, test, beforeEach } from "bun:test";
-import { EmbedBuilder, type MessageComponentInteraction } from "discord.js";
+import { EmbedBuilder, PermissionsBitField, type MessageComponentInteraction } from "discord.js";
 import { IssueActionsComponent } from "../../../presentation/components/community/issue-actions.component.ts";
 import { IssueStore } from "../../../presentation/commands/community/issue-store.ts";
 
@@ -30,6 +30,7 @@ describe("IssueActionsComponent", () => {
     const interaction = {
       customId: "issue:confirm:CB-9999",
       user: { id: "admin-1" },
+      memberPermissions: new PermissionsBitField(PermissionsBitField.Flags.Administrator),
       message: {
         embeds: [sampleEmbed],
       },
@@ -48,5 +49,17 @@ describe("IssueActionsComponent", () => {
 
     const issue = store.getIssue("CB-9999");
     expect(issue?.status).toBe("Confirmed");
+  });
+
+  test("rejects issue status changes from ordinary members", async () => {
+    const interaction = {
+      customId: "issue:confirm:CB-9999",
+      user: { id: "member-1" },
+      memberPermissions: new PermissionsBitField(),
+      message: { embeds: [] },
+      reply: mock(() => Promise.resolve()),
+    } as unknown as MessageComponentInteraction;
+    await new IssueActionsComponent().execute(interaction);
+    expect(interaction.reply).toHaveBeenCalledWith({ content: "This action is restricted to authorized Carbon staff.", ephemeral: true });
   });
 });

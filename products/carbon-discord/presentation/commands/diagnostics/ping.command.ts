@@ -4,6 +4,7 @@
 
 import type { ChatInputCommandInteraction } from "discord.js";
 import { Command, type CommandMeta } from "../../framework/command.ts";
+import { requireStaff } from "../../security/authorization.ts";
 
 export class PingCommand extends Command {
   readonly meta: CommandMeta = {
@@ -12,6 +13,7 @@ export class PingCommand extends Command {
   };
 
   async execute(interaction: ChatInputCommandInteraction): Promise<void> {
+    if (!(await requireStaff(interaction, "moderation", "diagnostics.ping"))) return;
     await interaction.reply("Pong!");
   }
 }

@@ -83,7 +83,7 @@ describe("ModalRouter & ModalRegistry", () => {
     await router.route(interaction);
 
     expect(interaction.reply).toHaveBeenCalledWith({
-      content: "modal failed: Modal failed",
+      content: expect.stringMatching(/^Carbon could not submit that form\. Reference: `[a-f0-9]{8}`\.$/),
       ephemeral: true,
     });
   });

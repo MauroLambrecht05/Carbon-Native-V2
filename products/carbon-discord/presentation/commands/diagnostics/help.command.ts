@@ -11,6 +11,8 @@ import type { ChatInputCommandInteraction } from "discord.js";
 import { EmbedBuilder } from "discord.js";
 import { Command, type CommandMeta } from "../../framework/command.ts";
 import type { CommandRegistry } from "../../framework/command-registry.ts";
+import { STAFF_COMMANDS } from "../../../composition/command-access.ts";
+import { hasStaffCapability } from "../../security/authorization.ts";
 
 export class HelpCommand extends Command {
   readonly meta: CommandMeta = {
@@ -23,7 +25,8 @@ export class HelpCommand extends Command {
   }
 
   async execute(interaction: ChatInputCommandInteraction): Promise<void> {
-    const commands = this.buildRegistry().all();
+    const isStaff = hasStaffCapability(interaction, "moderation") || hasStaffCapability(interaction, "support") || hasStaffCapability(interaction, "community");
+    const commands = this.buildRegistry().all().filter((descriptor) => isStaff || !STAFF_COMMANDS.has(descriptor.meta.name));
 
     const embed = new EmbedBuilder()
       .setTitle("Carbon: commands")

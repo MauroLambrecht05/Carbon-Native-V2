@@ -35,7 +35,7 @@ describe("HelpCommand", () => {
     const data = embeds[0].data;
 
     expect(data.title).toBe("Carbon: commands");
-    expect(data.fields).toContainEqual({ name: "/ping", value: "Check that the bot is alive" });
+    expect(data.fields).not.toContainEqual({ name: "/ping", value: "Check that the bot is alive" });
     expect(data.fields).toContainEqual({ name: "/status", value: "Show the bot's live connection status" });
   });
 });

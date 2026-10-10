@@ -9,6 +9,7 @@ function fakeInteraction(isAdmin = true): ChatInputCommandInteraction {
   return {
     commandName: "ticket-panel",
     memberPermissions: permissions,
+    user: { id: "staff-1" },
     channel: {
       send: mock(() => Promise.resolve()),
     },
@@ -24,7 +25,7 @@ describe("TicketPanelCommand", () => {
     await cmd.execute(interaction);
 
     expect(interaction.reply).toHaveBeenCalledWith({
-      content: "You need Administrator permissions to deploy the ticket panel.",
+      content: "This action is restricted to authorized Carbon staff.",
       ephemeral: true,
     });
     expect((interaction.channel as any).send).not.toHaveBeenCalled();
@@ -38,7 +39,7 @@ describe("TicketPanelCommand", () => {
 
     expect((interaction.channel as any).send).toHaveBeenCalled();
     expect(interaction.reply).toHaveBeenCalledWith({
-      content: "Support ticket panel deployed successfully.",
+      content: "Private support panel deployed.",
       ephemeral: true,
     });
   });

@@ -86,7 +86,7 @@ describe("ComponentRouter & ComponentRegistry", () => {
     await router.route(interaction);
 
     expect(interaction.reply).toHaveBeenCalledWith({
-      content: "component failed: Something broke",
+      content: expect.stringMatching(/^Carbon could not complete that action\. Reference: `[a-f0-9]{8}`\.$/),
       ephemeral: true,
     });
   });

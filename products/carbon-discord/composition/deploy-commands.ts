@@ -11,23 +11,22 @@
 
 import { REST, Routes, SlashCommandBuilder } from "discord.js";
 import { buildCommandRegistry } from "./commands.ts";
+import { STAFF_COMMANDS } from "./command-access.ts";
+import { readSingleGuildEnvironment } from "../infrastructure/config/environment.ts";
 
 export interface DeployConfig {
   readonly applicationId: string;
   readonly botToken: string;
-  readonly guildId?: string;
+  readonly guildId: string;
 }
 
 export function configFromEnv(env: NodeJS.ProcessEnv = process.env): DeployConfig {
-  const required = (name: string): string => {
-    const value = env[name];
-    if (!value) throw new Error(`missing required env var ${name}`);
-    return value;
-  };
+  const parsed = readSingleGuildEnvironment(env);
+  if (!parsed.applicationId) throw new Error("missing required env var DISCORD_APPLICATION_ID");
   return {
-    applicationId: required("DISCORD_APPLICATION_ID"),
-    botToken: required("DISCORD_BOT_TOKEN"),
-    guildId: env.DISCORD_GUILD_ID,
+    applicationId: parsed.applicationId,
+    botToken: parsed.botToken,
+    guildId: parsed.guildId,
   };
 }
 
@@ -40,20 +39,18 @@ export async function deployCommands(config: DeployConfig): Promise<void> {
         const builder = new SlashCommandBuilder()
           .setName(descriptor.meta.name)
           .setDescription(descriptor.meta.description);
+        if (STAFF_COMMANDS.has(descriptor.meta.name)) builder.setDefaultMemberPermissions(0n);
         command.configureBuilder?.(builder);
         return builder.toJSON();
       }),
   );
 
   const rest = new REST().setToken(config.botToken);
-  const route = config.guildId
-    ? Routes.applicationGuildCommands(config.applicationId, config.guildId)
-    : Routes.applicationCommands(config.applicationId);
+  const route = Routes.applicationGuildCommands(config.applicationId, config.guildId);
 
   const registered = (await rest.put(route, { body: commands })) as unknown[];
 
-  const scope = config.guildId ? `guild ${config.guildId}` : "globally (may take up to an hour to appear)";
-  console.log(`registered ${registered.length} command(s): ${commands.map((c) => c.name).join(", ")} (${scope})`);
+  console.log(`registered ${registered.length} command(s): ${commands.map((c) => c.name).join(", ")} (guild ${config.guildId})`);
 }
 
 if (import.meta.main) {

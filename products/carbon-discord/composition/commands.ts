@@ -16,11 +16,35 @@ export function buildCommandRegistry(): CommandRegistry {
         new (await import("../presentation/commands/diagnostics/help.command.ts")).HelpCommand(buildCommandRegistry),
     ),
     defineCommand(
+      { name: "start", description: "Get oriented and take the next useful Carbon step" },
+      async () => new (await import("../presentation/commands/onboarding/start.command.ts")).StartCommand(),
+    ),
+    defineCommand(
+      { name: "docs", description: "Open the official Carbon documentation" },
+      async () => new (await import("../presentation/commands/community/docs.command.ts")).DocsCommand(),
+    ),
+    defineCommand(
+      { name: "support", description: "Open a private Carbon support request" },
+      async () => new (await import("../presentation/commands/support/support.command.ts")).SupportCommand(),
+    ),
+    defineCommand(
+      { name: "trust", description: "View Carbon security, privacy, support, and status resources" },
+      async () => new (await import("../presentation/commands/community/trust.command.ts")).TrustCommand(),
+    ),
+    defineCommand(
       { name: "ping", description: "Check that the bot is alive" },
       async () => new (await import("../presentation/commands/diagnostics/ping.command.ts")).PingCommand(),
     ),
     defineCommand(
-      { name: "status", description: "Show the bot's live connection status" },
+      { name: "audit", description: "Review recent Carbon Discord staff and security actions" },
+      async () => new (await import("../presentation/commands/diagnostics/audit.command.ts")).AuditCommand(),
+    ),
+    defineCommand(
+      { name: "metrics", description: "Review aggregate Carbon Discord activity" },
+      async () => new (await import("../presentation/commands/diagnostics/metrics.command.ts")).MetricsCommand(),
+    ),
+    defineCommand(
+      { name: "status", description: "Open Carbon's authoritative service status" },
       async () => new (await import("../presentation/commands/diagnostics/status.command.ts")).StatusCommand(),
     ),
     defineCommand(
@@ -32,11 +56,11 @@ export function buildCommandRegistry(): CommandRegistry {
       async () => new (await import("../presentation/commands/release/download.command.ts")).DownloadCommand(),
     ),
     defineCommand(
-      { name: "setup-verification", description: "Post the Carbon Native verification and onboarding panel to this channel" },
+      { name: "setup-verification", description: "Deploy the community rules acknowledgement panel" },
       async () => new (await import("../presentation/commands/onboarding/setup-verification.command.ts")).SetupVerificationCommand(),
     ),
     defineCommand(
-      { name: "ticket-panel", description: "Deploy the Carbon Native support ticket panel to this channel" },
+      { name: "ticket-panel", description: "Deploy the private Carbon support panel" },
       async () => new (await import("../presentation/commands/ticketing/ticket-panel.command.ts")).TicketPanelCommand(),
     ),
     defineCommand(
@@ -48,19 +72,15 @@ export function buildCommandRegistry(): CommandRegistry {
       async () => new (await import("../presentation/commands/broadcast/announce.command.ts")).AnnounceCommand(),
     ),
     defineCommand(
-      { name: "release", description: "Publish a Carbon Native release announcement card" },
-      async () => new (await import("../presentation/commands/release/release.command.ts")).ReleaseCommand(),
-    ),
-    defineCommand(
       { name: "issue", description: "Report or search community bug reports and issues" },
       async () => new (await import("../presentation/commands/community/issue.command.ts")).IssueCommand(),
     ),
     defineCommand(
-      { name: "event", description: "Create or view scheduled community events and meetups" },
+      { name: "event", description: "Create or view official Carbon community events" },
       async () => new (await import("../presentation/commands/community/event.command.ts")).EventCommand(),
     ),
     defineCommand(
-      { name: "setup-roles", description: "Deploy the self-service role & notification picker panel" },
+      { name: "setup-roles", description: "Deploy the notification preference panel" },
       async () => new (await import("../presentation/commands/community/setup-roles.command.ts")).SetupRolesCommand(),
     ),
     defineCommand(

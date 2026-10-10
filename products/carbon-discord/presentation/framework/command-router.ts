@@ -12,6 +12,9 @@
 
 import type { ChatInputCommandInteraction } from "discord.js";
 import type { CommandRegistry } from "./command-registry.ts";
+import { randomUUID } from "node:crypto";
+import { recordAudit } from "../../infrastructure/state/audit-log.ts";
+import { incrementMetric } from "../../infrastructure/state/metrics.ts";
 
 export class CommandRouter {
   constructor(private readonly registry: CommandRegistry) {}
@@ -27,8 +30,12 @@ export class CommandRouter {
     try {
       const command = await descriptor.load();
       await command.execute(interaction);
+      incrementMetric(interaction.guildId, `command.${interaction.commandName}`);
     } catch (error) {
-      const content = `command failed: ${error instanceof Error ? error.message : String(error)}`;
+      const reference = randomUUID().slice(0, 8);
+      console.error(`command ${interaction.commandName} failed [${reference}]`, error);
+      recordAudit({ guildId: interaction.guildId, actorId: interaction.user?.id ?? "unknown", action: `command.${interaction.commandName}`, outcome: "failed", metadata: { reference } });
+      const content = `Carbon could not complete that command. Reference: \`${reference}\`.`;
       if (interaction.replied || interaction.deferred) {
         await interaction.followUp({ content, ephemeral: true });
       } else {

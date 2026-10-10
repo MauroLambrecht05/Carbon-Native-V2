@@ -1,85 +1,53 @@
-import { describe, expect, mock, test } from "bun:test";
+import { afterEach, describe, expect, mock, test } from "bun:test";
 import { PermissionsBitField, type ChatInputCommandInteraction } from "discord.js";
 import { EventCommand } from "../../../presentation/commands/community/event.command.ts";
 
-function fakeInteraction(options: {
-  isAdmin: boolean;
-  subcommand: string;
-}): ChatInputCommandInteraction {
+function fakeInteraction(options: { isAdmin: boolean; subcommand: "create" | "list" }): ChatInputCommandInteraction {
   const permissions = new PermissionsBitField();
   if (options.isAdmin) permissions.add(PermissionsBitField.Flags.Administrator);
-
-  const mockChannel = {
-    send: mock(() => Promise.resolve()),
+  const event = { id: "event-1", name: "Carbon workshop", scheduledStartTimestamp: Date.now() + 3_600_000, url: "https://discord.com/events/1/2" };
+  const scheduledEvents = {
+    create: mock(() => Promise.resolve(event)),
+    fetch: mock(() => Promise.resolve(new Map([[event.id, event]]))),
   };
-
   return {
     commandName: "event",
+    user: { id: "user-1", tag: "user#1" },
     memberPermissions: permissions,
-    channel: mockChannel,
+    guildId: "guild-1",
+    guild: { scheduledEvents },
     options: {
       getSubcommand: mock(() => options.subcommand),
-      getString: mock((name: string) => {
-        if (name === "title") return "V2 Architecture Town Hall";
-        if (name === "description") return "Deep dive into FlatBuffers & Zig plugins";
-        if (name === "time") return "Friday 18:00 UTC";
-        if (name === "location") return "Stage Channel";
-        return null;
-      }),
+      getString: mock((name: string) => ({
+        title: "Carbon workshop",
+        description: "Build a native application together",
+        starts_at: new Date(Date.now() + 3_600_000).toISOString(),
+        location: "Carbon Stage",
+      })[name] ?? null),
     },
     reply: mock(() => Promise.resolve()),
   } as unknown as ChatInputCommandInteraction;
 }
 
 describe("EventCommand", () => {
-  test("rejects non-admin for event creation", async () => {
-    const cmd = new EventCommand();
+  afterEach(() => { delete process.env.COMMUNITY_MANAGER_ROLE_IDS; });
+
+  test("rejects unauthorized event creation", async () => {
     const interaction = fakeInteraction({ isAdmin: false, subcommand: "create" });
-
-    await cmd.execute(interaction);
-
-    expect(interaction.reply).toHaveBeenCalledWith({
-      content: "You need Administrator permissions to schedule official community events.",
-      ephemeral: true,
-    });
+    await new EventCommand().execute(interaction);
+    expect(interaction.reply).toHaveBeenCalledWith({ content: "This action is restricted to authorized Carbon staff.", ephemeral: true });
   });
 
-  test("schedules community event with RSVP button when run by admin", async () => {
-    const cmd = new EventCommand();
+  test("creates a native Discord scheduled event", async () => {
     const interaction = fakeInteraction({ isAdmin: true, subcommand: "create" });
-
-    await cmd.execute(interaction);
-
-    expect((interaction.channel as any).send).toHaveBeenCalledWith(
-      expect.objectContaining({
-        embeds: expect.arrayContaining([
-          expect.objectContaining({
-            data: expect.objectContaining({
-              title: "📅 Community Event: V2 Architecture Town Hall",
-            }),
-          }),
-        ]),
-        components: expect.any(Array),
-      }),
-    );
-
-    expect(interaction.reply).toHaveBeenCalledWith({
-      content: expect.stringContaining("scheduled successfully"),
-      ephemeral: true,
-    });
+    await new EventCommand().execute(interaction);
+    expect(interaction.guild!.scheduledEvents.create).toHaveBeenCalledWith(expect.objectContaining({ name: "Carbon workshop", entityMetadata: { location: "Carbon Stage" } }));
+    expect(interaction.reply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining("Created **Carbon workshop**"), ephemeral: true }));
   });
 
-  test("lists upcoming events", async () => {
-    const cmd = new EventCommand();
+  test("lists native Discord scheduled events", async () => {
     const interaction = fakeInteraction({ isAdmin: false, subcommand: "list" });
-
-    await cmd.execute(interaction);
-
-    expect(interaction.reply).toHaveBeenCalledWith(
-      expect.objectContaining({
-        embeds: expect.any(Array),
-        ephemeral: true,
-      }),
-    );
+    await new EventCommand().execute(interaction);
+    expect(interaction.reply).toHaveBeenCalledWith(expect.objectContaining({ embeds: expect.any(Array), ephemeral: true }));
   });
 });

@@ -13,6 +13,7 @@ function fakeInteraction(isAdmin = true): ChatInputCommandInteraction {
   return {
     commandName: "setup-roles",
     memberPermissions: permissions,
+    user: { id: "staff-1" },
     channel: mockChannel,
     reply: mock(() => Promise.resolve()),
   } as unknown as ChatInputCommandInteraction;
@@ -26,7 +27,7 @@ describe("SetupRolesCommand", () => {
     await cmd.execute(interaction);
 
     expect(interaction.reply).toHaveBeenCalledWith({
-      content: "You need Administrator permissions to deploy the role picker panel.",
+      content: "This action is restricted to authorized Carbon staff.",
       ephemeral: true,
     });
   });
@@ -45,7 +46,7 @@ describe("SetupRolesCommand", () => {
     );
 
     expect(interaction.reply).toHaveBeenCalledWith({
-      content: "Role picker panel deployed successfully.",
+      content: "Notification preference panel deployed.",
       ephemeral: true,
     });
   });

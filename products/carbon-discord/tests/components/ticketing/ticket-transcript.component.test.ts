@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from "bun:test";
-import type { MessageComponentInteraction } from "discord.js";
+import { PermissionsBitField, type MessageComponentInteraction } from "discord.js";
 import { TicketTranscriptComponent } from "../../../presentation/components/ticketing/ticket-transcript.component.ts";
 
 describe("TicketTranscriptComponent", () => {
@@ -36,7 +36,10 @@ describe("TicketTranscriptComponent", () => {
 
     const interaction = {
       customId: "ticket:transcript",
+      user: { id: "staff-1" },
+      memberPermissions: new PermissionsBitField(PermissionsBitField.Flags.Administrator),
       channel: mockThread,
+      reply: mock(() => Promise.resolve()),
       deferReply: mock(() => Promise.resolve()),
       followUp: mock(() => Promise.resolve()),
     } as unknown as MessageComponentInteraction;

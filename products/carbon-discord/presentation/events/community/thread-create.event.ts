@@ -13,7 +13,9 @@ export class ThreadCreateEvent extends BotEvent {
 
   async handle(...args: unknown[]): Promise<void> {
     const [thread, newlyCreated] = args as [ThreadChannel, boolean | undefined];
-    if (!thread || !thread.isThread()) return;
+    if (!thread || !thread.isThread() || newlyCreated === false) return;
+    const helpForums = new Set((process.env.HELP_FORUM_CHANNEL_IDS ?? "").split(",").map((id) => id.trim()).filter(Boolean));
+    if (helpForums.size === 0 || !thread.parentId || !helpForums.has(thread.parentId)) return;
 
     // Send guidance notice in newly spawned threads
     const embed = new EmbedBuilder()

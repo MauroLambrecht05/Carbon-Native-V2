@@ -1,60 +1,30 @@
-import {
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-  EmbedBuilder,
-  PermissionsBitField,
-  type ChatInputCommandInteraction,
-} from "discord.js";
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, type ChatInputCommandInteraction } from "discord.js";
+import { recordAudit } from "../../../infrastructure/state/audit-log.ts";
 import { Command, type CommandMeta } from "../../framework/command.ts";
+import { requireStaff } from "../../security/authorization.ts";
 
 export class TicketPanelCommand extends Command {
-  readonly meta: CommandMeta = {
-    name: "ticket-panel",
-    description: "Deploy the Carbon Native support ticket panel to this channel",
-  };
+  readonly meta: CommandMeta = { name: "ticket-panel", description: "Deploy the private Carbon support panel" };
 
   async execute(interaction: ChatInputCommandInteraction): Promise<void> {
-    if (!interaction.memberPermissions?.has(PermissionsBitField.Flags.Administrator)) {
-      await interaction.reply({
-        content: "You need Administrator permissions to deploy the ticket panel.",
-        ephemeral: true,
-      });
+    if (!(await requireStaff(interaction, "support", "ticket.panel.deploy"))) return;
+    if (!interaction.channel || !("send" in interaction.channel)) {
+      await interaction.reply({ content: "The support panel requires a server text channel.", ephemeral: true });
       return;
     }
-
     const embed = new EmbedBuilder()
-      .setTitle("🎫 Carbon Native Support & Inquiries")
+      .setTitle("Private Carbon support")
       .setColor(0x5865f2)
       .setDescription(
-        "Need help with **Carbon Native**, build pipelines, cloud orchestration, or plugins?\n\n" +
-          "Click **Open Support Ticket** below to start a private conversation with the Carbon team.\n\n" +
-          "• **Cloud & Infrastructure**: Build workers, API keys, organization accounts\n" +
-          "• **Plugin Development**: Zig C-ABI extension points, FlatBuffers schemas\n" +
-          "• **General Support**: Tooling questions, bug reports, and contributions\n\n" +
-          "*Please do not share sensitive secrets, passwords, or private keys.*",
+        "Use the public help forum for general questions so answers help everyone. Open a private request here for account, security, or confidential operational questions.\n\n" +
+        "Do not share credentials, private keys, customer data, or unredacted confidential logs.",
       )
-      .setFooter({ text: "Carbon Native Support Hub" })
-      .setTimestamp();
-
+      .setFooter({ text: "One open private request per member" });
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId("ticket:open")
-        .setLabel("Open Support Ticket")
-        .setStyle(ButtonStyle.Primary)
-        .setEmoji("📩"),
+      new ButtonBuilder().setCustomId("ticket:open").setLabel("Open private support request").setStyle(ButtonStyle.Primary).setEmoji("📩"),
     );
-
-    if (interaction.channel && "send" in interaction.channel) {
-      await (interaction.channel as unknown as { send: (options: unknown) => Promise<unknown> }).send({
-        embeds: [embed],
-        components: [row],
-      });
-    }
-
-    await interaction.reply({
-      content: "Support ticket panel deployed successfully.",
-      ephemeral: true,
-    });
+    await interaction.channel.send({ embeds: [embed], components: [row], allowedMentions: { parse: [] } });
+    recordAudit({ guildId: interaction.guildId, actorId: interaction.user?.id ?? "unknown", action: "ticket.panel.deploy", targetId: interaction.channelId, outcome: "allowed" });
+    await interaction.reply({ content: "Private support panel deployed.", ephemeral: true });
   }
 }

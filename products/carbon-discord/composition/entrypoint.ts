@@ -3,7 +3,7 @@
 // Nothing here decides what a command or event does. That lives in
 // presentation/, once one exists.
 
-import { Client, Events, GatewayIntentBits } from "discord.js";
+import { Client, Events, GatewayIntentBits, Partials } from "discord.js";
 import { CommandRouter } from "../presentation/framework/command-router.ts";
 import { ComponentRouter } from "../presentation/framework/component-router.ts";
 import { ModalRouter } from "../presentation/framework/modal-router.ts";
@@ -15,24 +15,42 @@ import { buildComponentRegistry } from "./components.ts";
 import { buildModalRegistry } from "./modals.ts";
 import { buildAutocompleteRegistry } from "./autocompletes.ts";
 import { buildContextMenuRegistry } from "./context-menus.ts";
+import { readSingleGuildEnvironment, validateOptionalConfiguration } from "../infrastructure/config/environment.ts";
+import { database } from "../infrastructure/state/database.ts";
+import { pruneAuditEvents } from "../infrastructure/state/audit-log.ts";
 
 export interface CarbonDiscordConfig {
   readonly botToken: string;
+  readonly guildId: string;
 }
 
 export function configFromEnv(env: NodeJS.ProcessEnv = process.env): CarbonDiscordConfig {
-  const botToken = env.DISCORD_BOT_TOKEN;
-  if (!botToken) throw new Error("missing required env var DISCORD_BOT_TOKEN");
-  return { botToken };
+  validateOptionalConfiguration(env);
+  const parsed = readSingleGuildEnvironment(env);
+  return { botToken: parsed.botToken, guildId: parsed.guildId };
 }
 
-export function startBot(config: CarbonDiscordConfig): Client {
+function eventGuildId(args: unknown[]): string | undefined {
+  for (const value of args) {
+    if (!value || typeof value !== "object") continue;
+    const candidate = value as { guildId?: unknown; guild?: { id?: unknown }; message?: { guildId?: unknown } };
+    if (typeof candidate.guildId === "string") return candidate.guildId;
+    if (typeof candidate.guild?.id === "string") return candidate.guild.id;
+    if (typeof candidate.message?.guildId === "string") return candidate.message.guildId;
+  }
+  return undefined;
+}
+
+export async function startBot(config: CarbonDiscordConfig): Promise<Client> {
+  database().query("SELECT 1").get();
+  pruneAuditEvents(Number(process.env.AUDIT_RETENTION_DAYS ?? 365));
   const client = new Client({
     intents: [
       GatewayIntentBits.Guilds,
       GatewayIntentBits.GuildMembers,
       GatewayIntentBits.GuildMessageReactions,
     ],
+    partials: [Partials.Message, Partials.Channel, Partials.Reaction, Partials.User],
   });
 
   for (const descriptor of buildEventRegistry().all()) {
@@ -45,6 +63,11 @@ export function startBot(config: CarbonDiscordConfig): Client {
     (attach as (name: string, listener: (...args: unknown[]) => void) => Client)(
       descriptor.meta.name,
       async (...args: unknown[]) => {
+        const guildId = eventGuildId(args);
+        if (guildId && guildId !== config.guildId) {
+          console.warn(`ignored ${descriptor.meta.name} event from unauthorized guild ${guildId}`);
+          return;
+        }
         // Isolated per handler: EventRegistry allows more than one
         // descriptor per event name (unlike CommandRegistry, see
         // event-registry.ts), so a future second listener on the same event
@@ -67,6 +90,10 @@ export function startBot(config: CarbonDiscordConfig): Client {
   const contextMenuRouter = new ContextMenuRouter(buildContextMenuRegistry());
 
   client.on(Events.InteractionCreate, async (interaction) => {
+    if (interaction.guildId !== config.guildId) {
+      console.warn(`ignored interaction from unauthorized guild ${interaction.guildId ?? "direct-message"}`);
+      return;
+    }
     if (interaction.isChatInputCommand()) {
       await commandRouter.route(interaction);
     } else if (interaction.isAutocomplete()) {
@@ -80,6 +107,15 @@ export function startBot(config: CarbonDiscordConfig): Client {
     }
   });
 
-  client.login(config.botToken);
+  client.on(Events.Error, (error) => console.error("Discord client error:", error));
+  client.on(Events.Warn, (warning) => console.warn("Discord client warning:", warning));
+
+  await client.login(config.botToken);
+  try {
+    await client.guilds.fetch(config.guildId);
+  } catch (error) {
+    client.destroy();
+    throw new Error(`the bot cannot access configured guild ${config.guildId}`, { cause: error });
+  }
   return client;
 }

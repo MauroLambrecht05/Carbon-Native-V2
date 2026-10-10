@@ -1,12 +1,14 @@
 import {
   ChannelType,
   EmbedBuilder,
-  PermissionsBitField,
   type ChatInputCommandInteraction,
   type SlashCommandBuilder,
   type TextChannel,
 } from "discord.js";
 import { Command, type CommandMeta } from "../../framework/command.ts";
+import { recordAudit } from "../../../infrastructure/state/audit-log.ts";
+import { requireStaff } from "../../security/authorization.ts";
+import { safeUserText } from "../../security/content.ts";
 
 export class AnnounceCommand extends Command {
   readonly meta: CommandMeta = {
@@ -29,6 +31,9 @@ export class AnnounceCommand extends Command {
       .addStringOption((opt) =>
         opt.setName("message").setDescription("Announcement text body").setRequired(true),
       )
+      .addBooleanOption((opt) =>
+        opt.setName("confirm").setDescription("Confirm this announcement is ready to publish").setRequired(true),
+      )
       .addStringOption((opt) =>
         opt
           .setName("ping")
@@ -36,8 +41,12 @@ export class AnnounceCommand extends Command {
           .setRequired(false)
           .addChoices(
             { name: "None", value: "none" },
-            { name: "@everyone", value: "everyone" },
-            { name: "@here", value: "here" },
+            { name: "Product announcements", value: "announcements" },
+            { name: "Stable releases", value: "releases" },
+            { name: "Preview releases", value: "preview" },
+            { name: "Security advisories", value: "security" },
+            { name: "Events", value: "events" },
+            { name: "@everyone (emergencies only)", value: "everyone" },
           ),
       )
       .addStringOption((opt) =>
@@ -55,19 +64,18 @@ export class AnnounceCommand extends Command {
   }
 
   async execute(interaction: ChatInputCommandInteraction): Promise<void> {
-    if (!interaction.memberPermissions?.has(PermissionsBitField.Flags.Administrator)) {
-      await interaction.reply({
-        content: "You need Administrator permissions to broadcast announcements.",
-        ephemeral: true,
-      });
-      return;
-    }
+    if (!(await requireStaff(interaction, "community", "announcement.publish"))) return;
 
     const channelOption = interaction.options.getChannel("channel", true);
-    const title = interaction.options.getString("title", true);
-    const message = interaction.options.getString("message", true);
+    const title = safeUserText(interaction.options.getString("title", true), 256);
+    const message = safeUserText(interaction.options.getString("message", true), 4_000);
     const ping = interaction.options.getString("ping") || "none";
     const style = interaction.options.getString("style") || "brand";
+    const confirmed = interaction.options.getBoolean("confirm", true);
+    if (!confirmed) {
+      await interaction.reply({ content: "Announcement cancelled because publication was not confirmed.", ephemeral: true });
+      return;
+    }
 
     let color = 0x00e599; // Brand emerald
     if (style === "info") color = 0x5865f2;
@@ -88,21 +96,49 @@ export class AnnounceCommand extends Command {
 
     const authorTag = interaction.user?.tag || "Staff";
     const embed = new EmbedBuilder()
-      .setTitle(`📢 ${title}`)
+      .setTitle(`Announcement: ${title}`)
       .setColor(color)
       .setDescription(message)
       .setFooter({
-        text: `Official Carbon Announcement • Broadcast by ${authorTag}`,
+        text: `Official Carbon announcement | Published by ${authorTag}`,
       })
       .setTimestamp();
 
     let mentionContent: string | undefined;
-    if (ping === "everyone") mentionContent = "@everyone";
-    else if (ping === "here") mentionContent = "@here";
+    let allowedMentions: { parse: Array<"everyone"> } | { parse: []; roles?: string[] } = { parse: [] };
+    if (ping === "everyone") {
+      mentionContent = "@everyone";
+      allowedMentions = { parse: ["everyone"] };
+    } else if (ping !== "none") {
+      const envName: Record<string, string> = {
+        announcements: "ANNOUNCEMENTS_ROLE_ID",
+        releases: "RELEASES_ROLE_ID",
+        preview: "PREVIEW_ROLE_ID",
+        security: "SECURITY_ROLE_ID",
+        events: "EVENTS_ROLE_ID",
+      };
+      const roleId = process.env[envName[ping]]?.trim();
+      if (!roleId || !interaction.guild?.roles.cache.has(roleId)) {
+        await interaction.reply({ content: "The selected audience role is not configured in this server.", ephemeral: true });
+        return;
+      }
+      mentionContent = `<@&${roleId}>`;
+      allowedMentions = { parse: [], roles: [roleId] };
+    }
 
     await targetChannel.send({
       content: mentionContent,
       embeds: [embed],
+      allowedMentions,
+    });
+
+    recordAudit({
+      guildId: interaction.guildId,
+      actorId: interaction.user.id,
+      action: "announcement.publish",
+      targetId: targetChannel.id,
+      outcome: "allowed",
+      metadata: { title, ping, style },
     });
 
     await interaction.reply({

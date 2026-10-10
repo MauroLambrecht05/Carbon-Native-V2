@@ -9,6 +9,7 @@ function fakeInteraction(options: {
   message?: string;
   ping?: string;
   style?: string;
+  roleIds?: string[];
 }): ChatInputCommandInteraction {
   const permissions = new PermissionsBitField();
   if (options.isAdmin) permissions.add(PermissionsBitField.Flags.Administrator);
@@ -31,11 +32,17 @@ function fakeInteraction(options: {
         if (name === "style") return options.style || "brand";
         return null;
       }),
+      getBoolean: mock(() => true),
     },
     guild: {
       channels: {
         cache: {
           get: (id: string) => mockChannel,
+        },
+      },
+      roles: {
+        cache: {
+          has: (id: string) => (options.roleIds || []).includes(id),
         },
       },
     },
@@ -51,7 +58,7 @@ describe("AnnounceCommand", () => {
     await cmd.execute(interaction);
 
     expect(interaction.reply).toHaveBeenCalledWith({
-      content: "You need Administrator permissions to broadcast announcements.",
+      content: "This action is restricted to authorized Carbon staff.",
       ephemeral: true,
     });
   });
@@ -76,7 +83,7 @@ describe("AnnounceCommand", () => {
         embeds: expect.arrayContaining([
           expect.objectContaining({
             data: expect.objectContaining({
-              title: "📢 Maintenance Notice",
+              title: "Announcement: Maintenance Notice",
               description: "Build servers restarting in 10 minutes",
             }),
           }),
@@ -88,5 +95,31 @@ describe("AnnounceCommand", () => {
       content: expect.stringContaining("target-channel"),
       ephemeral: true,
     });
+  });
+
+  test("mentions only the configured audience role", async () => {
+    const previousRoleId = process.env.SECURITY_ROLE_ID;
+    process.env.SECURITY_ROLE_ID = "123456789012345678";
+    try {
+      const cmd = new AnnounceCommand();
+      const interaction = fakeInteraction({
+        isAdmin: true,
+        ping: "security",
+        roleIds: ["123456789012345678"],
+      });
+
+      await cmd.execute(interaction);
+
+      const channel = interaction.guild?.channels.cache.get("announce-chan-1");
+      expect((channel as any).send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content: "<@&123456789012345678>",
+          allowedMentions: { parse: [], roles: ["123456789012345678"] },
+        }),
+      );
+    } finally {
+      if (previousRoleId === undefined) delete process.env.SECURITY_ROLE_ID;
+      else process.env.SECURITY_ROLE_ID = previousRoleId;
+    }
   });
 });

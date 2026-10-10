@@ -13,7 +13,7 @@ export class IssueSearchAutocomplete extends Autocomplete {
     }
 
     const store = IssueStore.getInstance();
-    const results = store.searchIssues(focused.value);
+    const results = store.searchIssues(focused.value, interaction.guildId);
 
     const choices = results.map((issue) => ({
       name: `[${issue.id}] ${issue.title}`.slice(0, 100),
