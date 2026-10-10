@@ -143,7 +143,7 @@ export async function startServer(config: CarbonCloudConfig) {
         return Response.json({ error: { code: "capability", message: "App authentication is not configured", requestId } }, { status: 501, headers: { "x-request-id": requestId, "cache-control": "no-store" } });
       }
       if (new URL(request.url).pathname.startsWith("/worker/v1/")) {
-        if (accountPlatform?.workerHandler) return accountPlatform.workerHandler(request);
+        if (accountPlatform?.workerHandler) return accountPlatform.workerHandler(request, server.requestIP(request)?.address ?? "unknown");
         const requestId = crypto.randomUUID();
         return Response.json({ error: { code: "capability", message: "Workers are not configured", requestId } }, { status: 501, headers: { "x-request-id": requestId, "cache-control": "no-store" } });
       }

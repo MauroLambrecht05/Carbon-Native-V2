@@ -13,6 +13,7 @@ import { loadConfig } from "@carbon/workspace";
 import { parseComponent, type Permission } from "@carbon/contracts/platform";
 import { DeviceAuthorizationClient } from "../../../infrastructure/cloud/DeviceAuthorizationClient.ts";
 import { DeviceCredentialStore } from "../../../infrastructure/cloud/DeviceCredentialStore.ts";
+import { RegistryDeviceClient } from "../../../infrastructure/cloud/RegistryDeviceClient.ts";
 
 // Same directory signer.command.ts uses for keys — one place a user looks
 // for anything `carbon` keeps on their machine.
@@ -37,6 +38,7 @@ function writeCredentials(creds: Credentials): void {
 export interface CloudCommandDependencies {
   readonly deviceClient: DeviceAuthorizationClient;
   readonly deviceStore: DeviceCredentialStore;
+  readonly registryClient?: RegistryDeviceClient;
 }
 
 function defaultDependencies(): CloudCommandDependencies {
@@ -60,6 +62,8 @@ export async function cloudCommand(rest: string[], dependencies: CloudCommandDep
         return await cloudLogin(args, dependencies);
       case "logout":
         return await cloudLogout(dependencies);
+      case "namespace":
+        return await cloudNamespace(args, dependencies);
       case "worker-token":
         return await cloudWorkerToken();
       case "deploy":
@@ -172,6 +176,25 @@ async function cloudLogin(args: string[], dependencies: CloudCommandDependencies
   } });
   await dependencies.deviceStore.save(controlPlaneUrl, result.token, result.grant);
   log.success(`authorized ${result.grant.clientName} for environment ${environmentId}`);
+  return 0;
+}
+
+/** Shows the environment's Carbon Registry namespace, authorized by the active device login. */
+async function cloudNamespace(args: string[], dependencies: CloudCommandDependencies): Promise<number> {
+  let registryUrl = process.env.CARBON_REGISTRY_URL ?? ""; let bindingId = "";
+  for (let i = 0; i < args.length; i += 1) {
+    const next = args[i + 1];
+    if (args[i] === "--registry-url" && next) { registryUrl = next; i++; }
+    else if (args[i] === "--binding" && next) { bindingId = next; i++; }
+    else { log.error(`unknown or incomplete namespace option: ${args[i]}`); return 1; }
+  }
+  if (!registryUrl || !bindingId) { log.error("namespace requires --registry-url (or CARBON_REGISTRY_URL) and --binding"); return 1; }
+  const active = await dependencies.deviceStore.active();
+  if (!active) { log.error("no active device login — run `carbon cloud login` first"); return 1; }
+  const scope = parseComponent("EnvironmentScope", active.profile.grant.scope);
+  const request = parseComponent("RegistryRequest", { scope, bindingId, command: { kind: "namespace.get" } });
+  const result = await (dependencies.registryClient ?? new RegistryDeviceClient()).execute(registryUrl, active.profile, active.token, request);
+  log.raw(JSON.stringify(result.result, null, 2) + "\n");
   return 0;
 }
 
@@ -337,6 +360,10 @@ ${c.bold("Subcommands:")}
 
   ${c.cyan("logout")}   Remove the active device credential from OS secure storage
 
+  ${c.cyan("namespace")} Show this environment's Carbon Registry namespace (uses the device login)
+               --registry-url <origin>     (or CARBON_REGISTRY_URL)
+               --binding <binding-id>      (required)
+
   ${c.cyan("worker-token")} Mint a worker-scoped token (set WORKER_API_TOKEN to it) — separate
                from the org token above: a worker token can claim/complete
                any org's queued work, an org token cannot
@@ -366,7 +393,7 @@ export class CloudCommand extends Command {
   readonly meta: CommandMeta = {
     name: "cloud",
     summary: "Build, sign and publish through Carbon Cloud",
-    usage: "cloud <signup|login|logout|worker-token|deploy|list|status> [options]",
+    usage: "cloud <signup|login|logout|namespace|worker-token|deploy|list|status> [options]",
     examples: [
       "carbon cloud signup --url https://cloud.example.com --name \"My Org\"",
       "carbon cloud deploy --repo https://github.com/me/app.git --commit HEAD --target deb",

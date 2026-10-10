@@ -48,6 +48,7 @@ exact Registry binding. A Database assertion is refused by Registry, a Registry
 assertion is refused by Database, and revoking the grant blocks both the
 exchange and assertions already issued. The first canonical Registry request is
 `namespace.get`, which returns the environment's reserved namespace and requires
-`metadata.read`. The CLI does not call it yet.
+`metadata.read`. `carbon cloud namespace --registry-url <origin> --binding <id>`
+calls it with the device login.
 
 Personal and worker credentials remain separate later work.

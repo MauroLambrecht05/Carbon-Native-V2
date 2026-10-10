@@ -211,6 +211,36 @@ suite("Cloud migrations against real Postgres", () => {
     expect((await sql`SELECT count(*)::integer AS count FROM cloud_schema_migrations`)[0].count).toBe(rows.length);
   });
 
+  test("event backfill copies earlier events into the organization log in order, behind everything recorded since", async () => {
+    const sql = await database(); await migrate(sql, fixtureDirectory("0023"));
+    const org = crypto.randomUUID(); const account = crypto.randomUUID(); const project = crypto.randomUUID(); const environment = crypto.randomUUID(); const worker = crypto.randomUUID();
+    await sql`INSERT INTO accounts (id, primary_email, name, verified_at, terms_version) VALUES (${account}, 'owner@example.test', 'Owner', now(), 'fixture')`;
+    await sql`INSERT INTO organizations (id, name, slug, human_managed) VALUES (${org}, 'History', 'history', false)`;
+    await sql`INSERT INTO projects (id, org_id, name, slug) VALUES (${project}, ${org}, 'App', 'app')`;
+    await sql`INSERT INTO environments (id, org_id, project_id, name, kind) VALUES (${environment}, ${org}, ${project}, 'Development', 'development')`;
+    await sql`INSERT INTO workers (id, org_id, name, purposes, status, created_by) VALUES (${worker}, ${org}, 'win-01', '{build}', 'revoked', ${account})`;
+    const old = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()];
+    await sql`INSERT INTO organization_security_events (id, org_id, actor_account_id, action, request_id, revision, created_at) VALUES (${old[0]!}, ${org}, ${account}, 'organization.create', ${crypto.randomUUID()}, 1, now() - interval '4 days')`;
+    await sql`INSERT INTO catalog_events (id, org_id, project_id, environment_id, actor_account_id, action, revision, request_id, created_at) VALUES (${old[1]!}, ${org}, ${project}, ${environment}, ${account}, 'catalog.project-create', 1, ${crypto.randomUUID()}, now() - interval '3 days')`;
+    await sql`INSERT INTO worker_events (id, org_id, worker_id, action, request_id, created_at) VALUES (${old[2]!}, ${org}, ${worker}, 'worker.enrolled', ${crypto.randomUUID()}, now() - interval '2 days')`;
+    await sql`INSERT INTO catalog_events (id, org_id, project_id, actor_account_id, action, revision, request_id, created_at) VALUES (${old[3]!}, ${org}, ${project}, ${account}, 'catalog.project-command.update', 2, ${crypto.randomUUID()}, now() - interval '1 day')`;
+    // 0023 installs the triggers; an event written between 0023 and the backfill is recorded once, not twice.
+    await migrate(sql, fixtureDirectory("0025")); const between = crypto.randomUUID();
+    await sql`INSERT INTO catalog_events (id, org_id, project_id, actor_account_id, action, revision, request_id) VALUES (${between}, ${org}, ${project}, ${account}, 'catalog.project-command.archive', 3, ${crypto.randomUUID()})`;
+    expect(await sql`SELECT id FROM platform_events`).toHaveLength(1);
+    await migrate(sql); const after = crypto.randomUUID();
+    await sql`INSERT INTO catalog_events (id, org_id, project_id, actor_account_id, action, revision, request_id) VALUES (${after}, ${org}, ${project}, ${account}, 'catalog.project-command.archive', 4, ${crypto.randomUUID()})`;
+    const log = await sql`SELECT id, action, actor_kind, actor_id, resource_kind, resource_id, project_id, environment_id, revision::text FROM platform_events WHERE org_id = ${org} ORDER BY transaction_id, sequence`;
+    expect(log.map((row: { id: string }) => row.id)).toEqual([...old, between, after]);
+    expect(log[0]).toMatchObject({ action: "organization.create", actor_kind: "account", actor_id: account, resource_kind: "organization", resource_id: org, revision: "1" });
+    expect(log[1]).toMatchObject({ resource_kind: "environment", resource_id: environment, project_id: project, environment_id: environment });
+    expect(log[2]).toMatchObject({ action: "worker.enrolled", actor_kind: "worker", actor_id: worker, resource_kind: "worker", resource_id: worker, revision: null });
+    expect(log[3]).toMatchObject({ resource_kind: "project", resource_id: project, environment_id: null, revision: "2" });
+    // Running the backfill's statement again adds nothing.
+    await sql.unsafe(readFileSync(join(migrationsDir, "0025_event_backfill_and_limits.sql"), "utf8").split("-- Backfill:")[1]!.replace(/^[^\n]*\n(--[^\n]*\n)*/, ""));
+    expect(await sql`SELECT id FROM platform_events WHERE org_id = ${org}`).toHaveLength(6);
+  });
+
   test("adopts the real baseline without inventing an owner or changing legacy tokens", async () => {
     const sql = await database();
     for (const file of readdirSync(migrationsDir).filter(f => /^000[1-4]_/.test(f)).sort()) await sql.unsafe(readFileSync(join(migrationsDir, file), "utf8"));

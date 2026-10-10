@@ -111,3 +111,9 @@ and columns; the triggers keep writing harmlessly. See
 that copies app events into `platform_events`. It is additive and leaves the
 legacy `end_users` tables of 0004 untouched. Recovery: code from before 0024
 ignores these tables.
+
+0025 adds `worker_rate_limits` and backfills `platform_events` from the eleven
+source event tables for rows written before 0023. Backfilled rows are placed
+under transaction 3 so they sort before every event recorded by the triggers.
+The statement skips rows already present, so it is safe to repeat. Recovery:
+code from before 0025 ignores both.

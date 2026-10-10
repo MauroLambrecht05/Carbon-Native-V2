@@ -68,16 +68,17 @@ effect on the next use without a separate revocation step.
 |---|---|---|---|---|
 | `pt_` personal | refused | refused | refused | refused |
 | `dc_` device | refused | refused | refused | refused |
-| `cs_` service account | refused | refused | refused | accepted |
-| `ce_` environment | refused | refused | refused | accepted |
+| `cs_` service account | refused | refused | refused | reads only |
+| `ce_` environment | refused | refused | refused | reads only |
 | `wc_` worker lease and secret delivery | refused | refused | refused | refused |
 
 Recovery restores every credential: reinstating the organization, restoring the
 project, or recovering and resuming the environment.
 
-Automation credentials (`cs_`, `ce_`) are still accepted while an environment is
-paused. Blocking mutations during a pause is the owning service's job through
-its paused binding.
+While an environment is paused, automation credentials (`cs_`, `ce_`) are
+accepted for `metadata.read` and `data.read` only. A write assertion issued
+before the pause stops being current, and no new one is issued until the
+environment resumes.
 
 Before this phase, `cs_` and `ce_` verification and the service authority for
 `cs_`/`dc_` assertions accepted any environment that was not finally deleted.

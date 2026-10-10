@@ -3,7 +3,7 @@ import { AccountCatalog, AccountEnvironmentCredentials, AccountEnvironmentSecret
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { createHash, createHmac, randomBytes, generateKeyPairSync } from "node:crypto";
 import {
-  AccountAuthentication, AccountDeviceAuthorization, AccountServiceAccounts, AccountAudit, OrganizationLifecycle, PostgresAuditLog, AccountPersonalCredentials, PersonalCredentialAuthentication, PostgresPersonalCredentialRepository, AccountLegacyTokens, PostgresLegacyTokenRepository, PostgresIdentityRepository, CreateOrganizationUseCase, IssueWorkerTokenUseCase, VerifyTokenUseCase, DeviceCredentialAuthentication, DeliverAccountMail, EnvelopeMessageProtector, PostgresAccountIdentityRepository, PostgresDeviceAuthorizationRepository, PostgresServiceAccountRepository, ServiceAccountAuthentication, ServiceAssertionIssuer, ServiceAssertionVerifier,
+  AccountAuthentication, AccountDeviceAuthorization, AccountServiceAccounts, AccountAudit, OrganizationLifecycle, PostgresAuditLog, AccountPersonalCredentials, PersonalCredentialAuthentication, PersonalCredentialExchange, PostgresPersonalCredentialRepository, AccountLegacyTokens, PostgresLegacyTokenRepository, PostgresIdentityRepository, CreateOrganizationUseCase, IssueWorkerTokenUseCase, VerifyTokenUseCase, DeviceCredentialAuthentication, DeliverAccountMail, EnvelopeMessageProtector, PostgresAccountIdentityRepository, PostgresDeviceAuthorizationRepository, PostgresServiceAccountRepository, ServiceAccountAuthentication, ServiceAssertionIssuer, ServiceAssertionVerifier,
   PostgresAccountMailQueue, bodyDigest, tokenDigest, type AccountEmail,
   AccountSecurity, PostgresAccountSecurityRepository, PostgresMfaVerification, Rfc6238Totp,
   AccountProfile, PostgresAccountProfileRepository,
@@ -68,7 +68,7 @@ async function harness() {
     async createProposal(_installationId, _repositoryId, _baseBranch, proposal) { repositoryProposals++; return { pullRequestNumber: 12, url: 'https://github.com/carbon-team/desktop/pull/12', branch: proposal.branch, baseSha: 'b'.repeat(40), headSha: 'c'.repeat(40) }; },
     verifyWebhook(raw, signature, deliveryId, event) { const expected='sha256='+createHmac('sha256','repository-webhook-secret').update(raw).digest('hex'); if(signature!==expected||!deliveryId||!event) throw new Error('invalid webhook'); },
   };
-  const makeHandler = (auth: AccountAuthentication) => createAccountRoutes(auth, origin, new AccountSecurity(auth, new PostgresAccountSecurityRepository(sql, mfa), protector, totp), new AccountProfile(auth, new PostgresAccountProfileRepository(sql, mfa), protector, config), new OrganizationAccess(auth, new PostgresOrganizationRepository(sql), protector), new OrganizationInvitations(auth, new PostgresOrganizationInvitationsRepository(sql), new PostgresOrganizationRepository(sql), protector, config), new ExternalAccountAuthentication(auth, new PostgresExternalAccountRepository(sql, mfa), githubProvider, protector, config), new AccountAuthorization(auth, new PostgresPlatformAuthority(sql)), new AccountCatalog(auth, new PostgresCatalogRepository(sql), protector), undefined, undefined, new AccountEnvironmentCredentials(auth, new PostgresEnvironmentCredentialRepository(sql), protector), new AccountEnvironmentSecrets(auth, new PostgresEnvironmentSecretRepository(sql, secretProtector), protector), new AccountRepositories(auth, new PostgresRepositoryIntegrationRepository(sql), repositoryProvider, protector), new AccountDeviceAuthorization(auth,new PostgresDeviceAuthorizationRepository(sql),protector,origin,config.rateLimitKey,new DeviceCredentialAuthentication(sql),assertionIssuer),new AccountServiceAccounts(auth,new PostgresServiceAccountRepository(sql),protector,assertionIssuer),new AccountPersonalCredentials(auth,new PostgresPersonalCredentialRepository(sql),protector),new AccountLegacyTokens(auth,new PostgresLegacyTokenRepository(sql),protector,'accept'),new AccountWorkers(auth,new PostgresWorkerRepository(sql,secretProtector),protector),new AccountAudit(auth,new PostgresAuditLog(sql),protector,{pollMs:15,heartbeatMs:120,maxMs:900}),new AccountRealms(auth,new PostgresAppAuthRepository(sql),protector));
+  const makeHandler = (auth: AccountAuthentication) => createAccountRoutes(auth, origin, new AccountSecurity(auth, new PostgresAccountSecurityRepository(sql, mfa), protector, totp), new AccountProfile(auth, new PostgresAccountProfileRepository(sql, mfa), protector, config), new OrganizationAccess(auth, new PostgresOrganizationRepository(sql), protector), new OrganizationInvitations(auth, new PostgresOrganizationInvitationsRepository(sql), new PostgresOrganizationRepository(sql), protector, config), new ExternalAccountAuthentication(auth, new PostgresExternalAccountRepository(sql, mfa), githubProvider, protector, config), new AccountAuthorization(auth, new PostgresPlatformAuthority(sql)), new AccountCatalog(auth, new PostgresCatalogRepository(sql), protector), undefined, undefined, new AccountEnvironmentCredentials(auth, new PostgresEnvironmentCredentialRepository(sql), protector), new AccountEnvironmentSecrets(auth, new PostgresEnvironmentSecretRepository(sql, secretProtector), protector), new AccountRepositories(auth, new PostgresRepositoryIntegrationRepository(sql), repositoryProvider, protector), new AccountDeviceAuthorization(auth,new PostgresDeviceAuthorizationRepository(sql),protector,origin,config.rateLimitKey,new DeviceCredentialAuthentication(sql),assertionIssuer),new AccountServiceAccounts(auth,new PostgresServiceAccountRepository(sql),protector,assertionIssuer),new AccountPersonalCredentials(auth,new PostgresPersonalCredentialRepository(sql),protector),new AccountLegacyTokens(auth,new PostgresLegacyTokenRepository(sql),protector,'accept'),new AccountWorkers(auth,new PostgresWorkerRepository(sql,secretProtector),protector),new AccountAudit(auth,new PostgresAuditLog(sql),protector,{pollMs:15,heartbeatMs:120,maxMs:900}),new AccountRealms(auth,new PostgresAppAuthRepository(sql),protector),new PersonalCredentialExchange(new PersonalCredentialAuthentication(sql),assertionIssuer));
   let auth = makeAuth(); let handler = makeHandler(auth);
   // A stand-in identity provider: real discovery, token and key endpoints over the OIDC client's transport, a real signing key.
   const idpIssuer = 'https://login.example.test'; const idpKeys = generateKeyPairSync('ec', { namedCurve: 'P-256' }); const forgedKeys = generateKeyPairSync('ec', { namedCurve: 'P-256' });
@@ -96,10 +96,10 @@ async function harness() {
   // App calls carry no cookie and no Origin unless a test adds them on purpose.
   const app = (path: string, method = 'GET', input?: unknown, overrides: Record<string, string> = {}, peer = '203.0.113.10') => appHandler(new Request(origin + path, { method,
     headers: { ...(input === undefined ? {} : { 'content-type': 'application/json' }), ...overrides }, body: input === undefined ? undefined : JSON.stringify(input) }), peer);
-  const workerHandler = createWorkerRoutes(new WorkerProtocol(new PostgresWorkerRepository(sql, secretProtector)), origin);
+  const workerHandler = createWorkerRoutes(new WorkerProtocol(new PostgresWorkerRepository(sql, secretProtector), config.rateLimitKey), origin);
   // Worker calls carry no Origin and no cookies unless a test adds them on purpose.
-  const workerApi = (path: string, input?: unknown, overrides: Record<string, string> = {}) => workerHandler(new Request(origin + path, { method: 'POST',
-    headers: { ...(input === undefined ? {} : { 'content-type': 'application/json' }), ...overrides }, body: input === undefined ? undefined : JSON.stringify(input) }));
+  const workerApi = (path: string, input?: unknown, overrides: Record<string, string> = {}, peer = '203.0.113.20') => workerHandler(new Request(origin + path, { method: 'POST',
+    headers: { ...(input === undefined ? {} : { 'content-type': 'application/json' }), ...overrides }, body: input === undefined ? undefined : JSON.stringify(input) }), peer);
   const leases = new WorkerLeases(new PostgresWorkerRepository(sql, secretProtector));
   const organizationLifecycle = new OrganizationLifecycle(new PostgresAuditLog(sql)); const catalogLifecycle = new CatalogLifecycle(new PostgresCatalogRepository(sql));
   const mail: (AccountEmail & { idempotencyKey: string })[] = [];
@@ -542,8 +542,8 @@ suite("real account authentication", () => {
 
     // Custody failure delivers nothing and leaves the lease deliverable once custody recovers.
     const guarded = await grant(); offer = await claim(); const path = `/worker/v1/leases/${guarded.id}/secrets`;
-    const wrongCustody = createWorkerRoutes(new WorkerProtocol(new PostgresWorkerRepository(h.sql, new EnvelopeSecretProtector(new LocalAesSecretKeyCustodian('secret-test-key', { 'secret-test-key': randomBytes(32).toString('base64') })))), origin);
-    const refused = await wrongCustody(new Request(origin + path, { method: 'POST', headers: held(offer) })); expect(refused.status).toBe(503); expect(await refused.text()).not.toContain('first-signing-value');
+    const wrongCustody = createWorkerRoutes(new WorkerProtocol(new PostgresWorkerRepository(h.sql, new EnvelopeSecretProtector(new LocalAesSecretKeyCustodian('secret-test-key', { 'secret-test-key': randomBytes(32).toString('base64') }))), randomBytes(32).toString('base64')), origin);
+    const refused = await wrongCustody(new Request(origin + path, { method: 'POST', headers: held(offer) }), '203.0.113.20'); expect(refused.status).toBe(503); expect(await refused.text()).not.toContain('first-signing-value');
     expect((await h.sql`SELECT materialized_at FROM worker_leases WHERE id = ${guarded.id}`)[0].materialized_at).toBeNull();
     // A secret disabled after the grant is not delivered; the current version is delivered after rotation.
     const disabled = parseComponent('EnvironmentSecretReceipt', await (await h.call(`${environmentPath}/secrets/${secret.id}`, 'POST', { kind: 'disable', disabled: true }, { 'if-match': secret.revision, 'x-csrf-token': csrf() })).json()).secret;
@@ -1130,6 +1130,105 @@ suite("real account authentication", () => {
     expect(await h.sql`SELECT id FROM app_users`).toHaveLength(1);
     const durable = JSON.stringify({ events: await h.sql`SELECT * FROM app_auth_events`, challenges: await h.sql`SELECT * FROM app_challenges`, providers: await h.sql`SELECT * FROM realm_providers` });
     for (const secret of ['oidc-client-secret-value', signedIn.token, viaEmail.token]) expect(durable).not.toContain(secret);
+  });
+
+  test('gap closures: personal credential exchange, paused environments are read-only for automation, worker enrollment limits, and browser origins for apps', async () => {
+    const h = await harness(); await h.challenge('owner@example.test'); await h.deliver(); await h.complete();
+    const org = (await organizationResponse(h.createOrganization('Gap team', 'gap-team'))).receipt.id;
+    const scope = parseComponent('EnvironmentScope', parseComponent('CatalogReceipt', (await (await h.createProject(org)).json() as { receipt: unknown }).receipt).scope);
+    const csrf = () => h.cookies.get('__Host-carbon-csrf')!; const base = `/platform/v1/orgs/${org}/projects/${scope.projectId}`; const envPath = `${base}/environments/${scope.environmentId}`;
+    const provider = { apply: async (work: ProvisioningWork) => ({ scope: work.scope, remoteResourceId: `${work.owner}-${work.scope.environmentId}`, state: work.action === 'pause' ? 'paused' as const : 'active' as const }) };
+    const provisioning = new ProvisionEnvironment(new PostgresProvisioningRepository(h.sql), { database: provider, registry: provider });
+    const drain = async () => { while (await provisioning.execute()) { /* until idle */ } };
+    await drain();
+    const environment = async () => parseComponent('CatalogEnvironmentDetails', await (await h.call(envPath)).json());
+    const expiresAt = new Date(Date.now() + 86400_000).toISOString(); const post = (path: string, body: unknown, revision?: string) => h.call(path, 'POST', body, { 'x-csrf-token': csrf(), ...(revision ? { 'if-match': revision } : {}) });
+    const bindings = (await environment()).bindings; const databaseBinding = bindings.find(binding => binding.owner === 'database')!.id; const registryBinding = bindings.find(binding => binding.owner === 'registry')!.id;
+
+    // ── Personal credentials exchange for request-bound Database and Registry assertions.
+    const personal = parseComponent('PersonalCredentialIssue', await (await post('/platform/v1/account/personal-credentials', { name: 'Laptop', scope, permissions: ['metadata.read'], expiresAt })).json());
+    const bearer = { authorization: `Bearer ${personal.token}` };
+    const dataBody = JSON.stringify({ scope, bindingId: databaseBinding, command: { kind: 'tables.list', limit: 25 } });
+    const dataBound = { method: 'POST' as const, path: dataRequestPath(scope, databaseBinding, 'tables.list'), bodyDigest: bodyDigest(dataBody) };
+    const registryBound = { method: 'POST' as const, path: registryRequestPath(scope, registryBinding, 'namespace.get'), bodyDigest: bodyDigest(canonicalRegistryRequest({ scope, bindingId: registryBinding, command: { kind: 'namespace.get' } })) };
+    const dataExchange = { audience: 'carbon-database' as const, scope, permission: 'metadata.read' as const, request: dataBound };
+    const registryExchange = { audience: 'carbon-registry' as const, scope, permission: 'metadata.read' as const, request: registryBound };
+    expect((await h.call('/platform/v1/personal/assertions', 'POST', dataExchange)).status).toBe(401);
+    expect((await h.call('/platform/v1/personal/assertions', 'POST', dataExchange, { ...bearer, origin: 'https://attacker.test' })).status).toBe(403);
+    // Other credential types are not personal credentials, and each route takes only its own audience and path family.
+    expect((await h.call('/platform/v1/personal/assertions', 'POST', dataExchange, { authorization: `Bearer dc_${'A'.repeat(43)}` })).status).toBe(401);
+    expect((await h.call('/platform/v1/device/assertions', 'POST', dataExchange, bearer)).status).toBe(401);
+    expect((await h.call('/platform/v1/personal/assertions', 'POST', registryExchange, bearer)).status).toBe(400);
+    expect((await h.call('/platform/v1/personal/registry-assertions', 'POST', dataExchange, bearer)).status).toBe(400);
+    expect((await h.call('/platform/v1/personal/assertions', 'POST', { ...dataExchange, permission: 'data.write' }, bearer)).status).toBe(401);
+    const liveAuthority = new PostgresServiceAuthority(h.sql); const trusted = { isCurrent: async () => true, consume: async () => true }; const keys = [{ ...h.assertionKey, key: h.assertionPublicKey }];
+    const dataToken = parseComponent('DeviceAssertionResponse', await (await h.call('/platform/v1/personal/assertions', 'POST', dataExchange, bearer)).json());
+    const dataAssertion = await new ServiceAssertionVerifier(origin, 'carbon-database', keys, trusted).verify(dataToken.token, { scope, permission: 'metadata.read', ...dataBound, principalKinds: ['account'] });
+    expect(dataAssertion.principal).toMatchObject({ kind: 'account', audience: 'cli', credentialId: personal.credential.id }); expect(dataAssertion.roles).toEqual([]);
+    expect(await liveAuthority.isCurrent(dataAssertion)).toBe(true);
+    const registryToken = parseComponent('DeviceAssertionResponse', await (await h.call('/platform/v1/personal/registry-assertions', 'POST', registryExchange, bearer)).json());
+    const registryAssertion = await new ServiceAssertionVerifier(origin, 'carbon-registry', keys, trusted).verify(registryToken.token, { scope, permission: 'metadata.read', ...registryBound, principalKinds: ['account'] });
+    expect(await liveAuthority.isCurrent(registryAssertion)).toBe(true);
+    expect(await liveAuthority.isCurrent({ ...dataAssertion, aud: 'carbon-registry' })).toBe(false); expect(await liveAuthority.isCurrent({ ...registryAssertion, aud: 'carbon-database' })).toBe(false);
+    // A forged principal naming someone else's credential, and a revoked credential, have no live authority.
+    expect(await liveAuthority.isCurrent({ ...dataAssertion, principal: { ...dataAssertion.principal, credentialId: crypto.randomUUID() } })).toBe(false);
+    expect((await post(`/platform/v1/account/personal-credentials/${personal.credential.id}`, { kind: 'revoke' }, personal.credential.revision)).status).toBe(200);
+    expect(await liveAuthority.isCurrent(dataAssertion)).toBe(false); expect(await liveAuthority.isCurrent(registryAssertion)).toBe(false);
+    expect((await h.call('/platform/v1/personal/assertions', 'POST', dataExchange, bearer)).status).toBe(401);
+
+    // ── A paused environment is read-only for automation credentials.
+    const environmentCredential = parseComponent('EnvironmentCredentialIssue', await (await post(`${envPath}/credentials`, { name: 'CI', permissions: ['data.read', 'data.write'], expiresAt }, (await environment()).environment.revision)).json());
+    const serviceAccount = parseComponent('ServiceAccountReceipt', await (await post(`/platform/v1/orgs/${org}/service-accounts`, { name: 'Automation', scope, permissions: ['data.read', 'data.write'] }, (await environment()).environment.revision)).json()).serviceAccount;
+    const service = parseComponent('ServiceAccountCredentialIssue', await (await post(`/platform/v1/orgs/${org}/service-accounts/${serviceAccount.id}/credentials`, { name: 'CI', expiresAt }, serviceAccount.revision)).json());
+    const works = (attempt: Promise<unknown>) => attempt.then(() => true, () => false);
+    const automation = async (permission: 'data.read' | 'data.write') => [
+      await works(new EnvironmentCredentialAuthentication(new PostgresEnvironmentCredentialRepository(h.sql)).verify(environmentCredential.token, scope, permission)),
+      await works(new ServiceAccountAuthentication(new PostgresServiceAccountRepository(h.sql)).verify(service.token, scope, permission))];
+    const writeBody = JSON.stringify({ scope, bindingId: databaseBinding, command: { kind: 'rows.query', tableId: crypto.randomUUID(), access: { mode: 'application' }, limit: 1 } });
+    const serviceAssertion = async (permission: 'data.read' | 'data.write', kind: 'rows.query' | 'row.insert') => {
+      const request = { method: 'POST' as const, path: dataRequestPath(scope, databaseBinding, kind), bodyDigest: bodyDigest(writeBody) };
+      const response = await h.call('/platform/v1/service-assertions', 'POST', { audience: 'carbon-database', scope, permission, request }, { authorization: `Bearer ${service.token}` });
+      if (response.status !== 200) return undefined;
+      return new ServiceAssertionVerifier(origin, 'carbon-database', keys, trusted).verify(parseComponent('ServiceAccountAssertionResponse', await response.json()).token, { scope, permission, ...request, principalKinds: ['service_account'] });
+    };
+    expect(await automation('data.read')).toEqual([true, true]); expect(await automation('data.write')).toEqual([true, true]);
+    const writeWhileActive = (await serviceAssertion('data.write', 'row.insert'))!; expect(await liveAuthority.isCurrent(writeWhileActive)).toBe(true);
+    expect((await h.catalogCommand(envPath, { kind: 'pause', paused: true }, (await environment()).environment.revision)).status).toBe(202); await drain();
+    expect(await automation('data.read')).toEqual([true, true]); expect(await automation('data.write')).toEqual([false, false]);
+    // A write assertion issued before the pause stops being current, and no new one is issued; reads continue.
+    expect(await liveAuthority.isCurrent(writeWhileActive)).toBe(false);
+    expect(await serviceAssertion('data.write', 'row.insert')).toBeUndefined();
+    expect(await liveAuthority.isCurrent((await serviceAssertion('data.read', 'rows.query'))!)).toBe(true);
+    expect((await h.catalogCommand(envPath, { kind: 'pause', paused: false }, (await environment()).environment.revision)).status).toBe(202); await drain();
+    expect(await automation('data.write')).toEqual([true, true]);
+
+    // ── Worker enrollment attempts are limited per caller, without storing the caller's address.
+    const enrollment = parseComponent('WorkerEnrollmentIssue', await (await post(`/platform/v1/orgs/${org}/workers`, { name: 'win-01', purposes: ['build'] })).json());
+    const capabilities = { platform: 'windows', arch: 'x64', toolchains: [] };
+    const guesses: number[] = []; for (let i = 0; i < 11; i++) guesses.push((await h.workerApi('/worker/v1/enroll', { code: `we_${String(i).padStart(43, 'A')}`, capabilities }, {}, '198.51.100.200')).status);
+    expect(guesses.slice(0, 10).every(status => status === 401)).toBe(true); expect(guesses[10]).toBe(429);
+    // The limited caller is refused even with the real code, which stays unspent for the legitimate machine.
+    expect((await h.workerApi('/worker/v1/enroll', { code: enrollment.code, capabilities }, {}, '198.51.100.200')).status).toBe(429);
+    expect((await h.workerApi('/worker/v1/enroll', { code: enrollment.code, capabilities }, {}, '198.51.100.201')).status).toBe(201);
+    expect(JSON.stringify(await h.sql`SELECT * FROM worker_rate_limits`)).not.toContain('198.51.100');
+
+    // ── Browsers may call the app API from the origins of the realm's allowed redirects, never with credentials.
+    const realmPath = `${envPath}/realm`;
+    const realm = parseComponent('RealmReceipt', await (await post(realmPath, { kind: 'configure', signupEnabled: true, magicLinkEnabled: true, sessionTtlSeconds: 3600, redirectAllowlist: ['https://app.example.test/callback', 'http://localhost:5173/auth'] })).json()).realm;
+    const appBase = `/app/v1/realms/${realm.id}`;
+    const preflight = await h.app(`${appBase}/session`, 'OPTIONS', undefined, { origin: 'https://app.example.test', 'access-control-request-method': 'GET', 'access-control-request-headers': 'authorization' });
+    expect(preflight.status).toBe(204);
+    expect(Object.fromEntries(['access-control-allow-origin', 'access-control-allow-methods', 'access-control-allow-headers', 'access-control-max-age', 'vary'].map(name => [name, preflight.headers.get(name)])))
+      .toEqual({ 'access-control-allow-origin': 'https://app.example.test', 'access-control-allow-methods': 'GET, POST, DELETE', 'access-control-allow-headers': 'authorization, content-type, x-request-id', 'access-control-max-age': '600', vary: 'Origin' });
+    expect(preflight.headers.get('access-control-allow-credentials')).toBeNull();
+    const allowed = await h.app(`${appBase}/configuration`, 'GET', undefined, { origin: 'http://localhost:5173' }); expect(allowed.status).toBe(200); expect(allowed.headers.get('access-control-allow-origin')).toBe('http://localhost:5173');
+    for (const foreign of ['https://evil.example.test', 'https://app.example.test.evil.test', 'http://app.example.test', 'null']) {
+      const refused = await h.app(`${appBase}/configuration`, 'GET', undefined, { origin: foreign }); expect(refused.status).toBe(403); expect(refused.headers.get('access-control-allow-origin')).toBeNull();
+      expect((await h.app(`${appBase}/session`, 'OPTIONS', undefined, { origin: foreign })).status).toBe(403);
+    }
+    // A non-browser caller sends no Origin and is unaffected; an unknown realm allows no origin.
+    const native = await h.app(`${appBase}/configuration`); expect(native.status).toBe(200); expect(native.headers.get('access-control-allow-origin')).toBeNull();
+    expect((await h.app(`/app/v1/realms/${crypto.randomUUID()}/configuration`, 'GET', undefined, { origin: 'https://app.example.test' })).status).toBe(403);
   });
 
   test('device authorization approves bounded CLI access, discloses once, rate-limits polling, and revokes durably', async()=>{

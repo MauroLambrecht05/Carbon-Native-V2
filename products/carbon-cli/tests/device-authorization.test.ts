@@ -2,9 +2,11 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { canonicalDataRequest, dataRequestPath, type DataRequest, type DeviceGrant } from "@carbon/contracts/platform";
+import { canonicalDataRequest, canonicalRegistryRequest, dataRequestPath, registryRequestPath, type DataRequest, type DeviceGrant, type RegistryRequest } from "@carbon/contracts/platform";
 import { DeviceAuthorizationClient, type HttpTransport } from "../infrastructure/cloud/DeviceAuthorizationClient.ts";
 import { DatabaseDeviceClient } from "../infrastructure/cloud/DatabaseDeviceClient.ts";
+import { RegistryDeviceClient } from "../infrastructure/cloud/RegistryDeviceClient.ts";
+import { cloudCommand } from "../presentation/commands/cloud/cloud.command.ts";
 import { DeviceCredentialStore, type SecretStore } from "../infrastructure/cloud/DeviceCredentialStore.ts";
 
 const orgId = "11111111-1111-4111-8111-111111111111";
@@ -115,5 +117,72 @@ describe("Database assertion exchange", () => {
     const request: DataRequest = { scope: { orgId, projectId, environmentId }, bindingId, command: { kind: "tables.list", limit: 25 } };
     await expect(new DatabaseDeviceClient(transport).execute("https://database.example.com", { id: grantId, controlPlaneUrl: "https://cloud.example.com", grant }, deviceToken, request)).rejects.toThrow("invalid or revoked");
     expect(calls).toBe(1);
+  });
+});
+
+describe("Registry assertion exchange", () => {
+  const registryBinding = "66666666-6666-4666-8666-666666666666";
+  const request: RegistryRequest = { scope: { orgId, projectId, environmentId }, bindingId: registryBinding, command: { kind: "namespace.get" } };
+  const profile = { id: grantId, controlPlaneUrl: "https://cloud.example.com", grant };
+  const namespace = { id: "77777777-7777-4777-8777-777777777777", state: "active" as const, revision: "3" };
+
+  test("uses the Registry-only exchange and binds the assertion to the exact canonical request", async () => {
+    let exchangeBody: any; let registryBody = ""; let correlation = "";
+    const transport: HttpTransport = async (input, init) => {
+      const headers = new Headers(init?.headers); const requestId = headers.get("x-request-id")!;
+      if (String(input).startsWith("https://cloud.example.com/")) {
+        expect(String(input)).toBe("https://cloud.example.com/platform/v1/device/registry-assertions");
+        exchangeBody = JSON.parse(String(init?.body)); correlation = requestId;
+        expect(headers.get("authorization")).toBe(`Bearer ${deviceToken}`);
+        return json({ tokenType: "Bearer", token: assertionToken, expiresInSeconds: 60 }, requestId);
+      }
+      registryBody = String(init?.body);
+      expect(requestId).toBe(correlation);
+      // Registry sees the short-lived assertion, never the device credential.
+      expect(headers.get("authorization")).toBe(`Bearer ${assertionToken}`);
+      expect(String(input)).toBe(`https://registry.example.com${registryRequestPath(request.scope, registryBinding, "namespace.get")}`);
+      return json({ scope: request.scope, bindingId: registryBinding, result: namespace }, requestId);
+    };
+    const result = await new RegistryDeviceClient(transport).execute("https://registry.example.com", profile, deviceToken, request);
+    expect(registryBody).toBe(canonicalRegistryRequest(request));
+    expect(exchangeBody).toMatchObject({ audience: "carbon-registry", permission: "metadata.read", request: { method: "POST", path: registryRequestPath(request.scope, registryBinding, "namespace.get") } });
+    expect(exchangeBody.request.bodyDigest).toMatch(/^[a-f0-9]{64}$/);
+    expect(result.result).toEqual(namespace);
+  });
+
+  test("stops before any network call when the request is outside the device grant", async () => {
+    let calls = 0; const transport: HttpTransport = async (_input, init) => { calls += 1; return json({}, new Headers(init?.headers).get("x-request-id")!, 401); };
+    const client = new RegistryDeviceClient(transport);
+    await expect(client.execute("https://registry.example.com", profile, deviceToken, { ...request, scope: { ...request.scope, environmentId: bindingId } })).rejects.toThrow("does not match the active device scope");
+    await expect(client.execute("https://registry.example.com", { ...profile, grant: { ...grant, permissions: ["data.read"] } }, deviceToken, request)).rejects.toThrow("does not include this registry permission");
+    await expect(client.execute("http://registry.example.com", profile, deviceToken, request)).rejects.toThrow("HTTPS or loopback origin");
+    expect(calls).toBe(0);
+    await expect(client.execute("https://registry.example.com", profile, deviceToken, request)).rejects.toThrow("invalid or revoked");
+    expect(calls).toBe(1);
+  });
+
+  test("rejects a Registry answer for a different binding or correlation", async () => {
+    const answer = (body: unknown, mutate?: (id: string) => string): HttpTransport => async (input, init) => {
+      const requestId = new Headers(init?.headers).get("x-request-id")!;
+      if (String(input).startsWith("https://cloud.example.com/")) return json({ tokenType: "Bearer", token: assertionToken, expiresInSeconds: 60 }, requestId);
+      return json(body, mutate ? mutate(requestId) : requestId);
+    };
+    await expect(new RegistryDeviceClient(answer({ scope: request.scope, bindingId, result: namespace })).execute("https://registry.example.com", profile, deviceToken, request)).rejects.toThrow("mismatched scope");
+    await expect(new RegistryDeviceClient(answer({ scope: request.scope, bindingId: registryBinding, result: namespace }, () => grantId)).execute("https://registry.example.com", profile, deviceToken, request)).rejects.toThrow("invalid response");
+  });
+
+  test("carbon cloud namespace prints the namespace for the active device login", async () => {
+    const calls: unknown[][] = [];
+    const dependencies = {
+      deviceClient: new DeviceAuthorizationClient(async () => { throw new Error("unused"); }),
+      deviceStore: { active: async () => ({ profile, token: deviceToken }) } as unknown as DeviceCredentialStore,
+      registryClient: { execute: async (...args: unknown[]) => { calls.push(args); return { scope: request.scope, bindingId: registryBinding, result: namespace }; } } as unknown as RegistryDeviceClient,
+    };
+    expect(await cloudCommand(["namespace", "--registry-url", "https://registry.example.com", "--binding", registryBinding], dependencies)).toBe(0);
+    expect(calls).toEqual([["https://registry.example.com", profile, deviceToken, request]]);
+    expect(await cloudCommand(["namespace", "--binding", registryBinding], dependencies)).toBe(1);
+    expect(await cloudCommand(["namespace", "--registry-url", "https://registry.example.com"], dependencies)).toBe(1);
+    expect(await cloudCommand(["namespace", "--registry-url", "https://registry.example.com", "--binding", registryBinding], { ...dependencies, deviceStore: { active: async () => null } as unknown as DeviceCredentialStore })).toBe(1);
+    expect(calls).toHaveLength(1);
   });
 });

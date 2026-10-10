@@ -37,6 +37,8 @@ export interface AppAuthRepository {
   executeUser(input: AppUserMutation): Promise<AppUserReceipt>;
   // The app and its end users.
   configuration(realmId: string): Promise<AppRealmConfiguration>;
+  /** The web origins of the realm's allowed redirect URIs. */
+  origins(realmId: string): Promise<readonly string[]>;
   /** Never reveals whether the address has an account or a link was sent. */
   requestMagicLink(input: MagicLinkRequest): Promise<void>;
   consumeMagicLink(realmId: string, tokenHash: string, grant: SessionGrant): Promise<AppSession>;

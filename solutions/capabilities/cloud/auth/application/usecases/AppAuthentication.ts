@@ -73,6 +73,11 @@ export class AppAuthentication {
     return parseComponent('AppSessionIssue', { token, expiresAt: session.expiresAt.toISOString(), user: { id: session.userId, email: session.email } });
   }
 
+  /** A browser origin may call a realm only if one of the realm's allowed redirect URIs lives on it. */
+  async allowsOrigin(realmId: string, origin: string): Promise<boolean> {
+    try { parseComponent('Id', realmId); return (await this.repository.origins(realmId)).includes(origin); } catch { return false; }
+  }
+
   async configuration(realmId: string): Promise<AppRealmConfiguration> { parseComponent('Id', realmId); return this.repository.configuration(realmId); }
 
   /** Always answers the same way: whether the address has an account, may sign up, or was sent anything is never revealed. */

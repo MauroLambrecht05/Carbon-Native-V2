@@ -10,7 +10,7 @@ const STATUS: Record<string, number> = { unauthenticated: 401, forbidden: 403, v
  * type is ever consulted, and a request that carries a browser Origin is refused outright.
  */
 export function createWorkerRoutes(workers: WorkerProtocol, origin: string) {
-  return async (request: Request): Promise<Response> => {
+  return async (request: Request, peerAddress: string): Promise<Response> => {
     let requestId = request.headers.get('x-request-id') ?? randomUUID();
     try { parseComponent('Id', requestId); } catch { requestId = randomUUID(); }
     const headers = { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'x-request-id': requestId };
@@ -28,7 +28,7 @@ export function createWorkerRoutes(workers: WorkerProtocol, origin: string) {
         try { return JSON.parse(Buffer.from(raw).toString('utf8')); } catch { throw new PlatformFault('validation', 'Invalid JSON request'); }
       };
       const authorization = request.headers.get('authorization') ?? '';
-      if (url.pathname === `${BASE}/enroll`) return json(await workers.enroll(parseComponent('WorkerEnrollRequest', await body(true)), requestId), 201);
+      if (url.pathname === `${BASE}/enroll`) return json(await workers.enroll(parseComponent('WorkerEnrollRequest', await body(true)), peerAddress, requestId), 201);
       if (url.pathname === `${BASE}/credential`) return json(await workers.rotate(authorization, requestId));
       if (url.pathname === `${BASE}/leases/claim`) return json(await workers.claim(authorization, requestId));
       const lease = new RegExp(`^${BASE}/leases/([^/]+)(/secrets)?$`).exec(url.pathname);

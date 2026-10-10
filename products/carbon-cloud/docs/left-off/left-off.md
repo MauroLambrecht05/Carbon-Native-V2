@@ -1,6 +1,7 @@
 # Carbon platform left-off checkpoint
 
-Checkpoint: 2026-10-10, after Phase 6: application authentication.
+Checkpoint: 2026-10-10, after Phase 6 (application authentication) and the gap
+closures that followed it.
 
 The overall platform plan remains unfinished. The rough scope estimate is about
 **30% of the complete backend-and-frontend goal**, with backend foundations in
@@ -52,7 +53,7 @@ legacy permissions are inferred.
 
 ## Last verified state
 
-- Affected Bun regression: **524 tests, 5,243 assertions, 0 failures across 62
+- Affected Bun regression: **530 tests, 5,329 assertions, 0 failures across 62
   files**, including the real HTTP/PostgreSQL cross-service suites.
 - Solutions, Carbon Cloud, Database, Registry and CLI TypeScript checks passed.
 - Generated platform types are current.
@@ -75,7 +76,8 @@ This checkpoint supports exact Database and Registry assertion exchange for
 service accounts and CLI device credentials, personal credentials, enrolled
 workers that receive leased secrets, a browsable and streamable organization
 event log, recoverable deletion, and application authentication with Database
-row access for app users. Nothing grants worker leases in production yet. The
+row access for app users. Personal credentials exchange for Database and
+Registry assertions, and the CLI can read its Registry namespace. Nothing grants worker leases in production yet. The
 AWS KMS adapter and the OIDC client are tested against stand-ins, not real
 providers. Final deletion marks rows and destroys no owning-service data.
 Suspension has no operator route. Legacy `cc_` and `wk_` tokens, the legacy

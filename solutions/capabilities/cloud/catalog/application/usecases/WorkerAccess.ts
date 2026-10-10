@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import {
   PlatformFault, parseComponent, type CommandOptions, type EnvironmentScope, type PageRequest, type WorkerCapabilities, type WorkerCommand, type WorkerCredentialIssue,
   type WorkerEnrollmentCreate, type WorkerEnrollmentIssue, type WorkerEnrollRequest, type WorkerLease, type WorkerLeaseCommand, type WorkerLeaseOffer, type WorkerLeaseReceipt,
@@ -57,7 +57,7 @@ export class AccountWorkers {
 
 /** What a worker can do with its own wc_ credential and, for one lease, its wl_ lease token. */
 export class WorkerProtocol {
-  constructor(private readonly repository: WorkerRepository, private readonly now: () => Date = () => new Date()) {}
+  constructor(private readonly repository: WorkerRepository, private readonly rateLimitKey: string, private readonly now: () => Date = () => new Date()) {}
 
   private credential() {
     const token = opaque('wc');
@@ -69,10 +69,11 @@ export class WorkerProtocol {
     return { tokenHash: tokenDigest(bearer(authorization, 'wc')), leaseId, leaseTokenHash: tokenDigest(leaseToken), requestId };
   }
 
-  async enroll(value: WorkerEnrollRequest, requestId: string): Promise<WorkerCredentialIssue> {
+  async enroll(value: WorkerEnrollRequest, peer: string, requestId: string): Promise<WorkerCredentialIssue> {
     parseComponent('Id', requestId); const input = parseComponent('WorkerEnrollRequest', value);
+    const peerDigest = createHmac('sha256', this.rateLimitKey).update(`worker-enroll:${peer}`).digest('hex');
     const capabilities: WorkerCapabilities = { ...input.capabilities, toolchains: [...input.capabilities.toolchains].sort() };
-    return this.repository.enroll({ codeHash: tokenDigest(input.code), capabilities, ...this.credential(), requestId });
+    return this.repository.enroll({ codeHash: tokenDigest(input.code), capabilities, peerDigest, ...this.credential(), requestId });
   }
   async rotate(authorization: string, requestId: string): Promise<WorkerCredentialIssue> {
     parseComponent('Id', requestId);

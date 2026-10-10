@@ -33,7 +33,10 @@ Organization managers use the browser session with `organization.manage`:
   re-offers their work. Revocation is permanent and clears the credential hash.
 
 The worker calls `POST /worker/v1/enroll` with the code and its capabilities
-(platform, architecture, toolchains) and receives its `wc_` credential.
+(platform, architecture, toolchains) and receives its `wc_` credential. One
+caller may make ten enrollment attempts per 15 minutes; further attempts are
+refused with 429 even with a valid code. The counter is a keyed digest, so no
+address is stored.
 `POST /worker/v1/credential` rotates it; the previous credential stops at once.
 
 Every worker call re-checks that the worker is active, its credential is
@@ -101,6 +104,6 @@ values when the lease ends.
   Phases 7 and 13.
 - The legacy `wk_` worker tokens and the legacy build queue routes are unchanged
   and are not connected to enrolled workers.
-- Enrollment and worker calls are not rate limited.
+- Authenticated worker calls are not rate limited; only enrollment attempts are.
 - Worker attestation, network isolation and workspace erasure belong to the
   Windows execution phase.

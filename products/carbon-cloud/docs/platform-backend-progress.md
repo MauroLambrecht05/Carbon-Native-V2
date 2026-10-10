@@ -1548,3 +1548,44 @@ real OIDC provider.
 Phase 6 stops here. Phase 7 (build orchestration: immutable source snapshots,
 quota reservations, attempts, leases, heartbeats, cancellation and ordered logs)
 is next in [the handoff](left-off/handoff.md).
+
+## 2026-10-10: gap closures after Phase 6
+
+Six items that earlier phases listed as not done:
+
+- **Personal credential exchange (Phase 3).** `pt_` credentials exchange for
+  request-bound Database and Registry assertions at
+  `/platform/v1/personal/assertions` and `/platform/v1/personal/registry-assertions`,
+  behind `CARBON_PERSONAL_ASSERTIONS`. Cloud's live authority recognizes a
+  personal credential as an account acting through a tool and re-reads it.
+- **CLI Registry command (Phase 2).** `carbon cloud namespace` calls Registry's
+  `namespace.get` through the Registry-only device exchange.
+- **Worker enrollment limit (Phase 4).** Ten attempts per caller per 15 minutes,
+  counted before the code is examined, with no address stored.
+- **Event backfill (Phase 5).** Migration 0025 copies events from before 0023
+  into `platform_events`, in order and behind everything recorded since.
+- **Browser origins for apps (Phase 6).** The app API answers CORS for the web
+  origins of a realm's allowed redirect URIs and never allows credentials.
+- **Paused environments (Phase 5).** `cs_` and `ce_` credentials are read-only
+  while an environment is paused, both at verification and in the live authority
+  check, so a write assertion issued before the pause stops being current.
+
+Each has a test over real routes and PostgreSQL, and six mutation checks (paused
+write at verification and at authority, revoked personal credential, enrollment
+limit, origin check, backfill position) each make a test fail.
+
+The affected regression passed **530 tests, 0 failures and 5,329
+assertions across 62 files**. Generated contracts are current and the
+Solutions, Cloud, Database, Registry and CLI TypeScript checks pass.
+
+Still open from earlier phases, with the reason:
+
+- A run against a real AWS account and a real OIDC provider: needs accounts.
+- Destroying owning-service data after final deletion: needs a delete action in
+  the Database and Registry lifecycle protocol.
+- An operator route for suspension: Phase 16.
+- A production caller for worker leases, and retiring `wk_`: Phase 7.
+- Deleting legacy `cc_` hashes after a published window: needs the window
+  decided.
+- Custom claims, passwords, passkeys and MFA for app users; migrating the legacy
+  organization-wide end users; event retention and export: not started.

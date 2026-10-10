@@ -13,7 +13,7 @@ export interface WorkerMutation {
   readonly actor: OrganizationActor; readonly orgId: string; readonly workerId: string; readonly command: WorkerCommand;
   readonly expectedRevision: string; readonly keyDigest: string; readonly requestDigest: string; readonly requestId: string;
 }
-export interface WorkerEnrollInput extends WorkerCredentialSecret { readonly codeHash: string; readonly capabilities: WorkerCapabilities; readonly requestId: string }
+export interface WorkerEnrollInput extends WorkerCredentialSecret { readonly codeHash: string; readonly capabilities: WorkerCapabilities; readonly peerDigest: string; readonly requestId: string }
 export interface WorkerRotateInput extends WorkerCredentialSecret { readonly currentTokenHash: string; readonly requestId: string }
 export interface WorkerClaimInput { readonly tokenHash: string; readonly leaseToken: string; readonly leaseTokenHash: string; readonly requestId: string }
 export interface WorkerLeaseInput { readonly tokenHash: string; readonly leaseId: string; readonly leaseTokenHash: string; readonly requestId: string }

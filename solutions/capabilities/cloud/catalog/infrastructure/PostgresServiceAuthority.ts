@@ -137,7 +137,7 @@ export class PostgresServiceAuthority extends PostgresPlatformAuthority implemen
         JOIN environments e ON e.id=s.environment_id AND e.project_id=s.project_id AND e.org_id=s.org_id
         WHERE s.managed AND s.id=${principal.id} AND c.id=${principal.credentialId} AND s.org_id=${scope.orgId} AND s.project_id=${scope.projectId}
           AND s.environment_id=${scope.environmentId} AND s.status='active' AND c.status='active' AND c.expires_at>now()
-          AND o.state='active' AND p.state='active' AND e.state IN ('active','paused') AND ${permission}=ANY(s.permissions)`)[0];
+          AND o.state='active' AND p.state='active' AND (e.state='active' OR (e.state='paused' AND ${permission} IN ('metadata.read','data.read'))) AND ${permission}=ANY(s.permissions)`)[0];
       return !!service&&service.permission_revision===principal.permissionRevision&&service.credential_permission_revision===service.permission_revision;
     }
     if(principal.audience==='cli'){
@@ -148,8 +148,18 @@ export class PostgresServiceAuthority extends PostgresPlatformAuthority implemen
         JOIN environments e ON e.id=g.environment_id AND e.project_id=g.project_id AND e.org_id=g.org_id
         WHERE g.id=${principal.credentialId} AND g.account_id=${principal.id} AND g.org_id=${scope.orgId} AND g.project_id=${scope.projectId}
           AND g.environment_id=${scope.environmentId} AND g.status='active' AND g.expires_at>now() AND a.state='active'
-          AND o.state='active' AND m.state='active' AND p.state='active' AND e.state IN ('active','paused') AND ${permission}=ANY(g.permissions)`)[0];
-      return !!grant&&grant.grant_permission_revision===principal.permissionRevision&&grant.account_permission_revision===grant.grant_permission_revision;
+          AND o.state='active' AND m.state='active' AND p.state='active' AND (e.state='active' OR (e.state='paused' AND ${permission} IN ('metadata.read','data.read'))) AND ${permission}=ANY(g.permissions)`)[0];
+      if(grant)return grant.grant_permission_revision===principal.permissionRevision&&grant.account_permission_revision===grant.grant_permission_revision;
+      // Not a device grant: the same account acting through a personal credential.
+      const personal=(await tx`SELECT c.permission_revision::text AS credential_permission_revision,a.permission_revision::text AS account_permission_revision
+        FROM personal_credentials c JOIN accounts a ON a.id=c.account_id JOIN organizations o ON o.id=c.org_id
+        JOIN memberships m ON m.account_id=c.account_id AND m.org_id=c.org_id
+        JOIN projects p ON p.id=c.project_id AND p.org_id=c.org_id
+        JOIN environments e ON e.id=c.environment_id AND e.project_id=c.project_id AND e.org_id=c.org_id
+        WHERE c.id=${principal.credentialId} AND c.account_id=${principal.id} AND c.org_id=${scope.orgId} AND c.project_id=${scope.projectId}
+          AND c.environment_id=${scope.environmentId} AND c.status='active' AND c.expires_at>now() AND a.state='active'
+          AND o.state='active' AND m.state='active' AND p.state='active' AND e.state='active' AND ${permission}=ANY(c.permissions)`)[0];
+      return !!personal&&personal.credential_permission_revision===principal.permissionRevision&&personal.account_permission_revision===personal.credential_permission_revision;
     }
     return false;
   }

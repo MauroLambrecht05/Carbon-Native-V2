@@ -10,6 +10,8 @@ import type {
 const HEARTBEAT_SECONDS = 20;
 const LEASE_WINDOW_SECONDS = HEARTBEAT_SECONDS * 3;
 const WORKER_LIMIT = 100;
+/** Enrollment attempts one caller may make per 15 minutes. */
+const ENROLLMENT_ATTEMPTS = 10;
 
 type Row = Record<string, any>;
 type Tx = Bun.TransactionSQL;
@@ -120,15 +122,22 @@ export class PostgresWorkerRepository extends PostgresPlatformAuthority implemen
   // ── The worker ───────────────────────────────────────────────────────────
 
   async enroll(input: WorkerEnrollInput) {
-    return this.sql.begin(async tx => {
+    // Counted before the code is examined and committed either way, so guessing codes is bounded per caller.
+    const outcome = await this.sql.begin(async tx => {
+      const count = (await tx<{ count: number }[]>`INSERT INTO worker_rate_limits (key_digest, window_started_at, request_count)
+        VALUES (${input.peerDigest}, to_timestamp(floor(extract(epoch from now()) / 900) * 900), 1)
+        ON CONFLICT (key_digest, window_started_at) DO UPDATE SET request_count = worker_rate_limits.request_count + 1 RETURNING request_count AS count`)[0]!.count;
+      if (count > ENROLLMENT_ATTEMPTS) return { fault: new PlatformFault('rate_limited', 'Too many enrollment attempts') };
       const row = (await tx<Row[]>`SELECT w.*, o.state AS organization_state FROM workers w JOIN organizations o ON o.id = w.org_id WHERE w.enrollment_hash = ${input.codeHash} FOR UPDATE OF w`)[0];
-      if (!row || row.status !== 'pending' || row.enrollment_expires_at <= new Date() || row.organization_state !== 'active') throw new PlatformFault('unauthenticated', 'Worker enrollment code is invalid or expired');
+      if (!row || row.status !== 'pending' || row.enrollment_expires_at <= new Date() || row.organization_state !== 'active') return { fault: new PlatformFault('unauthenticated', 'Worker enrollment code is invalid or expired') };
       const updated = (await tx<Row[]>`UPDATE workers SET status = 'active', enrollment_hash = NULL, enrollment_expires_at = NULL, capabilities = ${JSON.stringify(input.capabilities)}::text::jsonb,
         token_hash = ${input.tokenHash}, token_prefix = ${input.tokenPrefix}, credential_expires_at = ${input.credentialExpiresAt}, last_seen_at = now(), revision = revision + 1, updated_at = now()
         WHERE id = ${row.id} RETURNING *, revision::text`)[0]!;
       await this.event(tx, row.org_id, 'worker.enrolled', input.requestId, { workerId: row.id }, { capabilities: input.capabilities });
-      return parseComponent('WorkerCredentialIssue', { worker: worker(updated), token: input.token });
+      return { value: parseComponent('WorkerCredentialIssue', { worker: worker(updated), token: input.token }) };
     });
+    if ('fault' in outcome) throw outcome.fault;
+    return outcome.value;
   }
 
   /** Every worker call re-reads the worker, its credential and its organization. */

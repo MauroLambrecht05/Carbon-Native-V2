@@ -55,9 +55,22 @@ The last rule means any change to the owner's access suspends the credential
 until the owner rotates it, and rotation re-checks the delegated permissions.
 Successful verification updates `lastUsedAt`.
 
+## Assertion exchange
+
+With `CARBON_PERSONAL_ASSERTIONS=enabled`, a personal credential can be
+exchanged for a 60-second assertion bound to one request:
+
+- `POST /platform/v1/personal/assertions` for Carbon Database;
+- `POST /platform/v1/personal/registry-assertions` for Carbon Registry.
+
+The request bodies are the device ones (`DeviceAssertionExchange`,
+`DeviceRegistryAssertionExchange`): a personal credential stands for the same
+account acting through a tool. Each route takes only its own audience and path
+family. The credential must be scoped to the exact environment and list the
+permission. The receiving service's live authority check re-reads the
+credential, so revocation stops an assertion already issued.
+
 ## Boundary
 
-Personal credentials are not yet exchangeable for Database or Registry
-assertions, and the CLI does not use them. Device (`dc_`) and service-account
-(`cs_`) credentials remain the only inputs to those exchanges. Worker
-credentials are described in [workers.md](workers.md).
+The CLI does not use personal credentials yet; it signs in with the device flow.
+Worker credentials are described in [workers.md](workers.md).

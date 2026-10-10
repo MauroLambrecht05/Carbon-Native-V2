@@ -99,6 +99,14 @@ errors are never returned to the caller.
 
 The public configuration lists provider names only.
 
+### Browser callers
+
+A browser may call the app API from the web origin of any redirect URI in the
+realm's allowlist. Other origins are refused with 403. Responses name the
+calling origin and never allow credentials, so no cookie can accompany a
+cross-origin call; the only credential is the `aps_` token the page sends itself.
+Native apps and servers send no `Origin` and are unaffected.
+
 ## Database access as an app user
 
 `POST /assertions` exchanges a live session for a 60-second assertion addressed
@@ -133,8 +141,6 @@ has a `system` actor there and names the user as the resource.
 - Passwords, phone or passkey sign-in, and MFA for app users.
 - Custom claims and roles for app users; row policies see the user ID only.
 - Export of users.
-- Browser use from another origin: the app API sends no CORS headers, so it is
-  for native apps and server-side callers.
 - App users in Carbon Registry or anything other than Database row access.
 - The legacy organization-wide end users of `/v1/end-users/*` are unchanged and
   are not migrated into realms.

@@ -63,8 +63,9 @@ events until it ends.
 
 ## Limits
 
-- The log starts at migration 0023. Earlier events stay in their source tables
-  and are not backfilled.
+- Events from before migration 0023 were copied in by migration 0025, in the
+  order they happened and behind everything recorded since. Earlier events
+  never appear on a stream, which only carries what happens after connecting.
 - Account-level security events (sign-in, MFA, sessions) are not in the
   organization log.
 - Entries have no metadata beyond the fields above.

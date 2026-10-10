@@ -176,6 +176,13 @@ export class PostgresAppAuthRepository extends PostgresPlatformAuthority impleme
     });
   }
 
+  async origins(realmId: string) {
+    return this.sql.begin(async tx => {
+      const realm = await this.liveRealm(tx, realmId);
+      return [...new Set((realm.redirect_allowlist as string[]).map(uri => new URL(uri).origin).filter(origin => origin !== 'null'))];
+    });
+  }
+
   async requestMagicLink(input: MagicLinkRequest) {
     // The peer limit is a refusal and must be committed; everything after it either sends or silently does not.
     const refused = await this.sql.begin(async tx => {
