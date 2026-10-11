@@ -36,6 +36,7 @@ enable one at a time.
 | `CARBON_METRICS_TOKEN` | The metrics endpoint |
 | `CARBON_MIGRATE_ON_START=disabled` | Migrations as a separate release step |
 | `CARBON_NEWER_SCHEMA=allowed` | An older version serving a newer schema, for a rollback |
+| `CARBON_WORKER_REQUESTS_PER_MINUTE` | The request limit per worker credential; 1,200 when unset |
 
 These are per deployment. There is no per-organization flag, so "enable for a
 canary set of organizations" cannot be done yet (G-162).

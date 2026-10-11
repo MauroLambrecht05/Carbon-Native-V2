@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { WorkerProtocol } from '@carbon/catalog';
 import type { WorkerBuilds, WorkerFunctions } from '@carbon/orchestration';
 import { ContractError, PlatformFault, parseComponent } from '@carbon/contracts/platform';
+import { credentialKey, type RateLimiter } from '@carbon/operations';
 
 const BASE = '/worker/v1';
 const STATUS: Record<string, number> = { unauthenticated: 401, forbidden: 403, validation: 400, not_found: 404, conflict: 409, capability: 501, quota: 429, rate_limited: 429 };
@@ -9,18 +10,26 @@ const STATUS: Record<string, number> = { unauthenticated: 401, forbidden: 403, v
 /**
  * The worker API. It authenticates with worker credentials only: no cookie, session, CSRF token or other credential
  * type is ever consulted, and a request that carries a browser Origin is refused outright.
+ *
+ * With a `limiter`, every request is counted against the credential it presents before anything else is done with
+ * it, and a credential over its limit is answered `429` until its window ends. Enrollment has its own, stricter
+ * limit in the database and is counted here by address.
  */
-export function createWorkerRoutes(workers: WorkerProtocol, origin: string, builds?: WorkerBuilds, functions?: WorkerFunctions) {
+export function createWorkerRoutes(workers: WorkerProtocol, origin: string, builds?: WorkerBuilds, functions?: WorkerFunctions, limiter?: RateLimiter) {
   return async (request: Request, peerAddress: string): Promise<Response> => {
     let requestId = request.headers.get('x-request-id') ?? randomUUID();
     try { parseComponent('Id', requestId); } catch { requestId = randomUUID(); }
-    const headers = { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'x-request-id': requestId };
+    const headers: Record<string, string> = { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'x-request-id': requestId };
     const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers });
     try {
       const url = new URL(request.url);
       if (url.host !== new URL(origin).host) throw new PlatformFault('forbidden', 'Invalid request origin');
       if (request.headers.has('origin') || request.headers.get('sec-fetch-site')) throw new PlatformFault('forbidden', 'The worker API is not available to browsers');
       if (request.method !== 'POST' || url.search) throw new PlatformFault('not_found', 'Route not found');
+      if (limiter) {
+        const decision = limiter.check(credentialKey(request.headers.get('authorization'), peerAddress));
+        if (!decision.allowed) { headers['retry-after'] = String(decision.retryAfterSeconds); throw new PlatformFault('rate_limited', 'Too many requests from this worker; slow down'); }
+      }
       const body = async (required: boolean, maximumBytes = 8192): Promise<unknown> => {
         const raw = new Uint8Array(await request.arrayBuffer());
         if (raw.byteLength > maximumBytes) throw new PlatformFault('validation', 'Request body exceeds the limit');

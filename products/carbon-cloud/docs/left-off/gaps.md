@@ -40,6 +40,7 @@ Saying "keep" closes the entry.
 | G-46 | Which encodings of a secret are removed from logs? | The exact value, its JSON-escaped form, and each line of a multi-line value |
 | G-56 | Should Cloud widen or halt a rollout on its own? | No. A person changes the percentage |
 | G-58 | The standalone updater daemon: harden or remove? | Kept, held to the shared conformance fixture, marked non-canonical |
+| G-60 | Where are anonymous requests (the update feed, public downloads, Registry's public endpoints) rate limited? | At the ingress or CDN in front of the services, not inside them. The feed is also read from the database on each request, with a 60-second cache header |
 | G-61 | Does a paused environment serve its update feed? | No. It answers `404` |
 | G-68 | Composite, cascading or `set null` foreign keys? | Single column, to a primary key, never cascading |
 | G-69 | A foreign key lets a writer learn whether a key exists in a table they cannot read. Accept? | Accepted |
@@ -77,7 +78,6 @@ decisions.md: G-09, G-22, G-101, G-106, G-110, G-119 and G-141.
 | G-15 | App users cannot be exported | Phase 6 | The plan lists export under BE-04 |
 | G-16 | Events have no retention policy and no export, and the stream never sends a `gap` frame | Phase 5 | |
 | G-17 | Account-level security events (sign-in, MFA, sessions) are not in the organization log | Phase 5 | They are account-scoped, not organization-scoped |
-| G-18 | Authenticated worker calls are not rate limited; only enrollment is | Phase 4, gap closures | |
 | G-20 | Members are not notified when a deletion is scheduled | Phase 5 | |
 | G-21 | Owning-service events (Database, Registry) are not in the organization log | Phase 5 | |
 | G-22 | The event stream polls the database once a second; there is no broker | Phase 5 | Acceptable until load says otherwise |
@@ -124,7 +124,6 @@ The rest of the gate is not, and is listed here.
 | G-55 | A release's compatibility is `min_version` only. The plan also lists the data environment and migration warnings | Those belong to data migrations (Phase 10) | Phase 10 |
 | G-57 | No packaged app has updated itself from this feed. The three updaters agree with the publisher on signatures and decisions through the shared fixture, and Cloud's feed is checked with the TypeScript updater's code, but download, slot swap and restart against a Cloud release have not run | Needs a real packaged build (G-36) | A packaged app on version N updates to N+1 from a Cloud channel and rolls back after a withdrawal |
 | G-59 | The CLI still publishes through the older path (`carbon publish` straight to S3, `PublishReleaseUseCase`, `RollbackReleaseUseCase`, `YankReleaseUseCase`), which bypasses Cloud releases, their audit trail and their immutability | CLI work is Phase 15 | Phase 15 |
-| G-60 | The public feed is read from the database on every request, with a 60-second cache header and no rate limit or CDN | Acceptable until load says otherwise | Phase 18 |
 | G-62 | Withdrawing a release leaves its artifacts in the bucket and reachable by URL | No object lifecycle yet | Phase 11 |
 | G-63 | A channel shows its latest 100 revisions; older ones are stored but cannot be listed. Releases cannot be filtered by state | Paging was not needed yet | When a channel passes 100 revisions |
 
@@ -154,7 +153,7 @@ entries here.
 | G-76 | App users have no blob access. Only accounts and service accounts can use blob commands; an app can reach only public objects | Needs an object ownership rule and app-user assertions for blobs | An app user uploads and reads their own objects, and cannot reach another user's |
 | G-77 | An object is limited to 256 MiB and is held in memory while it is uploaded, verified and downloaded | Verification before storing is done on a buffer | Streaming or multipart transfer with verification |
 | G-79 | A download address stays usable for its 60 seconds even if the caller's access is revoked in that time. Database has no assertion to recheck when the address is used | The address deliberately carries no session | Addresses bound to a recheck, or a shorter lifetime |
-| G-80 | A public object can be cached for up to 60 seconds after its bucket is made private. Public downloads are not rate limited | Short shared caching was chosen over none | Phase 18 |
+| G-80 | A public object can be cached for up to 60 seconds after its bucket is made private | Short shared caching was chosen over none | A decision: accept, or serve public objects with no shared caching |
 | G-81 | Usage is recorded in Database (`blob_usage`) and is not reported to Cloud billing or shown anywhere | Billing is Phase 16 | Phase 16 |
 | G-82 | Quota is per bucket. There is no environment or organization total, and no plan limit | No plan policy yet | Phase 16 |
 | G-83 | If cleanup cannot delete an abandoned upload's bytes, it does not try again: the transfer is already closed. Those bytes stay until removed by hand or by a bucket lifecycle rule | The store port has no listing | Cleanup lists a bucket's prefix, or the bucket gets a lifecycle rule |
@@ -283,6 +282,7 @@ walkthrough of the frontend plan; this is the first.
 
 | Gap | From | Closed by |
 |---|---|---|
+| G-18: authenticated worker calls were not rate limited | Phase 4 | Phase 19: each worker credential is counted in the memory of each Cloud instance and answered `429` with `Retry-After` over its limit, before the protocol or the database is reached. Per instance, not shared, which operations.md says |
 | G-147 (three more areas) and G-150 (one part): secrets, environment credentials and workers showed a notice, and the recent-sign-in link could not be finished in the console | Phase 17 | Phase 19: all three are connected, and `/auth/fresh` completes the emailed link against the signed-in session and returns to the page that asked. A command refused for lacking a recent sign-in now offers that link. Found while testing: a secret just submitted stayed in its form field; secret fields are now emptied after a successful command |
 | G-147 (four more areas): the console's builds, signing, releases and channels routes showed a notice | Phase 17 | Phase 19: all four are connected, per environment, with pages written for what the service has. Rendered from live answers in a test with every form's request checked, and walked against the real API from a queued build through a worker, a signed release, a channel and a withdrawal |
 | G-147 (one area): the console's functions routes showed a notice | Phase 17 | Phase 19: functions are connected, with pages written for what the service has (revisions, executions, logs, calendar and interval schedules) over their own contract. Rendered from live answers in a test, and walked against the real API with a worker finishing an execution |

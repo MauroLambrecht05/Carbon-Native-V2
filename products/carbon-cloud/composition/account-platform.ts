@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { RateLimiter } from '@carbon/operations';
 import { AccountRegistry, PostgresAccountRegistryAuthority, type RegistryTransport, AccountCatalog, AccountEnvironmentCredentials, AccountEnvironmentSecrets, AccountRepositories, EnvelopeSecretProtector, LocalAesSecretKeyCustodian, AwsKmsSecretKeyCustodian, CatalogLifecycle, PostgresProviderSecretReader, AccountWorkers, WorkerLeases, WorkerProtocol, PostgresWorkerRepository, PostgresCatalogRepository, PostgresEnvironmentCredentialRepository, PostgresEnvironmentSecretRepository, PostgresRepositoryIntegrationRepository } from '@carbon/catalog';
 import { AccountBlobs, AccountEngine, type BlobTransport, type EngineTransport, AccountData, AccountExports, AccountImports, ExportDownloads, PostgresExportJobs, PostgresImportJobs, RunExportJobs, RunImportJobs, PostgresAccountDataAuthority, type DataTransport, type ExportStore, type ImportTransport } from '@carbon/data';
 import { blobClientFromEnv, dataClientFromEnv, engineClientsFromEnv, exportStoreFromEnv, importClientFromEnv, registryClientFromEnv } from './data-platform.ts';
@@ -190,7 +191,7 @@ export function composeAccountPlatform(sql: Bun.SQL, config: AccountPlatformConf
     organizationLifecycle: new OrganizationLifecycle(auditLog),
     catalogLifecycle: new CatalogLifecycle(new PostgresCatalogRepository(sql)),
     workerHandler: workerRepository ? createWorkerRoutes(new WorkerProtocol(workerRepository, config.rateLimitKey), config.origin, buildRepository && config.artifactStore ? new WorkerBuilds(buildRepository, new S3ArtifactVerifier(config.artifactStore)) : undefined,
-      functionRepository ? new WorkerFunctions(functionRepository) : undefined) : undefined,
+      functionRepository ? new WorkerFunctions(functionRepository) : undefined, new RateLimiter(workerRateLimitFromEnv())) : undefined,
     workerLeases: workerRepository ? new WorkerLeases(workerRepository) : undefined,
     runImports: importJobs && config.imports ? new RunImportJobs(importJobs, config.imports) : undefined,
     runExports: exportJobs ? new RunExportJobs(exportJobs, config.data!, config.exportStore!) : undefined,
@@ -198,6 +199,18 @@ export function composeAccountPlatform(sql: Bun.SQL, config: AccountPlatformConf
     deliverMail: new DeliverAccountMail(new PostgresAccountMailQueue(sql), protector, notification),
     expireAccountProofs: () => externalAccounts.expire(),
   };
+}
+
+/**
+ * How many requests one worker credential may make of one Cloud instance per minute. A worker heartbeats every few
+ * seconds and sends log segments while it builds, so the default leaves a wide margin above honest use.
+ */
+export function workerRateLimitFromEnv(env: NodeJS.ProcessEnv = process.env): { limit: number; windowSeconds: number } {
+  const value = env.CARBON_WORKER_REQUESTS_PER_MINUTE;
+  if (value === undefined || value === '') return { limit: 1200, windowSeconds: 60 };
+  const limit = Number(value);
+  if (!Number.isInteger(limit) || limit < 60 || limit > 100000) throw new Error('CARBON_WORKER_REQUESTS_PER_MINUTE must be a whole number from 60 to 100000');
+  return { limit, windowSeconds: 60 };
 }
 
 /** Billing is on when CARBON_BILLING is `enabled`, and then the provider key, price and webhook secret are all required. */

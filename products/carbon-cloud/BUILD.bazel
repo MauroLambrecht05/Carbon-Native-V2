@@ -17,6 +17,14 @@ bun_test(
     deps = ["//solutions/contracts/platform:srcs"],
 )
 
+# The per-credential request limit on the worker API. Needs no database.
+bun_test(
+    name = "worker_rate_limit_test",
+    entry = "tests/worker-rate-limit.test.ts",
+    srcs = [":srcs"],
+    deps = ["//solutions/capabilities/cloud/catalog:srcs", "//solutions/contracts/platform:srcs", "//solutions/infrastructure/operations:srcs"],
+)
+
 # Without a configured Postgres URL, this still checks encryption/configuration.
 # Run the documented integration command for the real database scenarios.
 bun_test(

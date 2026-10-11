@@ -99,6 +99,31 @@ There is no distributed tracing (G-156).
 
 The legacy routes under `/v1` and `/api` in Cloud are not observed (G-157).
 
+## Request limits
+
+What is limited inside the services:
+
+| What | Limit | Counted by |
+|---|---|---|
+| Sign-in, recovery and verification links | 20 an hour | A keyed digest of the address and of the peer, in the database |
+| Device authorization requests and polling | 20 an hour; polling no faster than the interval given | The same, in the database |
+| Worker enrollment attempts | A handful per window | The peer, in the database |
+| Requests from one worker credential | 1,200 a minute by default (`CARBON_WORKER_REQUESTS_PER_MINUTE`, 60 to 100,000) | A digest of the credential, in the memory of each Cloud instance |
+
+The worker limit is per instance: with several instances behind a balancer a
+worker can make that many requests of each. Its purpose is to stop one
+misbehaving worker from occupying an instance, not to meter anything. A worker
+over its limit is answered `429` with `Retry-After`, and the refusal reaches
+neither the worker protocol nor the database.
+
+What is **not** limited inside the services: the public update feed, public
+blob downloads, Registry's public package and trust endpoints, and ordinary
+authenticated API calls. A service does not trust forwarded headers, so behind
+an ingress every anonymous request appears to come from the ingress, and a
+limit by address inside the service would limit everybody at once or nobody.
+Anonymous traffic must be limited at the ingress or CDN in front of the
+services. That is a condition of deploying them (see decisions.md, G-60).
+
 ## Releasing
 
 ### Migrations

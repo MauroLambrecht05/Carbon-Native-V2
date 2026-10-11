@@ -11,4 +11,5 @@
 export { redact, routeOf, SECRET_SHAPES } from "./adapters/redaction.ts";
 export { Metrics, type Sample } from "./adapters/metrics.ts";
 export { allowNewerSchema, migrationStatus, prepareSchema, readiness, schemaServable, type MigrationStatus, type ReadinessCheck } from "./adapters/readiness.ts";
+export { RateLimiter, credentialKey, type RateDecision, type RateLimit } from "./adapters/rate-limit.ts";
 export { observe, operationsRoutes, type OperationsConfig, type RequestLog } from "./adapters/observe.ts";

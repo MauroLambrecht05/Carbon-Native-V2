@@ -17,6 +17,12 @@ filegroup(
 )
 
 bun_test(
+    name = "rate_limit_test",
+    entry = "tests/rate-limit.test.ts",
+    srcs = [":srcs", ":tests"],
+)
+
+bun_test(
     name = "operations_test",
     entry = "tests/operations.test.ts",
     srcs = [":srcs", ":tests"],
