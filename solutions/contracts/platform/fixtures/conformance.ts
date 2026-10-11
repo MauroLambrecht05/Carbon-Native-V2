@@ -113,6 +113,8 @@ export const fixtures = {
   EnvironmentScope: scope,
   ServiceLifecycleCommand: { scope, bindingId: ids.credential, operationId: ids.operation, stepId: ids.request, leaseId: ids.account, action: 'ensure', remoteResourceId: null },
   ServiceLifecycleStatus: { scope, bindingId: ids.credential, remoteResourceId: 'fixture-environment', state: 'active' },
+  ServiceErasureCommand: { scope, bindingId: ids.credential, erasureId: ids.operation, remoteResourceId: 'fixture-environment' },
+  ServiceErasureReceipt: { scope, bindingId: ids.credential, erasureId: ids.operation, remoteResourceId: 'fixture-environment', state: 'erased', erasedAt: '2026-10-10T08:00:00Z', removed: { tables: 2, blob_objects: 5 } },
   OrganizationReceipt: { id: ids.org, revision: "1", message: "Organization updated" },
   OrganizationPage: { items: [], nextCursor: null },
   OrganizationMembersPage: { items: [], nextCursor: null, revision: "1" },

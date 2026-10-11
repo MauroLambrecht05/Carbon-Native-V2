@@ -244,9 +244,12 @@ placed and released, or the owner cancelling and scheduling again.
 
 ### What deletion still does not do
 
-Final deletion marks the organization deleted in Cloud. It does not remove
-anything from Carbon Database, Carbon Registry or object storage (G-09), and
-there is no customer-facing preview of what would be kept (G-142).
+Final deletion marks the organization deleted in Cloud and erases what Carbon
+Database and Carbon Registry hold for each of its environments
+([resource-lifecycle.md](resource-lifecycle.md), "Erasure"). A legal hold stops
+erasures that have not been carried out yet. Cloud's own rows, build and
+release artifacts, and Registry packages are not removed (G-09), and there is
+no customer-facing preview of what would be kept (G-142).
 
 ## Configuration
 
@@ -265,7 +268,8 @@ See G-135 to G-146 in [the gap ledger](left-off/gaps.md). The main ones:
 
 - Backup and restore (G-135).
 - No run against the real provider (G-136).
-- Final deletion destroys nothing in the owning services (G-09).
+- Final deletion does not remove Cloud's own rows, artifacts or Registry
+  packages (G-09).
 - Operators have no sign-in of their own, and Registry review is still outside
   this model (G-141, G-114).
 - Storage and egress are not metered (G-139).

@@ -2,14 +2,19 @@ import type { ApplyServiceLifecycle } from '@carbon/catalog';
 import { ContractError, PlatformFault, parseComponent } from '@carbon/contracts/platform';
 import { InvalidServiceAssertionError } from '@carbon/identity';
 
-export function createLifecycleRoutes(lifecycle: ApplyServiceLifecycle) {
+/**
+ * Lifecycle and erasure for one environment. `afterErasure` runs once an erasure has committed, for work that
+ * cannot be part of the database transaction.
+ */
+export function createLifecycleRoutes(lifecycle: ApplyServiceLifecycle, afterErasure?: () => void) {
   return async (request: Request): Promise<Response> => {
     let requestId = request.headers.get('x-request-id') ?? crypto.randomUUID();
     try { parseComponent('Id', requestId); } catch { requestId = crypto.randomUUID(); }
     const headers = { 'cache-control': 'no-store', 'x-request-id': requestId, 'x-content-type-options': 'nosniff' };
     try {
-      const url = new URL(request.url); const route = /^\/internal\/platform\/v1\/environments\/([^/]+)\/lifecycle$/.exec(url.pathname);
-      if (!route || !['POST', 'GET'].includes(request.method) || (request.method === 'POST' && url.search)) throw new PlatformFault('not_found', 'Route not found');
+      const url = new URL(request.url); const route = /^\/internal\/platform\/v1\/environments\/([^/]+)\/(lifecycle|erasure)$/.exec(url.pathname);
+      const erasing = route?.[2] === 'erasure';
+      if (!route || !['POST', 'GET'].includes(request.method) || (request.method === 'POST' && url.search) || (erasing && request.method !== 'POST')) throw new PlatformFault('not_found', 'Route not found');
       const authorization = request.headers.get('authorization') ?? '';
       if (!authorization.startsWith('Bearer ') || authorization.length > 32775) throw new PlatformFault('unauthenticated', 'A signed service assertion is required');
       if (request.method === 'GET') {
@@ -26,6 +31,11 @@ export function createLifecycleRoutes(lifecycle: ApplyServiceLifecycle) {
       } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
       const body = Buffer.concat(chunks).toString('utf8'); let input: unknown;
       try { input = JSON.parse(body); } catch { throw new PlatformFault('validation', 'Invalid JSON'); }
+      if (erasing) {
+        const erasure = parseComponent('ServiceErasureCommand', input);
+        if (erasure.scope.environmentId !== route[1]) throw new PlatformFault('validation', 'The request does not match this environment');
+        return Response.json(await lifecycle.erase(authorization.slice(7), erasure, url.pathname, body, request.headers.get('idempotency-key') ?? '', requestId, request.signal, afterErasure), { headers });
+      }
       const command = parseComponent('ServiceLifecycleCommand', input);
       if (command.scope.environmentId !== route[1]) throw new PlatformFault('validation', 'The request does not match this environment');
       const result = await lifecycle.execute(authorization.slice(7), command, url.pathname, body, request.headers.get('idempotency-key') ?? '', requestId, request.signal);

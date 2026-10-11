@@ -16,7 +16,11 @@ export function composeLifecyclePlatform(sql: Bun.SQL, config: LifecyclePlatform
   const authority = new HttpAssertionAuthority(config.authorityOrigin);
   const security = new PostgresAssertionSecurityStore(sql, (claims, token) => authority.isCurrent(claims, token));
   const verifier = new ServiceAssertionVerifier(config.trust.issuer, 'carbon-database', config.trust.keys, security);
-  const lifecycle = createLifecycleRoutes(new ApplyServiceLifecycle(verifier, security, new PostgresServiceLifecycleRepository(sql, new PostgresDatabaseEnvironmentDriver())));
+  const environments = new PostgresServiceLifecycleRepository(sql, new PostgresDatabaseEnvironmentDriver());
+  // The bytes of an erased environment are removed from the bucket once the erasure has committed, and again on every sweep until none are left.
+  const store = config.blobs?.store;
+  const purgeErasedObjects = async () => store ? environments.purgeErasedObjects(key => store.delete(key)) : 0;
+  const lifecycle = createLifecycleRoutes(new ApplyServiceLifecycle(verifier, security, environments), () => { purgeErasedObjects().catch(() => console.error(JSON.stringify({ event: 'erasure.purge_unavailable' }))); });
   const data = createDataRoutes(new ExecuteServiceData(verifier, security, new PostgresNativeTables(sql)));
   const imports = createImportRoutes(new ExecuteServiceImport(verifier, security, new PostgresNativeTables(sql)));
   const blobStorage = config.blobs ? new PostgresBlobStorage(sql, config.blobs.store, config.blobs.origin) : undefined;
@@ -35,5 +39,5 @@ export function composeLifecyclePlatform(sql: Bun.SQL, config: LifecyclePlatform
     if (/^\/internal\/platform\/v1\/environments\/[^/]+\/graph\//.test(path)) return graph(request);
     return path.includes('/imports/') ? imports(request) : path.includes('/data/') ? data(request) : lifecycle(request);
   };
-  return Object.assign(handler, { blobStorage, pruneChanges: (retentionHours?: number) => tables.pruneChanges(retentionHours) });
+  return Object.assign(handler, { blobStorage, purgeErasedObjects, pruneChanges: (retentionHours?: number) => tables.pruneChanges(retentionHours) });
 }

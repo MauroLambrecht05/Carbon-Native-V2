@@ -36,7 +36,7 @@ Phase 19 as well.
 | # | Gap | From | Owner |
 |---|---|---|---|
 | G-07 | The legacy `wk_` worker tokens and legacy build queue routes (`/v1/builds`) still work, separate from canonical builds | Phases 3, 4, 7 | Phase 7 built canonical builds but did not retire or bridge the legacy queue: the CLI's `carbon cloud deploy` and the Linux worker still use it. Retire with the CLI work in Phase 15 |
-| G-09 | Final deletion marks rows in Cloud and destroys no data in Carbon Database, Carbon Registry or object storage | Phase 5 | Needs a delete action in the owning-service lifecycle protocol; Phase 16 (recovery and deletion) |
+| G-09 | Final deletion does not remove Cloud's own rows for an environment: its encrypted secrets, credentials, function code and executions, builds and build logs, releases, app users and events are marked or left in place. **Default chosen, for the owner to confirm:** a deleted organization's Registry publishers stay reserved and its published packages stay downloadable, because other projects may depend on them | Phase 5 | Each of Cloud's tables needs its own rule, and several are guarded as immutable records. The Registry default is a policy choice | A removal rule per Cloud table, and the owner's decision on packages |
 | G-11 | The CLI uses only the device login; it cannot use personal credentials | Phases 3, gap closures | Phase 15 |
 
 ## Open: not started, no owner yet
@@ -276,6 +276,7 @@ walkthrough of the frontend plan; this is the first.
 
 | Gap | From | Closed by |
 |---|---|---|
+| G-09 (the owning services): final deletion destroyed nothing in Carbon Database or Carbon Registry | Phase 5 | Phase 19: every final deletion records an erasure per owning service, delivered as a signed request that only the platform can make and that the service checks with Cloud on arrival and again before committing. Database drops the environment's schema, role, catalog, change feed, vectors, graph and blob records, and deletes the blobs' bytes; Registry removes its namespace. Legal holds stop it; a second delivery removes nothing. What Cloud itself keeps is in G-09 |
 | G-101 (most of it): schedules were fixed intervals with no cron expression, time zone, daylight-saving rule or input | Phase 13 | Phase 19: cron expressions in an IANA time zone with a stated daylight-saving contract, and an input per schedule. What is left is in G-101 |
 | G-102 (most of it): there were no execution logs, and a failure was a category with no message | Phase 13 | Phase 19: standard output, standard error and the stack of a thrown error are kept per execution, bounded, redacted on the worker, and read with the execution's permission. What is left is in G-102 |
 | G-105 (one part): a syntax error was found at the first run. G-106 (two parts): nothing redacted an output, and executions were kept forever. G-111 (one part): a skipped slot was visible only in the database | Phase 13 | Phase 19: deploy refuses code that does not parse or has no default export; the worker removes lease secrets from outputs and logs; inputs, outputs and logs are removed after thirty days; a schedule carries its last skip and the reason |

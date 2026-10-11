@@ -203,6 +203,18 @@ an error when that schedule comes due, so pause or delete calendar schedules
 before rolling back past it; interval schedules are unaffected. Older code
 never prunes, and ignores the log table.
 
+Erasure adds one migration to each service. Cloud's `0033_environment_erasures.sql`
+adds `environment_erasures`, triggers on `environments`, `projects` and
+`organizations` that record an erasure when one becomes deleted, and a guard
+that makes an erasure permanent. Database's `0011_environment_erasure.sql` and
+Registry's `0005_environment_erasure.sql` allow the `erased` state on
+`platform_environments`, add `platform_erasures` (and, in Database,
+`platform_erasure_objects`), and guard both. All three are additive.
+Recovery: code from before these migrations ignores the new tables; Cloud
+would go on recording erasures that nothing delivers, and they would be
+delivered when newer code returns. An environment already erased stays erased:
+older owning-service code reads its `erased` state as not active.
+
 ## Running migrations as a release step
 
 Phase 18 adds no migration. Each service has `bun run migrate` (apply what is

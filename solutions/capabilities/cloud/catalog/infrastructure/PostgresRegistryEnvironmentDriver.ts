@@ -12,4 +12,13 @@ export class PostgresRegistryEnvironmentDriver implements NativeEnvironmentDrive
       AND project_id = ${scope.projectId} AND environment_id = ${scope.environmentId} RETURNING id`;
     if (!rows.length) throw new Error('Registry namespace is missing');
   }
+  /**
+   * Removes the environment's namespace. Publishers and published packages belong to the organization, not to an
+   * environment, and are public: they are not touched here.
+   */
+  async destroy(tx: Bun.TransactionSQL, scope: EnvironmentScope, remoteId: string) {
+    const rows = await tx`DELETE FROM registry_environment_namespaces WHERE id = ${remoteId} AND org_id = ${scope.orgId} AND project_id = ${scope.projectId}
+      AND environment_id = ${scope.environmentId} RETURNING id`;
+    return { removed: { namespaces: rows.length }, objects: [] };
+  }
 }

@@ -148,7 +148,7 @@ Never run against the real provider (G-136).
 | Policy | State |
 |---|---|
 | Operator access | Decided and enforced: separate accounts, scoped roles, reasons, a permanent record, no impersonation ([billing-operators.md](billing-operators.md)) |
-| Deletion | Scheduled, recoverable for a window, gated by legal holds and live subscriptions. Final deletion destroys nothing in the owning services (G-09) |
+| Deletion | Scheduled, recoverable for a window, gated by legal holds and live subscriptions. Final deletion erases the environment's data in Database and Registry on Cloud's recorded instruction ([resource-lifecycle.md](resource-lifecycle.md)). Cloud's own rows and artifacts are kept (G-09) |
 | Data export | Table exports exist, private and single-use. No account-level export of everything Carbon holds about a person |
 | Audit retention | Undecided. Events are kept forever |
 | Backup retention | No backups (G-135) |

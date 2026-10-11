@@ -16,9 +16,9 @@ export type Permission = "organization.manage" | "members.manage" | "projects.cr
 
 export type Role = "Owner" | "Admin" | "Developer" | "Viewer" | "Billing";
 
-export type PrincipalKind = "account" | "service_account" | "app_user" | "worker" | "operator";
+export type PrincipalKind = "account" | "service_account" | "app_user" | "worker" | "operator" | "platform";
 
-export type PrincipalAudience = "dashboard" | "cli" | "automation" | "app" | "worker" | "operator";
+export type PrincipalAudience = "dashboard" | "cli" | "automation" | "app" | "worker" | "operator" | "platform";
 
 export type ServiceAudience = "carbon-database" | "carbon-registry" | "carbon-worker";
 
@@ -399,6 +399,10 @@ export type FunctionScheduleList = { readonly "items": ReadonlyArray<FunctionSch
 export type FunctionScheduleCommand = { readonly "kind": "pause" | "resume" | "delete"; };
 
 export type FunctionScheduleReceipt = { readonly "schedule": FunctionSchedule; readonly "message": string; };
+
+export type ServiceErasureCommand = { readonly "scope": EnvironmentScope; readonly "bindingId": Id; readonly "erasureId": Id; readonly "remoteResourceId": string; };
+
+export type ServiceErasureReceipt = { readonly "scope": EnvironmentScope; readonly "bindingId": Id; readonly "erasureId": Id; readonly "remoteResourceId": string; readonly "state": "erased"; readonly "erasedAt": Timestamp; readonly "removed": { readonly [key: string]: number; }; };
 
 export type FunctionExecutionLogs = { readonly "executionId": Id; readonly "attempt": number; readonly "text": string; readonly "truncated": boolean; readonly "recordedAt": Timestamp; };
 
@@ -939,6 +943,8 @@ export interface Components {
   FunctionScheduleList: FunctionScheduleList;
   FunctionScheduleCommand: FunctionScheduleCommand;
   FunctionScheduleReceipt: FunctionScheduleReceipt;
+  ServiceErasureCommand: ServiceErasureCommand;
+  ServiceErasureReceipt: ServiceErasureReceipt;
   FunctionExecutionLogs: FunctionExecutionLogs;
   WorkerFunctionInput: WorkerFunctionInput;
   WorkerFunctionComplete: WorkerFunctionComplete;

@@ -28,6 +28,11 @@ export { HttpEnvironmentProvisioner } from './infrastructure/HttpEnvironmentProv
 export { CheckServiceAuthority } from './application/usecases/CheckServiceAuthority.ts';
 export { PostgresServiceAuthority } from './infrastructure/PostgresServiceAuthority.ts';
 export { ApplyServiceLifecycle } from './application/usecases/ApplyServiceLifecycle.ts';
+export { EraseEnvironments } from './application/usecases/EraseEnvironments.ts';
+export { PostgresErasureRepository } from './infrastructure/PostgresErasureRepository.ts';
+export { HttpServiceEraser } from './infrastructure/HttpServiceEraser.ts';
+export type { ErasureRepository, ErasureWork, ServiceEraser } from './application/ports/EnvironmentErasure.ts';
+export type { ServiceLifecycleRepository } from './application/ports/ServiceLifecycleRepository.ts';
 export { PostgresServiceLifecycleRepository } from './infrastructure/PostgresServiceLifecycleRepository.ts';
 export { PostgresDatabaseEnvironmentDriver, databaseEnvironmentIdentifiers } from './infrastructure/PostgresDatabaseEnvironmentDriver.ts';
 export { PostgresRegistryEnvironmentDriver } from './infrastructure/PostgresRegistryEnvironmentDriver.ts';

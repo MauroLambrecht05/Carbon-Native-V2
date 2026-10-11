@@ -1,10 +1,33 @@
 import { PostgresPlatformAuthority, bodyDigest, sameScope } from '@carbon/identity';
-import { serviceLifecycleBody, serviceLifecycleStatusPath, dataRequestPath, dataPermission, blobRequestPath, blobPermission, engineRequestPath, enginePermission, dataImportPath, registryRequestPath, registryPermission, type BlobCommand, type DataRequest, type InternalAssertion, type Permission, type RegistryRequest } from '@carbon/contracts/platform';
+import { serviceErasureBody, serviceErasurePath, serviceLifecycleBody, serviceLifecycleStatusPath, dataRequestPath, dataPermission, blobRequestPath, blobPermission, engineRequestPath, enginePermission, dataImportPath, registryRequestPath, registryPermission, type BlobCommand, type DataRequest, type InternalAssertion, type Permission, type RegistryRequest } from '@carbon/contracts/platform';
 import type { ServiceAuthority } from '../application/ports/ServiceAuthority.ts';
 
 /** Live authority for the implemented lifecycle, signed Database data and blob storage, and signed Registry protocols. */
 export class PostgresServiceAuthority extends PostgresPlatformAuthority implements ServiceAuthority {
+  /**
+   * Whether Cloud stands behind an erasure. True only while the erasure is on record for exactly this owning
+   * service, resource and request body, the environment's deletion is final, and the organization is not under a
+   * legal hold. A hold placed after the deletion became final still stops data that has not been erased yet.
+   */
+  private async erasureAuthority(assertion: InternalAssertion): Promise<boolean> {
+    const scope = assertion.scope; const principal = assertion.principal;
+    if (principal.audience !== 'platform' || principal.id !== principal.credentialId || !scope.projectId || !scope.environmentId || scope.realmId
+      || assertion.request.method !== 'POST' || assertion.request.path !== serviceErasurePath(scope.environmentId) || !['carbon-database', 'carbon-registry'].includes(assertion.aud)
+      || assertion.roles.length !== 0 || assertion.grants.length !== 1 || assertion.grants[0]!.permission !== 'resources.configure' || !sameScope(assertion.grants[0]!.scope, scope)) return false;
+    const row = (await this.sql`SELECT r.binding_id, r.remote_resource_id
+      FROM environment_erasures r JOIN environments e ON e.id = r.environment_id JOIN projects p ON p.id = r.project_id JOIN organizations o ON o.id = r.org_id
+      WHERE r.id = ${principal.id} AND r.org_id = ${scope.orgId} AND r.project_id = ${scope.projectId} AND r.environment_id = ${scope.environmentId}
+        AND r.owner = ${assertion.aud === 'carbon-database' ? 'database' : 'registry'}
+        AND (e.state = 'deleted' OR p.state = 'deleted' OR o.state = 'deleted')
+        AND NOT EXISTS (SELECT 1 FROM legal_holds h WHERE h.org_id = r.org_id AND h.released_at IS NULL)`)[0];
+    if (!row) return false;
+    const expected = serviceErasureBody({ scope: { orgId: scope.orgId, projectId: scope.projectId, environmentId: scope.environmentId }, bindingId: row.binding_id, erasureId: principal.id, remoteResourceId: row.remote_resource_id });
+    return bodyDigest(expected) === assertion.request.bodyDigest;
+  }
+
   async isCurrent(assertion: InternalAssertion): Promise<boolean> {
+    // The platform acting on its own record. Nothing below ever answers for this principal.
+    if (assertion.principal.kind === 'platform') return this.erasureAuthority(assertion);
     if (/^\/internal\/platform\/v1\/environments\/[^/]+\/registry\//.test(assertion.request.path)) return this.registryAuthority(assertion);
     if (assertion.request.path.includes('/imports/')) return this.importAuthority(assertion);
     if (assertion.request.path.includes('/data/')) return this.dataAuthority(assertion);

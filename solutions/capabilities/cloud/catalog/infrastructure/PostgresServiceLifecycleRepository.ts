@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { PlatformFault, parseComponent, serviceLifecycleBody, type ServiceLifecycleCommand, type Principal, type EnvironmentScope } from '@carbon/contracts/platform';
+import { PlatformFault, parseComponent, serviceLifecycleBody, type ServiceErasureCommand, type ServiceErasureReceipt, type ServiceLifecycleCommand, type Principal, type EnvironmentScope } from '@carbon/contracts/platform';
 import { bodyDigest } from '@carbon/identity';
 import type { ServiceLifecycleRepository } from '../application/ports/ServiceLifecycleRepository.ts';
 import type { NativeEnvironmentDriver } from './NativeEnvironmentDriver.ts';
@@ -11,7 +11,8 @@ export class PostgresServiceLifecycleRepository implements ServiceLifecycleRepos
       await tx`SET LOCAL lock_timeout = '5s'`; await tx`SET LOCAL statement_timeout = '10s'`;
       const row = (await tx`SELECT id, state FROM platform_environments WHERE org_id = ${scope.orgId} AND project_id = ${scope.projectId}
         AND environment_id = ${scope.environmentId} AND binding_id = ${bindingId} FOR SHARE`)[0];
-      if (!row) throw new PlatformFault('not_found', 'Environment resource not found');
+      // An erased environment has no resource to report on.
+      if (!row || row.state === 'erased') throw new PlatformFault('not_found', 'Environment resource not found');
       if (!await stillAuthorized()) throw new PlatformFault('forbidden', 'Lifecycle authority is no longer current');
       return parseComponent('ServiceLifecycleStatus', { scope, bindingId, remoteResourceId: row.id, state: row.state });
     });
@@ -40,7 +41,8 @@ export class PostgresServiceLifecycleRepository implements ServiceLifecycleRepos
         resource = (await tx`INSERT INTO platform_environments (id, org_id, project_id, environment_id, binding_id, state)
           VALUES (${id}, ${scope.orgId}, ${scope.projectId}, ${scope.environmentId}, ${command.bindingId}, 'active') RETURNING *`)[0];
         await this.driver.initialize(tx, scope, id);
-      } else if (command.action === 'ensure' && resource.state !== 'active') throw new PlatformFault('conflict', 'Resume the existing environment explicitly');
+      } else if (resource.state === 'erased') throw new PlatformFault('conflict', 'This environment was erased');
+      else if (command.action === 'ensure' && resource.state !== 'active') throw new PlatformFault('conflict', 'Resume the existing environment explicitly');
       if (command.action !== 'ensure') {
         if (command.remoteResourceId === null) throw new PlatformFault('validation', 'Lifecycle changes require the existing remote resource ID');
         const state = command.action === 'pause' ? 'paused' : 'active';
@@ -59,5 +61,45 @@ export class PostgresServiceLifecycleRepository implements ServiceLifecycleRepos
       if ((error as { errno?: string })?.errno === '23505') throw new PlatformFault('conflict', 'This canonical resource or lifecycle step is already bound');
       throw error;
     }
+  }
+
+  async erase(command: ServiceErasureCommand, requestId: string, stillAuthorized: () => Promise<boolean>): Promise<ServiceErasureReceipt> {
+    const scope = command.scope;
+    return this.sql.begin(async tx => {
+      await tx`SET LOCAL lock_timeout = '5s'`; await tx`SET LOCAL statement_timeout = '120s'`;
+      await tx`SELECT pg_advisory_xact_lock(1128354372, hashtext(${scope.environmentId}))`;
+      const resource = (await tx`SELECT * FROM platform_environments WHERE environment_id = ${scope.environmentId} FOR UPDATE`)[0];
+      if (!resource) throw new PlatformFault('not_found', 'Environment resource not found');
+      // The erasure must name exactly the resource this service holds for the environment, as Cloud recorded it.
+      if (resource.org_id !== scope.orgId || resource.project_id !== scope.projectId || resource.binding_id !== command.bindingId || resource.id !== command.remoteResourceId)
+        throw new PlatformFault('conflict', 'Canonical resource binding cannot be changed');
+      const previous = (await tx`SELECT erasure_id, receipt FROM platform_erasures WHERE environment_id = ${scope.environmentId}`)[0];
+      if (previous) {
+        if (previous.erasure_id !== command.erasureId) throw new PlatformFault('conflict', 'This environment was erased under another erasure');
+        if (!await stillAuthorized()) throw new PlatformFault('forbidden', 'Erasure authority is no longer current');
+        return parseComponent('ServiceErasureReceipt', previous.receipt);
+      }
+      const outcome = await this.driver.destroy(tx, scope, resource.id);
+      await tx`UPDATE platform_environments SET state = 'erased', revision = revision + 1, updated_at = now() WHERE id = ${resource.id}`;
+      // Asked last, with everything done and nothing committed: if Cloud no longer stands behind the erasure, all of it is undone.
+      if (!await stillAuthorized()) throw new PlatformFault('forbidden', 'Erasure authority is no longer current');
+      const receipt = parseComponent('ServiceErasureReceipt', { scope, bindingId: command.bindingId, erasureId: command.erasureId, remoteResourceId: resource.id, state: 'erased',
+        erasedAt: new Date().toISOString(), removed: outcome.removed });
+      await tx`INSERT INTO platform_erasures (erasure_id, environment_id, binding_id, remote_resource_id, receipt, request_id)
+        VALUES (${command.erasureId}, ${scope.environmentId}, ${command.bindingId}, ${resource.id}, ${JSON.stringify(receipt)}::text::jsonb, ${requestId})`;
+      for (const key of outcome.objects) await tx`INSERT INTO platform_erasure_objects (storage_key, erasure_id) VALUES (${key}, ${command.erasureId}) ON CONFLICT (storage_key) DO NOTHING`;
+      return receipt;
+    });
+  }
+
+  async purgeErasedObjects(remove: (storageKey: string) => Promise<void>, limit = 500): Promise<number> {
+    if ((await this.sql`SELECT to_regclass('public.platform_erasure_objects') AS name`)[0].name === null) return 0;
+    const rows = await this.sql<{ storage_key: string }[]>`SELECT storage_key FROM platform_erasure_objects ORDER BY created_at LIMIT ${limit}`;
+    for (const row of rows) {
+      // The store is asked first. A key is forgotten only once its bytes are gone; a failure leaves it for the next pass.
+      try { await remove(row.storage_key); } catch { continue; }
+      await this.sql`DELETE FROM platform_erasure_objects WHERE storage_key = ${row.storage_key}`;
+    }
+    return Number((await this.sql`SELECT count(*)::integer AS left FROM platform_erasure_objects`)[0].left);
   }
 }

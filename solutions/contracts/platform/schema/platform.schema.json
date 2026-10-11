@@ -66,7 +66,8 @@
         "service_account",
         "app_user",
         "worker",
-        "operator"
+        "operator",
+        "platform"
       ]
     },
     "PrincipalAudience": {
@@ -77,7 +78,8 @@
         "automation",
         "app",
         "worker",
-        "operator"
+        "operator",
+        "platform"
       ]
     },
     "ServiceAudience": {
@@ -196,6 +198,16 @@
             },
             "audience": {
               "const": "operator"
+            }
+          }
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "platform"
+            },
+            "audience": {
+              "const": "platform"
             }
           }
         }
@@ -2084,6 +2096,8 @@
     "FunctionScheduleList":{"type":"object","additionalProperties":false,"required":["items"],"properties":{"items":{"type":"array","maxItems":20,"items":{"$ref":"#/$defs/FunctionSchedule"}}}},
     "FunctionScheduleCommand":{"type":"object","additionalProperties":false,"required":["kind"],"properties":{"kind":{"enum":["pause","resume","delete"]}}},
     "FunctionScheduleReceipt":{"type":"object","additionalProperties":false,"required":["schedule","message"],"properties":{"schedule":{"$ref":"#/$defs/FunctionSchedule"},"message":{"type":"string","minLength":1,"maxLength":300}}},
+    "ServiceErasureCommand":{"type":"object","additionalProperties":false,"required":["scope","bindingId","erasureId","remoteResourceId"],"properties":{"scope":{"$ref":"#/$defs/EnvironmentScope"},"bindingId":{"$ref":"#/$defs/Id"},"erasureId":{"$ref":"#/$defs/Id"},"remoteResourceId":{"type":"string","minLength":1,"maxLength":200,"pattern":"^[^\\u0000-\\u001f\\u007f]+$"}}},
+    "ServiceErasureReceipt":{"type":"object","additionalProperties":false,"required":["scope","bindingId","erasureId","remoteResourceId","state","erasedAt","removed"],"properties":{"scope":{"$ref":"#/$defs/EnvironmentScope"},"bindingId":{"$ref":"#/$defs/Id"},"erasureId":{"$ref":"#/$defs/Id"},"remoteResourceId":{"type":"string","minLength":1,"maxLength":200,"pattern":"^[^\\u0000-\\u001f\\u007f]+$"},"state":{"const":"erased"},"erasedAt":{"$ref":"#/$defs/Timestamp"},"removed":{"type":"object","maxProperties":40,"propertyNames":{"pattern":"^[a-z][a-z0-9_]{0,62}$"},"additionalProperties":{"type":"integer","minimum":0,"maximum":9007199254740991}}}},
     "FunctionExecutionLogs":{"type":"object","additionalProperties":false,"required":["executionId","attempt","text","truncated","recordedAt"],"properties":{"executionId":{"$ref":"#/$defs/Id"},"attempt":{"type":"integer","minimum":1,"maximum":10},"text":{"type":"string","maxLength":65536},"truncated":{"type":"boolean"},"recordedAt":{"$ref":"#/$defs/Timestamp"}}},
     "WorkerFunctionInput":{"type":"object","additionalProperties":false,"required":["executionId","scope","functionId","revisionNumber","code","codeDigest","input","attempt","timeoutSeconds"],"properties":{"executionId":{"$ref":"#/$defs/Id"},"scope":{"$ref":"#/$defs/EnvironmentScope"},"functionId":{"$ref":"#/$defs/Id"},"revisionNumber":{"type":"integer","minimum":1,"maximum":1000000},"code":{"type":"string","maxLength":262144},"codeDigest":{"$ref":"#/$defs/Digest"},"input":{},"attempt":{"type":"integer","minimum":1,"maximum":10},"timeoutSeconds":{"type":"integer","minimum":1,"maximum":300}}},
     "WorkerFunctionComplete":{"anyOf":[{"type":"object","additionalProperties":false,"required":["outcome","output"],"properties":{"outcome":{"const":"succeeded"},"output":{},"logs":{"type":"object","additionalProperties":false,"required":["text","truncated"],"properties":{"text":{"type":"string","maxLength":65536},"truncated":{"type":"boolean"}}}}},{"type":"object","additionalProperties":false,"required":["outcome","errorCategory"],"properties":{"outcome":{"const":"failed"},"errorCategory":{"type":"string","pattern":"^[a-z][a-z0-9_.-]{0,99}$"},"logs":{"type":"object","additionalProperties":false,"required":["text","truncated"],"properties":{"text":{"type":"string","maxLength":65536},"truncated":{"type":"boolean"}}}}}]},

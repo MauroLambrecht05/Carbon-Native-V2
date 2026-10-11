@@ -11,9 +11,10 @@ import { composeOperations as registryOperations } from '../../../products/carbo
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AccountRegistry, HttpRegistryClient, PostgresAccountRegistryAuthority, RegistryTrustError, libraryFile, manifestDigest, manifestFile, packArchive, publicKeyHex, signTrustBundle, verifyRegistryPackage, type RegistryArchiveStore } from '@carbon/catalog';
+import { CatalogLifecycle, EraseEnvironments, HttpServiceEraser, PostgresErasureRepository } from '@carbon/catalog';
 import { AccountCatalog, PostgresCatalogRepository, PostgresProvisioningRepository, ProvisionEnvironment, HttpEnvironmentProvisioner,
   PostgresServiceLifecycleRepository, PostgresDatabaseEnvironmentDriver, databaseEnvironmentIdentifiers, type ProvisioningWork } from '@carbon/catalog';
-import { parseComponent, serviceLifecycleBody, dataPermission, dataRequestPath, canonicalRegistryRequest, registryRequestPath } from '@carbon/contracts/platform';
+import { parseComponent, serviceErasureBody, serviceErasurePath, serviceLifecycleBody, dataPermission, dataRequestPath, canonicalRegistryRequest, registryRequestPath } from '@carbon/contracts/platform';
 import { AppAuthentication, PostgresAppAuthRepository } from '@carbon/auth';
 import { AccountBlobs, AccountEngine, HttpBlobClient, HttpEngineClient, type BlobStore } from '@carbon/data';
 import { HttpDataClient, AccountData, PostgresAccountDataAuthority, AccountImports, PostgresImportJobs, HttpImportClient, RunImportJobs, AccountExports, ExportDownloads, PostgresExportJobs, RunExportJobs,
@@ -44,7 +45,8 @@ async function harness() {
       await store.sql.close();
       if (!new RegExp(`^carbon_service_test_${id}_(cloud|database|registry)$`).test(store.name)) throw new Error('Unsafe test database cleanup');
       await admin.unsafe(`DROP DATABASE "${store.name}"`);
-      for (const role of roles) { if (!/^ce_[a-f0-9]{32}$/.test(role)) throw new Error('Unsafe role cleanup'); await admin.unsafe(`DROP ROLE "${role}"`); }
+      // An erased environment's role is already gone.
+      for (const role of roles) { if (!/^ce_[a-f0-9]{32}$/.test(role)) throw new Error('Unsafe role cleanup'); await admin.unsafe(`DROP ROLE IF EXISTS "${role}"`); }
     }
     await admin.close();
   });
@@ -145,7 +147,7 @@ async function harness() {
   // A fresh worker over the same database and storage, as after a process restart. `jobs` lets a test break one step.
   const exportWorker = (jobs: ExportJobs = new PostgresExportJobs(cloud)) => new RunExportJobs(jobs, dataClient, exportStore);
   const download = (url: string, method = 'GET') => downloadHandler(new Request(url, { method }));
-  return { blobObjects, failBlobWrites: (count: number) => { failBlobWrites = count; }, duringBlobWrite: (work: () => Promise<void>) => { duringBlobWrite = work; }, sweepBlobs: () => databaseHandler.blobStorage!.sweep(), apiHandler, token, csrf, origin,
+  return { blobObjects, failBlobWrites: (count: number) => { failBlobWrites = count; }, duringBlobWrite: (work: () => Promise<void>) => { duringBlobWrite = work; }, sweepBlobs: () => databaseHandler.blobStorage!.sweep(), purgeErasedObjects: () => databaseHandler.purgeErasedObjects(), apiHandler, token, csrf, origin,
     exportJobs, restartExports: (): ExportJobs => new PostgresExportJobs(cloud), exportWorker, exportObjects, exportWrites, failExportWrites: (count: number) => { failWrites = count; }, download, session,
     registryObjects, registryRoot: publicKeyHex(registryRootSeed), get registryReview() { return registryHandler.review!; }, registryTrustMaterial: { rootSeed: registryRootSeed, signingSeed: registrySigningSeed },
     /** Starts Registry again with other trust settings. If the new settings are refused, the running Registry is left as it was. */
@@ -1579,6 +1581,172 @@ suite('Cloud-to-owning-service lifecycle over real HTTP and PostgreSQL', () => {
     const developer = await h.signedData({ scope, bindingId, command: query }); expect((await fetch(developer.url, developer.init)).status).toBe(403);
     expect(JSON.stringify(await h.database`SELECT * FROM canonical_data_commands`)).not.toContain('private-note');
   }, 30000);
+
+  test('final deletion erases an environment in the owning services: its schema, role, rows, vectors, graph and blob bytes, once, on Cloud\'s recorded instruction only', async () => {
+    const h = await harness(); const id = () => crypto.randomUUID(); const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
+    const doomedProject = await h.create('doomed'); expect(await h.worker.execute()).toBe(true); expect(await h.worker.execute()).toBe(true);
+    const keptProject = await h.create('kept', ['database']); expect(await h.worker.execute()).toBe(true);
+    const doomed = parseComponent('EnvironmentScope', doomedProject.scope); const kept = parseComponent('EnvironmentScope', keptProject.scope);
+    const envPath = (scope: typeof doomed) => `/platform/v1/orgs/${scope.orgId}/projects/${scope.projectId}/environments/${scope.environmentId}`;
+    const send = async (scope: typeof doomed, family: 'data' | 'blobs' | 'vectors' | 'graph', command: Record<string, unknown>, revision?: string) => {
+      const response = await h.api(`${envPath(scope)}/${family}`, command, revision, command.commandId ? { 'idempotency-key': command.commandId as string } : {});
+      if (response.status !== 200) throw new Error(`${command.kind} answered ${response.status}`); return (await response.json() as { result: Record<string, any> }).result;
+    };
+    // The same things in both environments: a table with a row, a vector collection, graph nodes and an edge, and a stored blob.
+    const fill = async (scope: typeof doomed, label: string) => {
+      const environment = parseComponent('CatalogEnvironmentDetails', await (await h.api(envPath(scope))).json()).environment; const tableId = id();
+      await send(scope, 'data', { kind: 'table.create', commandId: id(), tableId, definition: { name: 'notes', columns: [{ name: 'body', type: 'text', nullable: false }], policies: { enabled: false, rules: [] } } }, environment.revision);
+      const names = databaseEnvironmentIdentifiers(scope.environmentId);
+      await h.database.unsafe(`INSERT INTO "${names.schema}"."ct_${tableId.replaceAll('-', '')}" (body) VALUES ('${label} row')`);
+      const collectionId = id(); await send(scope, 'vectors', { kind: 'collection.create', commandId: id(), collectionId, definition: { name: 'articles', dimension: 2, metric: 'l2' } });
+      await send(scope, 'vectors', { kind: 'points.upsert', commandId: id(), collectionId, points: [{ id: id(), vector: [1, 1], metadata: {} }, { id: id(), vector: [2, 2], metadata: {} }] });
+      const [a, b] = [id(), id()]; for (const node of [a, b]) await send(scope, 'graph', { kind: 'node.put', commandId: id(), node: { id: node, label: 'Person', properties: { name: label } } });
+      await send(scope, 'graph', { kind: 'edge.put', commandId: id(), edge: { id: id(), source: a, target: b, label: 'KNOWS', properties: {} } });
+      const bucketId = id(); const bytes = new TextEncoder().encode(`${label} bytes`);
+      await send(scope, 'blobs', { kind: 'bucket.create', commandId: id(), bucketId, definition: { name: 'files', visibility: 'private', maxObjectBytes: 2000, allowedContentTypes: ['text/plain'], versioning: true, retentionDays: 7, quotaBytes: 3000 } });
+      const transfer = await send(scope, 'blobs', { kind: 'object.upload', commandId: id(), bucketId, key: 'note.txt', sizeBytes: bytes.byteLength, sha256: digest(bytes), contentType: 'text/plain' });
+      expect((await fetch(transfer.url, { method: 'PUT', body: bytes, headers: { 'content-type': 'text/plain' } })).status).toBe(204);
+      return { names, tableId, bucketId, environment };
+    };
+    const D = await fill(doomed, 'doomed'); const K = await fill(kept, 'kept');
+    // What Database holds for an environment, counted the way an auditor would: by its ID, in every table that has one.
+    const held = async (scope: typeof doomed, names: { schema: string; role: string }) => {
+      const one = async (query: Promise<{ n: number }[]>) => (await query)[0]!.n; const e = scope.environmentId;
+      return {
+        schema: await one(h.database`SELECT count(*)::integer AS n FROM pg_namespace WHERE nspname = ${names.schema}`), role: await one(h.database`SELECT count(*)::integer AS n FROM pg_roles WHERE rolname = ${names.role}`),
+        tables: await one(h.database`SELECT count(*)::integer AS n FROM canonical_data_tables WHERE environment_id = ${e}`), dataCommands: await one(h.database`SELECT count(*)::integer AS n FROM canonical_data_commands WHERE environment_id = ${e}`),
+        changes: await one(h.database`SELECT count(*)::integer AS n FROM data_change_events WHERE environment_id = ${e}`),
+        collections: await one(h.database`SELECT count(*)::integer AS n FROM canonical_vector_collections WHERE environment_id = ${e}`),
+        points: await one(h.database`SELECT count(*)::integer AS n FROM canonical_vector_points p JOIN canonical_vector_collections c ON c.id = p.collection_id WHERE c.environment_id = ${e}`),
+        nodes: await one(h.database`SELECT count(*)::integer AS n FROM canonical_graph_nodes WHERE environment_id = ${e}`), edges: await one(h.database`SELECT count(*)::integer AS n FROM canonical_graph_edges WHERE environment_id = ${e}`),
+        engineCommands: await one(h.database`SELECT count(*)::integer AS n FROM engine_commands WHERE environment_id = ${e}`),
+        buckets: await one(h.database`SELECT count(*)::integer AS n FROM blob_buckets WHERE environment_id = ${e}`), blobCommands: await one(h.database`SELECT count(*)::integer AS n FROM blob_commands WHERE environment_id = ${e}`),
+        objects: await one(h.database`SELECT count(*)::integer AS n FROM blob_objects o JOIN blob_buckets b ON b.id = o.bucket_id WHERE b.environment_id = ${e}`),
+        usage: await one(h.database`SELECT count(*)::integer AS n FROM blob_usage WHERE environment_id = ${e}`),
+      };
+    };
+    const full = { schema: 1, role: 1, tables: 1, dataCommands: 1, changes: 1, collections: 1, points: 2, nodes: 2, edges: 1, engineCommands: 5, buckets: 1, blobCommands: 1, objects: 1, usage: 1 };
+    const none = Object.fromEntries(Object.keys(full).map(key => [key, 0])) as typeof full;
+    expect(await held(doomed, D.names)).toEqual(full); expect(await held(kept, K.names)).toEqual(full);
+    const bytesOf = (bucketId: string) => [...h.blobObjects.keys()].filter(key => key.includes(bucketId));
+    expect(bytesOf(D.bucketId)).toHaveLength(1); expect(bytesOf(K.bucketId)).toHaveLength(1);
+
+    const erasers = { database: new HttpServiceEraser('database', h.databaseServer.url.origin, h.issuer), registry: new HttpServiceEraser('registry', h.registryServer.url.origin, h.issuer) };
+    const erasures = new PostgresErasureRepository(h.cloud); const erase = new EraseEnvironments(erasures, erasers);
+    const recorded = () => h.cloud<{ id: string; owner: string; state: string; attempts: number; last_error: string | null; binding_id: string; remote_resource_id: string }[]>`SELECT id, owner, state, attempts, last_error, binding_id, remote_resource_id FROM environment_erasures ORDER BY owner`;
+    // Nothing is recorded, and nothing can be erased, while the environment is merely live or scheduled for deletion.
+    expect(await recorded()).toEqual([]); expect(await erase.execute(id())).toBe(0);
+    const binding = (await h.cloud`SELECT id, remote_resource_id FROM service_bindings WHERE environment_id = ${doomed.environmentId} AND owner = 'database'`)[0];
+    // Someone who holds Cloud's signing key but has no erasure on record gets nowhere: the owning service asks Cloud, and Cloud has no such erasure.
+    const forged = async (erasureId: string, scope = doomed, bindingId: string = binding.id, remote: string = binding.remote_resource_id, principal: Record<string, unknown> = {}, service: 'database' | 'registry' = 'database') => {
+      const body = serviceErasureBody({ scope, bindingId, erasureId, remoteResourceId: remote }); const path = serviceErasurePath(scope.environmentId); const requestId = id();
+      const proof = await h.issuer.issue({ aud: service === 'database' ? 'carbon-database' : 'carbon-registry', principal: { id: erasureId, kind: 'platform', audience: 'platform', credentialId: erasureId, permissionRevision: '1', ...principal } as never, scope, roles: [],
+        grants: [{ permission: 'resources.configure', scope }], requestId, request: { method: 'POST', path, bodyDigest: bodyDigest(body) } });
+      return (await fetch((service === 'database' ? h.databaseServer : h.registryServer).url.origin + path, { method: 'POST', body, headers: { authorization: `Bearer ${proof}`, 'content-type': 'application/json', 'idempotency-key': erasureId, 'x-request-id': requestId } })).status;
+    };
+    expect(await forged(id())).toBe(401); expect(await held(doomed, D.names)).toEqual(full);
+
+    // An environment is paused before it can be deleted; the pause reaches both owning services first.
+    const revisionOf = async () => parseComponent('CatalogEnvironmentDetails', await (await h.api(envPath(doomed))).json()).environment.revision;
+    expect((await h.api(envPath(doomed), { kind: 'pause', paused: true }, await revisionOf())).status).toBe(202);
+    for (let step = 0; step < 6 && await h.worker.execute() === true; step++);
+    const current = { revision: await revisionOf() };
+    const schedule = await h.api(envPath(doomed), { kind: 'delete', deleted: true, confirmation: 'doomed' }, current.revision); expect([schedule.status, schedule.status === 200 ? '' : await schedule.text()]).toEqual([200, '']);
+    expect(await recorded()).toEqual([]); expect(await forged(id())).toBe(401);
+    // An account, even the owner in a fresh session, cannot ask for an erasure: only the platform principal is accepted on this route.
+    const asOwner = { id: h.account, kind: 'account', audience: 'dashboard', credentialId: h.session };
+    expect(await forged(id(), doomed, binding.id, binding.remote_resource_id, asOwner)).toBe(401);
+
+    // The recovery window passes and the deletion becomes final. That, and nothing else, puts the erasures on record: one per owning service.
+    await h.cloud`UPDATE environments SET deletion_scheduled_at = now() - interval '1 second' WHERE id = ${doomed.environmentId}`;
+    expect(await new CatalogLifecycle(new PostgresCatalogRepository(h.cloud)).finalizeDeletions(id())).toHaveLength(1);
+    const pending = await recorded(); expect(pending.map(row => [row.owner, row.state, row.attempts])).toEqual([['database', 'pending', 0], ['registry', 'pending', 0]]);
+    const databaseErasure = pending[0]!; expect(databaseErasure.binding_id).toBe(binding.id);
+    // Still exact: the right erasure for another resource, another environment, or with a different ID is refused, and nothing is touched.
+    expect(await forged(id())).toBe(401); expect(await forged(databaseErasure.id, doomed, id())).toBe(401); expect(await forged(databaseErasure.id, doomed, binding.id, id())).toBe(401);
+    expect(await forged(databaseErasure.id, kept)).toBe(401);
+    // Database's erasure presented to Registry is not Registry's erasure: Cloud answers for the service that asks.
+    expect(await forged(databaseErasure.id, doomed, binding.id, binding.remote_resource_id, {}, 'registry')).toBe(401);
+    expect(await held(doomed, D.names)).toEqual(full); expect(await held(kept, K.names)).toEqual(full);
+
+    // A legal hold placed after the deletion became final still protects data that has not been erased yet.
+    const operator = id(); await h.cloud`INSERT INTO operators (id, email, name) VALUES (${operator}, 'legal@example.test', 'Legal')`;
+    const hold = id(); await h.cloud`INSERT INTO legal_holds (id, org_id, reason, placed_by) VALUES (${hold}, ${doomed.orgId}, 'preserve for litigation', ${operator})`;
+    expect(await erase.execute(id())).toBe(0); expect((await recorded()).map(row => row.attempts)).toEqual([0, 0]); expect(await forged(databaseErasure.id)).toBe(401);
+    expect(await held(doomed, D.names)).toEqual(full);
+    await h.cloud`UPDATE legal_holds SET released_at = now(), released_by = ${operator} WHERE id = ${hold}`;
+
+    // Cloud changes its mind between an owning service's work and its commit: everything that service did is undone, schema and role included.
+    // Each delivery asks Cloud twice, once on arrival and once just before committing. The hold lands before the second answer of the first delivery.
+    let asked = 0; h.interceptAuthority(async () => { asked++; if (asked === 2) await h.cloud`INSERT INTO legal_holds (id, org_id, reason, placed_by) VALUES (${id()}, ${doomed.orgId}, 'placed mid-erasure', ${operator})`; });
+    expect(await erase.execute(id())).toBe(0); h.interceptAuthority(); expect(asked).toBe(3);
+    expect(await held(doomed, D.names)).toEqual(full); expect(bytesOf(D.bucketId)).toHaveLength(1);
+    expect((await h.database`SELECT state FROM platform_environments WHERE environment_id = ${doomed.environmentId}`)[0].state).toBe('paused');
+    expect((await h.registry`SELECT state FROM platform_environments WHERE environment_id = ${doomed.environmentId}`)[0].state).toBe('paused');
+    expect((await h.registry`SELECT 1 FROM registry_environment_namespaces WHERE environment_id = ${doomed.environmentId}`) as unknown[]).toHaveLength(1);
+    expect((await recorded()).map(row => [row.owner, row.state, row.attempts, row.last_error])).toEqual([['database', 'pending', 1, 'erasure.forbidden'], ['registry', 'pending', 1, 'erasure.forbidden']]);
+    await h.cloud`UPDATE legal_holds SET released_at = now(), released_by = ${operator} WHERE released_at IS NULL`;
+    // A failed delivery waits before it is tried again; it is not hammered.
+    expect(await erase.execute(id())).toBe(0); expect((await recorded()).map(row => row.attempts)).toEqual([1, 1]);
+    await h.cloud`UPDATE environment_erasures SET next_attempt_at = now() WHERE state = 'pending'`;
+
+    // The object store is down when the erasure commits: the rows go, the keys are remembered, and the bytes go on the next pass.
+    const original = h.blobObjects.delete.bind(h.blobObjects); let storeDown = true;
+    h.blobObjects.delete = (key: string) => { if (storeDown) throw new Error('storage unavailable'); return original(key); };
+    expect(await erase.execute(id())).toBe(2);
+    expect(await held(doomed, D.names)).toEqual(none);
+    for (let wait = 0; wait < 40 && (await h.database`SELECT 1 FROM platform_erasure_objects`).length === 0; wait++) await Bun.sleep(25);
+    expect(bytesOf(D.bucketId)).toHaveLength(1); expect((await h.database`SELECT storage_key FROM platform_erasure_objects`).map((row: { storage_key: string }) => row.storage_key)).toEqual(bytesOf(D.bucketId));
+    expect(await h.purgeErasedObjects()).toBe(1);
+    storeDown = false; expect(await h.purgeErasedObjects()).toBe(0); expect(bytesOf(D.bucketId)).toEqual([]); expect((await h.database`SELECT 1 FROM platform_erasure_objects`) as unknown[]).toEqual([]);
+
+    // Both owning services are done, Cloud has their receipts, and the organization's log says so.
+    const done = await h.cloud<{ owner: string; state: string; receipt: Record<string, any>; completed_at: Date | null }[]>`SELECT owner, state, receipt, completed_at FROM environment_erasures ORDER BY owner`;
+    expect(done.map(row => [row.owner, row.state, row.completed_at !== null])).toEqual([['database', 'erased', true], ['registry', 'erased', true]]);
+    expect(done[0]!.receipt).toMatchObject({ erasureId: databaseErasure.id, bindingId: binding.id, state: 'erased', scope: doomed,
+      removed: { tables: 1, change_events: 1, vector_collections: 1, vector_points: 2, graph_nodes: 2, graph_edges: 1, blob_buckets: 1, blob_objects: 1, blob_bytes_pending: 1 } });
+    expect(done[1]!.receipt.removed).toEqual({ namespaces: 1 }); expect((await h.registry`SELECT 1 FROM registry_environment_namespaces WHERE environment_id = ${doomed.environmentId}`) as unknown[]).toEqual([]);
+    expect((await h.cloud`SELECT action FROM platform_events WHERE environment_id = ${doomed.environmentId} AND action LIKE 'environment.erased.%' ORDER BY action`).map((row: { action: string }) => row.action)).toEqual(['environment.erased.database', 'environment.erased.registry']);
+    // The other environment lost nothing: not a row, not its schema, not its bytes.
+    expect(await held(kept, K.names)).toEqual(full); expect(bytesOf(K.bucketId)).toHaveLength(1);
+    expect((await h.database.unsafe(`SELECT body FROM "${K.names.schema}"."ct_${K.tableId.replaceAll('-', '')}"`)) as unknown[]).toEqual([{ body: 'kept row' }]);
+
+    // Delivered again, as after a lost reply: the same receipt, and nothing more is removed anywhere.
+    expect(await forged(databaseErasure.id)).toBe(200); expect(await held(kept, K.names)).toEqual(full);
+    expect(await erase.execute(id())).toBe(0);
+    // What was erased stays erased: it cannot be provisioned again under the same identity, and its records cannot be rewritten.
+    const refused = (query: Promise<unknown>) => query.then(() => 'changed', error => String((error as { constraint?: string }).constraint));
+    expect(await refused(h.database`UPDATE platform_environments SET state = 'active' WHERE environment_id = ${doomed.environmentId}`)).toBe('platform_environment_erased');
+    expect(await refused(h.database`DELETE FROM platform_erasures WHERE environment_id = ${doomed.environmentId}`)).toBe('platform_erasure_permanent');
+    expect(await refused(h.cloud`UPDATE environment_erasures SET state = 'pending', completed_at = NULL, receipt = NULL WHERE id = ${databaseErasure.id}`)).toBe('environment_erasure_final');
+    expect(await refused(h.cloud`DELETE FROM environment_erasures WHERE id = ${databaseErasure.id}`)).toBe('environment_erasure_permanent');
+
+    // An erased environment cannot be brought back under the same identity, by any lifecycle step.
+    const owning = new PostgresServiceLifecycleRepository(h.database, new PostgresDatabaseEnvironmentDriver());
+    const revived = await owning.execute({ scope: doomed, bindingId: binding.id, operationId: id(), stepId: id(), leaseId: id(), action: 'resume', remoteResourceId: binding.remote_resource_id },
+      { id: h.account, kind: 'account', audience: 'dashboard', credentialId: h.session, permissionRevision: '1' }, id(), async () => true).then(() => 'resumed', error => (error as Error).message);
+    expect(revived).toBe('This environment was erased'); expect(await held(doomed, D.names)).toEqual(none);
+
+    // An erasure is honoured only for a deletion that is final. A row written for a live environment, by whatever means, authorizes nothing.
+    const keptBinding = (await h.cloud`SELECT id, remote_resource_id FROM service_bindings WHERE environment_id = ${kept.environmentId} AND owner = 'database'`)[0]; const planted = id();
+    await h.cloud`INSERT INTO environment_erasures (id, org_id, project_id, environment_id, binding_id, owner, remote_resource_id) VALUES (${planted}, ${kept.orgId}, ${kept.projectId}, ${kept.environmentId}, ${keptBinding.id}, 'database', ${keptBinding.remote_resource_id})`;
+    expect(await forged(planted, kept, keptBinding.id, keptBinding.remote_resource_id)).toBe(401); expect(await erase.execute(id())).toBe(0);
+    expect(await held(kept, K.names)).toEqual(full); expect(bytesOf(K.bucketId)).toHaveLength(1);
+    await h.cloud`UPDATE environment_erasures SET next_attempt_at = now() WHERE state = 'pending'`;
+
+    // An organization's final deletion reaches every environment it still has.
+    await h.cloud`UPDATE organizations SET state = 'deleted' WHERE id = ${kept.orgId}`;
+    expect((await h.cloud`SELECT owner, state FROM environment_erasures WHERE environment_id = ${kept.environmentId}`) as unknown[]).toEqual([{ owner: 'database', state: 'pending' }]);
+    // A confirmation counts only if it names exactly what was asked for. An owning service that answers for something else has confirmed nothing.
+    const lying = new EraseEnvironments(erasures, { database: { erase: async work => ({ scope: work.scope, bindingId: work.bindingId, erasureId: id(), remoteResourceId: work.remoteResourceId, state: 'erased' as const, erasedAt: new Date().toISOString(), removed: {} }) } });
+    expect(await lying.execute(id())).toBe(0);
+    expect((await h.cloud`SELECT state, last_error FROM environment_erasures WHERE environment_id = ${kept.environmentId}`) as unknown[]).toEqual([{ state: 'pending', last_error: 'erasure.conflict' }]);
+    expect(await held(kept, K.names)).toEqual(full);
+    await h.cloud`UPDATE environment_erasures SET next_attempt_at = now() WHERE state = 'pending'`;
+    expect(await erase.execute(id())).toBe(1); expect(await held(kept, K.names)).toEqual(none);
+    for (let wait = 0; wait < 40 && bytesOf(K.bucketId).length; wait++) await Bun.sleep(25);
+    expect(bytesOf(K.bucketId)).toEqual([]);
+  }, 60000);
 
   test('ensure, pause and resume provision real native resources and preserve cross-environment PostgreSQL privilege boundaries', async () => {
     const h = await harness(); const created = await h.create(); const scope = created.scope;

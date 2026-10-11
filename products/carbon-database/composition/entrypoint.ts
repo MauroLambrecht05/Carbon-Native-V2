@@ -118,11 +118,11 @@ export async function buildDatabaseSystem(config: CarbonDatabaseConfig) {
   const handler = (request: Request) => canonical(new URL(request.url).pathname)
     ? lifecycle ? lifecycle(request) : Promise.resolve(Response.json({ error: { code: 'capability', message: 'Internal platform is not configured', requestId: crypto.randomUUID() } }, { status: 501, headers: { 'cache-control': 'no-store' } }))
     : legacyHandler(request);
-  return { sql, deps, handler, realtime, blobStorage: lifecycle?.blobStorage, pruneChanges: lifecycle?.pruneChanges };
+  return { sql, deps, handler, realtime, blobStorage: lifecycle?.blobStorage, pruneChanges: lifecycle?.pruneChanges, purgeErasedObjects: lifecycle?.purgeErasedObjects };
 }
 
 export async function startDatabase(config: CarbonDatabaseConfig = configFromEnv()) {
-  const { sql, handler, realtime, deps, blobStorage, pruneChanges } = await buildDatabaseSystem(config);
+  const { sql, handler, realtime, deps, blobStorage, pruneChanges, purgeErasedObjects } = await buildDatabaseSystem(config);
   const operations = composeOperations(sql);
   const observedHandler = operations.observe(async (request: Request) => (await operations.routes(request)) ?? handler(request));
   const server = startDatabaseServer({ port: config.port, handler: observedHandler, realtime });
@@ -130,6 +130,8 @@ export async function startDatabase(config: CarbonDatabaseConfig = configFromEnv
   if (pruneChanges) setInterval(() => { pruneChanges().catch(() => console.error(JSON.stringify({ event: 'data.changes.prune_unavailable' }))); }, 3_600_000).unref();
   // Blob cleanup: lapsed transfer addresses, abandoned uploads, and versions past their retention.
   if (blobStorage) setInterval(() => { blobStorage.sweep().catch(() => console.error(JSON.stringify({ event: 'blob.sweep_unavailable' }))); }, 60_000).unref();
+  // Bytes of erased environments that the store could not delete at the time are tried again here.
+  if (purgeErasedObjects) setInterval(() => { purgeErasedObjects().catch(() => console.error(JSON.stringify({ event: 'erasure.purge_unavailable' }))); }, 60_000).unref();
 
   console.log(`\n⚡ Carbon Database Studio running at: http://localhost:${server.port}`);
   console.log(`📡 API & Database services active (Relational, Vector, Graph, Functions, Storage)`);
