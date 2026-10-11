@@ -170,6 +170,8 @@ export interface BrowserServices {
   functions: import("./function-contracts").FunctionService;
   /** Functions as the live service offers them. Present only in the production composition; the mock uses `functions`. */
   liveFunctions?: import("./live-function-contracts").LiveFunctionService;
+  /** Builds, signing, releases and channels as the live service offers them. Present only in the production composition. */
+  liveDelivery?: import("./live-delivery-contracts").LiveDeliveryService;
   registry: import("./registry-contracts").RegistryService;
   billing: import("./operations-contracts").BillingService;
   operator: import("./operations-contracts").OperatorService;

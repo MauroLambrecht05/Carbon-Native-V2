@@ -55,17 +55,24 @@ function integer(value: string | undefined, what: string, min: number, max: numb
   return number;
 }
 const exactly = (positionals: readonly string[], count: number, usage: string) => { if (positionals.length !== count) throw new UsageError(`usage: ${usage}`); };
+/** `?limit=&cursor=` for a list. The cursor is the `nextCursor` of the page before; it is opaque and sent back as it came. */
+function paging(p: { one(name: string): string | undefined }): string {
+  const query = new URLSearchParams(); const limit = p.one("limit"); const cursor = p.one("cursor");
+  if (limit !== undefined) query.set("limit", String(integer(limit, "--limit", 1, 100)));
+  if (cursor !== undefined) { if (!/^[A-Za-z0-9_.~-]{1,4096}$/.test(cursor)) throw new UsageError("--cursor must be the nextCursor of an earlier page"); query.set("cursor", cursor); }
+  const text = query.toString(); return text ? `?${text}` : "";
+}
 
 const HELP: Record<PlatformFamily, string> = {
   builds: `carbon cloud builds <subcommand>
-  list                                   every build of the environment, newest first
+  list [--limit <n>] [--cursor <cursor>]  the environment's builds, a page at a time; the answer's nextCursor gets the next page
   show <buildId>                         one build
   logs <buildId> [--after <sequence>]    its log segments
   provenance <buildId>                   its signed provenance
   create --repo <url> --commit <sha> --target <name>... --platform <windows|linux|macos> [--secret <NAME>]...
   cancel <buildId>`,
   releases: `carbon cloud releases <subcommand>
-  list
+  list [--limit <n>] [--cursor <cursor>]
   show <releaseId>
   create --file <release.json>           the release as JSON: buildId, version, notes, minVersion, signingProfileId, artifacts
   withdraw <releaseId> --reason <text>`,
@@ -76,11 +83,11 @@ const HELP: Record<PlatformFamily, string> = {
   rollout <name> --rollout <0-100>
   command <name> --command <json>        any other channel command, as JSON`,
   functions: `carbon cloud functions <subcommand>
-  list
+  list [--limit <n>] [--cursor <cursor>]
   show <functionId>
   deploy <name> --file <module.js> [--secret <NAME>]... [--timeout <seconds>]
   invoke <functionId> [--input <json>] [--wait] [--wait-seconds <n>]
-  executions <functionId>
+  executions <functionId> [--limit <n>] [--cursor <cursor>]
   execution <executionId>
   logs <executionId>
   cancel <executionId>
@@ -121,7 +128,7 @@ interface Api {
 
 async function run(family: PlatformFamily, subcommand: string, rest: readonly string[], api: Api): Promise<unknown> {
   if (family === "builds") {
-    if (subcommand === "list") { exactly(parse(rest, []).positionals, 0, "carbon cloud builds list"); return api.get("/builds"); }
+    if (subcommand === "list") { const p = parse(rest, ["limit", "cursor"]); exactly(p.positionals, 0, "carbon cloud builds list [--limit <n>] [--cursor <cursor>]"); return api.get(`/builds${paging(p)}`); }
     if (subcommand === "show") { const p = parse(rest, []); exactly(p.positionals, 1, "carbon cloud builds show <buildId>"); return api.get(`/builds/${identifier(p.positionals[0], "buildId")}`); }
     if (subcommand === "provenance") { const p = parse(rest, []); exactly(p.positionals, 1, "carbon cloud builds provenance <buildId>"); return api.get(`/builds/${identifier(p.positionals[0], "buildId")}/provenance`); }
     if (subcommand === "logs") {
@@ -140,7 +147,7 @@ async function run(family: PlatformFamily, subcommand: string, rest: readonly st
     }
   }
   if (family === "releases") {
-    if (subcommand === "list") { exactly(parse(rest, []).positionals, 0, "carbon cloud releases list"); return api.get("/releases"); }
+    if (subcommand === "list") { const p = parse(rest, ["limit", "cursor"]); exactly(p.positionals, 0, "carbon cloud releases list [--limit <n>] [--cursor <cursor>]"); return api.get(`/releases${paging(p)}`); }
     if (subcommand === "show") { const p = parse(rest, []); exactly(p.positionals, 1, "carbon cloud releases show <releaseId>"); return api.get(`/releases/${identifier(p.positionals[0], "releaseId")}`); }
     if (subcommand === "create") { const p = parse(rest, ["file"]); exactly(p.positionals, 0, "carbon cloud releases create --file <release.json>"); if (!p.one("file")) throw new UsageError("create needs --file"); return api.post("/releases", json(file(p.one("file")!, "release"), "the release file")); }
     if (subcommand === "withdraw") {
@@ -166,9 +173,9 @@ async function run(family: PlatformFamily, subcommand: string, rest: readonly st
     const fn = (p: { positionals: readonly string[] }, usage: string) => { exactly(p.positionals, 1, usage); return `/functions/${identifier(p.positionals[0], "functionId")}`; };
     const execution = (p: { positionals: readonly string[] }, usage: string) => { exactly(p.positionals, 1, usage); return `/executions/${identifier(p.positionals[0], "executionId")}`; };
     const functionRevision = (path: string) => api.revisionOf(path, value => value?.function?.revision);
-    if (subcommand === "list") { exactly(parse(rest, []).positionals, 0, "carbon cloud functions list"); return api.get("/functions"); }
+    if (subcommand === "list") { const p = parse(rest, ["limit", "cursor"]); exactly(p.positionals, 0, "carbon cloud functions list [--limit <n>] [--cursor <cursor>]"); return api.get(`/functions${paging(p)}`); }
     if (subcommand === "show") return api.get(fn(parse(rest, []), "carbon cloud functions show <functionId>"));
-    if (subcommand === "executions") return api.get(`${fn(parse(rest, []), "carbon cloud functions executions <functionId>")}/executions`);
+    if (subcommand === "executions") { const p = parse(rest, ["limit", "cursor"]); return api.get(`${fn(p, "carbon cloud functions executions <functionId> [--limit <n>] [--cursor <cursor>]")}/executions${paging(p)}`); }
     if (subcommand === "schedules") return api.get(`${fn(parse(rest, []), "carbon cloud functions schedules <functionId>")}/schedules`);
     if (subcommand === "execution") return api.get(execution(parse(rest, []), "carbon cloud functions execution <executionId>"));
     if (subcommand === "logs") return api.get(`${execution(parse(rest, []), "carbon cloud functions logs <executionId>")}/logs`);

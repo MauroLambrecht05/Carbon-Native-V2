@@ -11,6 +11,7 @@ import type { AccountContext, Audit, AuditRequest, BrowserServices, Capability, 
   Unsubscribe } from "../../../presentation/framework/services/contracts";
 import type { Account, AccountCommand, AccountSession, AuthRequest, CommandReceipt, IdentityService, Invitation, Member, OrganizationDetails, PlatformCommand, PlatformService } from "../../../presentation/framework/services/identity-contracts";
 import type { LiveExecution, LiveExecutionLogs, LiveFunction, LiveFunctionDetails, LiveFunctionService, LiveSchedule } from "../../../presentation/framework/services/live-function-contracts";
+import type { LiveBuild, LiveChannel, LiveChannelRevision, LiveDeliveryService, LiveRelease } from "../../../presentation/framework/services/live-delivery-contracts";
 import { API, LiveTransport, failure, pageQuery, unsupported, type LiveTransportOptions } from "./transport.ts";
 
 type Json = Record<string, any>;
@@ -232,8 +233,8 @@ export function createLiveServices(options: LiveTransportOptions = {}): { servic
       const later = "Not connected to the live service in this version of the frontend.";
       return ok([
         { id: "account", owner: "cloud", available: true }, { id: "organizations", owner: "cloud", available: true }, { id: "catalog", owner: "cloud", available: true }, { id: "activity", owner: "cloud", available: true },
-        { id: "functions", owner: "cloud", available: true },
-        ...["credentials", "builds", "releases", "billing"].map(id => ({ id, owner: "cloud" as const, available: false, reason: later })),
+        { id: "functions", owner: "cloud", available: true }, { id: "builds", owner: "cloud", available: true }, { id: "releases", owner: "cloud", available: true },
+        ...["credentials", "billing"].map(id => ({ id, owner: "cloud" as const, available: false, reason: later })),
         ...["data", "storage", "app-auth", "vectors", "graph", "realtime"].map(id => ({ id, owner: "database" as const, available: false, reason: later })),
         { id: "registry", owner: "registry", available: false, reason: later },
       ]);
@@ -302,8 +303,70 @@ export function createLiveServices(options: LiveTransportOptions = {}): { servic
     },
   };
 
+  // Builds, signing profiles, releases and channels. One request per call, to the route of the same name.
+  const build = (row: Json): LiveBuild => ({ id: row.id, state: row.state, repositoryUrl: row.source.repositoryUrl, commitSha: row.source.commitSha, targets: row.source.targets, platform: row.source.platform, secretNames: row.source.secretNames,
+    attempt: row.attempt, errorCategory: row.errorCategory ?? null, reservedMinutes: row.reservedMinutes, usedMinutes: row.usedMinutes ?? null, revision: row.revision, createdAt: row.createdAt, startedAt: row.startedAt ?? null, completedAt: row.completedAt ?? null });
+  const release = (row: Json): LiveRelease => ({ id: row.id, buildId: row.buildId, version: row.version, notes: row.notes, minVersion: row.minVersion ?? null, signingProfileId: row.signingProfileId, state: row.state,
+    artifacts: (row.artifacts as Json[]).map(item => ({ platform: item.platform, target: item.target, sizeBytes: item.sizeBytes, sha256: item.sha256, url: item.url })), withdrawnReason: row.withdrawnReason ?? null, revision: row.revision,
+    createdAt: row.createdAt, withdrawnAt: row.withdrawnAt ?? null });
+  const channelRevision = (row: Json): LiveChannelRevision => ({ number: row.number, releaseId: row.releaseId, version: row.version, rollout: row.rollout, reason: row.reason ?? null, createdAt: row.createdAt });
+  const channel = (row: Json): LiveChannel => ({ name: row.name, feedUrl: row.feedUrl, current: channelRevision(row.current), revision: row.revision });
+  const liveDelivery: LiveDeliveryService = {
+    async builds(context, page) {
+      const result = await http.get<Json>(`${environmentPath(context.scope)}/builds${pageQuery(page)}`, context.signal);
+      return then(result, value => ({ items: (value.items as Json[]).map(build), nextCursor: value.nextCursor as string | null, total: (value.items as Json[]).length }));
+    },
+    async build(context, id) {
+      const result = await http.get<Json>(`${environmentPath(context.scope)}/builds/${id}`, context.signal);
+      return then(result, value => ({ build: build(value.build), artifacts: (value.artifacts as Json[]).map(item => ({ id: item.id, target: item.target, sizeBytes: item.sizeBytes, sha256: item.sha256 })) }));
+    },
+    async buildLog(context, id, after) {
+      const result = await http.get<Json>(`${environmentPath(context.scope)}/builds/${id}/logs${after === undefined ? "" : `?after=${after}`}`, context.signal);
+      return then(result, value => ({ text: (value.items as Json[]).map(item => item.text as string).join(""), nextSequence: value.nextSequence as number | null }));
+    },
+    async createBuild(context, input, options) {
+      const result = await http.post<Json>(`${environmentPath(context.scope)}/builds`, { repositoryUrl: input.repositoryUrl, commitSha: input.commitSha, targets: [...input.targets], secretNames: [...input.secretNames], platform: input.platform }, { idempotencyKey: options.idempotencyKey });
+      return then(result, (value): CommandReceipt => ({ message: value.message, resourceId: value.build.id }));
+    },
+    async cancelBuild(context, id, options) {
+      const result = await http.post<Json>(`${environmentPath(context.scope)}/builds/${id}`, { kind: "cancel" }, options);
+      return then(result, (value): CommandReceipt => ({ message: value.message, resourceId: value.build.id }));
+    },
+    async signingProfiles(context) {
+      const result = await http.get<Json>(`${environmentPath(context.scope)}/signing-profiles`, context.signal);
+      return then(result, value => (value.items as Json[]).map(item => ({ id: item.id as string, name: item.name as string, secretName: item.secretName as string, publicKey: item.publicKey as string, createdAt: item.createdAt as string })));
+    },
+    async createSigningProfile(context, input, options) {
+      const result = await http.post<Json>(`${environmentPath(context.scope)}/signing-profiles`, { name: input.name, secretName: input.secretName }, { idempotencyKey: options.idempotencyKey });
+      return then(result, (value): CommandReceipt => ({ message: "Signing profile created", resourceId: value.id }));
+    },
+    async releases(context, page) {
+      const result = await http.get<Json>(`${environmentPath(context.scope)}/releases${pageQuery(page)}`, context.signal);
+      return then(result, value => ({ items: (value.items as Json[]).map(release), nextCursor: value.nextCursor as string | null, total: (value.items as Json[]).length }));
+    },
+    async release(context, id) { return then(await http.get<Json>(`${environmentPath(context.scope)}/releases/${id}`, context.signal), release); },
+    async createRelease(context, input, options) {
+      const result = await http.post<Json>(`${environmentPath(context.scope)}/releases`, { buildId: input.buildId, version: input.version, notes: input.notes, minVersion: input.minVersion, signingProfileId: input.signingProfileId,
+        artifacts: input.artifacts.map(item => ({ platform: item.platform, target: item.target })) }, { idempotencyKey: options.idempotencyKey });
+      return then(result, (value): CommandReceipt => ({ message: value.message, resourceId: value.release.id }));
+    },
+    async withdrawRelease(context, id, reason, options) {
+      const result = await http.post<Json>(`${environmentPath(context.scope)}/releases/${id}`, { kind: "withdraw", reason }, options);
+      return then(result, (value): CommandReceipt => ({ message: value.message, resourceId: value.release.id }));
+    },
+    async channels(context) { return then(await http.get<Json>(`${environmentPath(context.scope)}/channels`, context.signal), value => (value.items as Json[]).map(channel)); },
+    async channel(context, name) {
+      const result = await http.get<Json>(`${environmentPath(context.scope)}/channels/${encodeURIComponent(name)}`, context.signal);
+      return then(result, value => ({ channel: channel(value.channel), revisions: (value.revisions as Json[]).map(channelRevision) }));
+    },
+    async channelCommand(context, name, command, options) {
+      const result = await http.post<Json>(`${environmentPath(context.scope)}/channels/${encodeURIComponent(name)}`, command, options);
+      return then(result, (value): CommandReceipt => ({ message: value.message, resourceId: value.channel.name }));
+    },
+  };
+
   const services: BrowserServices = {
-    session, identity, platform, catalog, activity, capabilities, liveFunctions,
+    session, identity, platform, catalog, activity, capabilities, liveFunctions, liveDelivery,
     configuration: notConnected("Credentials and configuration"), delivery: notConnected("Builds and releases"), data: notConnected("Database"), appAuth: notConnected("Application authentication"),
     extensions: notConnected("Storage, vectors, graph and realtime"), functions: notConnected("Functions"), registry: notConnected("Registry"), billing: notConnected("Billing"), operator: notConnected("Operator tools"),
     operations: notConnected("Operations"), events: notConnected("Live events"),

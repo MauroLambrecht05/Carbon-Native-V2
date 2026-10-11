@@ -94,6 +94,9 @@ credential outright and takes precedence; it then needs `CARBON_CLOUD_URL`,
 `CARBON_ORG`, `CARBON_PROJECT` and `CARBON_ENVIRONMENT`, because a personal
 credential does not say where it is to be used.
 
+Lists are read a page at a time: `--limit` and `--cursor`, where the cursor is
+the `nextCursor` of the page before.
+
 Each subcommand prints Cloud's JSON answer on standard output and nothing else,
 so it can be piped. Exit code 0 means Cloud answered; 1 means it refused or
 could not be reached; 2 means the command was used wrongly and nothing was

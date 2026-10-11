@@ -157,7 +157,8 @@ test("against the live service the console says only true things: no mock wordin
   const organizations = await mount("/organizations", member.send); view!.unmount(); view = undefined;
   expect(organizations).toContain("North Works"); expect(organizations).toContain("Ada"); expect(organizations.toLowerCase()).not.toContain("mock"); expect(organizations).not.toContain("Operations");
   // Routes of areas that are not connected: a notice, and not one request for their data.
-  for (const path of ["/orgs/11111111-1111-4111-8111-111111111111/billing", "/orgs/11111111-1111-4111-8111-111111111111/projects/22222222-2222-4222-8222-222222222222/builds", "/registry", "/operations", "/account/tokens"]) {
+  for (const path of ["/orgs/11111111-1111-4111-8111-111111111111/billing", "/orgs/11111111-1111-4111-8111-111111111111/projects/22222222-2222-4222-8222-222222222222/settings/build", "/orgs/11111111-1111-4111-8111-111111111111/workers",
+    "/orgs/11111111-1111-4111-8111-111111111111/projects/22222222-2222-4222-8222-222222222222/environments/33333333-3333-4333-8333-333333333333/database/tables", "/registry", "/operations", "/account/tokens"]) {
     member.calls.length = 0; const page = await mount(path, member.send); view!.unmount(); view = undefined;
     expect(page).toContain("not connected to Carbon Cloud"); expect(page.toLowerCase()).not.toContain("mock");
     expect(member.calls.map(call => call.path)).toEqual(["/platform/v1/account/session"]);
@@ -298,6 +299,112 @@ test("the functions pages show what the service holds and send its own commands:
   await page(`${pages}/${functionId}`);
   for (const title of ["Activate a revision", "Deploy a new revision", "Disable this function", "Invoke"]) expect([title, formTitled(title).findByType("fieldset").props.disabled]).toEqual([title, true]);
   done();
+  expect(net.calls.every(call => call.path.startsWith("/platform/v1/"))).toBe(true);
+});
+
+test("builds, signing, releases and channels render per environment from live answers and send the service's own commands", async () => {
+  const [org, projectId, development, production, buildId, releaseId, profileId] = ["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", "33333333-3333-4333-8333-333333333333",
+    "88888888-8888-4888-8888-888888888888", "44444444-4444-4444-8444-444444444444", "55555555-5555-4555-8555-555555555555", "66666666-6666-4666-8666-666666666666"];
+  const project = `/platform/v1/orgs/${org}/projects/${projectId}`; const env = (id: string) => `${project}/environments/${id}`; const pages = `/orgs/${org}/projects/${projectId}`;
+  const environmentRow = (id: string, name: string, kind: string) => ({ id, orgId: org, projectId, name, kind, state: "active", revision: "3", provisioning: "ready", createdAt: "2026-10-02T00:00:00Z" });
+  const buildRow = (overrides: Record<string, unknown> = {}) => ({ id: buildId, scope: { orgId: org, projectId, environmentId: development }, state: "succeeded",
+    source: { repositoryUrl: "https://github.com/acme/app.git", commitSha: "a".repeat(40), targets: ["nsis", "wix"], secretNames: [], platform: "windows" }, sourceDigest: "d".repeat(64), attempt: 1, createdBy: "a-1",
+    reservedMinutes: 30, usedMinutes: 4, errorCategory: null, revision: "6", createdAt: "2026-10-10T08:00:00Z", startedAt: "2026-10-10T08:00:05Z", completedAt: "2026-10-10T08:04:00Z", ...overrides });
+  const artifacts = [{ id: "ar-1", attempt: 1, target: "nsis", objectKey: "k1", sizeBytes: 3145728, sha256: "1".repeat(64), createdAt: "2026-10-10T08:03:00Z" }, { id: "ar-2", attempt: 1, target: "wix", objectKey: "k2", sizeBytes: 2048, sha256: "2".repeat(64), createdAt: "2026-10-10T08:03:00Z" }];
+  const releaseRow = (overrides: Record<string, unknown> = {}) => ({ id: releaseId, scope: { orgId: org, projectId, environmentId: development }, buildId, version: "1.2.0", notes: "Fixes the sync bug", minVersion: "1.0.0", signingProfileId: profileId, state: "published",
+    artifacts: [{ platform: "x86_64-pc-windows-msvc", target: "nsis", objectKey: "k1", sizeBytes: 3145728, sha256: "1".repeat(64), signature: "s", url: "https://cdn.example.test/k1" }], withdrawnReason: null, createdBy: "a-1", revision: "1", createdAt: "2026-10-10T09:00:00Z", withdrawnAt: null, ...overrides });
+  const revisionRow = (number: number, rollout: number) => ({ number, releaseId, version: "1.2.0", rollout, reason: null, manifestDigest: "m".repeat(64), createdBy: "a-1", createdAt: "2026-10-10T10:00:00Z" });
+  let current = buildRow(); let granted = ["metadata.read", "release.publish", "signing.manage"]; let profiles = [{ id: profileId, scope: {}, name: "release", secretName: "UPDATE_SIGNING_KEY", publicKey: "cHVibGlj", createdBy: "a-1", createdAt: "2026-10-01T00:00:00Z" }];
+  let stableExists = true;
+  const net = network({
+    "/platform/v1/account/session": () => json({ session: { id: "s-1", expiresAt: "2026-10-12T00:00:00Z", account: { id: "a-1", name: "Ada", securityRevision: "1", permissionRevision: "1" } } }),
+    [`/platform/v1/orgs/${org}`]: () => json({ organization: { id: org, name: "North Works", slug: "north-works", state: "active", revision: "6", role: "Owner", membershipId: "m-1", membershipRevision: "1", requireMfa: false }, transfer: null }),
+    [`/platform/v1/orgs/${org}/access`]: () => json({ scope: { orgId: org, projectId }, permissions: granted, permissionRevision: "1", membershipRevision: "1", organizationRevision: "6" }),
+    [project]: () => json({ id: projectId, orgId: org, name: "Notes", slug: "notes", state: "active", revision: "2", productionMutationsAllowed: true, createdAt: "2026-10-02T00:00:00Z" }),
+    [`${project}/environments`]: () => json({ items: [environmentRow(development, "Development", "development"), environmentRow(production, "Production", "production")], nextCursor: null, revision: "2" }),
+    [`${env(development)}/builds`]: init => init.method === "POST" ? json({ build: buildRow({ id: "99999999-9999-4999-8999-999999999999", state: "queued" }), message: "Build queued" }, 201) : json({ items: [current], nextCursor: null }),
+    [`${env(production)}/builds`]: () => json({ items: [], nextCursor: null }),
+    [`${env(development)}/builds/${buildId}`]: init => init.method === "POST" ? json({ build: current, message: "Build cancelled" }) : json({ build: current, artifacts: current.state === "succeeded" ? artifacts : [] }),
+    [`${env(development)}/builds/${buildId}/logs`]: () => json({ items: [{ sequence: 1, attempt: 1, text: "checkout a1b2\n", createdAt: "2026-10-10T08:00:06Z" }, { sequence: 2, attempt: 1, text: "packaged nsis\n", createdAt: "2026-10-10T08:03:00Z" }], nextSequence: null }),
+    [`${env(development)}/signing-profiles`]: init => init.method === "POST" ? json({ ...profiles[0], id: "77777777-7777-4777-8777-777777777777", name: "beta" }, 201) : json({ items: profiles }),
+    [`${env(development)}/releases`]: init => init.method === "POST" ? json({ release: releaseRow(), message: "Release created" }, 201) : json({ items: [releaseRow()], nextCursor: null }),
+    [`${env(development)}/releases/${releaseId}`]: init => init.method === "POST" ? json({ release: releaseRow({ state: "withdrawn" }), message: "Release withdrawn" }) : json(releaseRow()),
+    [`${env(development)}/channels`]: () => json({ items: [{ name: "stable", scope: {}, feedUrl: "https://cloud.example.test/updates/v1/x/stable/latest.json", current: revisionRow(2, 25), revision: "2" }] }),
+    [`${env(development)}/channels/stable`]: init => init.method === "POST" ? json({ channel: { name: "stable" }, message: "Channel updated" })
+      : stableExists ? json({ channel: { name: "stable", scope: {}, feedUrl: "https://cloud.example.test/updates/v1/x/stable/latest.json", current: revisionRow(2, 25), revision: "2" }, revisions: [revisionRow(2, 25), revisionRow(1, 10)] })
+      : json({ error: { code: "not_found", message: "Channel not found", requestId: "r-3" } }, 404),
+    [`${env(development)}/channels/broken`]: init => init.method === "POST" ? json({ channel: { name: "broken" }, message: "Channel created" }) : json({ error: { code: "unavailable", message: "Try again", requestId: "r-4" } }, 503),
+    [`${env(development)}/channels/beta`]: init => init.method === "POST" ? json({ channel: { name: "beta" }, message: "Channel created" }) : json({ error: { code: "not_found", message: "Channel not found", requestId: "r-3" } }, 404),
+  });
+  const done = () => { view!.unmount(); view = undefined; };
+  const honest = (shown: string) => { for (const word of ["mock", "fake", "simulated", "fixture", "local build"]) expect([word, shown.toLowerCase().includes(word)]).toEqual([word, false]); expect(shown).not.toContain("not connected"); };
+  const formTitled = (title: string) => view!.root.findAllByType("form").find(form => JSON.stringify(form.findByType("h3").props.children).includes(title))!;
+  const fill = async (form: ReturnType<typeof formTitled>, values: readonly string[]) => {
+    for (const [index, value] of values.entries()) { const control = form.findAll(node => node.type === "textarea" || node.type === "input" || node.type === "select")[index]!; await act(async () => { control.props.onChange({ target: { value } }); }); }
+  };
+  const submit = async (form: ReturnType<typeof formTitled>) => { await act(async () => { await form.props.onSubmit({ preventDefault() {} }); }); await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); }); };
+  const posts = () => net.calls.filter(call => call.method === "POST");
+
+  // Builds are an environment's. With none chosen the first is used, and choosing another asks that one and only that one.
+  const builds = await mount(`${pages}/builds`, net.send); honest(builds);
+  for (const text of ["Development", "Production", "succeeded", "aaaaaaaaaaaa", "nsis, wix", "Queue a build"]) expect([text, builds.includes(text)]).toEqual([text, true]);
+  expect(net.calls.some(call => call.path.startsWith(env(production)))).toBe(false); done();
+  net.calls.length = 0; const elsewhere = await mount(`${pages}/builds?environment=${production}`, net.send); expect(elsewhere).toContain("No builds in this environment yet");
+  expect(net.calls.some(call => call.path.startsWith(`${env(development)}/builds`))).toBe(false); done();
+  // An environment that is not this project's is said to be so, and nothing is asked on its behalf.
+  net.calls.length = 0; const foreign = await mount(`${pages}/builds?environment=${org}`, net.send); expect(foreign).toContain("That environment is not in this project"); expect(net.calls.some(call => call.path.includes("/builds"))).toBe(false); done();
+
+  // Queueing a build sends exactly what the service takes: one commit, its targets, a platform.
+  await mount(`${pages}/builds`, net.send); net.calls.length = 0;
+  await fill(formTitled("Queue a build"), ["https://github.com/acme/app.git", "B".repeat(40), " nsis , wix ", "windows", "NPM_TOKEN"]); await submit(formTitled("Queue a build"));
+  expect([posts()[0]!.path, posts()[0]!.body]).toEqual([`${env(development)}/builds`, { repositoryUrl: "https://github.com/acme/app.git", commitSha: "b".repeat(40), targets: ["nsis", "wix"], secretNames: ["NPM_TOKEN"], platform: "windows" }]); done();
+
+  // A build that succeeded: what it built from, its installers with sizes and digests, its log, and the form to release it.
+  const built = await mount(`${pages}/builds/${buildId}`, net.send); honest(built);
+  for (const text of ["https://github.com/acme/app.git", "4", " minutes used", "3.0 MiB", "2 KiB", "1".repeat(64), "checkout a1b2", "packaged nsis", "Release this build", "release"]) expect([text, built.includes(text)]).toEqual([text, true]);
+  expect(built).not.toContain("Cancel this build");
+  net.calls.length = 0; await fill(formTitled("Release this build"), ["1.2.0", "Fixes the sync bug", "1.0.0", profileId, "x86_64-pc-windows-msvc", "x86_64-pc-windows-msvc-msi"]); await submit(formTitled("Release this build"));
+  expect([posts()[0]!.path, posts()[0]!.body]).toEqual([`${env(development)}/releases`, { buildId, version: "1.2.0", notes: "Fixes the sync bug", minVersion: "1.0.0", signingProfileId: profileId,
+    artifacts: [{ platform: "x86_64-pc-windows-msvc", target: "nsis" }, { platform: "x86_64-pc-windows-msvc-msi", target: "wix" }] }]); done();
+  // Without a signing profile there is nothing to sign with: the page says where to make one and offers no release form.
+  profiles = []; const unsigned = await mount(`${pages}/builds/${buildId}`, net.send); expect(unsigned).toContain("first create a signing profile"); expect(unsigned).not.toContain("Release this build"); done(); profiles = [{ id: profileId, scope: {}, name: "release", secretName: "UPDATE_SIGNING_KEY", publicKey: "cHVibGlj", createdBy: "a-1", createdAt: "2026-10-01T00:00:00Z" }];
+  // A build still running can be cancelled, with its revision, and cannot be released.
+  current = buildRow({ state: "running", usedMinutes: null, completedAt: null, revision: "3" });
+  const running = await mount(`${pages}/builds/${buildId}`, net.send);
+  for (const text of ["has not finished", "30", " minutes reserved", "Cancel this build", "Installers are listed once the build succeeds"]) expect([text, running.includes(text)]).toEqual([text, true]); expect(running).not.toContain("Release this build");
+  net.calls.length = 0; await submit(formTitled("Cancel this build")); expect([posts()[0]!.path, posts()[0]!.body, posts()[0]!.headers.get("if-match")]).toEqual([`${env(development)}/builds/${buildId}`, { kind: "cancel" }, "3"]); done();
+  current = buildRow();
+
+  // Signing: the public key and the secret's name, never a private key, and the form to add a profile.
+  const signing = await mount(`${pages}/settings/signing`, net.send); honest(signing); for (const text of ["release", "UPDATE_SIGNING_KEY", "cHVibGlj", "never leaves the secret"]) expect([text, signing.includes(text)]).toEqual([text, true]);
+  net.calls.length = 0; await fill(formTitled("Create a signing profile"), ["beta", "BETA_KEY"]); await submit(formTitled("Create a signing profile")); expect(posts()[0]!.body).toEqual({ name: "beta", secretName: "BETA_KEY" }); done();
+
+  // A release, and publishing it. An existing channel is changed at its current revision; a new one is created with none.
+  const releases = await mount(`${pages}/releases`, net.send); expect(releases).toContain("1.2.0"); expect(releases).toContain("published"); done();
+  const release = await mount(`${pages}/releases/${releaseId}`, net.send); honest(release);
+  for (const text of ["Release ", "1.2.0", "Fixes the sync bug", "x86_64-pc-windows-msvc", "older than ", "Publish to a channel", "Withdraw this release"]) expect([text, release.includes(text)]).toEqual([text, true]);
+  net.calls.length = 0; await fill(formTitled("Publish to a channel"), ["stable", "50"]); await submit(formTitled("Publish to a channel"));
+  expect([posts()[0]!.path, posts()[0]!.body, posts()[0]!.headers.get("if-match")]).toEqual([`${env(development)}/channels/stable`, { kind: "publish", releaseId, rollout: 50 }, "2"]);
+  net.calls.length = 0; await fill(formTitled("Publish to a channel"), ["beta", "10"]); await submit(formTitled("Publish to a channel"));
+  expect([posts()[0]!.path, posts()[0]!.body, posts()[0]!.headers.has("if-match")]).toEqual([`${env(development)}/channels/beta`, { kind: "publish", releaseId, rollout: 10 }, false]);
+  // If the channel's state cannot be read, nothing is published: an unknown state is not the same as a new channel.
+  net.calls.length = 0; await fill(formTitled("Publish to a channel"), ["broken", "10"]); await submit(formTitled("Publish to a channel")); expect(posts()).toEqual([]);
+  net.calls.length = 0; await fill(formTitled("Withdraw this release"), ["Crashes on start"]); await submit(formTitled("Withdraw this release"));
+  expect([posts()[0]!.path, posts()[0]!.body, posts()[0]!.headers.get("if-match")]).toEqual([`${env(development)}/releases/${releaseId}`, { kind: "withdraw", reason: "Crashes on start" }, "1"]); done();
+
+  // Channels: what installs are offered now, the feed they read, the history, and the rollout command.
+  const channels = await mount(`${pages}/channels`, net.send); for (const text of ["stable", "1.2.0", "25"]) expect([text, channels.includes(text)]).toEqual([text, true]); done();
+  const channel = await mount(`${pages}/channels/stable`, net.send); honest(channel);
+  for (const text of ["Channel ", "stable", "/updates/v1/x/stable/latest.json", "revision ", "offered to ", "Change the rollout", "does not take the release back"]) expect([text, channel.includes(text)]).toEqual([text, true]);
+  net.calls.length = 0; await fill(formTitled("Change the rollout"), ["100"]); await submit(formTitled("Change the rollout"));
+  expect([posts()[0]!.path, posts()[0]!.body, posts()[0]!.headers.get("if-match")]).toEqual([`${env(development)}/channels/stable`, { kind: "rollout", rollout: 100 }, "2"]); done();
+  stableExists = false; expect(await mount(`${pages}/channels/stable`, net.send)).toContain("Channel not found"); done(); stableExists = true;
+
+  // A member who may only read sees everything and can change nothing.
+  granted = ["metadata.read"];
+  await mount(`${pages}/builds`, net.send); expect(formTitled("Queue a build").findByType("fieldset").props.disabled).toBe(true); done();
+  await mount(`${pages}/releases/${releaseId}`, net.send); for (const title of ["Publish to a channel", "Withdraw this release"]) expect([title, formTitled(title).findByType("fieldset").props.disabled]).toEqual([title, true]); done();
+  await mount(`${pages}/settings/signing`, net.send); expect(formTitled("Create a signing profile").findByType("fieldset").props.disabled).toBe(true); done();
   expect(net.calls.every(call => call.path.startsWith("/platform/v1/"))).toBe(true);
 });
 

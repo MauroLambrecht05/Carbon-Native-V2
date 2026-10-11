@@ -55,6 +55,10 @@ against the live service (see below), but it ships (G-151).
 | Projects and environments | List, create, archive, pause |
 | Scope and permissions | Resolved by the server for every page |
 | Audit | The list on organization, project and environment overviews |
+| Builds | Per environment: list, queue a build for one commit, read its installers and log, cancel |
+| Signing | Per environment: list signing profiles, create one from an environment secret |
+| Releases | Per environment: list, create from a succeeded build, read, withdraw with a reason |
+| Update channels | Per environment: list, publish a release (which creates the channel), change the rollout, read the feed address and the history |
 | Functions | List, deploy a function or a new revision, read a revision's code, activate a revision, enable and disable, invoke, list and follow executions, read an execution's log, cancel, retry, and schedules by calendar or interval with pause, resume and delete |
 
 Not connected inside these areas (G-148): GitHub sign-in, recovery by code,
@@ -71,9 +75,27 @@ have meant showing settings that do nothing.
 
 So against the live service the functions routes render their own pages
 (`LiveFunctionPages`), over their own contract (`LiveFunctionService`), which
-describes exactly what the service returns. The mock composition keeps the
+describes exactly what the service returns. Builds, signing, releases and
+channels are done the same way (`LiveDeliveryPages`, `LiveDeliveryService`). The mock composition keeps the
 mock's pages. The same routes serve both; which pages render is decided by the
 composition, in one place.
+
+### Builds and releases belong to an environment
+
+The console's routes file builds, releases, channels and signing under a
+project. The service keeps each of them per environment. The live pages
+therefore start with a choice of environment, carried in the address as
+`?environment=`, and show that environment's and nothing else's. An
+environment that is not in the project is said to be so, and nothing is asked
+on its behalf.
+
+Publishing to a channel reads the channel first: an existing channel is
+changed at the revision it has now, a new one is created, and if the channel's
+state cannot be read nothing is published.
+
+In the same slice of the route catalog, build configuration and organization
+workers are not connected: the service has no build configuration, and the
+workers page is not written. Those two routes still show the notice.
 
 What the live functions pages do not have, because the service does not: a
 stream of log output while a function runs (the log arrives when it finishes),

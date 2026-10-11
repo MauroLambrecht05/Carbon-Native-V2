@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useRuntime } from "../../framework/services/runtime";
+import { LiveDeliveryPages } from "./LiveDeliveryPages";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { Feedback } from "../../components/Feedback";
@@ -37,7 +39,12 @@ function usePagination() {
   const set = (key: string, value: string) => { const next = new URLSearchParams(params); value ? next.set(key, value) : next.delete(key); if (key !== "cursor") next.delete("cursor"); setParams(next); };
   return { params, cursor, set, pager: (next: string | null) => <Pager cursor={cursor} next={next} change={value => set("cursor", value ?? "")} /> };
 }
-export function DeliveryScopePage({ scope, resolved }: { scope: Scope; resolved: ResolvedScope }) {
+/** Against the live service the pages are the live ones; the mock keeps its own, which describe things the service does not have. */
+export function DeliveryScopePage(props: { scope: Scope; resolved: ResolvedScope }) {
+  const { live } = useRuntime();
+  return live ? <LiveDeliveryPages {...props} /> : <MockDeliveryScopePage {...props} />;
+}
+function MockDeliveryScopePage({ scope, resolved }: { scope: Scope; resolved: ResolvedScope }) {
   const path = useLocation().pathname, match = resolveRoute(path)!;
   if (!resolved.permissions["metadata.read"].allowed) return <p>{resolved.permissions["metadata.read"].reason}</p>;
   if (path.endsWith("/workers")) return <WorkersPage scope={scope} resolved={resolved} />;

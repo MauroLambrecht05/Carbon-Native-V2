@@ -39,6 +39,16 @@ describe("carbon cloud builds, releases, channels and functions", () => {
     expect(h.printed).toHaveLength(14); for (const text of h.printed) expect(JSON.parse(text)).toEqual({ items: [] });
   });
 
+  test("lists are read a page at a time, with the cursor Cloud gave", async () => {
+    const h = harness(() => ({ items: [], nextCursor: null }));
+    expect(await h.run("builds", "list", "--limit", "50", "--cursor", "abc.DEF_123-~")).toBe(0); expect(await h.run("releases", "list", "--limit", "1")).toBe(0);
+    expect(await h.run("functions", "list", "--cursor", "c2")).toBe(0); expect(await h.run("functions", "executions", ID, "--limit", "100", "--cursor", "c3")).toBe(0);
+    expect(h.requests.map(request => request.path)).toEqual(["/builds?limit=50&cursor=abc.DEF_123-%7E", "/releases?limit=1", "/functions?cursor=c2", `/functions/${ID}/executions?limit=100&cursor=c3`]);
+    for (const args of [["builds", "list", "--limit", "0"], ["builds", "list", "--limit", "101"], ["builds", "list", "--cursor", "a b"], ["builds", "list", "--cursor", "../x"], ["functions", "list", "--cursor", ""]] as const) {
+      const bad = harness(); expect([args.join(" "), await bad.run(args[0] as PlatformFamily, ...args.slice(1)), bad.requests.length]).toEqual([args.join(" "), 2, 0]);
+    }
+  });
+
   test("creating things sends what was asked, once, each with its own idempotency key", async () => {
     const directory = mkdtempSync(join(tmpdir(), "carbon-cli-platform-")); temporary.push(directory);
     const module = join(directory, "fn.js"); writeFileSync(module, "export default () => 1;\n"); const release = join(directory, "release.json"); writeFileSync(release, JSON.stringify({ buildId: ID, version: "1.2.3" }));

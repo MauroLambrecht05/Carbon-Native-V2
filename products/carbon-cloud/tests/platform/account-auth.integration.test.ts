@@ -2824,6 +2824,77 @@ suite("real account authentication", () => {
     expect(refused(await live.get({ scope: { ...f.scope, environmentId: crypto.randomUUID() } }, id))).toBe('not_found');
   });
 
+  test('the console\'s live delivery adapters work against the real API: queue and cancel builds, read installers and logs, sign, release, publish to channels and withdraw', async () => {
+    const h = await harness(); await h.challenge('owner@example.test'); await h.deliver(); await h.complete();
+    const org = (await organizationResponse(h.createOrganization('Delivery console', 'delivery-console'))).receipt.id;
+    const scope = parseComponent('EnvironmentScope', parseComponent('CatalogReceipt', (await (await h.createProject(org)).json() as { receipt: unknown }).receipt).scope);
+    const csrf = () => h.cookies.get('__Host-carbon-csrf')!; const envPath = `/platform/v1/orgs/${org}/projects/${scope.projectId}/environments/${scope.environmentId}`;
+    const post = (path: string, body: unknown, revision?: string) => h.call(path, 'POST', body, { 'x-csrf-token': csrf(), ...(revision ? { 'if-match': revision } : {}) });
+    await h.sql`INSERT INTO org_plans (org_id, plan) VALUES (${org}, 'pro')`;
+    const environmentRevision = parseComponent('CatalogEnvironmentDetails', await (await h.call(envPath)).json()).environment.revision;
+    expect((await post(`${envPath}/secrets`, { name: 'UPDATE_SIGNING_KEY', value: randomBytes(32).toString('base64') }, environmentRevision)).status).toBe(201);
+    const enrollment = parseComponent('WorkerEnrollmentIssue', await (await post(`/platform/v1/orgs/${org}/workers`, { name: 'win-01', purposes: ['build'] })).json());
+    const worker = parseComponent('WorkerCredentialIssue', await (await h.workerApi('/worker/v1/enroll', { code: enrollment.code, capabilities: { platform: 'windows', arch: 'x64', toolchains: [] } })).json());
+    const bearer = { authorization: `Bearer ${worker.token}` };
+
+    const live = createLiveServices({ fetch: h.browserFetch, cookies: h.browserCookies }).services.liveDelivery!; const context = { scope }; const options = () => ({ idempotencyKey: crypto.randomUUID() });
+    const value = <T,>(result: { ok: true; value: T } | { ok: false; error: { code: string; message: string } }): T => { if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`); return result.value; };
+    const refused = (result: { ok: boolean; error?: { code: string } }) => (result.ok ? 'accepted' : result.error!.code);
+    const source = (commit: string) => ({ repositoryUrl: 'https://github.com/carbon-team/desktop.git', commitSha: commit.repeat(40), targets: ['nsis', 'wix'], platform: 'windows', secretNames: [] });
+
+    // Queue a build from the page, and watch a worker take it through to verified installers.
+    expect(value(await live.builds(context)).items).toEqual([]);
+    expect(refused(await live.createBuild(context, { ...source('a'), commitSha: 'main' }, options()))).toBe('validation');
+    const buildId = value(await live.createBuild(context, source('a'), options())).resourceId!;
+    expect(value(await live.build(context, buildId))).toMatchObject({ build: { id: buildId, state: 'queued', commitSha: 'a'.repeat(40), targets: ['nsis', 'wix'], platform: 'windows', usedMinutes: null }, artifacts: [] });
+    const offer = parseComponent('WorkerLeaseOffer', await (await h.workerApi('/worker/v1/leases/claim', undefined, bearer)).json()); if (offer.state !== 'leased') throw new Error('expected a lease');
+    const on = (suffix: string, body?: unknown) => h.workerApi(`/worker/v1/leases/${offer.lease.id}/build${suffix}`, body, { ...bearer, 'x-carbon-lease-token': offer.leaseToken });
+    expect((await on('')).status).toBe(200); expect(value(await live.build(context, buildId)).build.state).toBe('running');
+    expect((await on('/logs', { sequence: 1, text: 'checking out\n' })).status).toBe(200); expect((await on('/logs', { sequence: 2, text: 'packaged nsis and wix\n' })).status).toBe(200);
+    expect(value(await live.buildLog(context, buildId)).text).toBe('checking out\npackaged nsis and wix\n');
+    const digest = (text: string) => createHash('sha256').update(text).digest('hex');
+    for (const target of ['nsis', 'wix']) expect((await on('/artifacts', { target, ...h.store.put(`artifacts/${buildId}/1/${target}/setup.${target}`, `${target} installer`) })).status).toBe(201);
+    expect((await on('/complete', { outcome: 'succeeded', materials: { resolvedCommit: 'a'.repeat(40), dependencyLockDigest: digest('lock'), configurationDigest: null, tools: [{ name: 'bun', version: '1.3.10' }], workspaceErased: true } })).status).toBe(200);
+    const built = value(await live.build(context, buildId)); expect(built.build.state).toBe('succeeded');
+    expect(built.artifacts.map(artifact => [artifact.target, artifact.sizeBytes, artifact.sha256])).toEqual([['nsis', 'nsis installer'.length, digest('nsis installer')], ['wix', 'wix installer'.length, digest('wix installer')]]);
+    // A second build, cancelled from the page at the revision the page was shown. A stale revision is a conflict.
+    const doomedId = value(await live.createBuild(context, source('b'), options())).resourceId!; const doomed = value(await live.build(context, doomedId)).build;
+    expect(refused(await live.cancelBuild(context, doomedId, { ...options(), expectedRevision: '99' }))).toBe('conflict');
+    value(await live.cancelBuild(context, doomedId, { ...options(), expectedRevision: doomed.revision })); expect(value(await live.build(context, doomedId)).build.state).toBe('cancelled');
+    expect(value(await live.builds(context)).items.map(build => [build.id, build.state]).sort()).toEqual([[doomedId, 'cancelled'], [buildId, 'succeeded']].sort());
+
+    // Signing, then a release of that build. The service's refusals come through with its codes.
+    expect(value(await live.signingProfiles(context))).toEqual([]);
+    expect(refused(await live.createSigningProfile(context, { name: 'release', secretName: 'NO_SUCH_SECRET' }, options()))).toBe('conflict');
+    const profileId = value(await live.createSigningProfile(context, { name: 'release', secretName: 'UPDATE_SIGNING_KEY' }, options())).resourceId!;
+    expect(value(await live.signingProfiles(context)).map(profile => [profile.id, profile.name, profile.secretName, profile.publicKey.length > 20])).toEqual([[profileId, 'release', 'UPDATE_SIGNING_KEY', true]]);
+    const release = { buildId, version: '1.0.0', notes: 'First release', minVersion: null, signingProfileId: profileId, artifacts: [{ platform: 'x86_64-pc-windows-msvc', target: 'nsis' }, { platform: 'x86_64-pc-windows-msvc-msi', target: 'wix' }] };
+    expect(refused(await live.createRelease(context, { ...release, buildId: doomedId }, options()))).toBe('conflict');
+    expect(refused(await live.createRelease(context, { ...release, version: 'v1' }, options()))).toBe('validation');
+    const releaseId = value(await live.createRelease(context, release, options())).resourceId!;
+    const made = value(await live.release(context, releaseId)); expect(made).toMatchObject({ id: releaseId, buildId, version: '1.0.0', state: 'published', notes: 'First release', minVersion: null, withdrawnReason: null });
+    expect(made.artifacts.map(artifact => [artifact.platform, artifact.target, artifact.sha256])).toEqual([['x86_64-pc-windows-msvc', 'nsis', digest('nsis installer')], ['x86_64-pc-windows-msvc-msi', 'wix', digest('wix installer')]]);
+    expect(value(await live.releases(context)).items.map(item => [item.id, item.version])).toEqual([[releaseId, '1.0.0']]);
+
+    // Publishing creates the channel. After that it changes only at its current revision.
+    expect(value(await live.channels(context))).toEqual([]); expect(refused(await live.channel(context, 'stable'))).toBe('not_found');
+    expect(value(await live.channelCommand(context, 'stable', { kind: 'publish', releaseId, rollout: 25 }, options())).resourceId).toBe('stable');
+    const stable = value(await live.channel(context, 'stable')); expect(stable.channel).toMatchObject({ name: 'stable', current: { number: 1, releaseId, version: '1.0.0', rollout: 25 } }); expect(stable.revisions.map(revision => revision.number)).toEqual([1]);
+    expect(stable.channel.feedUrl).toContain('/updates/v1/');
+    expect(refused(await live.channelCommand(context, 'stable', { kind: 'rollout', rollout: 100 }, { ...options(), expectedRevision: '99' }))).toBe('conflict');
+    value(await live.channelCommand(context, 'stable', { kind: 'rollout', rollout: 100 }, { ...options(), expectedRevision: stable.channel.revision }));
+    const widened = value(await live.channel(context, 'stable')); expect(widened.channel.current).toMatchObject({ number: 2, rollout: 100 }); expect(widened.revisions.map(revision => [revision.number, revision.rollout])).toEqual([[2, 100], [1, 25]]);
+    expect(value(await live.channels(context)).map(channel => [channel.name, channel.current.version, channel.current.rollout])).toEqual([['stable', '1.0.0', 100]]);
+
+    // Withdrawing is recorded with its reason, and a withdrawn release cannot be published again.
+    expect(refused(await live.withdrawRelease(context, releaseId, 'Crashes on start', { ...options(), expectedRevision: '99' }))).toBe('conflict');
+    value(await live.withdrawRelease(context, releaseId, 'Crashes on start', { ...options(), expectedRevision: made.revision }));
+    expect(value(await live.release(context, releaseId))).toMatchObject({ state: 'withdrawn', withdrawnReason: 'Crashes on start' });
+    expect(refused(await live.channelCommand(context, 'beta', { kind: 'publish', releaseId, rollout: 10 }, options()))).toBe('conflict');
+    // Another environment's build does not exist as far as this page can tell.
+    expect(refused(await live.build({ scope: { ...scope, environmentId: crypto.randomUUID() } }, buildId))).toBe('not_found');
+  });
+
   test('the console\'s live adapters walk the account and organization slice against the real API: sign-up by emailed link, session, organizations, projects, members, invitations, permissions, audit and sign-out', async () => {
     const h = await harness(); const { services } = createLiveServices({ fetch: h.browserFetch, cookies: h.browserCookies });
     const value = <T,>(result: { ok: true; value: T } | { ok: false; error: { code: string; message: string } }): T => { if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`); return result.value; };

@@ -8,7 +8,7 @@ import { ScopeCache } from "./framework/queries/scope-cache";
 import { resolveRoute } from "./framework/routing/routes";
 import { useSession } from "./framework/session/SessionProvider";
 import { useServices } from "./framework/services/context";
-import { LIVE_SLICES, useRuntime } from "./framework/services/runtime";
+import { isLive, useRuntime } from "./framework/services/runtime";
 import { unwrap } from "./framework/services/contracts";
 import { AccountPage, AuthPage, InvitationPage } from "./features/identity/IdentityPages";
 import { CreateResource, Invitations } from "./features/identity/PlatformPages";
@@ -39,7 +39,7 @@ export function App({ tools }: { tools?: ReactNode }) {
   else if (location.pathname === "/")
     content = <Navigate replace to={session ? "/organizations" : "/sign-in"} />;
   // Against the live service, an area that is not connected yet says so. Its page is not rendered at all.
-  else if (live && !LIVE_SLICES.has(match.route.slice))
+  else if (live && !isLive(match.route))
     content = (
       <>
         <h1>{match.route.label}</h1>
