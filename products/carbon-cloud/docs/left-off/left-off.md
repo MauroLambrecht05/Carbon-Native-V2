@@ -189,8 +189,9 @@ suites in CI; the services proven as processes, with a rollback setting; cron
 schedules, logs and retention for functions; real erasure in the owning
 services at final deletion; a supply-chain workflow; device and personal
 credentials on Cloud's build, release and function routes, with CLI commands
-over them; the console's functions, builds, signing, releases and channels
-against the live service; a threat model; and
+over them; the console's functions, builds, signing, releases, channels,
+activity, secrets, credentials and workers against the live service; a request
+limit per worker credential; a threat model; and
 [decisions.md](../decisions.md), which lists every open question that is a
 choice with the default in force. The progress log has the detail.
 
