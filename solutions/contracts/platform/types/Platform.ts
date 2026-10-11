@@ -304,6 +304,30 @@ export type BuildMaterials = { readonly "resolvedCommit": string; readonly "depe
 
 export type BuildProvenance = { readonly "statement": { readonly "version": 1; readonly "buildId": Id; readonly "scope": EnvironmentScope; readonly "attempt": number; readonly "workerId": Id; readonly "source": BuildSource; readonly "sourceDigest": Digest; readonly "materials": BuildMaterials; readonly "artifacts": ReadonlyArray<{ readonly "target": string; readonly "objectKey": string; readonly "sizeBytes": number; readonly "sha256": Digest; }>; readonly "startedAt": Timestamp; readonly "finishedAt": Timestamp; }; readonly "statementDigest": Digest; readonly "signature": { readonly "keyId": string; readonly "algorithm": "ed25519"; readonly "value": string; } | null; };
 
+export type BlobBucketName = string;
+
+export type BlobKey = string;
+
+export type BlobBucketDefinition = { readonly "name": BlobBucketName; readonly "visibility": "private" | "public"; readonly "maxObjectBytes": number; readonly "allowedContentTypes": ReadonlyArray<string>; readonly "versioning": boolean; readonly "retentionDays": number | null; readonly "quotaBytes": number; };
+
+export type BlobBucket = { readonly "id": Id; readonly "definition": BlobBucketDefinition; readonly "usedBytes": number; readonly "objectCount": number; readonly "revision": Revision; readonly "createdAt": Timestamp; };
+
+export type BlobBucketList = { readonly "buckets": ReadonlyArray<BlobBucket>; };
+
+export type BlobObject = { readonly "key": BlobKey; readonly "versionId": Id; readonly "sizeBytes": number; readonly "sha256": Digest; readonly "contentType": string; readonly "state": "current" | "replaced" | "deleted"; readonly "createdAt": Timestamp; readonly "removedAt": Timestamp | null; readonly "purgeAfter": Timestamp | null; };
+
+export type BlobObjectList = { readonly "bucketId": Id; readonly "objects": ReadonlyArray<BlobObject>; readonly "nextAfterKey": BlobKey | null; };
+
+export type BlobTransfer = { readonly "method": "PUT" | "GET"; readonly "url": string; readonly "expiresAt": Timestamp; readonly "headers": { readonly [key: string]: string; }; };
+
+export type BlobReceipt = { readonly "commandId": Id; readonly "bucketId": Id; readonly "revision"?: Revision; readonly "key"?: BlobKey; readonly "versionId"?: Id; };
+
+export type BlobCommand = { readonly "kind": "bucket.create"; readonly "commandId": Id; readonly "bucketId": Id; readonly "definition": BlobBucketDefinition; } | { readonly "kind": "bucket.update"; readonly "commandId": Id; readonly "bucketId": Id; readonly "revision": Revision; readonly "definition": BlobBucketDefinition; } | { readonly "kind": "bucket.delete"; readonly "commandId": Id; readonly "bucketId": Id; readonly "revision": Revision; readonly "confirmation": BlobBucketName; } | { readonly "kind": "buckets.list"; } | { readonly "kind": "bucket.get"; readonly "bucketId": Id; } | { readonly "kind": "objects.list"; readonly "bucketId": Id; readonly "prefix"?: string; readonly "afterKey"?: BlobKey; readonly "limit"?: number; } | { readonly "kind": "object.versions"; readonly "bucketId": Id; readonly "key": BlobKey; } | { readonly "kind": "object.upload"; readonly "commandId": Id; readonly "bucketId": Id; readonly "key": BlobKey; readonly "sizeBytes": number; readonly "sha256": Digest; readonly "contentType": string; } | { readonly "kind": "object.download"; readonly "bucketId": Id; readonly "key": BlobKey; readonly "versionId"?: Id; } | { readonly "kind": "object.delete"; readonly "commandId": Id; readonly "bucketId": Id; readonly "key": BlobKey; readonly "versionId"?: Id; } | { readonly "kind": "object.restore"; readonly "commandId": Id; readonly "bucketId": Id; readonly "key": BlobKey; readonly "versionId": Id; };
+
+export type BlobRequest = { readonly "scope": EnvironmentScope; readonly "bindingId": Id; readonly "command": BlobCommand; };
+
+export type BlobResponse = { readonly "scope": EnvironmentScope; readonly "bindingId": Id; readonly "result": BlobBucket | BlobBucketList | BlobObjectList | BlobTransfer | BlobReceipt; };
+
 export type DataExportCreate = { readonly "kind": "export.enqueue"; readonly "commandId": Id; readonly "tableId": Id; readonly "format": "jsonl" | "csv"; readonly "selection"?: DataRowSelection; readonly "access": { readonly "mode": "policy-preview"; readonly "userId"?: Id; }; };
 
 export type DataExportJob = { readonly "id": Id; readonly "scope": EnvironmentScope; readonly "tableId": Id; readonly "format": "jsonl" | "csv"; readonly "state": "queued" | "running" | "ready" | "failed" | "cancelled" | "expired"; readonly "rows": number; readonly "bytes": number; readonly "errorCode": string | null; readonly "createdBy": Id; readonly "revision": Revision; readonly "createdAt": Timestamp; readonly "completedAt": Timestamp | null; readonly "expiresAt": Timestamp | null; };
@@ -727,6 +751,18 @@ export interface Components {
   WorkerBuildInput: WorkerBuildInput;
   BuildMaterials: BuildMaterials;
   BuildProvenance: BuildProvenance;
+  BlobBucketName: BlobBucketName;
+  BlobKey: BlobKey;
+  BlobBucketDefinition: BlobBucketDefinition;
+  BlobBucket: BlobBucket;
+  BlobBucketList: BlobBucketList;
+  BlobObject: BlobObject;
+  BlobObjectList: BlobObjectList;
+  BlobTransfer: BlobTransfer;
+  BlobReceipt: BlobReceipt;
+  BlobCommand: BlobCommand;
+  BlobRequest: BlobRequest;
+  BlobResponse: BlobResponse;
   DataExportCreate: DataExportCreate;
   DataExportJob: DataExportJob;
   DataExportReceipt: DataExportReceipt;

@@ -1,0 +1,301 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Carbon blob storage",
+    "version": "1.0.0",
+    "description": "Buckets, objects and single-use transfers. Commands go to Cloud; bytes go to and from Carbon Database through the addresses a command returns. See blob-storage.md."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "paths": {
+    "/platform/v1/orgs/{orgId}/projects/{projectId}/environments/{environmentId}/blobs": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrgId"
+        },
+        {
+          "$ref": "#/components/parameters/ProjectId"
+        },
+        {
+          "$ref": "#/components/parameters/EnvironmentId"
+        }
+      ],
+      "post": {
+        "operationId": "executeBlobCommand",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "description": "Runs one blob command. Commands with a commandId need the same value as Idempotency-Key and a recently authenticated session; bucket.update and bucket.delete also need If-Match with the bucket revision.",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/BlobCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The command's result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "result"
+                  ],
+                  "properties": {
+                    "result": {
+                      "anyOf": [
+                        {
+                          "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/BlobBucket"
+                        },
+                        {
+                          "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/BlobBucketList"
+                        },
+                        {
+                          "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/BlobObjectList"
+                        },
+                        {
+                          "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/BlobTransfer"
+                        },
+                        {
+                          "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/BlobReceipt"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/storage/v1/transfers/{token}": {
+      "servers": [
+        {
+          "url": "{database}",
+          "variables": {
+            "database": {
+              "default": "https://data.example.test",
+              "description": "Carbon Database's public origin"
+            }
+          }
+        }
+      ],
+      "parameters": [
+        {
+          "name": "token",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "pattern": "^bt_[A-Za-z0-9_-]{43}$"
+          }
+        }
+      ],
+      "put": {
+        "operationId": "uploadBlob",
+        "security": [],
+        "description": "Spends an upload address. The body must be exactly the authorized size, digest and content type; anything else is refused and stores nothing.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Stored"
+          },
+          "400": {
+            "description": "Not what was authorized"
+          },
+          "404": {
+            "description": "Not a valid address"
+          },
+          "503": {
+            "description": "Storage unavailable"
+          }
+        }
+      },
+      "get": {
+        "operationId": "downloadBlob",
+        "security": [],
+        "description": "Spends a download address and returns the object's bytes as an attachment.",
+        "responses": {
+          "200": {
+            "description": "The bytes",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not a valid address"
+          }
+        }
+      }
+    },
+    "/storage/v1/public/{environmentId}/{bucket}/{key}": {
+      "servers": [
+        {
+          "url": "{database}",
+          "variables": {
+            "database": {
+              "default": "https://data.example.test"
+            }
+          }
+        }
+      ],
+      "parameters": [
+        {
+          "name": "environmentId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+          }
+        },
+        {
+          "name": "bucket",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/BlobBucketName"
+          }
+        },
+        {
+          "name": "key",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/BlobKey"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "readPublicBlob",
+        "security": [],
+        "description": "A current object of a bucket that is public right now, in an active environment. Cacheable for 60 seconds.",
+        "responses": {
+          "200": {
+            "description": "The bytes",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not public, not current, or not there"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "OrgId": {
+        "name": "orgId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+        }
+      },
+      "ProjectId": {
+        "name": "projectId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+        }
+      },
+      "EnvironmentId": {
+        "name": "environmentId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+        }
+      }
+    },
+    "securitySchemes": {
+      "browserSession": {
+        "$ref": "account-api.openapi.json#/components/securitySchemes/browserSession"
+      },
+      "workerCredential": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A wc_ worker credential."
+      }
+    }
+  }
+}

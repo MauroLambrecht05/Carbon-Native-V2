@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { generateKeyPairSync, randomBytes } from 'node:crypto';
+import { createHash, generateKeyPairSync, randomBytes } from 'node:crypto';
 import { AccountAuthentication, PostgresAccountIdentityRepository, EnvelopeMessageProtector, PostgresMfaVerification, Rfc6238Totp,
   OrganizationAccess, PostgresOrganizationRepository, AccountServiceAccounts, PostgresServiceAccountRepository, ServiceAssertionIssuer, opaqueToken, tokenDigest, bodyDigest, type AssertionTrust } from '@carbon/identity';
 import { AccountCatalog, PostgresCatalogRepository, PostgresProvisioningRepository, ProvisionEnvironment, HttpEnvironmentProvisioner,
   PostgresServiceLifecycleRepository, PostgresDatabaseEnvironmentDriver, databaseEnvironmentIdentifiers, type ProvisioningWork } from '@carbon/catalog';
 import { parseComponent, serviceLifecycleBody, dataPermission, dataRequestPath, canonicalRegistryRequest, registryRequestPath } from '@carbon/contracts/platform';
 import { AppAuthentication, PostgresAppAuthRepository } from '@carbon/auth';
+import { AccountBlobs, HttpBlobClient, type BlobStore } from '@carbon/data';
 import { HttpDataClient, AccountData, PostgresAccountDataAuthority, AccountImports, PostgresImportJobs, HttpImportClient, RunImportJobs, AccountExports, ExportDownloads, PostgresExportJobs, RunExportJobs,
   type ExportJobs, type ExportStore } from '@carbon/data';
 import { createExportRoutes } from '../../../products/carbon-cloud/infrastructure/http/export-routes.ts';
@@ -50,9 +51,15 @@ async function harness() {
   let authorityCalls = 0; let beforeAuthority: ((call: number) => Promise<void>) | undefined;
   let authority = composeServiceAuthority(cloud, trust);
   const cloudServer = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async request => { authorityCalls++; await beforeAuthority?.(authorityCalls); return authority(request); } }); servers.push(cloudServer);
-  let databaseHandler = composeDatabase(database, { trust, authorityOrigin: cloudServer.url.origin });
+  // Stands in for the private blob bucket. A test can make the next writes fail, as a storage outage would.
+  const blobObjects = new Map<string, Uint8Array>(); let failBlobWrites = 0; let duringBlobWrite: (() => Promise<void>) | undefined;
+  const blobStore: BlobStore = { async put(key, bytes) { const during = duringBlobWrite; duringBlobWrite = undefined; await during?.(); if (failBlobWrites > 0) { failBlobWrites--; throw new Error('storage unavailable'); } blobObjects.set(key, bytes); },
+    async get(key) { return blobObjects.get(key) ?? null; }, async delete(key) { blobObjects.delete(key); } };
+  let databaseHandler: ReturnType<typeof composeDatabase>;
   let registryHandler = composeRegistry(registry, { trust, authorityOrigin: cloudServer.url.origin });
   const databaseServer = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: request => databaseHandler(request) }); servers.push(databaseServer);
+  const databaseConfig = () => ({ trust, authorityOrigin: cloudServer.url.origin, blobs: { store: blobStore, origin: databaseServer.url.origin } });
+  databaseHandler = composeDatabase(database, databaseConfig());
   const registryServer = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: request => registryHandler(request) }); servers.push(registryServer);
   const repo = new PostgresProvisioningRepository(cloud);
   const databaseProvider = new HttpEnvironmentProvisioner('database', databaseServer.url.origin, issuer);
@@ -78,7 +85,8 @@ async function harness() {
   const apiHandler = createAccountRoutes(auth, origin, undefined, undefined, new OrganizationAccess(auth, new PostgresOrganizationRepository(cloud), protector), undefined, undefined, undefined,
     new AccountCatalog(auth, new PostgresCatalogRepository(cloud), protector), new AccountData(auth, new PostgresAccountDataAuthority(cloud), new HttpDataClient(databaseServer.url.origin, issuer), protector), new AccountImports(auth, importJobs),
     undefined, undefined, undefined, undefined, new AccountServiceAccounts(auth, new PostgresServiceAccountRepository(cloud), protector, issuer),
-    undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, new AccountExports(auth, exportJobs, origin));
+    undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, new AccountExports(auth, exportJobs, origin),
+    new AccountBlobs(auth, new PostgresAccountDataAuthority(cloud), new HttpBlobClient(databaseServer.url.origin, issuer)));
   const downloadHandler = createExportRoutes(new ExportDownloads(exportJobs, exportStore));
   const api = (path: string, input?: unknown, revision?: string, overrides?: Record<string, string>) => apiHandler(new Request(origin + path, { method: input === undefined ? 'GET' : 'POST',
     headers: { origin, cookie: `__Host-carbon-session=${token}`, 'x-csrf-token': csrf, 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID(), ...(revision ? { 'if-match': revision } : {}), ...Object.fromEntries(new Headers(overrides)) },
@@ -115,11 +123,12 @@ async function harness() {
   // A fresh worker over the same database and storage, as after a process restart. `jobs` lets a test break one step.
   const exportWorker = (jobs: ExportJobs = new PostgresExportJobs(cloud)) => new RunExportJobs(jobs, dataClient, exportStore);
   const download = (url: string, method = 'GET') => downloadHandler(new Request(url, { method }));
-  return { exportJobs, restartExports: (): ExportJobs => new PostgresExportJobs(cloud), exportWorker, exportObjects, exportWrites, failExportWrites: (count: number) => { failWrites = count; }, download, session,
+  return { blobObjects, failBlobWrites: (count: number) => { failBlobWrites = count; }, duringBlobWrite: (work: () => Promise<void>) => { duringBlobWrite = work; }, sweepBlobs: () => databaseHandler.blobStorage!.sweep(), apiHandler, token, csrf, origin,
+    exportJobs, restartExports: (): ExportJobs => new PostgresExportJobs(cloud), exportWorker, exportObjects, exportWrites, failExportWrites: (count: number) => { failWrites = count; }, download, session,
     cloud, database, registry, issuer, protector, worker, repo, api, create, signed, signedData, clientData, account, organization, databaseProvider, registryProvider, databaseServer, registryServer,
     importJobs, importClient, importWorker, restartImports: () => new PostgresImportJobs(cloud, protector),
     interceptAuthority: (callback?: (call: number) => Promise<void>) => { authorityCalls = 0; beforeAuthority = callback; },
-    restart: () => { authority = composeServiceAuthority(cloud, trust); databaseHandler = composeDatabase(database, { trust, authorityOrigin: cloudServer.url.origin }); registryHandler = composeRegistry(registry, { trust, authorityOrigin: cloudServer.url.origin }); },
+    restart: () => { authority = composeServiceAuthority(cloud, trust); databaseHandler = composeDatabase(database, databaseConfig()); registryHandler = composeRegistry(registry, { trust, authorityOrigin: cloudServer.url.origin }); },
   };
 }
 
@@ -433,6 +442,217 @@ suite('Cloud-to-owning-service lifecycle over real HTTP and PostgreSQL', () => {
       'export.download_refused:account', 'export.expired:system']);
     const durable = JSON.stringify({ jobs: await h.cloud`SELECT request, error_code, state FROM data_export_jobs`, events: await h.cloud`SELECT * FROM data_export_events` });
     expect(durable).not.toContain('row 1'); expect(durable).not.toContain('ex_');
+  }, 240000);
+
+  test('blob storage keeps exact bytes behind single-use transfers: two environments stay apart, broken and abandoned uploads leave nothing, quota and retention hold, and cleanup removes what is left', async () => {
+    const h = await harness(); const first = await h.create('blob-a', ['database']); expect(await h.worker.execute()).toBe(true);
+    const second = await h.create('blob-b', ['database']); expect(await h.worker.execute()).toBe(true);
+    const A = parseComponent('EnvironmentScope', first.scope); const B = parseComponent('EnvironmentScope', second.scope);
+    const path = (scope: typeof A) => `/platform/v1/orgs/${scope.orgId}/projects/${scope.projectId}/environments/${scope.environmentId}/blobs`;
+    const digest = (bytes: Uint8Array | string) => createHash('sha256').update(bytes).digest('hex');
+    // One command to Cloud's account API. Commands that change something carry their own ID as the idempotency key.
+    const send = (scope: typeof A, command: Record<string, unknown>, overrides: Record<string, string> = {}) => h.api(path(scope), command, command.revision as string | undefined,
+      { ...(command.commandId ? { 'idempotency-key': command.commandId as string } : {}), ...overrides });
+    const ok = async <T extends Parameters<typeof parseComponent>[0]>(component: T, scope: typeof A, command: Record<string, unknown>) => {
+      const response = await send(scope, command); if (response.status !== 200) throw new Error(`${command.kind} answered ${response.status}`);
+      return parseComponent(component, (await response.json() as { result: unknown }).result);
+    };
+    const status = async (scope: typeof A, command: Record<string, unknown>, overrides?: Record<string, string>) => (await send(scope, command, overrides)).status;
+    const id = () => crypto.randomUUID();
+    const definition = (overrides: Record<string, unknown> = {}) => ({ name: 'files', visibility: 'private', maxObjectBytes: 2000, allowedContentTypes: ['text/plain', 'image/png'], versioning: true, retentionDays: 7, quotaBytes: 3000, ...overrides });
+    const bucket = id();
+    const ticket = (scope: typeof A, bucketId: string, key: string, bytes: Uint8Array, contentType = 'text/plain', overrides: Record<string, unknown> = {}) =>
+      ({ kind: 'object.upload', commandId: id(), bucketId, key, sizeBytes: bytes.byteLength, sha256: digest(bytes), contentType, ...overrides });
+    // The bytes themselves go straight to the storage service over real HTTP, with nothing but the address.
+    const put = (url: string, bytes: Uint8Array, contentType = 'text/plain') => fetch(url, { method: 'PUT', body: bytes, headers: { 'content-type': contentType } });
+    const upload = async (scope: typeof A, bucketId: string, key: string, bytes: Uint8Array, contentType = 'text/plain') => {
+      const transfer = await ok('BlobTransfer', scope, ticket(scope, bucketId, key, bytes, contentType)); expect((await put(transfer.url, bytes, contentType)).status).toBe(204); return transfer;
+    };
+    const download = async (scope: typeof A, bucketId: string, key: string, versionId?: string) => fetch((await ok('BlobTransfer', scope, { kind: 'object.download', bucketId, key, ...(versionId ? { versionId } : {}) })).url);
+    const info = async (scope: typeof A, bucketId: string) => { const found = await ok('BlobBucket', scope, { kind: 'bucket.get', bucketId }); return { used: found.usedBytes, objects: found.objectCount, revision: found.revision }; };
+    const keys = async (scope: typeof A, bucketId: string, extra: Record<string, unknown> = {}) => (await ok('BlobObjectList', scope, { kind: 'objects.list', bucketId, ...extra })).objects.map(object => object.key);
+    const text = (value: string) => new TextEncoder().encode(value);
+    const stored = (bucketId: string) => [...h.blobObjects.keys()].filter(key => key.includes(bucketId));
+
+    // Buckets.
+    expect(await status(A, { kind: 'bucket.create', commandId: id(), bucketId: bucket, definition: definition({ name: 'Files' }) })).toBe(400);
+    expect(await status(A, { kind: 'bucket.create', commandId: id(), bucketId: bucket, definition: definition({ maxObjectBytes: 0 }) })).toBe(400);
+    const creating = { kind: 'bucket.create', commandId: id(), bucketId: bucket, definition: definition() };
+    expect(await status(A, creating, { cookie: '' })).toBe(401); expect(await status(A, creating, { 'x-csrf-token': 'bad' })).toBe(403); expect(await status(A, creating, { 'idempotency-key': id() })).toBe(400);
+    const created = await ok('BlobReceipt', A, creating); expect(created).toEqual({ commandId: creating.commandId, bucketId: bucket, revision: '1' });
+    expect(await ok('BlobReceipt', A, creating)).toEqual(created); expect(await status(A, { ...creating, definition: definition({ quotaBytes: 9 }) })).toBe(409);
+    expect(await status(A, { kind: 'bucket.create', commandId: id(), bucketId: id(), definition: definition() })).toBe(409);
+    expect((await ok('BlobBucketList', A, { kind: 'buckets.list' })).buckets.map(item => [item.id, item.definition.name, item.usedBytes, item.objectCount])).toEqual([[bucket, 'files', 0, 0]]);
+
+    // An upload is authorized for one exact object: this key, this size, this digest, this type.
+    const hello = text('hello, exact bytes');
+    for (const refused of [ticket(A, bucket, '../escape', hello), ticket(A, bucket, '/leading', hello), ticket(A, bucket, 'a//b', hello), ticket(A, bucket, 'a/./b', hello), ticket(A, bucket, 'ok', hello, 'text/html'),
+      ticket(A, bucket, 'ok', hello, 'text/plain', { sizeBytes: 2001 }), ticket(A, bucket, 'ok', hello, 'text/plain', { sha256: 'nope' })]) expect(await status(A, refused)).toBe(400);
+    expect(await h.database`SELECT 1 FROM blob_transfers`).toHaveLength(0);
+    const request = ticket(A, bucket, 'docs/hello.txt', hello); const transfer = await ok('BlobTransfer', A, request);
+    expect(transfer).toMatchObject({ method: 'PUT', headers: { 'content-type': 'text/plain', 'content-length': String(hello.byteLength) } });
+    expect(transfer.url.startsWith(`${h.databaseServer.url.origin}/storage/v1/transfers/bt_`)).toBe(true); expect(new Date(transfer.expiresAt).getTime() - Date.now()).toBeLessThanOrEqual(300_000);
+    // An address is not replayable through the command either: it was returned once.
+    expect(await status(A, request)).toBe(409);
+    expect((await fetch(transfer.url, { method: 'POST', body: hello })).status).toBe(405); expect((await fetch(transfer.url)).status).toBe(404);
+    expect((await put(transfer.url, hello)).status).toBe(204);
+    // One use. The same address accepts nothing more and serves nothing.
+    expect((await put(transfer.url, hello)).status).toBe(404); expect((await fetch(transfer.url)).status).toBe(404);
+    expect(await keys(A, bucket)).toEqual(['docs/hello.txt']); expect(await info(A, bucket)).toMatchObject({ used: hello.byteLength, objects: 1 });
+    // Every byte value survives: nothing is transcoded on the way in or out.
+    const binary = new Uint8Array(700); for (let index = 0; index < binary.length; index++) binary[index] = index % 256;
+    await upload(A, bucket, 'images/all bytes.png'.replace(' ', '-'), binary, 'image/png');
+    const fetched = await download(A, bucket, 'images/all-bytes.png'); expect(fetched.status).toBe(200);
+    expect(Buffer.from(await fetched.arrayBuffer()).equals(Buffer.from(binary))).toBe(true);
+    expect(Object.fromEntries(['content-type', 'content-length', 'content-disposition', 'cache-control', 'etag', 'x-content-type-options', 'content-security-policy'].map(name => [name, fetched.headers.get(name)]))).toEqual({
+      'content-type': 'image/png', 'content-length': '700', 'content-disposition': 'attachment; filename="all-bytes.png"', 'cache-control': 'no-store', etag: `"${digest(binary)}"`, 'x-content-type-options': 'nosniff',
+      'content-security-policy': "default-src 'none'; sandbox" });
+    const once = await ok('BlobTransfer', A, { kind: 'object.download', bucketId: bucket, key: 'docs/hello.txt' });
+    expect(await (await fetch(once.url)).text()).toBe('hello, exact bytes'); expect((await fetch(once.url)).status).toBe(404); expect((await put(once.url, hello)).status).toBe(404);
+    expect(await status(A, { kind: 'object.download', bucketId: bucket, key: 'docs/missing.txt' })).toBe(404);
+    expect(await keys(A, bucket, { prefix: 'docs/' })).toEqual(['docs/hello.txt']); expect(await keys(A, bucket, { limit: 1 })).toEqual(['docs/hello.txt']);
+    expect((await ok('BlobObjectList', A, { kind: 'objects.list', bucketId: bucket, limit: 1 })).nextAfterKey).toBe('docs/hello.txt'); expect(await keys(A, bucket, { afterKey: 'docs/hello.txt' })).toEqual(['images/all-bytes.png']);
+
+    // Broken transfers. Whatever arrives that is not exactly what was authorized is refused, stores nothing, and spends the address.
+    const before = stored(bucket).length; const used = (await info(A, bucket)).used; const note = text('a note of thirty-two bytes long.');
+    const broken = async (send: (url: string) => Promise<Response>, expected: number) => {
+      const issued = await ok('BlobTransfer', A, ticket(A, bucket, 'docs/note.txt', note)); expect((await send(issued.url)).status).toBe(expected); expect((await put(issued.url, note)).status).toBe(404);
+    };
+    await broken(url => put(url, text('a note of thirty-two bytes LONG.')), 400);
+    await broken(url => put(url, note.slice(0, 10)), 400);
+    await broken(url => put(url, new Uint8Array([...note, ...note])), 400);
+    await broken(url => put(url, note, 'image/png'), 400);
+    await broken(url => fetch(url, { method: 'PUT', headers: { 'content-type': 'text/plain' } }), 400);
+    // Storage is down: the upload fails cleanly and can be asked for again.
+    h.failBlobWrites(1); await broken(url => put(url, note), 503);
+    expect(stored(bucket)).toHaveLength(before); expect(await info(A, bucket)).toMatchObject({ used, objects: 2 }); expect(await keys(A, bucket)).toEqual(['docs/hello.txt', 'images/all-bytes.png']);
+    expect((await h.database`SELECT state FROM blob_transfers WHERE kind = 'upload' AND key = 'docs/note.txt'`).map((row: { state: string }) => row.state)).toEqual(Array(6).fill('failed'));
+
+    // Expiry: an address that was never used stops working, and cleanup closes it.
+    const lapsed = await ok('BlobTransfer', A, ticket(A, bucket, 'docs/note.txt', note));
+    await h.database`UPDATE blob_transfers SET expires_at = now() - interval '1 second' WHERE state = 'issued'`;
+    expect((await put(lapsed.url, note)).status).toBe(404); expect(await h.sweepBlobs()).toEqual({ expired: 1, interrupted: 0, purged: 0 });
+    const late = await ok('BlobTransfer', A, { kind: 'object.download', bucketId: bucket, key: 'docs/hello.txt' });
+    await h.database`UPDATE blob_transfers SET expires_at = now() - interval '1 second' WHERE state = 'issued'`; expect((await fetch(late.url)).status).toBe(404);
+
+    // Interrupted: the service died after the bytes reached storage and before the object was recorded. Cleanup removes them.
+    const abandoned = await ok('BlobTransfer', A, ticket(A, bucket, 'docs/abandoned.txt', note));
+    const orphan = (await h.database`SELECT storage_key FROM blob_transfers WHERE key = 'docs/abandoned.txt'`)[0].storage_key as string;
+    await h.database`UPDATE blob_transfers SET state = 'receiving', used_at = now() - interval '20 minutes' WHERE key = 'docs/abandoned.txt'`; h.blobObjects.set(orphan, note);
+    // While it looks in progress it still holds its share of the quota, and it is too recent to give up on until it is not.
+    expect((await put(abandoned.url, note)).status).toBe(404); expect(stored(bucket)).toHaveLength(before + 1);
+    expect(await h.sweepBlobs()).toEqual({ expired: 1, interrupted: 1, purged: 0 });
+    expect(h.blobObjects.has(orphan)).toBe(false); expect(stored(bucket)).toHaveLength(before); expect(await keys(A, bucket)).toEqual(['docs/hello.txt', 'images/all-bytes.png']);
+    expect(await h.sweepBlobs()).toEqual({ expired: 0, interrupted: 0, purged: 0 });
+
+    // Quota counts what is stored and what may still arrive. 718 bytes are stored of 3000.
+    const big = new Uint8Array(1000).fill(65);
+    const held = await ok('BlobTransfer', A, ticket(A, bucket, 'q/one', big));
+    const racing = await Promise.all([send(A, ticket(A, bucket, 'q/two', big)), send(A, ticket(A, bucket, 'q/three', big))]);
+    expect(racing.map(response => response.status).sort()).toEqual([200, 429]);
+    expect(await status(A, ticket(A, bucket, 'q/four', new Uint8Array(283).fill(66)))).toBe(429); expect(await status(A, ticket(A, bucket, 'q/four', new Uint8Array(282).fill(66)))).toBe(200);
+    // Reservations that lapse give the room back.
+    await h.database`UPDATE blob_transfers SET expires_at = now() - interval '1 second' WHERE state = 'issued' AND key <> 'q/one'`; expect((await h.sweepBlobs()).expired).toBe(2);
+    expect((await put(held.url, big)).status).toBe(204); expect(await info(A, bucket)).toMatchObject({ used: 1718, objects: 3 });
+    expect(await status(A, ticket(A, bucket, 'q/five', new Uint8Array(1283).fill(67)))).toBe(429);
+
+    // Versions: replacing keeps the old bytes restorable for the bucket's retention.
+    const original = (await ok('BlobObjectList', A, { kind: 'object.versions', bucketId: bucket, key: 'docs/hello.txt' })).objects[0]!;
+    const revised = text('hello, revised'); await upload(A, bucket, 'docs/hello.txt', revised);
+    const versions = (await ok('BlobObjectList', A, { kind: 'object.versions', bucketId: bucket, key: 'docs/hello.txt' })).objects;
+    expect(versions.map(version => [version.state, version.sizeBytes])).toEqual([['current', revised.byteLength], ['replaced', hello.byteLength]]); expect(versions[1]!.versionId).toBe(original.versionId);
+    expect(Math.round((new Date(versions[1]!.purgeAfter!).getTime() - Date.now()) / 86_400_000)).toBe(7); expect(await info(A, bucket)).toMatchObject({ used: 1718 + revised.byteLength, objects: 3 });
+    expect(await (await download(A, bucket, 'docs/hello.txt')).text()).toBe('hello, revised'); expect(await (await download(A, bucket, 'docs/hello.txt', original.versionId)).text()).toBe('hello, exact bytes');
+    // Deleting hides the object; restoring a version brings exactly that version back.
+    const removal = { kind: 'object.delete', commandId: id(), bucketId: bucket, key: 'docs/hello.txt' }; const removed = await ok('BlobReceipt', A, removal); expect(await ok('BlobReceipt', A, removal)).toEqual(removed);
+    expect(await keys(A, bucket, { prefix: 'docs/' })).toEqual([]); expect(await status(A, { kind: 'object.download', bucketId: bucket, key: 'docs/hello.txt' })).toBe(404); expect((await info(A, bucket)).objects).toBe(2);
+    expect(await status(A, { kind: 'object.delete', commandId: id(), bucketId: bucket, key: 'docs/hello.txt' })).toBe(404);
+    await ok('BlobReceipt', A, { kind: 'object.restore', commandId: id(), bucketId: bucket, key: 'docs/hello.txt', versionId: original.versionId });
+    expect(await (await download(A, bucket, 'docs/hello.txt')).text()).toBe('hello, exact bytes'); expect((await info(A, bucket)).objects).toBe(3);
+    expect(await status(A, { kind: 'object.restore', commandId: id(), bucketId: bucket, key: 'docs/hello.txt', versionId: original.versionId })).toBe(409);
+    // Naming a version deletes it for good. Its bytes go at the next cleanup, and so does its share of the quota.
+    await ok('BlobReceipt', A, { kind: 'object.delete', commandId: id(), bucketId: bucket, key: 'docs/hello.txt', versionId: removed.versionId });
+    const count = stored(bucket).length; expect(await h.sweepBlobs()).toEqual({ expired: 0, interrupted: 0, purged: 1 });
+    expect(stored(bucket)).toHaveLength(count - 1); expect(await info(A, bucket)).toMatchObject({ used: 1718, objects: 3 });
+    expect(await status(A, { kind: 'object.restore', commandId: id(), bucketId: bucket, key: 'docs/hello.txt', versionId: removed.versionId })).toBe(404);
+    // Retention: a replaced version past its time is removed, and can no longer be restored or downloaded.
+    await upload(A, bucket, 'docs/hello.txt', revised);
+    // Inside its retention a replaced version survives cleanup and can still be read.
+    expect((await h.sweepBlobs()).purged).toBe(0); expect(await (await download(A, bucket, 'docs/hello.txt', original.versionId)).text()).toBe('hello, exact bytes');
+    await h.database`UPDATE blob_objects SET purge_after = now() - interval '1 second' WHERE id = ${original.versionId}`;
+    expect((await h.sweepBlobs()).purged).toBe(1); expect(await status(A, { kind: 'object.download', bucketId: bucket, key: 'docs/hello.txt', versionId: original.versionId })).toBe(404);
+    expect(await status(A, { kind: 'object.restore', commandId: id(), bucketId: bucket, key: 'docs/hello.txt', versionId: original.versionId })).toBe(404);
+    expect(await (await download(A, bucket, 'docs/hello.txt')).text()).toBe('hello, revised');
+
+    // Two environments. B cannot see, read, write, restore or delete anything of A's, by ID or by name, and may reuse the names.
+    const other = id(); await ok('BlobReceipt', B, { kind: 'bucket.create', commandId: id(), bucketId: other, definition: definition() });
+    await upload(B, other, 'docs/hello.txt', text('from the other environment'));
+    for (const command of [{ kind: 'bucket.get', bucketId: bucket }, { kind: 'objects.list', bucketId: bucket }, { kind: 'object.versions', bucketId: bucket, key: 'docs/hello.txt' }, { kind: 'object.download', bucketId: bucket, key: 'docs/hello.txt' },
+      ticket(B, bucket, 'docs/intruder.txt', note), { kind: 'object.delete', commandId: id(), bucketId: bucket, key: 'docs/hello.txt' }, { kind: 'object.restore', commandId: id(), bucketId: bucket, key: 'docs/hello.txt', versionId: removed.versionId },
+      { kind: 'bucket.update', commandId: id(), bucketId: bucket, revision: '1', definition: definition({ visibility: 'public' }) }, { kind: 'bucket.delete', commandId: id(), bucketId: bucket, revision: '1', confirmation: 'files' }]) expect(await status(B, command)).toBe(404);
+    expect((await ok('BlobBucketList', B, { kind: 'buckets.list' })).buckets.map(item => item.id)).toEqual([other]);
+    expect(await (await download(A, bucket, 'docs/hello.txt')).text()).toBe('hello, revised'); expect(await (await download(B, other, 'docs/hello.txt')).text()).toBe('from the other environment');
+    expect(stored(bucket).every(key => key.includes(A.environmentId)) && stored(other).every(key => key.includes(B.environmentId))).toBe(true);
+
+    // Public download follows the bucket as it is now, not as it was.
+    const open = (scope: typeof A, name: string, key: string) => fetch(`${h.databaseServer.url.origin}/storage/v1/public/${scope.environmentId}/${name}/${key}`);
+    expect((await open(A, 'files', 'docs/hello.txt')).status).toBe(404);
+    const current = await info(A, bucket); expect(await status(A, { kind: 'bucket.update', commandId: id(), bucketId: bucket, revision: '99', definition: definition({ visibility: 'public' }) })).toBe(409);
+    const published = await ok('BlobReceipt', A, { kind: 'bucket.update', commandId: id(), bucketId: bucket, revision: current.revision, definition: definition({ visibility: 'public' }) });
+    const served = await open(A, 'files', 'docs/hello.txt'); expect(served.status).toBe(200); expect(await served.text()).toBe('hello, revised'); expect(served.headers.get('cache-control')).toBe('public, max-age=60');
+    // The other environment's bucket has the same name and the same key and is still private; a deleted object is not served either.
+    // A deleted object stops being served, even though its bytes are kept for the retention period.
+    await upload(A, bucket, 'docs/gone.txt', note); expect((await open(A, 'files', 'docs/gone.txt')).status).toBe(200);
+    await ok('BlobReceipt', A, { kind: 'object.delete', commandId: id(), bucketId: bucket, key: 'docs/gone.txt' }); expect((await open(A, 'files', 'docs/gone.txt')).status).toBe(404);
+    expect((await open(B, 'files', 'docs/hello.txt')).status).toBe(404); expect((await open(A, 'files', 'docs/missing.txt')).status).toBe(404); expect((await open(A, 'files', '..%2Fescape')).status).toBe(404);
+    expect((await fetch(`${h.databaseServer.url.origin}/storage/v1/public/${A.environmentId}/files/docs/hello.txt`, { method: 'POST' })).status).toBe(405);
+    await h.database`UPDATE platform_environments SET state = 'paused' WHERE environment_id = ${A.environmentId}`; expect((await open(A, 'files', 'docs/hello.txt')).status).toBe(404);
+    await h.database`UPDATE platform_environments SET state = 'active' WHERE environment_id = ${A.environmentId}`; expect((await open(A, 'files', 'docs/hello.txt')).status).toBe(200);
+    await ok('BlobReceipt', A, { kind: 'bucket.update', commandId: id(), bucketId: bucket, revision: published.revision!, definition: definition() }); expect((await open(A, 'files', 'docs/hello.txt')).status).toBe(404);
+
+    // Authority is live at the storage service too: a principal that stops being current mid-request changes nothing.
+    const transfers = (await h.database`SELECT count(*)::integer AS count FROM blob_transfers`)[0].count;
+    h.interceptAuthority(async () => { await h.cloud`UPDATE accounts SET permission_revision = permission_revision + 1 WHERE id = ${h.account}`; });
+    expect([401, 403]).toContain(await status(A, ticket(A, bucket, 'docs/late.txt', note))); h.interceptAuthority();
+    expect((await h.database`SELECT count(*)::integer AS count FROM blob_transfers`)[0].count).toBe(transfers);
+    // A member who may see metadata but not data can list and nothing else; a stranger to the organization sees nothing.
+    const member = async (email: string, role?: string) => {
+      const accountId = id(); const memberToken = opaqueToken('as'); const memberCsrf = opaqueToken('csrf');
+      await h.cloud`INSERT INTO accounts (id, primary_email, name, verified_at, terms_version) VALUES (${accountId}, ${email}, 'Member', now(), 'fixture')`;
+      await h.cloud`INSERT INTO account_sessions (id, account_id, token_hash, csrf_hash, security_revision, device_name, expires_at, fresh_until)
+        VALUES (${id()}, ${accountId}, ${tokenDigest(memberToken)}, ${tokenDigest(memberCsrf)}, 1, 'Fixture', now() + interval '8 hours', now() + interval '10 minutes')`;
+      if (role) await h.cloud`INSERT INTO memberships (id, account_id, org_id, role, state, project_access) VALUES (${id()}, ${accountId}, ${A.orgId}, ${role}, 'active', 'all')`;
+      return { cookie: `__Host-carbon-session=${memberToken}`, 'x-csrf-token': memberCsrf };
+    };
+    const viewer = await member('viewer@example.test', 'Viewer'); const stranger = await member('stranger@example.test');
+    expect(await status(A, { kind: 'objects.list', bucketId: bucket }, viewer)).toBe(200);
+    for (const command of [{ kind: 'object.download', bucketId: bucket, key: 'docs/hello.txt' }, ticket(A, bucket, 'docs/viewer.txt', note), { kind: 'object.delete', commandId: id(), bucketId: bucket, key: 'docs/hello.txt' },
+      { kind: 'bucket.create', commandId: id(), bucketId: id(), definition: definition({ name: 'viewer' }) }]) expect(await status(A, command, viewer)).toBe(403);
+    for (const command of [{ kind: 'buckets.list' }, { kind: 'objects.list', bucketId: bucket }, { kind: 'object.download', bucketId: bucket, key: 'docs/hello.txt' }, ticket(A, bucket, 'docs/stranger.txt', note)]) expect([403, 404]).toContain(await status(A, command, stranger));
+
+    // Metering: each stored version, each completed download and each removal is counted exactly once.
+    const usage = async (bucketId: string) => Object.fromEntries((await h.database`SELECT kind, count(*)::integer AS count, sum(bytes)::integer AS bytes FROM blob_usage WHERE bucket_id = ${bucketId} GROUP BY kind`).map((row: { kind: string; count: number; bytes: number }) => [row.kind, [row.count, row.bytes]]));
+    const metered = await usage(bucket); expect(metered.stored).toEqual([6, hello.byteLength + 700 + 1000 + revised.byteLength * 2 + note.byteLength]); expect(metered.removed).toEqual([2, revised.byteLength + hello.byteLength]);
+    // Eight downloads through addresses and three public ones.
+    expect(metered.egress![0]).toBe(11); expect((await h.database`SELECT 1 FROM blob_usage GROUP BY kind, source_id HAVING count(*) > 1`).length).toBe(0);
+
+    // Deleting a bucket: its name must be confirmed; then nothing in it is reachable, addresses stop, and cleanup removes every byte.
+    const pending = await ok('BlobTransfer', A, ticket(A, bucket, 'docs/pending.txt', note)); const final = await info(A, bucket);
+    expect(await status(A, { kind: 'bucket.delete', commandId: id(), bucketId: bucket, revision: final.revision, confirmation: 'wrong' })).toBe(400);
+    // The bucket is deleted while an upload's bytes are arriving: the upload is refused and its bytes do not stay.
+    const arriving = await ok('BlobTransfer', A, ticket(A, bucket, 'docs/arriving.txt', note)); const beforeDelete = stored(bucket).length;
+    h.duringBlobWrite(async () => { await ok('BlobReceipt', A, { kind: 'bucket.delete', commandId: id(), bucketId: bucket, revision: final.revision, confirmation: 'files' }); });
+    expect((await put(arriving.url, note)).status).toBe(409); expect(stored(bucket)).toHaveLength(beforeDelete);
+    expect(await h.database`SELECT 1 FROM blob_objects WHERE key = 'docs/arriving.txt'`).toHaveLength(0);
+    expect((await ok('BlobBucketList', A, { kind: 'buckets.list' })).buckets).toEqual([]); expect(await status(A, { kind: 'bucket.get', bucketId: bucket })).toBe(404);
+    expect(await status(A, { kind: 'object.download', bucketId: bucket, key: 'docs/hello.txt' })).toBe(404); expect((await put(pending.url, note)).status).toBe(404);
+    expect(stored(bucket).length).toBeGreaterThan(0); expect((await h.sweepBlobs()).purged).toBe(4); expect(stored(bucket)).toEqual([]);
+    expect((await h.database`SELECT used_bytes::integer AS used, object_count::integer AS objects, state FROM blob_buckets WHERE id = ${bucket}`) as unknown[]).toEqual([{ used: 0, objects: 0, state: 'deleting' }]);
+    // The name is free again, and the other environment was never touched.
+    await ok('BlobReceipt', A, { kind: 'bucket.create', commandId: id(), bucketId: id(), definition: definition() });
+    expect(await (await download(B, other, 'docs/hello.txt')).text()).toBe('from the other environment'); expect(stored(other)).toHaveLength(1);
+    // Nothing durable holds an address.
+    expect(JSON.stringify(await h.database`SELECT * FROM blob_transfers`)).not.toContain('bt_'); expect(JSON.stringify(await h.database`SELECT * FROM blob_events`)).not.toContain('bt_');
   }, 240000);
 
   test('table catalog is paginated, scoped and available to metadata-only accounts with current schema policies', async () => {

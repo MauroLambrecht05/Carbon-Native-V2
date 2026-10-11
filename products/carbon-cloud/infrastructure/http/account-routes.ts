@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { AccountBuilds, AccountReleases } from '@carbon/orchestration';
 import type { AccountRealms } from '@carbon/auth';
 import type { AccountCatalog, AccountEnvironmentCredentials, AccountWorkers, AccountEnvironmentSecrets, AccountRepositories, CatalogCommand } from '@carbon/catalog';
-import type { AccountData, AccountExports, AccountImports } from '@carbon/data';
+import type { AccountBlobs, AccountData, AccountExports, AccountImports } from '@carbon/data';
 import { AccountAuthentication, opaqueToken, type PersonalCredentialExchange, type AccountAudit, type AccountPersonalCredentials, type AccountLegacyTokens, type AccountDeviceAuthorization, type AccountServiceAccounts, type AccountSecurity, type AccountProfile, type OrganizationAccess, type OrganizationInvitations, type ExternalAccountAuthentication, type AccountAuthorization } from "@carbon/identity";
 import { ContractError, PlatformFault, parseComponent, type ErrorCode } from "@carbon/contracts/platform";
 
@@ -14,7 +14,7 @@ function cookieValue(request: Request, name: string): string {
   return matches.length === 1 ? matches[0]!.slice(name.length + 1) : "";
 }
 
-export function createAccountRoutes(auth: AccountAuthentication, origin: string, security?: AccountSecurity, profile?: AccountProfile, organizations?: OrganizationAccess, invitations?: OrganizationInvitations, github?: ExternalAccountAuthentication, access?: AccountAuthorization, catalog?: AccountCatalog, data?: AccountData, imports?: AccountImports, credentials?: AccountEnvironmentCredentials, secrets?: AccountEnvironmentSecrets, repositories?: AccountRepositories, devices?: AccountDeviceAuthorization, serviceAccounts?: AccountServiceAccounts, personal?: AccountPersonalCredentials, legacy?: AccountLegacyTokens, workers?: AccountWorkers, audit?: AccountAudit, realms?: AccountRealms, personalExchange?: PersonalCredentialExchange, builds?: AccountBuilds, releases?: AccountReleases, exports?: AccountExports) {
+export function createAccountRoutes(auth: AccountAuthentication, origin: string, security?: AccountSecurity, profile?: AccountProfile, organizations?: OrganizationAccess, invitations?: OrganizationInvitations, github?: ExternalAccountAuthentication, access?: AccountAuthorization, catalog?: AccountCatalog, data?: AccountData, imports?: AccountImports, credentials?: AccountEnvironmentCredentials, secrets?: AccountEnvironmentSecrets, repositories?: AccountRepositories, devices?: AccountDeviceAuthorization, serviceAccounts?: AccountServiceAccounts, personal?: AccountPersonalCredentials, legacy?: AccountLegacyTokens, workers?: AccountWorkers, audit?: AccountAudit, realms?: AccountRealms, personalExchange?: PersonalCredentialExchange, builds?: AccountBuilds, releases?: AccountReleases, exports?: AccountExports, blobs?: AccountBlobs) {
   const secure = new URL(origin).protocol === "https:";
   const names = { session: `${secure ? "__Host-" : ""}carbon-session`, csrf: `${secure ? "__Host-" : ""}carbon-csrf`, browser: `${secure ? "__Host-" : ""}carbon-browser` };
   const cookie = (name: string, value: string, seconds: number, httpOnly = true) => `${name}=${value}; Path=/; Max-Age=${seconds}; SameSite=Lax${httpOnly ? "; HttpOnly" : ""}${secure ? "; Secure" : ""}`;
@@ -228,6 +228,15 @@ export function createAccountRoutes(auth: AccountAuthentication, origin: string,
           expectedRevision: request.headers.get('if-match')?.replace(/^"([1-9][0-9]*)"$/, '$1') });
         if (importRoute[5] === 'cancel') return json({ receipt: await imports.cancel(token, csrf, scope, importRoute[4]!, parseComponent('DataImportJobCancel', await body()), options) }, 202);
         return json({ receipt: await imports.enqueue(token, csrf, scope, parseComponent('DataImportJobCreate', await body(393216)), options, requestId) }, 202);
+      }
+      // Blob storage: one POST endpoint that takes a command, like table data. Bytes never pass through here.
+      const blobRoute = new RegExp(`^${BASE}/orgs/([^/]+)/projects/([^/]+)/environments/([^/]+)/blobs$`).exec(url.pathname);
+      if (blobRoute && request.method === 'POST') {
+        if (!blobs) throw new PlatformFault('capability', 'Blob storage is not configured');
+        if (url.search) throw new PlatformFault('validation', 'Blob scope belongs in the path');
+        const scope = parseComponent('EnvironmentScope', { orgId: blobRoute[1], projectId: blobRoute[2], environmentId: blobRoute[3] });
+        const command = parseComponent('BlobCommand', await body());
+        return json({ result: await blobs.execute(cookieValue(request, names.session), request.headers.get('x-csrf-token') ?? '', scope, command, 'commandId' in command ? parseComponent('CommandOptions', { idempotencyKey: request.headers.get('idempotency-key') ?? '', expectedRevision: request.headers.get('if-match')?.replace(/^"([1-9][0-9]*)"$/, '$1') }) : undefined, requestId, request.signal) });
       }
       // Exports are POST-only, like imports: reading one needs the session and CSRF token, never a bare link.
       const exportRoute = new RegExp(`^${BASE}/orgs/([^/]+)/projects/([^/]+)/environments/([^/]+)/data/exports(?:/(list)|/([^/]+)/(status|cancel|download))?$`).exec(url.pathname);

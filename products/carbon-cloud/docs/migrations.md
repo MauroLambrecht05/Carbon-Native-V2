@@ -147,3 +147,8 @@ the export bucket would then need to be removed by hand.
 
 Foreign keys need no migration in Database: they are a new kind of entry in the
 existing `canonical_data_constraints` catalog.
+
+Blob storage adds no Cloud migration. Its tables are Database migration
+`0008_blob_storage.sql` (`blob_buckets`, `blob_objects`, `blob_transfers`,
+`blob_commands`, `blob_events`, `blob_usage`), which is additive and leaves the
+legacy `storage_buckets` and `storage_files` tables untouched.

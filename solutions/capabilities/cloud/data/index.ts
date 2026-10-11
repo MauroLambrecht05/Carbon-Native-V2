@@ -17,3 +17,7 @@ export type { ExportDownloadSource, ExportJobs, ExportLease, ExportPart, ExportS
 export { PostgresExportJobs } from './infrastructure/PostgresExportJobs.ts';
 export { S3ExportStore, type ExportStoreConfig } from './infrastructure/S3ExportStore.ts';
 export { encodeExportRows, exportColumns, type ExportFormat } from './domain/ExportEncoding.ts';
+export { AccountBlobs, ExecuteServiceBlobs, type BlobTransport } from './application/usecases/Blobs.ts';
+export type { BlobAuthority, BlobContent, BlobStorageRepository, BlobStore, BlobSweepResult } from './application/ports/BlobStorage.ts';
+export { PostgresBlobStorage } from './infrastructure/PostgresBlobStorage.ts';
+export { HttpBlobClient, S3BlobStore, type BlobStoreConfig } from './infrastructure/HttpBlobClient.ts';

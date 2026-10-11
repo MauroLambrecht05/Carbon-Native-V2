@@ -133,6 +133,23 @@ entries here.
 | G-74 | `S3ExportStore` has run only against a local MinIO container, in a test CI skips; the job tests use an in-memory stand-in for the bucket. A download streams each part through Cloud's memory (up to one page of rows at a time) | CI has no object store | The export tests run against MinIO in CI (with G-44), and once against a real provider |
 | G-75 | The export worker's entry point (`data-export-worker.ts`) and the `CARBON_DATA_EXPORTS` configuration have no test of their own | Small glue | A configuration test |
 
+## Open: from Phase 11 (blob storage)
+
+| # | Gap | Why open | Closes when |
+|---|---|---|---|
+| G-76 | App users have no blob access. Only accounts and service accounts can use blob commands; an app can reach only public objects | Needs an object ownership rule and app-user assertions for blobs | An app user uploads and reads their own objects, and cannot reach another user's |
+| G-77 | An object is limited to 256 MiB and is held in memory while it is uploaded, verified and downloaded | Verification before storing is done on a buffer | Streaming or multipart transfer with verification |
+| G-78 | Transfers go through Carbon Database, not through presigned object-store URLs as the plan describes. Database carries every byte in and out | A presigned PUT cannot enforce an exact size and digest before the object exists | A decision: keep service-mediated transfers, or presign and verify on completion |
+| G-79 | A download address stays usable for its 60 seconds even if the caller's access is revoked in that time. Database has no assertion to recheck when the address is used | The address deliberately carries no session | Addresses bound to a recheck, or a shorter lifetime |
+| G-80 | A public object can be cached for up to 60 seconds after its bucket is made private. Public downloads are not rate limited | Short shared caching was chosen over none | Phase 18 |
+| G-81 | Usage is recorded in Database (`blob_usage`) and is not reported to Cloud billing or shown anywhere | Billing is Phase 16 | Phase 16 |
+| G-82 | Quota is per bucket. There is no environment or organization total, and no plan limit | No plan policy yet | Phase 16 |
+| G-83 | If cleanup cannot delete an abandoned upload's bytes, it does not try again: the transfer is already closed. Those bytes stay until removed by hand or by a bucket lifecycle rule | The store port has no listing | Cleanup lists a bucket's prefix, or the bucket gets a lifecycle rule |
+| G-84 | The legacy storage engine and its routes (`/api/projects/.../storage`, `/storage/v1/object/public/...`, base64 JSON uploads) still exist beside canonical blobs, unhardened | Retiring them needs the unified frontend | Phase 17 |
+| G-85 | `S3BlobStore` has run only against a local MinIO container, in a test CI skips; the scenario tests use an in-memory stand-in for the bucket | CI has no object store | With G-44 |
+| G-86 | Final deletion of an environment does not remove its blobs (see G-09), and blob events are not in the organization log (see G-21) | Owning-service deletion and events are open across the platform | With G-09 and G-21 |
+| G-87 | There is no range request, no conditional request, no object metadata or tags, no copy or move, and no listing by delimiter | Not needed for the proof gate | A need for them |
+
 ## Open: verification
 
 | # | Gap | Why open | Closes when |

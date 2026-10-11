@@ -21,7 +21,7 @@ meaningful tests pass together.
 | 8 — partly complete | Implement disposable Windows x64 execution, dependency locks, NSIS/WiX packaging, signing and provenance. | Done and proven: Cloud verifies declared artifacts against object storage, signed provenance, a worker runtime with pinned checkout, required lockfile, log redaction, disposable workspace and cancellation. Not proven: a real NSIS/WiX build, Authenticode signing, and resource or egress limits (G-36 to G-38). The gate is not met until those are. |
 | 9 — complete | Implement BE-07 releases, channel revisions, rollout/promotion/withdrawal and updater compatibility. | Completed: immutable releases over verified artifacts, signing profiles, signed channel revisions, promotion, rollout, withdrawal with a stop list, a public feed, and one conformance fixture run by the publisher's code and the TypeScript, standalone and Rust updaters. No packaged app has updated from the feed yet (G-57). |
 | 10 — partly complete | Finish BE-08 relational work: private exports, foreign keys, impact previews, asynchronous schema work, migration promotion and restricted SQL. | Done and proven against real Database: foreign keys, cross-table impact previews, and private resumable exports with authorization, cancellation and crash recovery. Not built: restricted SQL, migration promotion, asynchronous schema changes, table deletion (G-64 to G-67). |
-| 11 | Implement BE-09 blob storage with private objects, signed bounded transfers, metadata authority, retention and cleanup. | Two-tenant upload/download/delete, interrupted transfer, expiry, quota and orphan cleanup scenarios pass. |
+| 11 — complete | Implement BE-09 blob storage with private objects, signed bounded transfers, metadata authority, retention and cleanup. | Completed: buckets, single-use exact-object transfers verified before storing, public download by current visibility, versions and retention, quota, cleanup and metering, proven across two environments over real HTTP. App users have no blob access yet (G-76); transfers are mediated by Database, not presigned (G-78). |
 | 12 | Implement BE-09 vector, graph and realtime parity with canonical environment authority and durable outbox semantics. | Exact-scope CRUD/query isolation and reconnect/replay/revocation tests pass for every service. |
 | 13 | Implement BE-10 functions and schedules with immutable revisions, secret bindings, leases, limits and durable executions. | Deploy/invoke/schedule/cancel/retry tests prove revision pinning, secret isolation, idempotency and timeout recovery. |
 | 14 | Implement BE-11 Registry publisher identity, review, trust, immutable archives, yanking and signed distribution. | Publish/review/install tests verify namespace authority, provenance, digest/signature checks, revocation and tenant isolation. |
@@ -31,18 +31,18 @@ meaningful tests pass together.
 | 18 | Complete observability, deployment compatibility, security review, migration reconciliation, canary rollout and cutover. | Sections 25-29 of the backend plan have recorded production evidence, including restore, rotation, rollback and no-mock-fallback drills. |
 | 19 | Close the gap ledger: every open decision and everything an earlier phase could not finish or prove. | Each entry in [gaps.md](gaps.md) is closed with evidence or explicitly accepted by the owner. Includes the hardware- and account-dependent proofs (a real Windows build, signing, isolation, real KMS, a real identity provider) and CI running the database suites. |
 
-## Start with Phase 11
+## Start with Phase 12
 
-Phases 1 to 7 and 9 are complete; Phases 8 and 10 are partly complete. Read
-these files before changing Phase 11 code:
+Phases 1 to 7, 9 and 11 are complete; Phases 8 and 10 are partly complete. Read
+these files before changing Phase 12 code:
 
-- section 15.1 of [the backend plan](../platform-backend-plan.md), "Blobs", and its proof gate
-- [data-exports.md](../data-exports.md): the export store and single-use download are the nearest existing pattern for private objects and bounded transfers
-- `products/carbon-database/infrastructure/services/StorageEngine.ts` (the legacy storage engine) and `solutions/capabilities/cloud/data/`
-- [gaps.md](gaps.md), G-42, G-47, G-62 and G-73: artifact immutability and object cleanup are waiting on this phase
+- sections 15.2 and 15.3 of [the backend plan](../platform-backend-plan.md), "Vector and graph" and "Realtime", and their proof gate
+- [blob-storage.md](../blob-storage.md): the newest example of a signed command family owned by Database, with its own paths and permissions in Cloud's live authority
+- `products/carbon-database/infrastructure/services/` (`VectorEngine`, `GraphEngine`, `RealtimeEngine`: the legacy engines)
+- [audit-events.md](../audit-events.md): the event log and stream are the existing durable-ordering pattern
 
-Phase 11 builds blob storage: private objects, signed bounded transfers,
-metadata authority, retention and cleanup.
+Phase 12 brings vector, graph and realtime to canonical environment authority
+with durable outbox semantics.
 
 ## Deferred work
 

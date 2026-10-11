@@ -1,4 +1,4 @@
-import { HttpDataClient, HttpImportClient, S3ExportStore } from '@carbon/data';
+import { HttpBlobClient, HttpDataClient, HttpImportClient, S3ExportStore } from '@carbon/data';
 import { serviceAssertionIssuerFromEnv } from './service-assertion-signing.ts';
 
 export function dataClientFromEnv(env: NodeJS.ProcessEnv = process.env): HttpDataClient | undefined {
@@ -22,4 +22,12 @@ export function exportStoreFromEnv(env: NodeJS.ProcessEnv = process.env): S3Expo
   const bucket = required('CARBON_EXPORT_BUCKET');
   if (bucket === env.OBJECT_STORE_BUCKET) throw new Error('CARBON_EXPORT_BUCKET must be a private bucket, separate from OBJECT_STORE_BUCKET');
   return new S3ExportStore({ endpoint: required('OBJECT_STORE_ENDPOINT'), bucket, accessKeyId: required('OBJECT_STORE_ACCESS_KEY_ID'), secretAccessKey: required('OBJECT_STORE_SECRET_ACCESS_KEY') });
+}
+
+/** Cloud's transport for blob commands. Blobs are offered when the Database origin is configured and CARBON_BLOBS is enabled. */
+export function blobClientFromEnv(env: NodeJS.ProcessEnv = process.env): HttpBlobClient | undefined {
+  if (!env.CARBON_BLOBS || env.CARBON_BLOBS === 'disabled') return undefined;
+  if (env.CARBON_BLOBS !== 'enabled') throw new Error('CARBON_BLOBS must be enabled or disabled');
+  if (!env.CARBON_DATA_DATABASE_ORIGIN) throw new Error('Blob storage requires CARBON_DATA_DATABASE_ORIGIN');
+  return new HttpBlobClient(env.CARBON_DATA_DATABASE_ORIGIN, serviceAssertionIssuerFromEnv(env));
 }

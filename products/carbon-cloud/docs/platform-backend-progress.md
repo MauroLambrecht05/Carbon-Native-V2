@@ -1880,3 +1880,59 @@ New gaps are G-64 to G-75.
 
 Phase 10 stops here, partly complete. Phase 11 (blob storage) is next in
 [the handoff](left-off/handoff.md).
+
+## 2026-10-11: Phase 11, blob storage
+
+Phase 11 added canonical blob storage, owned by Carbon Database and reached
+through Cloud's account API ([blob-storage.md](blob-storage.md),
+[blob-api.openapi.json](blob-api.openapi.json), Database migration
+`0008_blob_storage.sql`).
+
+- Buckets with visibility, a size limit, allowed content types, versioning,
+  retention, a quota and a revision.
+- Uploads and downloads through single-use addresses. An upload address is for
+  one exact object (key, size, SHA-256, content type); what arrives is verified
+  before anything is stored. Bytes are raw, never base64 or JSON, and never pass
+  through Cloud.
+- Public download that reads the bucket's visibility at the moment of the
+  request.
+- Versions, restore, and retention-based removal.
+- A quota that counts stored versions and uploads still in flight.
+- Cleanup for lapsed addresses, abandoned uploads and expired versions.
+- Metering rows that cannot double count.
+- Cloud's live authority now recognizes blob requests, with their own paths and
+  permissions; app users are refused.
+
+Proof gate, over the real Cloud account API, the real Database service over
+HTTP (including the byte transfers themselves) and PostgreSQL:
+
+- **Two-tenant upload, download and delete:** a second environment cannot see,
+  read, write, restore or delete anything of the first, by ID or by name, and
+  may reuse bucket names and keys. A member without data access can list and
+  nothing else; a stranger to the organization sees nothing. Stored keys are
+  opaque and contain the owning environment.
+- **Exact bytes:** all 256 byte values round-trip unchanged.
+- **Interrupted transfers:** wrong bytes of the right size, a short body, a long
+  body, a wrong content type, no body, and a storage outage are each refused,
+  store nothing, and spend the address. An upload that died after its bytes
+  reached storage is found by cleanup and its bytes deleted.
+- **Expiry:** unused upload and download addresses stop working and are closed.
+- **Quota:** two racing uploads for the last space produce exactly one address;
+  the limit is exact to the byte; lapsed reservations and purged versions give
+  space back.
+- **Orphan cleanup:** abandoned uploads, versions past retention, permanently
+  deleted versions and every byte of a deleted bucket are removed, and the
+  bucket's usage returns to zero.
+- Also: versions and restore, public visibility flips, a paused environment, a
+  mid-request revocation, idempotent receipts, and metering counts.
+- **Mutation checks:** 31 deliberate breakages were tried. 27 make a test fail: cross-environment access by ID, reuse and expiry of upload and download addresses, an upload address used to download, digest and content-type checks, bytes left behind by a failed upload, an upload recorded into a bucket deleted while it arrived, public serving of private buckets, paused environments and deleted objects, both quota rules, the size and content-type policies, immediate removal of replaced versions, cleanup keeping bytes, not returning quota, skipping abandoned uploads and purging retained versions, bucket deletion and its confirmation, the bucket revision check, egress metering and attachment serving. The other four change nothing observable because a second guard holds: an oversized body is also caught by the digest, a replayed upload command by a unique constraint, an upload into a deleted bucket by the expired address and the completion check, and a wrong grant in Cloud's authority by Database's own verifier.
+
+The affected regression passed **681 tests, 0 failures and 6,841 assertions across 84 files, with the three object-store tests run against a local MinIO container**. Generated contracts are
+current and the TypeScript checks pass.
+
+New gaps are G-76 to G-87. The largest: app users have no blob access (G-76),
+objects are buffered in memory up to 256 MiB (G-77), and transfers are mediated
+by Database rather than presigned (G-78).
+
+Phase 11 stops here. Phase 12 (vector, graph and realtime parity) is next in
+[the handoff](left-off/handoff.md).

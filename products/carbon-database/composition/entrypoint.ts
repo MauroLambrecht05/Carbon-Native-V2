@@ -6,7 +6,7 @@
 // engine, attaches HTTP routes, and launches the server.
 
 import { HttpIdentityClient, assertionTrustFromEnv } from "@carbon/identity";
-import { PostgresNativeTables } from '@carbon/data';
+import { PostgresNativeTables, S3BlobStore } from '@carbon/data';
 import { composeLifecyclePlatform, type LifecyclePlatformConfig } from './lifecycle-platform.ts';
 import { migrate, openDatabase } from "../infrastructure/persistence/Database.ts";
 import { DatabaseEngine } from "../infrastructure/services/DatabaseEngine.ts";
@@ -34,6 +34,20 @@ export interface CarbonDatabaseConfig {
   };
 }
 
+/**
+ * Blob storage needs a private bucket of its own and this service's public origin, which transfer addresses are built
+ * from. The bucket must not be the one the legacy storage engine serves public files from.
+ */
+function blobsFromEnv(env: NodeJS.ProcessEnv, required: (name: string) => string): LifecyclePlatformConfig['blobs'] {
+  if (!env.CARBON_BLOBS || env.CARBON_BLOBS === 'disabled') return undefined;
+  if (env.CARBON_BLOBS !== 'enabled') throw new Error('CARBON_BLOBS must be enabled or disabled');
+  const bucket = required('CARBON_BLOB_BUCKET');
+  if (bucket === env.OBJECT_STORE_BUCKET) throw new Error('CARBON_BLOB_BUCKET must be a private bucket, separate from OBJECT_STORE_BUCKET');
+  const origin = new URL(required('CARBON_DATABASE_PUBLIC_ORIGIN'));
+  if (origin.pathname !== '/' || origin.search || origin.hash || origin.username) throw new Error('CARBON_DATABASE_PUBLIC_ORIGIN must be a bare origin');
+  return { origin: origin.origin, store: new S3BlobStore({ endpoint: required('OBJECT_STORE_ENDPOINT'), bucket, accessKeyId: required('OBJECT_STORE_ACCESS_KEY_ID'), secretAccessKey: required('OBJECT_STORE_SECRET_ACCESS_KEY') }) };
+}
+
 export function configFromEnv(env: NodeJS.ProcessEnv = process.env): CarbonDatabaseConfig {
   const required = (name: string): string => {
     const value = env[name];
@@ -42,7 +56,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): CarbonDatab
   };
   const trust = assertionTrustFromEnv(env);
   return {
-    internalPlatform: trust ? { trust, authorityOrigin: required('CARBON_AUTHORITY_ORIGIN') } : undefined,
+    internalPlatform: trust ? { trust, authorityOrigin: required('CARBON_AUTHORITY_ORIGIN'), blobs: blobsFromEnv(env, required) } : undefined,
     port: Number(env.PORT ?? 54321),
     databaseUrl: required("DATABASE_URL"),
     controlPlaneUrl: required("CONTROL_PLANE_URL"),
@@ -96,15 +110,19 @@ export async function buildDatabaseSystem(config: CarbonDatabaseConfig) {
 
   const legacyHandler = buildDatabaseRoutes(deps);
   const lifecycle = config.internalPlatform ? composeLifecyclePlatform(sql, config.internalPlatform) : undefined;
-  const handler = (request: Request) => new URL(request.url).pathname.startsWith('/internal/platform/v1/')
+  // Canonical blob transfer and public addresses are served by the platform handler; every other /storage path is the legacy engine's.
+  const canonical = (path: string) => path.startsWith('/internal/platform/v1/') || path.startsWith('/storage/v1/transfers/') || path.startsWith('/storage/v1/public/');
+  const handler = (request: Request) => canonical(new URL(request.url).pathname)
     ? lifecycle ? lifecycle(request) : Promise.resolve(Response.json({ error: { code: 'capability', message: 'Internal platform is not configured', requestId: crypto.randomUUID() } }, { status: 501, headers: { 'cache-control': 'no-store' } }))
     : legacyHandler(request);
-  return { deps, handler, realtime };
+  return { deps, handler, realtime, blobStorage: lifecycle?.blobStorage };
 }
 
 export async function startDatabase(config: CarbonDatabaseConfig = configFromEnv()) {
-  const { handler, realtime, deps } = await buildDatabaseSystem(config);
+  const { handler, realtime, deps, blobStorage } = await buildDatabaseSystem(config);
   const server = startDatabaseServer({ port: config.port, handler, realtime });
+  // Blob cleanup: lapsed transfer addresses, abandoned uploads, and versions past their retention.
+  if (blobStorage) setInterval(() => { blobStorage.sweep().catch(() => console.error(JSON.stringify({ event: 'blob.sweep_unavailable' }))); }, 60_000).unref();
 
   console.log(`\n⚡ Carbon Database Studio running at: http://localhost:${server.port}`);
   console.log(`📡 API & Database services active (Relational, Vector, Graph, Functions, Storage)`);

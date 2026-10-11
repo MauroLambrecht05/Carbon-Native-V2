@@ -1,6 +1,6 @@
 # Carbon platform left-off checkpoint
 
-Checkpoint: 2026-10-11, after Phase 10: relational data (partly complete).
+Checkpoint: 2026-10-11, after Phase 11: blob storage.
 
 The overall platform plan remains unfinished. The rough scope estimate is about
 **30% of the complete backend-and-frontend goal**, with backend foundations in
@@ -57,6 +57,9 @@ the **low 40% range** and the requested production frontend redesign still at
 - Foreign keys between tables of one environment, with schema previews that show
   and block changes other tables depend on.
 - Private, resumable, cancellable table exports with single-use downloads.
+- Blob storage in Carbon Database: private and public buckets, exact-byte
+  single-use transfers verified before storing, versions and retention, quota,
+  cleanup and metering.
 
 The service-account implementation is described in
 [service-accounts.md](../service-accounts.md), its wire surface in
@@ -67,7 +70,7 @@ legacy permissions are inferred.
 
 ## Last verified state
 
-- Affected Bun regression: **679 tests, 0 failures and 6,661 assertions across 83 files, with the two object-store tests run against a local MinIO container**,
+- Affected Bun regression: **681 tests, 0 failures and 6,841 assertions across 84 files, with the three object-store tests run against a local MinIO container**,
   including the real HTTP/PostgreSQL cross-service suites. These database
   scenarios run on the development machine only: CI has no database and skips
   them (G-50).
@@ -113,15 +116,13 @@ build queue and the legacy end-user routes still work as before. Existing legacy
 implementations elsewhere in the repository still need review against the new
 isolation, durability and trust requirements before they count as complete.
 
-Phases 8 and 10 are **partly complete**; Phase 9 is complete. Phase 10 has
-foreign keys, cross-table impact previews and exports, and does not have
-restricted SQL, migration promotion, asynchronous schema changes or table
-deletion (G-64 to G-67). By the owner's decision (2026-10-10), open decisions
-and everything a phase could not finish or prove are collected in
-[gaps.md](gaps.md) and worked in a final Phase 19; phases do not stop for them.
+Phases 8 and 10 are **partly complete**; Phases 9 and 11 are complete. By the
+owner's decision (2026-10-10), open decisions and everything a phase could not
+finish or prove are collected in [gaps.md](gaps.md) and worked in a final Phase
+19; phases do not stop for them.
 
-The next bounded goal is **Phase 11: blob storage with private objects, signed
-bounded transfers, metadata authority, retention and cleanup**. Continue with
+The next bounded goal is **Phase 12: vector, graph and realtime parity with
+canonical environment authority and durable outbox semantics**. Continue with
 exactly one phase from [handoff.md](handoff.md) per future work session. Finish
 that phase's proof gate, update both checkpoint documents, and stop before
 beginning the next phase unless the user explicitly combines them.
