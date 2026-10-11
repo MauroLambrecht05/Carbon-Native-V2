@@ -2455,3 +2455,71 @@ are G-154 to G-165.
 
 Phase 18 stops here. Phase 19, closing [the gap ledger](left-off/gaps.md), is
 the last phase.
+
+## 2026-10-11: Phase 19, closing the gap ledger (in progress)
+
+Phase 19 works the ledger itself. It is not finished: most entries are still
+open. This entry records what has been closed so far, in the order it was done.
+
+**The database suites run in CI** (`7cdf47e`, `b0f6782`, `3276a04`). A Linux job
+starts two PostgreSQL containers and an S3-compatible store and runs the whole
+regression with the test variables set. Until now those scenarios had only run
+on a development machine. Its first complete run passed 745 of 746 tests; the
+one failure was a real ordering tie in a test double. MinIO no longer publishes
+a public image, so the store is RustFS, pinned by digest. Closes G-50, G-44,
+G-85.
+
+**The services as processes** (`8088104`). Each service's `main.ts` and
+`migrate.ts` is started as a real process against a database of its own. That
+found three defects: Cloud's `start` script launched a file that starts
+nothing; Cloud's `/healthz` was answered by the legacy route table and so never
+logged or counted; Database and Registry crashed on an unmigrated database. A
+service told not to migrate now refuses to start on a schema it may not serve,
+and `CARBON_NEWER_SCHEMA=allowed` is the rollback setting. Closes most of G-163
+and G-145 and the schema half of G-158.
+
+**Functions** (`e278124`, migration 0032). Cron schedules in an IANA time zone
+with a stated daylight-saving contract, an input per schedule, execution logs
+redacted on the worker, deploy-time validation, redaction of returned secrets,
+and removal of inputs, outputs and logs after thirty days. Closes most of G-101
+and G-102 and parts of G-105, G-106 and G-111.
+
+**Erasure** (`778c306`, migrations Cloud 0033, Database 0011, Registry 0005). A
+final deletion now destroys what the owning services hold: the environment's
+schema, role, rows, vectors, graph and blob bytes in Database, and its
+namespace in Registry, on a signed request only the platform can make and that
+the service confirms with Cloud twice. Legal holds stop it. Closes the
+owning-service half of G-09.
+
+**Supply chain** (`f2e198f`, `d7b9149`). A workflow audits the JavaScript and
+Rust lockfiles, writes a deterministic bill of materials, and builds, migrates,
+starts and scans each service image. Its first run found one critical and five
+high advisories in JavaScript dependencies and three vulnerabilities in Rust
+crates, all fixed by updates, and base-image packages with fixes waiting.
+Closes most of G-161.
+
+**Credentials on Cloud's API** (`620f54d`). A device or personal credential can
+call builds, releases, channels and functions as its account, inside its own
+scope and permissions. Closes the server half of G-128 and part of G-104.
+
+**A deadlock** (`620f54d`). CI's Linux job showed that cancelling a build or an
+execution could deadlock with the worker's heartbeat and answer 500. Fixed,
+with a test that reproduces it deterministically.
+
+**Documents.** [threat-model.md](threat-model.md) (the author's own; closes
+part of G-159) and [decisions.md](decisions.md), which gathers every question
+that is a choice and not work, with the default in force and its reason.
+
+Deliberate breakages in this phase so far: 22 for functions, 17 for erasure and
+11 for credential access. Every one fails a test, after three scenarios were
+added for erasure and three for credentials, and one redundant check found by a
+surviving breakage was removed.
+
+The latest full regression passed 763 of 764 tests; the one failure was an
+older stream test that read a heartbeat frame as an event frame, since fixed.
+
+**Still open.** The ledger. Its largest parts are the rest of the console
+(G-147), isolation of builds and functions (G-38, G-100), backup and restore
+(G-135), the data features Phase 10 did not reach (G-64 to G-67), the CLI
+commands (G-128), and everything that needs something from outside the
+repository.

@@ -1,6 +1,6 @@
 # Carbon platform left-off checkpoint
 
-Checkpoint: 2026-10-11, after Phase 18: observability, release steps, rotation drills and the security and cutover documents.
+Checkpoint: 2026-10-11, during Phase 19: the gap ledger is being worked. It is not closed.
 
 The overall platform plan remains unfinished. The rough scope estimate is about
 **45% of the complete backend-and-frontend goal**: most backend areas exist
@@ -102,10 +102,10 @@ legacy permissions are inferred.
 
 ## Last verified state
 
-- Affected Bun regression: **742 tests, 0 failures and 9,035 assertions across 93 files, with the object-store tests run against a local MinIO container**,
-  including the real HTTP/PostgreSQL cross-service suites. These database
-  scenarios run on the development machine only: CI has no database and skips
-  them (G-50).
+- Affected Bun regression: **764 tests across 96 files, with the object-store tests run against a local container**,
+  including the real HTTP/PostgreSQL cross-service suites. The same suites now
+  run in CI's `integration` job on Linux, against real PostgreSQL and an
+  S3-compatible store.
 - The Rust updater's 18 tests pass, including the conformance fixture.
 - Solutions, Carbon Cloud, Database, Registry and CLI TypeScript checks passed.
 - Generated platform types are current.
@@ -184,7 +184,12 @@ enabled for a canary set of organizations (G-162). See
 [operations.md](../operations.md), [security-review.md](../security-review.md)
 and [cutover.md](../cutover.md).
 
-The next bounded goal is **Phase 19: close the gap ledger**. It is the last
-phase. [handoff.md](handoff.md) sorts the ledger into what can be done in the
-repository, what needs something from outside, and what needs the owner's
-decision.
+**Phase 19, closing the gap ledger, is in progress.** Done so far: the database
+suites in CI; the services proven as processes, with a rollback setting; cron
+schedules, logs and retention for functions; real erasure in the owning
+services at final deletion; a supply-chain workflow; device and personal
+credentials on Cloud's build, release and function routes; a threat model; and
+[decisions.md](../decisions.md), which lists every open question that is a
+choice with the default in force. The progress log has the detail.
+
+Most of the ledger is still open. [handoff.md](handoff.md) sorts what is left.

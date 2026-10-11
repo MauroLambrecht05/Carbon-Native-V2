@@ -23,13 +23,42 @@ Phase 19 as well.
 | G-01 | The AWS KMS custody adapter has never run against real AWS | Phase 4 | No AWS account or key was available; it is tested against the published signature example and a stand-in | A wrap/unwrap round trip and a key rotation succeed against a real KMS key |
 | G-02 | The OIDC client has never run against a real identity provider | Phase 6 | No provider tenant was available; it is tested against a stand-in with real signatures | A sign-in completes against at least one real provider |
 
-## Open: needs a decision
+## Open: a default is in force, waiting for the owner to confirm it
 
-| # | Gap | From | Decision needed |
-|---|---|---|---|
-| G-04 | Legacy `cc_` token hashes are never deleted | Phase 3 | The published expiry window after which retired or all legacy tokens are purged |
-| G-05 | Legacy organization-wide end users (`/v1/end-users/*`) are not migrated into realms | Phase 6 | Whether to migrate them, and to which environment's realm, or retire the routes |
-| G-06 | Hosted key custody is AWS KMS only | Phase 4 | Whether another provider is required; the custody port allows it |
+These are questions about what the platform should do, not about whether something works. Each has a default
+in force. [decisions.md](../decisions.md) gives the reason for each and what the alternative would cost.
+Saying "keep" closes the entry.
+
+| # | Question | Default in force |
+|---|---|---|
+| G-04 | When are retired legacy `cc_` token hashes deleted? | Never. Retired tokens are refused; their hashes stay |
+| G-05 | Are legacy organization-wide end users migrated into realms? | No. They stay on the legacy routes, which stay until removed |
+| G-06 | Is another key custody provider needed besides AWS KMS? | No. Local keys or AWS KMS |
+| G-19 | Can envelopes be moved between custody modes? | No. The mode is chosen before secrets are stored |
+| G-30 | Should creating a build need its own permission? | No. It needs `release.publish` |
+| G-45 | Lockfiles in a subdirectory or a workspace package? | Root-level bun lockfile only |
+| G-46 | Which encodings of a secret are removed from logs? | The exact value, its JSON-escaped form, and each line of a multi-line value |
+| G-56 | Should Cloud widen or halt a rollout on its own? | No. A person changes the percentage |
+| G-58 | The standalone updater daemon: harden or remove? | Kept, held to the shared conformance fixture, marked non-canonical |
+| G-61 | Does a paused environment serve its update feed? | No. It answers `404` |
+| G-68 | Composite, cascading or `set null` foreign keys? | Single column, to a primary key, never cascading |
+| G-69 | A foreign key lets a writer learn whether a key exists in a table they cannot read. Accept? | Accepted |
+| G-72 | Custom sort order for exports? | ID order only |
+| G-78 | Blob bytes through Carbon Database, or presigned object-store addresses? | Through Database |
+| G-87 | Range and conditional requests, object metadata, copy and move for blobs? | None |
+| G-88 | Should a change event carry the row's values? | No. It names the row; the reader fetches it |
+| G-89 | Is visibility of a change decided when it happens or when it is read? | When it happens |
+| G-95 | Double-precision vectors, richer metadata filters? | Single precision; equality on top-level scalars |
+| G-97 | A shortest-path search that hits its width limit answers "not found" | Kept, bounded |
+| G-103 | Does an execution see the secret value from when its revision was deployed, or the current one? | The current one |
+| G-112 | Functions stored in Cloud or owned by Database? | Cloud |
+| G-125 | Are review and yank reasons moderated or categorised? | Free text within a length limit; a revocation's reason is public |
+| G-143 | What does suspending an organization stop? | Customer changes. Work already running finishes; the subscription is untouched |
+| G-160 | Row-level security in Cloud's and Registry's own databases? | No. Scope checks in the application, foreign keys carrying scope, and the denial matrix as the control |
+| G-164 | Which dependencies must be up for a service to report ready? | The database and its schema only |
+
+Seven more entries are part decision and part work, and stay where they are below with the decision named in
+decisions.md: G-09, G-22, G-101, G-106, G-110, G-119 and G-141.
 
 ## Open: later phase owns it
 
@@ -49,7 +78,6 @@ Phase 19 as well.
 | G-16 | Events have no retention policy and no export, and the stream never sends a `gap` frame | Phase 5 | |
 | G-17 | Account-level security events (sign-in, MFA, sessions) are not in the organization log | Phase 5 | They are account-scoped, not organization-scoped |
 | G-18 | Authenticated worker calls are not rate limited; only enrollment is | Phase 4, gap closures | |
-| G-19 | Envelopes cannot be moved between custody modes (local keyring to KMS) | Phase 4 | Choose the mode before storing secrets |
 | G-20 | Members are not notified when a deletion is scheduled | Phase 5 | |
 | G-21 | Owning-service events (Database, Registry) are not in the organization log | Phase 5 | |
 | G-22 | The event stream polls the database once a second; there is no broker | Phase 5 | Acceptable until load says otherwise |
@@ -60,7 +88,6 @@ Phase 19 as well.
 |---|---|---|---|
 | G-28 | A build's input is a repository, commit, targets, secret names and platform. The lockfile digest, configuration digest and tool versions are recorded in provenance after the build; the toolchain is not pinned before it, so two attempts can use different tool versions | Pinning needs a toolchain manifest in the input and workers that install exactly it | Needs a Windows build host (with G-36) |
 | G-29 | The repository URL and commit SHA are supplied by the caller; a build is not created from a branch or tag through the repository integration, `repositoryId` is optional, and the URL is not checked against the project's bound repository | Resolution exists (`RepositoryCommitResolve`) but is not chained into build creation | Do together with G-40 |
-| G-30 | There is no dedicated build permission; creating a build needs `release.publish` | Adding one changes the permission vocabulary and role presets | Needs a decision |
 | G-32 | Build logs are read by polling `?after=N`; they are not on the event stream | The stream carries events, not log text | Phase 17 decides the UI need |
 | G-33 | The reservation is a fixed 30 minutes, the deadline equals it, and attempts are fixed at three | No per-plan or per-build policy yet | Phase 16 (quotas) |
 | G-34 | Quota reads the legacy `org_plans` and `usage_records` tables, whose organization column is text | Billing is rebuilt in Phase 16 | Phase 16 |
@@ -82,8 +109,6 @@ The rest of the gate is not, and is listed here.
 | G-41 | The provenance signing key has no published public key, no rotation list and no revocation; consumers must be given the key out of band. The statement is Carbon's own format, not in-toto or SLSA | Publishing keys belongs with release signing | Phase 9 (releases) |
 | G-42 | The worker holds write access to the whole artifact bucket. Cloud verifies an object once, before accepting success; an object replaced afterwards is not detected, and a worker could overwrite another build's objects. Objects are not write-once | Needs per-build upload grants (presigned URLs under the build's prefix) and object immutability or versioning in the bucket | Phase 11 (blob storage) or sooner if workers are not all trusted |
 | G-43 | Cloud verifies an artifact by reading the whole object inside the completion request. Large installers make that request slow, and there is no size-based timeout or background verification | Simple first implementation | Verification moves to a job, or measured limits are documented |
-| G-45 | The lockfile rule covers a bun lockfile at the repository root only. A project in a subdirectory or a workspace package is not supported, and `Cargo.lock` is digested when present but not required | Carbon apps today are root-level bun projects | A project layout that needs it |
-| G-46 | Log redaction removes exact secret values and the lines of multi-line values. An encoded form of a secret (base64, URL-encoded, split across lines) is not removed | Exact matching only | A decision on which encodings to cover |
 | G-47 | Objects uploaded by failed, cancelled and lost attempts stay in the bucket forever | No cleanup job | Phase 11 (retention and cleanup) |
 | G-48 | Cancellation stops the worker between steps. A compile or package step already running is not killed, so a cancelled build can keep using the machine until that step ends | `RealLocalPipeline` does not take the abort signal | Subprocesses are terminated on cancellation |
 | G-49 | The worker removes only its own settings from the environment. Any other secret in the worker machine's environment is inherited by builds. The worker credential is not rotated automatically, and the `build-worker.ts` loop has no test beyond its settings handling | Depends on G-38 for a real boundary | With G-38 |
@@ -97,12 +122,9 @@ The rest of the gate is not, and is listed here.
 | G-53 | An update signing key cannot be rotated. A profile is fixed to one key, and the manifest's `keyring.secondary` is always empty | Rotation needs the overlap rules of `@carbon/signing`'s keyring wired into profiles and manifests | A rotation with an overlap window passes the conformance fixture |
 | G-54 | Signing keys are environment secrets: encrypted at rest under the configured custody, decrypted in Cloud's memory for each signature. The plan asks that private keys never enter Cloud tables; the encrypted form does. Default chosen: reuse the secret store | Signing inside a KMS or HSM needs a provider and a decision | A custody adapter signs without exporting the key |
 | G-55 | A release's compatibility is `min_version` only. The plan also lists the data environment and migration warnings | Those belong to data migrations (Phase 10) | Phase 10 |
-| G-56 | Nothing schedules a rollout, widens it over time, or halts it when installs crash | No health signal reaches Cloud; the plan forbids device telemetry unless the app enables it | A decision on telemetry |
 | G-57 | No packaged app has updated itself from this feed. The three updaters agree with the publisher on signatures and decisions through the shared fixture, and Cloud's feed is checked with the TypeScript updater's code, but download, slot swap and restart against a Cloud release have not run | Needs a real packaged build (G-36) | A packaged app on version N updates to N+1 from a Cloud channel and rolls back after a withdrawal |
-| G-58 | `products/carbon-updater` (the standalone daemon) is not the canonical updater and still exists. Its local HTTP surface takes the trusted key and a manifest from the request body with open CORS | Default chosen: keep it conforming, mark it non-canonical | A decision to harden or remove it |
 | G-59 | The CLI still publishes through the older path (`carbon publish` straight to S3, `PublishReleaseUseCase`, `RollbackReleaseUseCase`, `YankReleaseUseCase`), which bypasses Cloud releases, their audit trail and their immutability | CLI work is Phase 15 | Phase 15 |
 | G-60 | The public feed is read from the database on every request, with a 60-second cache header and no rate limit or CDN | Acceptable until load says otherwise | Phase 18 |
-| G-61 | A paused environment's feed answers 404, so its installs see no updates and no stop list while it is paused. Default chosen: only an active environment serves a feed | Needs a product decision on what "paused" means for shipped apps | A decision |
 | G-62 | Withdrawing a release leaves its artifacts in the bucket and reachable by URL | No object lifecycle yet | Phase 11 |
 | G-63 | A channel shows its latest 100 revisions; older ones are stored but cannot be listed. Releases cannot be filtered by state | Paging was not needed yet | When a channel passes 100 revisions |
 
@@ -119,11 +141,8 @@ entries here.
 | G-65 | **Migration promotion is not built.** A schema cannot be compared between environments or promoted from one to another | Not reached in Phase 10 | A reviewed plan promotes a schema between two environments and reports what it would change first |
 | G-66 | **Schema changes are synchronous.** A change runs inside one request with a five-second statement timeout, so a change that rewrites or validates a large table fails instead of running as a job | Not reached in Phase 10 | Long schema changes run as cancellable jobs with progress and recovery |
 | G-67 | **A table cannot be deleted.** There is no `table.delete`, and so no impact preview for one | The catalog keeps audit rows that reference the table; deletion needs a retired state | Tables can be retired with a preview that lists inbound foreign keys |
-| G-68 | Foreign keys are single-column, reference only a primary key, and never cascade. There is no `set null` or `cascade`, and no composite key | The simplest safe form first | A need for them |
-| G-69 | PostgreSQL checks foreign keys without row policies, so a writer to a referencing table can learn whether a key exists in a table they cannot read | Inherent to native foreign keys | A decision: accept, or check references under policy in application code |
 | G-70 | An export ends when its creator's session ends or expires, even mid-run, because the job re-resolves that session's authority at every claim. Imports behave the same way | Background jobs have no identity of their own | Jobs act under a durable grant instead of a browser session |
 | G-71 | An export contains only rows its creator's policy-preview access can read. There is no administrative export of every row | The data API has no administrative row access by design | A separately audited administrative path |
-| G-72 | Exported rows are always in ID order; a custom sort is not supported. Exports cannot be listed beyond the latest 50 | Keyset paging by ID is what makes resuming exact | A need for it |
 | G-73 | If a worker dies after writing a part and before recording it, and the job is then cancelled or fails, that one object is never deleted: the sweep only knows recorded parts | The store port has no listing | The sweep lists a job's prefix, or the bucket gets a lifecycle rule |
 | G-74 | A table export download streams each part through Cloud's memory, up to one page of rows at a time | Simple first implementation | Streaming from the bucket to the response, or the limit accepted |
 | G-75 | The export worker's entry point (`data-export-worker.ts`) and the `CARBON_DATA_EXPORTS` configuration have no test of their own | Small glue | A configuration test |
@@ -134,29 +153,23 @@ entries here.
 |---|---|---|---|
 | G-76 | App users have no blob access. Only accounts and service accounts can use blob commands; an app can reach only public objects | Needs an object ownership rule and app-user assertions for blobs | An app user uploads and reads their own objects, and cannot reach another user's |
 | G-77 | An object is limited to 256 MiB and is held in memory while it is uploaded, verified and downloaded | Verification before storing is done on a buffer | Streaming or multipart transfer with verification |
-| G-78 | Transfers go through Carbon Database, not through presigned object-store URLs as the plan describes. Database carries every byte in and out | A presigned PUT cannot enforce an exact size and digest before the object exists | A decision: keep service-mediated transfers, or presign and verify on completion |
 | G-79 | A download address stays usable for its 60 seconds even if the caller's access is revoked in that time. Database has no assertion to recheck when the address is used | The address deliberately carries no session | Addresses bound to a recheck, or a shorter lifetime |
 | G-80 | A public object can be cached for up to 60 seconds after its bucket is made private. Public downloads are not rate limited | Short shared caching was chosen over none | Phase 18 |
 | G-81 | Usage is recorded in Database (`blob_usage`) and is not reported to Cloud billing or shown anywhere | Billing is Phase 16 | Phase 16 |
 | G-82 | Quota is per bucket. There is no environment or organization total, and no plan limit | No plan policy yet | Phase 16 |
 | G-83 | If cleanup cannot delete an abandoned upload's bytes, it does not try again: the transfer is already closed. Those bytes stay until removed by hand or by a bucket lifecycle rule | The store port has no listing | Cleanup lists a bucket's prefix, or the bucket gets a lifecycle rule |
 | G-84 | The legacy storage engine and its routes (`/api/projects/.../storage`, `/storage/v1/object/public/...`, base64 JSON uploads) still exist beside canonical blobs, unhardened | Retiring them needs the unified frontend | Phase 17 |
-| G-87 | There is no range request, no conditional request, no object metadata or tags, no copy or move, and no listing by delimiter | Not needed for the proof gate | A need for them |
 
 ## Open: from Phase 12 (realtime, vectors, graph)
 
 | # | Gap | Why open | Closes when |
 |---|---|---|---|
-| G-88 | A change event names the row and what happened; it carries no row values, old or new. A reader fetches the row with a query | Row images in the feed would copy customer data into a second place and need their own policy checks | A decision on row images |
-| G-89 | Who is told about a change is decided from the policies and the owner column at the moment of the change. A reader who gains access later is not told about earlier changes, and one who loses access (not by a policy change) keeps being told about rows they owned at the time | The feed stores a visibility snapshot instead of re-evaluating policy at read time | A decision: snapshot or read-time evaluation |
 | G-90 | The change stream is polled by Cloud once a second per open stream, and exists only for account sessions. There is no push, no broker, and no stream endpoint for app users, who must poll `rows.changes` themselves with a fresh assertion each time | The pull primitive came first | An app-facing stream with its own authentication, and a notification path that does not poll |
 | G-91 | Reading the change feed is not audited or rate limited, and every reader re-scans the table's events from their cursor | A polled feed would otherwise flood the audit trail | Phase 18 |
 | G-92 | Every schema or policy change resets every cursor on that table, even when it does not affect visibility | The table revision is the only visibility revision there is | A separate policy revision |
 | G-93 | Rows changed before migration 0009 are not in the feed, and a table's capture trigger can be dropped by anyone with ownership of the table in PostgreSQL; nothing detects a missing trigger | The trigger is not part of the managed-constraint drift check | The drift check covers the capture trigger |
 | G-94 | Vector search is exact: every point of a collection is scored on every query. There is no approximate index, so cost grows with collection size up to the 100,000-point limit | The points table holds vectors of every dimension in one column, which pgvector cannot index | Per-collection storage with an index, and a measured accuracy contract |
-| G-95 | Vectors are stored in single precision; a value read back can differ from the one written in its last digits. Metadata filters are equality on top-level scalar values only | pgvector's `vector` type; simplest filter first | A need for more |
 | G-96 | Large vector and graph work does not run as cancellable jobs, as the plan asks. A batch is at most 100 points; a walk is bounded by depth and size and by a ten-second statement limit | Bounded synchronous commands were enough for the proof gate | Bulk load and bulk walk as jobs |
-| G-97 | A shortest-path search looks at no more than 5,000 newly reached nodes per level. In a graph wider than that it can answer "not found" when a path within the depth limit exists | Bounded work per request | The limit is reported in the answer, or the search becomes a job |
 | G-98 | App users cannot use vectors or the graph, and neither has row-level or node-level policy: anyone with `data.read` in the environment reads all of it | Needs an ownership model for points, nodes and edges | With G-76 |
 | G-99 | The legacy realtime (in-process websocket), vector and graph engines and their routes still exist beside the canonical ones, unhardened. Vector and graph limits are fixed constants, not plan quotas, and their usage is not metered | Retiring them needs the unified frontend; quotas are Phase 16 | Phases 16 and 17 |
 
@@ -170,7 +183,6 @@ than was built. Each difference is an entry here.
 | G-100 | **A function is not isolated or limited.** It runs as a child process of the worker, as the worker's own user, with that user's files and network and no CPU, memory or disk limit. Only wall time and output size are bounded. Its environment holds only the lease's secrets and a few start-up variables, but it can read any file the worker can. A process the function starts itself is not killed with it | The same missing sandbox as builds (G-38); the plan requires CPU, memory, filesystem and egress policy | With G-38: a real isolation boundary, proven by a function that tries to leave it |
 | G-101 | A schedule's overlap and missed-run behaviour is fixed (skip on overlap; one run for any number of missed slots) and cannot be chosen per schedule. A schedule has no credential of its own. Cron expressions take numbers only: no month or weekday names, no `@daily` shorthands, no seconds field | The fixed behaviour is the safe default, and nothing has asked for another | A per-schedule policy, if one is needed |
 | G-102 | Logs arrive with the result, not while a function runs: a running execution has none, and an execution whose worker was lost, or that Cloud timed out, never gets one. A log is the first 60,000 bytes only | Streaming needs a log route on the lease, as builds have, and ordering across attempts | Logs appended during the run, kept per attempt |
-| G-103 | A revision names its secrets, not versions of them. An execution gets whatever value is current when the worker fetches it, so rotating a secret changes what an old revision and a retry see. The plan asks for secret version references in the snapshot | Leases deliver the current version only | Leases can deliver a pinned version, or the choice to follow the current one is accepted |
 | G-104 | Service accounts (`cs_`), environment credentials (`ce_`) and app users cannot invoke a function: only an account can, from a browser session or through a device or personal credential. There is no HTTP or event trigger, and no call that waits for the result | Each remaining principal kind needs its own grant model | Invocation grants for service and app principals, and a trigger |
 | G-105 | Code is one ES module stored as text. There are no drafts, no packaging, no dependencies, no recorded runtime version, and no promotion of a revision between environments. Deploy checks that the code parses and has a default export; it cannot check that the default export is a function or that the module loads | The smallest deployable unit that proves immutability | A packaging step and a deployment snapshot that includes the runtime |
 | G-106 | Inputs and outputs are stored unencrypted in Cloud's database for the thirty days before they are removed. Redaction of a secret from an output or a log is exact-match only: an encoded, split or shorter-than-four-character secret is not recognised. Revisions, events and idempotency records have no retention, and the thirty days is a constant, not a setting per organization | Field encryption and broader redaction were not designed | Encrypted inputs and outputs, and a retention setting |
@@ -179,7 +191,6 @@ than was built. Each difference is an entry here.
 | G-109 | Not proven: the `function-worker.ts` entry point has never run as its own process against a served Cloud (the use case and runner are tested through the in-process worker API); the sweeper's calls to `reconcile` and `tick` are not covered by a test; the real-process test has only run on Windows; a build lease presented to the function routes is refused by code that no test reaches; a scheduled slot skipped because a secret is gone is untested; invoking in a paused or archived environment is untested | Each needs a served deployment or another scenario | A deployed worker runs a function end to end, and the listed scenarios have tests |
 | G-110 | An execution can run more than once: a worker that dies after the function had effects is replaced, and the function runs again from the start. Only lost workers are retried, at most three attempts, with no backoff; a function failure is never retried automatically and there is no dead-letter list | At-least-once on worker loss was the default chosen | A stated delivery guarantee and a retry policy per function |
 | G-111 | The scheduler runs inside the lease sweeper, so a slot fires up to one sweep interval late and stops entirely if that process is down. Function events are not in the organization audit log (see G-21) | One background process so far; events are open across the platform | Monitoring of the sweeper, and G-21 |
-| G-112 | Functions, revisions and executions are stored in Cloud. The plan says Database remains the resource owner | Cloud already owns leases and secrets, and one transaction across both was needed to create an execution with its lease | A decision: keep them in Cloud, or move them behind signed Database requests |
 | G-113 | A function cannot be deleted or renamed, a revision can never be removed (not even one deployed with a secret pasted into its code), and final deletion of an environment does not remove its functions (see G-09) | Immutability came first; deletion is open across the platform | A reviewed removal path for revisions, and G-09 |
 
 ## Open: from Phase 14 (Registry publishing and trust)
@@ -196,7 +207,6 @@ than was built. Each difference is an entry here.
 | G-122 | Not proven: `S3RegistryArchiveStore` against a real bucket; Registry's environment wiring (`publishingFromEnv`) and the review tool as processes; writes refused in a paused environment; a browser session that is no longer fresh at Registry's live check; publishing through the CLI and service-account assertion exchange (only `namespace.get` is tested that way); real Linux and macOS libraries (headers are hand-made in tests); a plugin actually built by the Zig toolchain, packed and published | Each needs a deployment, another credential path, or a real build | Those scenarios have tests, and one real plugin goes from build to install |
 | G-123 | Registry's package events are in Registry's own table, not the organization audit log (see G-21). A publisher learns of a rejection or revocation only by reading the version; nothing notifies them | Owning-service events are open across the platform | G-21, and a notification |
 | G-124 | The upload address is disclosed once. If that response is lost, the publisher must withdraw the reservation and submit again with a new command | Disclosing a credential a second time was the worse default | An explicit "new upload address" command |
-| G-125 | An operator's rejection reason and a publisher's yank reason are free text shown to others; nothing limits what is written beyond length. A revoked version's reason is public | No moderation model | A decision on reason categories |
 
 ## Open: from Phase 15 (plugin consumption and the CLI)
 
@@ -227,7 +237,6 @@ of the backend plan asks for more; each difference is an entry here.
 | G-140 | A budget warning is an event in the organization's log and nothing more: nobody is emailed. It fires once per month when the line is crossed, with no earlier thresholds. Warn-mode budgets are not applied to builds, only caps are | No billing notifications exist | Notification of warnings and of a failed payment |
 | G-141 | Operators authenticate with a bearer credential issued from the command line. There is no operator sign-in, second factor, single sign-on, network restriction or rate limit, and creating an operator is not itself in the operator record. Two-person approval covers early deletion only, not suspension, holds or trust rotation. Registry review still takes a typed name (G-114) | The boundary and the record came first | Operator sign-in with a second factor, operator administration in the record, and Registry review under the same accounts |
 | G-142 | A legal hold stops final deletion and nothing else. It does not stop the customer from deleting tables, rows, blobs or packages in the ordinary way, and it does not stop a deletion from being scheduled. There is no customer-facing preview of what blocks a deletion or what is kept, and an owner is not told why a deletion is waiting. A chargeable subscription blocks the organization's final deletion but not a project's or an environment's | Preserving live data needs holds in every owning service | Holds enforced by Database, Registry and storage, and a deletion preview for owners |
-| G-143 | Suspension blocks customer changes as before, but charged work already running continues, schedules of a suspended organization are not paused by suspension itself, and the subscription is not paused | Suspension semantics were not revisited | A decision on what suspension stops |
 | G-145 | Provider events racing across more than one Cloud process are untested (the test races them inside one). The legacy billing use cases and routes still exist and write the plan table directly, beside the new projection | The legacy routes need the console moved first | Two processes receive the same event and one applies it; the legacy billing path is removed |
 | G-146 | Build minutes are written to two ledgers, the older `usage_records` and the shared `usage_events`, and build admission still reads the older one. A function execution is charged when it ran, whether it succeeded or not. Usage events are never rolled up or expired | The build path was left as proven in Phase 7 | One ledger, and a retention rule |
 
@@ -256,11 +265,9 @@ walkthrough of the frontend plan; this is the first.
 | G-157 | Only requests through the observed handlers are logged and counted. Cloud's legacy `/v1` and `/api` routes, the workers, the sweepers and the command-line tools write no structured logs. Audit events remain the only record of what those did | The legacy routes are served by a separate route table | Those processes log through the same redacting logger |
 | G-158 | **Two versions of the code have not talked to each other.** No test starts a new Cloud against an old Database or Registry, or the reverse, so a change to a signed request or a response shape between releases would be found in production. (The schema side is done: see "Closed".) | Needs a second, older build of each service to run beside the current one | A test that runs the previous release's Database and Registry against the current Cloud, and the reverse |
 | G-159 | **No independent security review.** [threat-model.md](../threat-model.md) and [security-review.md](../security-review.md) are the author's own. Nobody whose job was to break the platform has read either or tested the code. Of the checklist's thirteen items, two are not met (sandboxing, independent review) and four are partly met (threat model, retention policies, supply chain, and tokens, for function outputs) | Needs a reviewer who did not write the code | An outside review, with findings worked |
-| G-160 | Cloud's and Registry's own databases have no row-level security. Tenant isolation there is the application's scope checks and foreign keys; a query that forgets its scope is not caught by the database. Only Carbon Database's per-environment schemas and roles are enforced by PostgreSQL | Design choice so far, never revisited | A decision: accept it with the denial matrix as the control, or add row-level security |
 | G-161 | The platform's service images are not signed and have no provenance: they are built and scanned in CI and discarded. The toolchains (bun, rustc, zig) are pinned but not watched for advisories, and the workflows' third-party actions are pinned by tag, not by digest. `react-router` 6 has two moderate advisories fixed only in version 7, held as dated exceptions | Signing needs a registry to publish to, which does not exist. The router upgrade is a change to the console and the website | Published, signed images; actions pinned by digest; react-router 7 |
 | G-162 | There is no per-organization feature flag, so a canary set of organizations cannot be enabled: every flag is per deployment. Legacy organizations can be claimed one at a time by an owner; there is no bulk import and no reconciliation report comparing legacy and canonical records | Nothing to cut over to yet | Cohort flags, and an import with a report |
 | G-163 | Cloud's assertion-key rotation is proven at the verifier only, not across running services. One mutation check in Phase 18, on the ledger-name guard, ended by hanging the test instead of failing it | The rotation needs three processes sharing trust configuration | A process-level rotation: Database and Registry restarted on trust that lists both keys, Cloud switched, the old key removed |
-| G-164 | Readiness checks the database and the schema, nothing else. A service whose object storage, payment provider, email provider, key custodian or peer service is unreachable still reports ready | Deliberate for a first pass: a shared dependency failing should not take every instance out of rotation | A decision per dependency on whether it gates readiness |
 | G-165 | Much of the verification the plan's section 25 lists is not built: browser end-to-end tests, load and soak tests, fault injection against a deployment, and tests on a Windows runner with real packaging. The database suites run on Linux in CI and nowhere else: not on Windows or macOS runners | Each needs infrastructure the repository does not have | Each kind of test exists and runs |
 
 ## Open: local environment

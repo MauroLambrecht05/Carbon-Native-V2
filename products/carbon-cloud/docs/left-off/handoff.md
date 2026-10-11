@@ -31,10 +31,10 @@ meaningful tests pass together.
 | 18 — partly complete | Complete observability, deployment compatibility, security review, migration reconciliation, canary rollout and cutover. | **Gate not met:** there is no deployment, so no production evidence exists (G-154). Done and proven on a development machine: liveness, readiness and metrics endpoints on all three services, request logs that carry routes and no values, read-only migration status and migrations as a separate release step, and rotation of Registry's signing key, the message key and the webhook secret. Written, not exercised: runbooks, the security checklist as a self-review, the cutover plan. Not done: restore drill (G-135), version-skew tests (G-158), threat model and independent review (G-159), canary cohorts (G-162). |
 | 19 | Close the gap ledger: every open decision and everything an earlier phase could not finish or prove. | Each entry in [gaps.md](gaps.md) is closed with evidence or explicitly accepted by the owner. Includes the hardware- and account-dependent proofs (a real Windows build, signing, isolation, real KMS, a real identity provider) and CI running the database suites. |
 
-## Start with Phase 19
+## Continue Phase 19
 
 Phases 1 to 7, 9, 11, 12 and 14 are complete; Phases 8, 10, 13, 15, 16, 17 and 18 are partly complete.
-Phase 19 is the gap ledger itself. Read these first:
+Phase 19 is the gap ledger itself, and it is under way: the progress log's Phase 19 entry lists what has been closed. Read these first:
 
 - [gaps.md](gaps.md), all of it. It is the work list
 - [cutover.md](../cutover.md), "Before any customer data": the order in which the outside dependencies matter
@@ -45,7 +45,9 @@ The ledger falls into three kinds of work:
 
 - **Can be done in the repository now.** The largest is the rest of the console (G-147, G-148, G-150). Also: function logs and schedules (G-101, G-102), Cloud's project plugin API and the remaining CLI workflows (G-127, G-128), unknown-outcome resolution (G-138), process-level tests of the entrypoints (G-145, G-163), observing the legacy routes and workers (G-157), and removing legacy paths once nothing depends on them.
 - **Needs something from outside.** A deployment (G-03, G-154), a database in CI (G-50), a Windows host with packaging tools and a signing certificate (G-36, G-37), an isolation mechanism for builds and functions (G-38, G-100), real AWS KMS, a real identity provider and the real payment provider (G-01, G-136), and an independent reviewer (G-159).
-- **Needs the owner's decision.** The section "Open: needs a decision", plus retention (G-106, G-146), row-level security in Cloud (G-160), and what gates readiness (G-164).
+- **Needs the owner's decision.** Every such question is in [decisions.md](../decisions.md) with the default in force. "Keep" closes one.
+
+Suggested order for what can be done in the repository: the CLI commands over the credential routes (G-128); the rest of the console (G-147); table deletion, schema changes as jobs, promotion and restricted SQL (G-64 to G-67); backup and restore (G-135); removal of Cloud's own rows at final deletion (G-09); owning-service and account events in the organization log (G-17, G-21); the cleanup sweeps (G-47, G-62, G-73, G-83, G-121, G-132); general rate limiting (G-18, G-60, G-80); then the legacy paths.
 
 ## Deferred work
 
