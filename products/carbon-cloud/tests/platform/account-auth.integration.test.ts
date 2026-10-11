@@ -21,6 +21,7 @@ import { migrate } from "../../infrastructure/persistence/Database.ts";
 import { AccountBuilds, AccountFunctions, AccountReleases, BuildOrchestration, Ed25519ProvenanceSigner, FunctionOrchestration, PostgresPlatformFunctionRepository, WorkerFunctions, type FunctionLimits, PostgresPlatformBuildRepository, PostgresPlatformReleaseRepository, PublicUpdateFeed, SecretReleaseSigner, WorkerBuilds, verifyBuildProvenance } from "@carbon/orchestration";
 import { decideUpdate, verifyUpdateSignature } from "@carbon/updating";
 import { createUpdateRoutes } from "../../infrastructure/http/update-routes.ts";
+import { createLiveServices } from "../../infrastructure/browser/http/live-services.ts";
 import { createOperatorRoutes } from "../../infrastructure/http/operator-routes.ts";
 import { createBillingWebhookRoutes } from "../../infrastructure/http/billing-webhook-routes.ts";
 import { AccountBilling, BillingWebhooks, FakeCheckoutSessionProvider, PostgresBilling, UsageGate, type Plan, type PlanId } from "@carbon/billing";
@@ -167,6 +168,14 @@ async function harness(functionLimits?: FunctionLimits, plans?: Record<PlanId, P
     }
     return response;
   };
+  // What a browser on this origin does: it sends its cookies and its Origin, and keeps the cookies it is given.
+  const browserCookies = () => [...cookies].map(([name, value]) => `${name}=${value}`).join("; ");
+  const browserFetch = (async (input: string | URL | Request, init: RequestInit = {}) => {
+    const headers = new Headers(init.headers); headers.set("origin", origin); headers.set("cookie", browserCookies());
+    const response = await handler(new Request(origin + String(input), { method: init.method ?? "GET", headers, body: init.body as string | undefined }), "127.0.0.1");
+    for (const cookie of response.headers.getSetCookie()) { const [pair] = cookie.split(";"); const index = pair!.indexOf("="); const value = pair!.slice(index + 1); if (value) cookies.set(pair!.slice(0, index), value); else cookies.delete(pair!.slice(0, index)); }
+    return response;
+  }) as typeof fetch;
   const challenge = async (email = "member@example.test", purpose = "registration", key = crypto.randomUUID()) => {
     await call("/platform/v1/auth/bootstrap");
     return call("/platform/v1/auth/challenges", "POST", { email, purpose, termsAccepted: true, termsVersion: "2026-09-12", name: "Member", returnTo: "/organizations" }, { "idempotency-key": key });
@@ -218,7 +227,7 @@ async function harness(functionLimits?: FunctionLimits, plans?: Record<PlanId, P
     const redirected = await githubCallback(url.searchParams.get('state')!); expect(redirected.status).toBe(303);
     return redirected.headers.get('location')!.split('#token=')[1]!;
   };
-  return { sql, protector, secretProtector, workerApi, workerFetch, updates, store, provenancePublicKey: provenanceSigner.publicKey(), leases, builds, functions: new FunctionOrchestration(functionRepository), usageGate, billing, checkouts, webhook, webhookHandler, operatorAdmin, operator, organizationLifecycle, catalogLifecycle, app, idp, deliverApp, assertionPublicKey:assertionKeys.publicKey, assertionKey, mail, cookies, call, challenge, complete, token, freshRequest, freshComplete, profile, emailToken, emailComplete, createOrganization, organizationCommand, restoreCookies,
+  return { sql, protector, secretProtector, workerApi, workerFetch, updates, store, provenancePublicKey: provenanceSigner.publicKey(), leases, builds, functions: new FunctionOrchestration(functionRepository), usageGate, billing, checkouts, webhook, webhookHandler, operatorAdmin, operator, browserFetch, browserCookies, organizationLifecycle, catalogLifecycle, app, idp, deliverApp, assertionPublicKey:assertionKeys.publicKey, assertionKey, mail, cookies, call, challenge, complete, token, freshRequest, freshComplete, profile, emailToken, emailComplete, createOrganization, organizationCommand, restoreCookies,
     catalogCommand, createProject,
     invitation, invitationToken, invitationProof,
     githubStart, githubCallback, githubComplete, githubBegin, githubCalls,
@@ -2474,6 +2483,102 @@ suite("real account authentication", () => {
     await h.sql`UPDATE operator_credentials SET expires_at = now() - interval '1 second' WHERE operator_id = ${security.id}`; expect((await h.operator(security.token, `/orgs/${org}`)).status).toBe(401);
     expect(JSON.stringify(await h.sql`SELECT * FROM operator_credentials`)).not.toContain(alice.token);
   }, 90000);
+
+  test('the console\'s live adapters walk the account and organization slice against the real API: sign-up by emailed link, session, organizations, projects, members, invitations, permissions, audit and sign-out', async () => {
+    const h = await harness(); const { services } = createLiveServices({ fetch: h.browserFetch, cookies: h.browserCookies });
+    const value = <T,>(result: { ok: true; value: T } | { ok: false; error: { code: string; message: string } }): T => { if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`); return result.value; };
+    const code = async (work: Promise<{ ok: boolean; error?: { code: string } }>) => { const result = await work; return result.ok ? 'ok' : result.error!.code; };
+    const key = () => ({ idempotencyKey: crypto.randomUUID() }); const changes: boolean[] = []; services.session.subscribe(change => { changes.push(change.security); });
+    const linkToken = (prefix: string) => new RegExp(`#token=(${prefix}_[A-Za-z0-9_-]{43})`).exec([...h.mail].reverse().find(message => message.text.includes(`#token=${prefix}_`))!.text)![1]!;
+
+    // A visitor has no session, and nothing protected answers.
+    expect(value(await services.session.getSession())).toBeNull(); expect(await code(services.identity.getAccount())).toBe('unauthenticated'); expect(await code(services.catalog.listOrganizations())).toBe('unauthenticated');
+
+    // Sign up: Carbon emails a link, and opening it in the same browser makes the session.
+    expect(await code(services.identity.request({ email: 'owner@example.test', name: 'Ada Owner', termsAccepted: false, purpose: 'signup' }))).toBe('validation');
+    expect(value(await services.identity.request({ email: 'owner@example.test', name: 'Ada Owner', termsAccepted: true, purpose: 'signup', returnTo: '/organizations' })).message).toContain('email');
+    await h.deliver(); expect(h.mail.at(-1)!.text).toContain('/auth/complete#token=ac_');
+    expect(await code(services.identity.complete(`ac_${'A'.repeat(43)}`))).not.toBe('ok');
+    expect(value(await services.identity.complete(linkToken('ac')))).toEqual({ returnTo: '/organizations' }); expect(changes).toEqual([true]);
+    // The link works once.
+    expect(await code(services.identity.complete(linkToken('ac')))).not.toBe('ok');
+    const session = value(await services.session.getSession())!; expect(session).toMatchObject({ name: 'Ada Owner', audience: 'dashboard' }); expect(session.visibilityKey.startsWith(session.id)).toBe(true);
+    const account = value(await services.identity.getAccount()); expect(account).toMatchObject({ id: session.accountId, email: 'owner@example.test', name: 'Ada Owner', status: 'active', methods: ['email'], mfa: false });
+    expect(value(await services.identity.listSessions()).items).toMatchObject([{ id: session.id, current: true, revoked: false }]);
+    // The profile is saved against the revision that was read; a stale one is refused.
+    expect(value(await services.identity.command({ kind: 'profile', name: 'Ada Lovelace', avatar: 'AL' }, { ...key(), expectedRevision: account.revision })).message).toBeTruthy();
+    expect(await code(services.identity.command({ kind: 'profile', name: 'Someone Else', avatar: 'SE' }, { ...key(), expectedRevision: account.revision }))).toBe('conflict');
+    expect(value(await services.identity.getAccount())).toMatchObject({ name: 'Ada Lovelace', avatar: 'AL' }); expect(value(await services.session.getSession())!.name).toBe('Ada Lovelace');
+
+    // Organizations: none, then one the account owns. A taken namespace is refused, and the same command twice makes one organization.
+    expect(value(await services.catalog.listOrganizations())).toEqual({ items: [], nextCursor: null, total: 0 });
+    const creating = key(); const created = value(await services.platform.command(undefined, { kind: 'organization-create', name: 'North Works', namespace: 'north-works' }, creating)); const orgId = created.resourceId!;
+    expect(value(await services.platform.command(undefined, { kind: 'organization-create', name: 'North Works', namespace: 'north-works' }, creating)).resourceId).toBe(orgId);
+    expect(await code(services.platform.command(undefined, { kind: 'organization-create', name: 'Copy', namespace: 'north-works' }, key()))).toBe('conflict');
+    expect(await code(services.platform.command(undefined, { kind: 'organization-create', name: 'Bad', namespace: 'No Spaces' }, key()))).toBe('validation');
+    value(await services.platform.command(undefined, { kind: 'organization-create', name: 'South Yard', namespace: 'south-yard' }, key()));
+    const organizations = value(await services.catalog.listOrganizations()); expect(organizations.items.map(item => item.name).sort()).toEqual(['North Works', 'South Yard']);
+    expect(value(await services.catalog.listOrganizations({ filter: { name: 'north' } })).items.map(item => item.id)).toEqual([orgId]);
+    // Paging follows the server's cursor.
+    const firstPage = value(await services.catalog.listOrganizations({ limit: 1 })); expect(firstPage.items).toHaveLength(1); expect(firstPage.nextCursor).not.toBeNull();
+    const secondPage = value(await services.catalog.listOrganizations({ limit: 1, cursor: firstPage.nextCursor! })); expect([...firstPage.items, ...secondPage.items].map(item => item.id).sort()).toEqual(organizations.items.map(item => item.id).sort());
+
+    // The scope and what the account may do in it come from the server.
+    const scope = { orgId }; const resolved = value(await services.catalog.resolveScope({ scope })); expect(resolved.organization).toMatchObject({ id: orgId, name: 'North Works' });
+    expect(Object.values(resolved.permissions).every(action => action.allowed)).toBe(true); expect(resolved.project).toBeUndefined();
+    const details = value(await services.platform.getOrganization({ scope })); expect(details).toMatchObject({ namespace: 'north-works', requireMfa: false, transfers: [] });
+    expect(value(await services.platform.command({ scope }, { kind: 'organization-update', name: 'North Works Ltd', namespace: 'north-works' }, { ...key(), expectedRevision: details.revision })).message).toBeTruthy();
+    expect(await code(services.platform.command({ scope }, { kind: 'organization-update', name: 'Stale', namespace: 'north-works' }, { ...key(), expectedRevision: details.revision }))).toBe('conflict');
+    expect(value(await services.catalog.resolveScope({ scope })).organization.name).toBe('North Works Ltd');
+
+    // A project and its environments.
+    const revision = async () => value(await services.platform.getOrganization({ scope })).revision;
+    expect(value(await services.platform.command({ scope }, { kind: 'project-create', name: 'Notes', slug: 'notes', mode: 'both', environment: 'development' }, { ...key(), expectedRevision: await revision() })).message).toBeTruthy();
+    expect(await code(services.platform.command({ scope }, { kind: 'project-create', name: 'Notes again', slug: 'notes', mode: 'both', environment: 'development' }, { ...key(), expectedRevision: await revision() }))).toBe('conflict');
+    const projects = value(await services.catalog.listProjects({ scope })); expect(projects.items).toMatchObject([{ orgId, name: 'Notes', slug: 'notes', status: 'ready' }]); const projectId = projects.items[0]!.id;
+    const environments = value(await services.catalog.listEnvironments({ scope: { orgId, projectId } })); expect(environments.items.length).toBeGreaterThan(0);
+    const environment = environments.items[0]!; expect(['development', 'staging', 'production']).toContain(environment.kind); expect(environment.projectId).toBe(projectId);
+    const deep = value(await services.catalog.resolveScope({ scope: { orgId, projectId, environmentId: environment.id } }));
+    expect(deep.project).toMatchObject({ id: projectId, name: 'Notes' }); expect(deep.environment).toMatchObject({ id: environment.id, name: environment.name }); expect(deep.bindings.map(binding => binding.owner).sort()).toEqual(['database', 'registry']);
+    // Identifiers that are not this organization's resolve to nothing.
+    expect(await code(services.catalog.resolveScope({ scope: { orgId, projectId: crypto.randomUUID() } }))).toBe('not_found'); expect(await code(services.catalog.resolveScope({ scope: { orgId: crypto.randomUUID() } }))).toBe('not_found');
+
+    // Members and an invitation, accepted by a second person through their own emailed link.
+    expect(value(await services.platform.listMembers({ scope })).items).toMatchObject([{ email: 'owner@example.test', role: 'Owner', accountId: session.accountId }]);
+    expect(value(await services.platform.command({ scope }, { kind: 'invite', email: 'grace@example.test', role: 'Viewer', projects: [] }, { ...key(), expectedRevision: await revision() })).message).toBeTruthy();
+    await h.deliver(); expect(h.mail.at(-1)!.text).toContain('/invitations/accept#token=inv_'); const invitation = linkToken('inv');
+    expect(value(await services.platform.listInvitations({ scope })).items).toMatchObject([{ email: 'grace@example.test', role: 'Viewer', status: 'pending', orgId }]);
+    const owner = new Map(h.cookies); h.cookies.clear();
+    expect(value(await services.identity.request({ email: 'grace@example.test', name: 'Grace', termsAccepted: true, purpose: 'signup' })).message).toBeTruthy(); await h.deliver(); value(await services.identity.complete(linkToken('ac')));
+    expect(value(await services.platform.previewInvitation(invitation))).toMatchObject({ organization: 'North Works Ltd', role: 'Viewer', status: 'pending' });
+    expect(value(await services.platform.respondInvitation(invitation, true))).toEqual({ orgId }); expect(await code(services.platform.respondInvitation(invitation, true))).not.toBe('ok');
+    // What a Viewer may do is what the server says, and the server refuses the rest whatever the page shows.
+    const viewer = value(await services.catalog.resolveScope({ scope })); expect(viewer.permissions['metadata.read']).toEqual({ allowed: true }); expect(viewer.permissions['projects.create'].allowed).toBe(false); expect(viewer.permissions['projects.create'].reason).toBeTruthy();
+    // An invited member starts with no project assigned, so none is listed.
+    expect(value(await services.catalog.listProjects({ scope })).items).toEqual([]); expect(await code(services.catalog.resolveScope({ scope: { orgId, projectId } }))).toBe('not_found');
+    expect(await code(services.platform.command({ scope }, { kind: 'project-create', name: 'Sneaky', slug: 'sneaky', mode: 'data', environment: 'development' }, { ...key(), expectedRevision: await revision() }))).toBe('forbidden');
+    expect(await code(services.platform.command({ scope }, { kind: 'organization-policy', requireMfa: true }, { ...key(), expectedRevision: await revision() }))).toBe('forbidden');
+    // The other organization does not exist for this account.
+    const south = organizations.items.find(item => item.name === 'South Yard')!.id; expect(await code(services.catalog.resolveScope({ scope: { orgId: south } }))).toBe('not_found'); expect(value(await services.catalog.listOrganizations()).items.map(item => item.id)).toEqual([orgId]);
+
+    // Back as the owner: the member is listed, can be given another role, and the audit list shows what happened.
+    h.restoreCookies(owner); const members = value(await services.platform.listMembers({ scope })); expect(members.items.map(member => [member.email, member.role]).sort()).toEqual([['grace@example.test', 'Viewer'], ['owner@example.test', 'Owner']]);
+    const grace = members.items.find(member => member.email === 'grace@example.test')!;
+    expect(value(await services.platform.command({ scope }, { kind: 'member-update', memberId: grace.id, role: 'Developer', projects: [], grants: [] }, { ...key(), expectedRevision: await revision() })).message).toBeTruthy();
+    expect(value(await services.platform.listMembers({ scope })).items.find(member => member.id === grace.id)!.role).toBe('Developer');
+    const audit = value(await services.activity.listAudit({ scope }, { limit: 50 })); expect(audit.items.length).toBeGreaterThan(3); expect(audit.items.every(entry => entry.scope.orgId === orgId && entry.outcome === 'succeeded' && !!entry.requestId)).toBe(true);
+    expect(audit.items.some(entry => entry.action.startsWith('organization.'))).toBe(true); expect(audit.items.some(entry => entry.action.startsWith('catalog.'))).toBe(true);
+
+    // The session ends on the server while the page is open: the next answer says so and the page is told to drop what it shows.
+    const before = changes.length; await h.sql`UPDATE account_sessions SET expires_at = now() - interval '1 second' WHERE id = ${session.id}`;
+    expect(await code(services.catalog.listOrganizations())).toBe('unauthenticated'); expect(changes.length).toBe(before + 1); expect(value(await services.session.getSession())).toBeNull();
+    // Sign in again by link, then sign out.
+    h.cookies.clear(); value(await services.identity.request({ email: 'owner@example.test', purpose: 'signin' })); await h.deliver(); value(await services.identity.complete(linkToken('ac')));
+    expect(value(await services.session.getSession())!.accountId).toBe(session.accountId); expect((await services.session.signOut()).ok).toBe(true);
+    expect(value(await services.session.getSession())).toBeNull(); expect(await code(services.identity.getAccount())).toBe('unauthenticated');
+    // Areas that are not connected say so, here as everywhere.
+    expect(await code((services.functions as any).list({ scope: { orgId } }))).toBe('unsupported_operation'); expect(await code(services.identity.request({ email: 'owner@example.test', purpose: 'github' }))).toBe('unsupported_operation');
+  }, 60000);
 
   test('device authorization approves bounded CLI access, discloses once, rate-limits polling, and revokes durably', async()=>{
     const h=await harness();await h.challenge();await h.deliver();await h.complete();const orgId=(await organizationResponse(h.createOrganization('Device team','device-team'))).receipt.id;const project=parseComponent('CatalogReceipt',(await (await h.createProject(orgId)).json() as {receipt:unknown}).receipt);const environmentResponse=await h.catalogCommand(`/platform/v1/orgs/${orgId}/projects/${project.scope.projectId}/environments`,{name:'CLI',kind:'development',services:['database','registry']},project.revision);const environment=parseComponent('CatalogReceipt',(await environmentResponse.json() as {receipt:unknown}).receipt);

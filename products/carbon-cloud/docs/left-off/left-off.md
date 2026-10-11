@@ -1,11 +1,11 @@
 # Carbon platform left-off checkpoint
 
-Checkpoint: 2026-10-11, after Phase 16: billing, quotas, operators and deletion gates.
+Checkpoint: 2026-10-11, after Phase 17: the first part of the console against the live service.
 
 The overall platform plan remains unfinished. The rough scope estimate is about
-**30% of the complete backend-and-frontend goal**, with backend foundations in
-the **low 40% range** and the requested production frontend redesign still at
-**0%**. These are planning estimates, not release-readiness measurements.
+**45% of the complete backend-and-frontend goal**: most backend areas exist
+with recorded gaps, one part of the console is connected to them, and the
+requested production frontend redesign is still at **0%**. These are planning estimates, not release-readiness measurements.
 
 ## Completed through this checkpoint
 
@@ -84,6 +84,9 @@ the **low 40% range** and the requested production frontend redesign still at
 - Operators: separate accounts with scoped roles, a reason and the current
   revision for every act, a permanent record, and two people for an early
   deletion. Legal holds and live subscriptions stop final deletion.
+- The console, in part: a production browser composition with no mock in it,
+  and live adapters for accounts, organizations, members, invitations, projects
+  and environments. Every other area of the console says it is not connected.
 
 The service-account implementation is described in
 [service-accounts.md](../service-accounts.md), its wire surface in
@@ -94,7 +97,7 @@ legacy permissions are inferred.
 
 ## Last verified state
 
-- Affected Bun regression: **723 tests, 0 failures and 8,306 assertions across 89 files, with the object-store tests run against a local MinIO container**,
+- Affected Bun regression: **730 tests, 0 failures and 8,770 assertions across 90 files, with the object-store tests run against a local MinIO container**,
   including the real HTTP/PostgreSQL cross-service suites. These database
   scenarios run on the development machine only: CI has no database and skips
   them (G-50).
@@ -140,7 +143,7 @@ build queue and the legacy end-user routes still work as before. Existing legacy
 implementations elsewhere in the repository still need review against the new
 isolation, durability and trust requirements before they count as complete.
 
-Phases 8, 10, 13, 15 and 16 are **partly complete**; Phases 9, 11, 12 and 14 are complete. By
+Phases 8, 10, 13, 15, 16 and 17 are **partly complete**; Phases 9, 11, 12 and 14 are complete. By
 the owner's decision (2026-10-10), open decisions and everything a phase could
 not finish or prove are collected in [gaps.md](gaps.md) and worked in a final
 Phase 19; phases do not stop for them.
@@ -163,8 +166,12 @@ and restore do not exist (G-135). Final deletion is gated by holds, live
 subscriptions and two operators, but still destroys nothing in the owning
 services (G-09). Operators have no sign-in of their own (G-141).
 
-The next bounded goal is **Phase 17: the production browser adapters and the
-Carbon frontend, one vertical slice at a time**. Continue
+The console's production build talks to the real API for accounts and
+organizations only (G-147), has never run in a real browser (G-151), and has no
+visual design (G-152).
+
+The next bounded goal is **Phase 18: observability, deployment compatibility,
+security review, migration reconciliation, canary rollout and cutover**. Continue
 with exactly one phase from [handoff.md](handoff.md) per future work session.
 Finish that phase's proof gate, update both checkpoint documents, and stop
 before beginning the next phase unless the user explicitly combines them.

@@ -7,6 +7,16 @@ filegroup(
     srcs = glob(["composition/**/*.ts", "infrastructure/**/*.ts", "infrastructure/**/*.sql", "**/tsconfig.json"], exclude = ["infrastructure/browser/**"]),
 )
 
+# The production browser composition: no mock in its import graph, the live
+# adapters' request and error handling, the connected pages rendered, and the
+# handler that serves the built console. Needs no database and no network.
+bun_test(
+    name = "console_live_test",
+    entry = "tests/browser/live.test.tsx",
+    srcs = [":srcs"] + glob(["presentation/**/*.ts", "presentation/**/*.tsx", "presentation/**/*.html", "infrastructure/browser/http/**/*.ts", "composition/browser.live.tsx"]),
+    deps = ["//solutions/contracts/platform:srcs"],
+)
+
 # Without a configured Postgres URL, this still checks encryption/configuration.
 # Run the documented integration command for the real database scenarios.
 bun_test(

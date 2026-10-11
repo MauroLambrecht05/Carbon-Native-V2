@@ -2308,3 +2308,70 @@ hold stops final deletion but not ordinary deletion of data by the customer
 
 Phase 16 stops here. Phase 17 (the production frontend) is next in
 [the handoff](left-off/handoff.md).
+
+## 2026-10-11: Phase 17, the console against the live service (partly complete)
+
+Phase 17 gave the console a production composition and connected its first
+part to the real API ([platform-frontend-live.md](platform-frontend-live.md)).
+It adds no migration and no contract.
+
+- **Production composition.** `browser.live.tsx`, `index.live.html` and
+  `vite.live.config.ts` build the same pages over HTTP adapters. The build
+  stops if a mock service, mock data, a development tool or server code is in
+  its graph.
+- **Live adapters.** One transport carries the session cookie, the CSRF token,
+  an idempotency key and the revision, and turns every failure into a service
+  error. On it: the session, the account, organizations, members, invitations,
+  the project and environment catalog, scope and permissions, and the audit
+  list.
+- **No fallback.** An area that is not connected answers
+  `unsupported_operation`, and its route renders a notice instead of its page.
+- **Honest wording.** Pages take one flag and use it to stop saying that
+  something is simulated. Emailed links are read from the URL fragment.
+- **Serving.** With `CARBON_CONSOLE_DIR`, Cloud serves the built console from
+  the API's origin, with nothing outside the build reachable.
+
+Proof gate ("each frontend-plan walkthrough passes against real services;
+production bundles contain no mock imports or mock data"). Met for the first
+walkthrough only.
+
+- **Against the real API and PostgreSQL,** through Cloud's handler with a
+  browser's cookie behaviour: sign-up by emailed link, a link that works once,
+  the session and its cache key, the profile saved against a revision and
+  refused on a stale one, two organizations, an idempotent create, a taken
+  namespace, cursor paging, a project and its environments, deep scope
+  resolution with service bindings, a second person invited and accepting by
+  their own link, what a Viewer may and may not do, another organization
+  staying invisible, a role change, the audit list, a session ended by the
+  server, sign-in again and sign-out.
+- **No mock in production:** a test walks every import from the production
+  entry and finds none of the forbidden modules; the Vite build, run locally,
+  has the same check and produced a bundle with no mock module in it.
+- **Rendered pages:** eight connected pages rendered from server-shaped answers
+  show the server's names and no mock wording; five unconnected routes render
+  the notice and request nothing; the sign-in pages offer no GitHub or
+  recovery-code form; tokens are read from the fragment and never put in a URL
+  that is sent.
+- **Transport:** headers on reads and commands, every error translation,
+  unreadable and failed responses, cancellation, and telling the page once
+  when a session ends.
+- **Serving:** application paths, hashed assets, missing files, seven traversal
+  attempts, methods, caching and security headers.
+- **Mutation checks:** 35 deliberate breakages across the transport, the
+  adapters, the page gating and wording, the static server and the two
+  no-mock checks; 34 make a test fail. The one that does not: ignoring a failed
+  project or environment lookup while resolving a scope changes nothing,
+  because the access check for the same identifiers already answers not found.
+
+The affected regression passed **730 tests, 0 failures and 8,770 assertions across 90 files, with the object-store tests run against a local MinIO container**. The console tests need no database and are
+now a Bazel target, so they run in CI. The TypeScript checks pass.
+
+**Why partly complete.** One part of the console is connected. Credentials,
+builds and releases, data, application authentication, storage, vectors, graph,
+realtime, functions, Registry, billing and the operator area are not, although
+most of their backend exists (G-147). Inside the connected part, a member's
+project assignments are not sent, and several smaller flows do nothing (G-148).
+Nothing was checked in a real browser (G-151). New gaps are G-147 to G-153.
+
+Phase 17 stops here. Phase 18 (observability, deployment, security review and
+cutover) is next in [the handoff](left-off/handoff.md).

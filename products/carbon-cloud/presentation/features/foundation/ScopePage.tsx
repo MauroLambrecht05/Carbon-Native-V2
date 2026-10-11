@@ -6,6 +6,7 @@ import { scopeKey } from "../../framework/queries/scope-cache";
 import { scopePath } from "../../framework/routing/routes";
 import { useServices } from "../../framework/services/context";
 import { unwrap, type Scope } from "../../framework/services/contracts";
+import { useRuntime } from "../../framework/services/runtime";
 import { useSession } from "../../framework/session/SessionProvider";
 import { CatalogPage } from "./CatalogPage";
 import { CreateResource, EnvironmentControls, PlatformPage, ScopeNavigation } from "../identity/PlatformPages";
@@ -28,6 +29,7 @@ export function ScopePage({
   operationId?: string;
 }) {
   const services = useServices();
+  const { live } = useRuntime();
   const [params] = useSearchParams();
   const { session } = useSession();
   const key = scopeKey(session!.visibilityKey, scope);
@@ -107,11 +109,11 @@ export function ScopePage({
         <section>
           <h2>Billing access</h2>
           <p>{resolved.permissions["metadata.read"].reason}</p>
-          <Link to={`${scopePath(scope)}/billing`}>Billing (Slice 9)</Link>
+          <Link to={`${scopePath(scope)}/billing`}>{live ? "Billing" : "Billing (Slice 9)"}</Link>
         </section>
       ) : (
         <>
-          {!scope.environmentId && <>{scope.projectId && <ProjectChecklist scope={scope} />}<CatalogPage scope={scope} /><CreateResource scope={scope} resolved={resolved} />{resolved.permissions["audit.read"].allowed && <AuditPanel scope={scope} />}</>}
+          {!scope.environmentId && <>{scope.projectId && !live && <ProjectChecklist scope={scope} />}<CatalogPage scope={scope} /><CreateResource scope={scope} resolved={resolved} />{resolved.permissions["audit.read"].allowed && <AuditPanel scope={scope} />}</>}
           {scope.environmentId && (
             <>
               <section>
@@ -121,7 +123,7 @@ export function ScopePage({
                     <tr>
                       <th>Owner</th>
                       <th>State</th>
-                      <th>Fixture resource</th>
+                      <th>{live ? "Resource" : "Fixture resource"}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -137,9 +139,9 @@ export function ScopePage({
                   </tbody>
                 </table>
               </section>
-              <OperationPanel scope={scope} operationId={operationId ?? params.get("operation") ?? undefined} />
+              {!live && <OperationPanel scope={scope} operationId={operationId ?? params.get("operation") ?? undefined} />}
               <EnvironmentControls scope={scope} resolved={resolved} />
-              <section><h2>Integration settings</h2><nav><Link to={`${scopePath(scope)}/settings/api`}>API and credentials</Link><Link to={`${scopePath(scope)}/settings/secrets`}>Secrets</Link></nav></section>
+              {!live && <section><h2>Integration settings</h2><nav><Link to={`${scopePath(scope)}/settings/api`}>API and credentials</Link><Link to={`${scopePath(scope)}/settings/secrets`}>Secrets</Link></nav></section>}
               {resolved.permissions["audit.read"].allowed && (
                 <AuditPanel scope={scope} />
               )}
@@ -172,7 +174,7 @@ export function ScopePage({
             {capability.data.map((entry) => (
               <li key={entry.id}>
                 {entry.id}:{" "}
-                {entry.available ? "available in mock mode" : entry.reason}
+                {entry.available ? (live ? "available" : "available in mock mode") : entry.reason}
                 {entry.limits && (
                   <pre>{JSON.stringify(entry.limits, null, 2)}</pre>
                 )}

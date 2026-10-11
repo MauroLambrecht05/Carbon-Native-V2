@@ -3,6 +3,7 @@
 // infrastructure/http's routes, starts the server. Nothing here decides
 // what a build IS or does — that's cloud-orchestration. This only wires.
 
+import { createFrontendRoutes } from '../infrastructure/http/frontend-routes.ts';
 import {
   ClaimNextBuildUseCase,
   CompleteBuildUseCase,
@@ -131,6 +132,9 @@ export async function startServer(config: CarbonCloudConfig) {
     stripeWebhookSecret: config.stripe?.webhookSecret,
   });
 
+  const frontend = process.env.CARBON_CONSOLE_DIR ? createFrontendRoutes(process.env.CARBON_CONSOLE_DIR) : undefined;
+  // With a console to serve, the root path is the console, not the API's placeholder page.
+  if (frontend) (routes as Record<string, unknown>)["/"] = { GET: (request: Request) => frontend(request) };
   return Bun.serve({
     port: config.port,
     routes,
@@ -171,6 +175,8 @@ export async function startServer(config: CarbonCloudConfig) {
         const requestId = crypto.randomUUID();
         return Response.json({ error: { code: "capability", message: "Account platform is not configured", requestId } }, { status: 501, headers: { "x-request-id": requestId, "cache-control": "no-store" } });
       }
+      // The console, when this deployment was given a build of it. Same origin as the API, so its cookies apply.
+      if (frontend) return frontend(request);
       return new Response("not found", { status: 404 });
     },
   });

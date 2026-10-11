@@ -8,6 +8,7 @@ import { ScopeCache } from "./framework/queries/scope-cache";
 import { resolveRoute } from "./framework/routing/routes";
 import { useSession } from "./framework/session/SessionProvider";
 import { useServices } from "./framework/services/context";
+import { LIVE_SLICES, useRuntime } from "./framework/services/runtime";
 import { unwrap } from "./framework/services/contracts";
 import { AccountPage, AuthPage, InvitationPage } from "./features/identity/IdentityPages";
 import { CreateResource, Invitations } from "./features/identity/PlatformPages";
@@ -20,6 +21,7 @@ export function App({ tools }: { tools?: ReactNode }) {
   const match = resolveRoute(location.pathname);
   const { session, loading, error } = useSession();
   const services = useServices();
+  const { live } = useRuntime();
   const signOut = useMutation({
     mutationFn: async () => unwrap(await services.session.signOut()),
   });
@@ -36,6 +38,15 @@ export function App({ tools }: { tools?: ReactNode }) {
     );
   else if (location.pathname === "/")
     content = <Navigate replace to={session ? "/organizations" : "/sign-in"} />;
+  // Against the live service, an area that is not connected yet says so. Its page is not rendered at all.
+  else if (live && !LIVE_SLICES.has(match.route.slice))
+    content = (
+      <>
+        <h1>{match.route.label}</h1>
+        <p role="status">This area is not connected to Carbon Cloud in this version of the console yet.</p>
+        <Link to="/organizations">Open organizations</Link>
+      </>
+    );
   else if (match.route.audience === "dashboard" && !session)
     content = (
       <Navigate
@@ -57,9 +68,11 @@ export function App({ tools }: { tools?: ReactNode }) {
         </p>
       </>
     );
-  else if (["/sign-in", "/sign-up", "/auth/callback", "/auth/recovery"].includes(location.pathname)) content = <AuthPage key={location.pathname + location.search} />;
+  else if (["/sign-in", "/sign-up", "/auth/callback", "/auth/complete", "/auth/recovery"].includes(location.pathname)) content = <AuthPage key={location.pathname + location.search} />;
   else if (match.params.realmId) content = <HostedAppAuth key={match.params.realmId} realmId={match.params.realmId} />;
   else if (match.params.token) content = <InvitationPage token={match.params.token} />;
+  // The emailed invitation link carries its token in the fragment.
+  else if (location.pathname === "/invitations/accept") content = <InvitationPage token={new URLSearchParams(location.hash.slice(1)).get("token") ?? ""} />;
   else if (location.pathname === "/registry" || location.pathname.startsWith("/registry/")) content = <PublicRegistryPage />;
   else if (location.pathname === "/operations" || location.pathname.startsWith("/operations/")) content = <OperatorPages />;
   else if (location.pathname.startsWith("/account/") && match.route.slice === 2) content = <AccountPage key={location.pathname} />;
@@ -87,12 +100,12 @@ export function App({ tools }: { tools?: ReactNode }) {
     <>
       <header>
         <Link to="/">Carbon Cloud</Link>
-        <span>Slices 9–10 · Billing, operators and consistency · local mock</span>
+        {!live && <span>Slices 9–10 · Billing, operators and consistency · local mock</span>}
         <nav aria-label="Global navigation">
           <Link to="/organizations">Organizations</Link>
-          <Link to="/registry">Registry</Link>
+          {!live && <Link to="/registry">Registry</Link>}
           <Link to="/account/profile">Account</Link>
-          <Link to="/operations">Operations</Link>
+          {!live && <Link to="/operations">Operations</Link>}
         </nav>
         {session && (
           <p>

@@ -17,6 +17,8 @@
     "dev:mock": "vite --config composition/vite.mock.config.ts",
     "build:mock": "vite build --config composition/vite.mock.config.ts",
     "preview:mock": "vite preview --config composition/vite.mock.config.ts --host 127.0.0.1 --port 5176 --strictPort",
+    "dev:live": "vite --config composition/vite.live.config.ts",
+    "build:live": "vite build --config composition/vite.live.config.ts",
     "typecheck:browser": "tsc -p presentation/tsconfig.json",
     "test:browser": "bun test tests/browser",
     "check:mock-assets": "node tests/browser/assets-smoke.mjs"

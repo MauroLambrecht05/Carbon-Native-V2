@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "react-router-dom";
 import { Feedback } from "../../components/Feedback";
+import { useRuntime } from "../../framework/services/runtime";
 import { useSession } from "../../framework/session/SessionProvider";
 import type { CommandOptions, Result } from "../../framework/services/contracts";
 import { unwrap } from "../../framework/services/contracts";
@@ -15,7 +16,7 @@ export function CommandForm({ title, fields = [], revision, submit, disabled, ch
   disabled?: string; children?: ReactNode; after?: (result: CommandReceipt) => void; sensitive?: boolean;
   preview?: (values: Record<string, string>) => ReactNode;
 }) {
-  const { session } = useSession(), location = useLocation(), cache = useQueryClient();
+  const { session } = useSession(), location = useLocation(), cache = useQueryClient(), { live } = useRuntime();
   const draftKey = `${session?.accountId ?? "visitor"}:${location.pathname}:${title}`;
   const initial = Object.fromEntries(fields.map(f => [f.name, f.value ?? ""]));
   const [values, setValues] = useState<Record<string, string>>(() => ({ ...initial, ...drafts.get(draftKey) }));
@@ -54,7 +55,7 @@ export function CommandForm({ title, fields = [], revision, submit, disabled, ch
     {disabled && <p className="muted">{disabled}</p>}
     {error !== undefined && <><Feedback error={error} /><button type="button" onClick={() => { initialRevision.current = revision; setKey(crypto.randomUUID()); setError(undefined); }}>Use latest revision ({revision}) and review draft</button></>}
     {result && <p role="status">{result.message}</p>}
-    {result?.secretValue && <div className="notice"><p>Copy this fake credential now. Carbon Cloud stores only its prefix and cannot show it again.</p><pre>{result.secretValue}</pre><button type="button" onClick={() => setResult({ message: "Credential dismissed. Its value cannot be recovered." })}>I copied the credential</button></div>}
+    {result?.secretValue && <div className="notice"><p>{live ? "Copy this value now. Carbon Cloud cannot show it again." : "Copy this fake credential now. Carbon Cloud stores only its prefix and cannot show it again."}</p><pre>{result.secretValue}</pre><button type="button" onClick={() => setResult({ message: "Credential dismissed. Its value cannot be recovered." })}>I copied the credential</button></div>}
     {result?.recoveryCodes && !after && <div className="notice"><p>Save these recovery codes now. They are shown once; generating new codes invalidates the old set.</p><pre>{result.recoveryCodes.join("\n")}</pre><button type="button" onClick={() => setResult({ message: "Recovery codes dismissed." })}>I saved my codes</button></div>}
     {dirty.current && <button type="button" onClick={() => { drafts.delete(draftKey); setValues(initial); dirty.current = false; initialRevision.current = revision; }}>Discard draft</button>}
   </form>;
