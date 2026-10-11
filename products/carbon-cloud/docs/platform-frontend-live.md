@@ -54,7 +54,7 @@ against the live service (see below), but it ships (G-151).
 | Invitations | Send, resend, cancel, list sent, preview and accept |
 | Projects and environments | List, create, archive, pause |
 | Scope and permissions | Resolved by the server for every page |
-| Audit | The list on organization, project and environment overviews |
+| Activity | The organization's and a project's log, newest first, a page at a time; and the short list on each overview. No search by actor or action, and no count: the service has neither |
 | Builds | Per environment: list, queue a build for one commit, read its installers and log, cancel |
 | Signing | Per environment: list signing profiles, create one from an environment secret |
 | Releases | Per environment: list, create from a succeeded build, read, withdraw with a reason |

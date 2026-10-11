@@ -196,6 +196,7 @@ test("every connected page renders from live answers, with the names the server 
     [`/platform/v1/orgs/${org}/audit`]: () => json({ items: [{ id: "e-1", sequence: "9", scope: { orgId: org }, action: "organization.created", resource: { owner: "cloud", kind: "organization", id: org }, actor: { kind: "account", id: "a-1" }, occurredAt: "2026-10-01T00:00:00Z", requestId: "r-1" }], nextCursor: null }),
   });
   const pages: [string, string[]][] = [
+    [`/orgs/${org}/activity`, ["Activity", "organization.created", "a-1", "r-1", "A request that was refused is not an entry"]], [`/orgs/${org}/projects/${projectId}/activity`, ["Activity", "organization.created", "and by whom"]],
     ["/account/profile", ["ada@example.test", "Save profile", "Verify new email"]], ["/account/sessions", ["Current session", "s-1"]], ["/account/security", ["Sign-in methods: ", "email"]],
     [`/orgs/${org}/overview`, ["North Works", "Notes", "Create project", "organization.created"]], [`/orgs/${org}/members`, ["ada@example.test", "Owner", "grace@example.test"]], [`/orgs/${org}/settings`, ["north-works", "Save organization"]],
     [`/orgs/${org}/projects/${projectId}/overview`, ["Notes", "Development", "Create environment"]], [`/orgs/${org}/projects/${projectId}/environments/${environmentId}/overview`, ["Development", "database", "env_abc", "Pause environment"]],

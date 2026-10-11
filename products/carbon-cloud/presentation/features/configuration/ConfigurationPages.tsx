@@ -1,4 +1,5 @@
 import { IntegrationRecipes } from "../data/AppAuthPages";
+import { useRuntime } from "../../framework/services/runtime";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
@@ -29,14 +30,14 @@ function ChecklistItem({ task }: { task: SetupTask }) {
 }
 
 export function ConfigurationScopePage({ scope, resolved }: { scope: Scope; resolved: ResolvedScope }) {
-  const path = useLocation().pathname;
+  const path = useLocation().pathname; const { live } = useRuntime();
   if (path.endsWith("/settings/general")) return <ProjectGeneralPage scope={scope} resolved={resolved} />;
   if (path.endsWith("/settings/repository")) return <RepositoryPage scope={scope} resolved={resolved} />;
   if (path.endsWith("/connections")) return <ConnectionsPage scope={scope} resolved={resolved} />;
   if (path.endsWith("/credentials") && !scope.projectId) return <OrganizationCredentialsPage scope={scope} resolved={resolved} />;
   if (path.endsWith("/settings/api")) return <ApiPage scope={scope} resolved={resolved} />;
   if (path.endsWith("/settings/secrets")) return <SecretsPage scope={scope} resolved={resolved} />;
-  if (path.endsWith("/activity")) return <ActivityPage scope={scope} />;
+  if (path.endsWith("/activity")) return live ? <LiveActivityPage scope={scope} /> : <ActivityPage scope={scope} />;
   return <section><h2>Configuration route unavailable</h2><p>This Slice 3 route has no matching project scope.</p></section>;
 }
 
@@ -101,6 +102,33 @@ function OrganizationCredentialsPage({ scope, resolved }: { scope: Scope; resolv
   return <><section><h2>Organization service accounts</h2><p>Service accounts remain organization-owned when members leave. Each grant must name a project and may name one environment.</p><CommandForm title="Create service account" revision={resolved.organization.revision} disabled={disabled} fields={[{ name: "name", label: "Service account name" }, { name: "project", label: "Project ID" }, { name: "environment", label: "Environment ID (optional)", required: false }, { name: "action", label: "Allowed action", value: "builds:trigger", options: actionOptions }]} submit={(values, options) => services.configuration.serviceAccountCommand({ scope }, { kind: "service-account-create", name: values.name, projectId: values.project, environmentId: values.environment || undefined, actions: [values.action as CredentialAction] }, options)} />{accounts.data.items.map(item => <article key={item.id}><h3>{item.name} · {item.status}</h3><p><code>{item.id}</code> · Revision {item.revision}</p><ul>{item.grants.map((grant, index) => <li key={index}>{grant.scope.projectId} / {grant.scope.environmentId ?? "all environments"} · {grant.actions.join(", ")}</li>)}</ul>{item.status === "active" && <><CommandForm title={`Issue credential for ${item.name}`} sensitive revision={item.revision} disabled={disabled} fields={[{ name: "name", label: "Credential name" }, { name: "expiry", label: "Expiry", value: "90", options: [{ value: "7", label: "7 days" }, { value: "30", label: "30 days" }, { value: "90", label: "90 days" }, { value: "365", label: "1 year" }] }]} submit={(values, options) => services.configuration.serviceAccountCommand({ scope }, { kind: "service-account-credential", serviceAccountId: item.id, name: values.name, expiryDays: Number(values.expiry) }, options)} /><CommandForm title={`Disable ${item.name}`} revision={item.revision} disabled={disabled} submit={(_, options) => services.configuration.serviceAccountCommand({ scope }, { kind: "service-account-disable", serviceAccountId: item.id }, options)}><p>Disabling this account revokes all of its credentials without relying on the creator's session.</p></CommandForm></>}</article>)}</section><section><h2>Issued credentials</h2>{credentials.data.items.map(item => <article key={item.id}><p><strong>{item.name}</strong> · {item.status} · prefix <code>{item.prefix}</code> · expires {item.expiresAt} · last used {item.lastUsedAt ?? "never"}</p>{item.status === "active" && <CommandForm title={`Revoke ${item.name}`} revision={item.revision} disabled={disabled} submit={(_, options) => services.configuration.serviceAccountCommand({ scope }, { kind: "organization-credential-revoke", credentialId: item.id }, options)} />}</article>)}{!credentials.data.items.length && <p>No credentials have been issued.</p>}</section></>;
 }
 
+/**
+ * The organization's log, as the live service keeps it. The service returns what happened, newest first, a page at a
+ * time, for the organization or narrowed to the project or environment of the address. It has no search by actor or
+ * action and records no refused requests, so this page offers neither and shows no count it could not stand behind.
+ */
+function LiveActivityPage({ scope }: { scope: Scope }) {
+  const services = useServices(), { session } = useSession(), [params, setParams] = useSearchParams();
+  const cursor = params.get("cursor") ?? undefined;
+  const query = useQuery({ queryKey: [...scopeKey(session!.visibilityKey, scope), "live-activity", cursor], queryFn: async ({ signal }) => unwrap(await services.activity.listAudit({ scope, signal }, { limit: 50, cursor })) });
+  return (
+    <section>
+      <h2>Activity</h2>
+      <p>What was done in this {scope.projectId ? "project" : "organization"}, and by whom. A request that was refused is not an entry. Values, secrets and command contents are never recorded here.</p>
+      {query.isPending ? <p>Loading activity...</p> : query.error ? <Feedback error={query.error} retry={() => void query.refetch()} /> : (
+        <>
+          {!query.data.items.length && <p>Nothing has been recorded yet.</p>}
+          <table><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Where</th><th>Request</th></tr></thead>
+            <tbody>{query.data.items.map(item => <tr key={item.id}><td>{item.occurredAt}</td><td>{item.actorId}</td><td>{item.action}</td><td>{item.scope.environmentId ?? item.scope.projectId ?? "organization"}</td><td>{item.requestId}</td></tr>)}</tbody></table>
+          <nav aria-label="Pages">
+            {cursor && <button type="button" onClick={() => setParams({})}>Newest</button>}
+            {query.data.nextCursor && <button type="button" onClick={() => setParams({ cursor: query.data.nextCursor! })}>Older</button>}
+          </nav>
+        </>
+      )}
+    </section>
+  );
+}
 function ActivityPage({ scope }: { scope: Scope }) {
   const services = useServices(), { session } = useSession(), [params, setParams] = useSearchParams();
   const cursor = params.get("cursor") ?? undefined;
