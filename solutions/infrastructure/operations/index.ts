@@ -8,7 +8,7 @@
 // Vendor-neutral: nothing here knows a log shipper, a metrics server or a
 // tracing product. A deployment points its own at the output.
 
-export { redact, routeOf, SECRET_SHAPES } from "./redaction.ts";
-export { Metrics, type Sample } from "./metrics.ts";
-export { migrationStatus, readiness, type MigrationStatus, type ReadinessCheck } from "./readiness.ts";
-export { observe, operationsRoutes, type OperationsConfig, type RequestLog } from "./observe.ts";
+export { redact, routeOf, SECRET_SHAPES } from "./adapters/redaction.ts";
+export { Metrics, type Sample } from "./adapters/metrics.ts";
+export { migrationStatus, readiness, type MigrationStatus, type ReadinessCheck } from "./adapters/readiness.ts";
+export { observe, operationsRoutes, type OperationsConfig, type RequestLog } from "./adapters/observe.ts";
