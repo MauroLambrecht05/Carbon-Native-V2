@@ -2083,7 +2083,7 @@ suite("real account authentication", () => {
     // Schedules. While the function is disabled a due slot is skipped, not saved up.
     expect((await f.post(`${functionsPath}/${fn.id}/schedules`, { intervalSeconds: 59 })).status).toBe(400);
     const scheduleKey = id(); const scheduleResponse = await f.post(`${functionsPath}/${fn.id}/schedules`, { intervalSeconds: 60 }, undefined, { 'idempotency-key': scheduleKey }); expect(scheduleResponse.status).toBe(201);
-    const schedule = parseComponent('FunctionScheduleReceipt', await scheduleResponse.json()).schedule; expect(schedule).toMatchObject({ functionId: fn.id, intervalSeconds: 60, state: 'active', lastRunAt: null });
+    const schedule = parseComponent('FunctionScheduleReceipt', await scheduleResponse.json()).schedule; expect(schedule).toMatchObject({ functionId: fn.id, intervalSeconds: 60, cron: null, timeZone: null, input: null, state: 'active', lastRunAt: null, lastSkippedAt: null, lastSkipReason: null });
     expect(parseComponent('FunctionScheduleReceipt', await (await f.post(`${functionsPath}/${fn.id}/schedules`, { intervalSeconds: 60 }, undefined, { 'idempotency-key': scheduleKey })).json()).schedule).toEqual(schedule);
     expect(await f.schedules(fn.id)).toHaveLength(1);
     const due = (seconds = 1) => h.sql`UPDATE function_schedules SET next_run_at = now() - make_interval(secs => ${seconds}) WHERE id = ${schedule.id}`;
@@ -2189,7 +2189,9 @@ suite("real account authentication", () => {
         export default async (input) => ({ doubled: input.n * 2, key: process.env.API_KEY ?? null, other: process.env.OTHER_KEY ?? null, worker: process.env.CARBON_WORKER_TOKEN ?? null,
           database: process.env.CARBON_PLATFORM_TEST_DATABASE_URL ?? null, files: readdirSync(".").sort() });`, { n: 21 }, { secretNames: ['API_KEY'] });
       expect(echo.outcome).toBe('succeeded');
-      expect(echo.execution).toMatchObject({ state: 'succeeded', attempt: 1, errorCategory: null, output: { doubled: 42, key: 'api-key-value', other: null, worker: null, database: null, files: ['function.mjs', 'harness.mjs'] } });
+      expect(echo.execution).toMatchObject({ state: 'succeeded', attempt: 1, errorCategory: null, output: { doubled: 42, key: '[redacted]', other: null, worker: null, database: null, files: ['function.mjs', 'harness.mjs'] } });
+      // The function did receive the secret: a returned value is replaced only when it is exactly one of the lease's secrets.
+      expect(JSON.stringify(echo.execution)).not.toContain('api-key-value');
       expect(left()).toEqual([]);
 
       // What a function prints is not its result.
@@ -2197,11 +2199,13 @@ suite("real account authentication", () => {
       // Returning nothing is a null result.
       expect((await once('silent', 'export default () => {};')).execution).toMatchObject({ state: 'succeeded', output: null });
 
-      // Failures are reported as a category. The error text, which may hold anything, stays on the worker.
+      // Failures are reported as a category. The error text is not part of the execution; it is in the execution's log, redacted.
       const threw = await once('throws', `export default () => { throw new Error('detail with ' + process.env.API_KEY); };`, null, { secretNames: ['API_KEY'] });
       expect(threw.outcome).toBe('failed'); expect(threw.execution).toMatchObject({ state: 'failed', errorCategory: 'function.threw', output: null }); expect(JSON.stringify(threw.execution)).not.toContain('detail');
-      expect((await once('no-handler', 'export const value = 1;')).execution).toMatchObject({ state: 'failed', errorCategory: 'function.invalid' });
-      expect((await once('syntax', 'export default (')).execution).toMatchObject({ state: 'failed', errorCategory: 'function.invalid' });
+      // A module with no default export, or one that does not parse, never reaches a worker: deploy refuses it.
+      expect((await f.post(`${f.envPath}/functions`, { name: 'no-handler', code: 'export const value = 1;', secretNames: [], timeoutSeconds: 30 })).status).toBe(400);
+      expect((await f.post(`${f.envPath}/functions`, { name: 'syntax', code: 'export default (', secretNames: [], timeoutSeconds: 30 })).status).toBe(400);
+      expect((await once('not-a-function', 'export default 42;')).execution).toMatchObject({ state: 'failed', errorCategory: 'function.invalid' });
       expect((await once('exits', 'export default () => { process.exit(0); };')).execution).toMatchObject({ state: 'failed', errorCategory: 'function.crashed' });
       expect((await once('too-big', `export default () => 'x'.repeat(300000);`)).execution).toMatchObject({ state: 'failed', errorCategory: 'function.output_too_large' });
       expect((await once('cyclic', 'export default () => { const value = {}; value.self = value; return value; };')).execution).toMatchObject({ state: 'failed', errorCategory: 'function.output_invalid' });
@@ -2225,6 +2229,113 @@ suite("real account authentication", () => {
       if (marker === undefined) delete process.env.CARBON_WORKER_TOKEN; else process.env.CARBON_WORKER_TOKEN = marker;
       rmSync(root, { recursive: true, force: true });
     }
+  }, 120000);
+
+  test('functions are checked when deployed, keep what they printed with secrets removed, run on calendar schedules, and forget old inputs and outputs', async () => {
+    const h = await harness(); const f = await functionFixture(h, 'function-logs', { API_KEY: 'api-key-value', QUOTED: 'quo"ted\\value' }); const functionsPath = `${f.envPath}/functions`; const id = () => crypto.randomUUID();
+    const body = (code: string, extra: Record<string, unknown> = {}) => ({ name: 'checked', code, secretNames: [], timeoutSeconds: 30, ...extra });
+
+    // Code that could never run is refused at deploy, with the reason, and nothing is stored. It is parsed, never run.
+    for (const [code, message] of [['export default (', 'The function code is not a valid JavaScript module'], ['const value = 1;', 'The function module has no default export'], ['export const handler = () => 1;', 'The function module has no default export'],
+      ['throw new Error("ran at deploy"); export default () => 1;', null]] as const) {
+      const response = await f.post(functionsPath, body(code));
+      if (message === null) { expect(response.status).toBe(201); continue; }
+      expect(response.status).toBe(400); expect(((await response.json()) as { error: { message: string } }).error.message).toBe(message);
+    }
+    expect((await h.sql`SELECT count(*)::integer AS n FROM function_revisions`)[0].n).toBe(1);
+
+    // A real worker process: what the function prints is kept, and the lease's secrets are removed before it leaves the worker.
+    const root = mkdtempSync(join(tmpdir(), 'carbon-function-logs-'));
+    try {
+      const run = new RunLeasedFunctionUseCase(new HttpBuildProtocol(origin, f.worker.token, h.workerFetch), new DisposableWorkspaces(join(root, 'work')), new BunFunctionRunner(), { heartbeatMs: 50 });
+      const once = async (name: string, code: string, extra: Record<string, unknown> = {}) => { const fn = await f.deploy(name, code, extra); const execution = await f.invoke(fn.id); const outcome = await run.execute(); return { outcome, execution: await f.execution(execution.id) }; };
+      const logsOf = async (executionId: string) => { const response = await h.call(`${f.envPath}/executions/${executionId}/logs`); return response.status === 200 ? parseComponent('FunctionExecutionLogs', await response.json()) : response.status; };
+
+      const chatty = await once('chatty', `export default () => { console.log('started with ' + process.env.API_KEY); console.error('warning: ' + JSON.stringify({ q: process.env.QUOTED })); console.log('raw ' + process.env.QUOTED);
+        return { ok: true, leaked: process.env.API_KEY, nested: [process.env.QUOTED], note: 'fine' }; };`, { secretNames: ['API_KEY', 'QUOTED'] });
+      expect(chatty.execution).toMatchObject({ state: 'succeeded', hasLogs: true, prunedAt: null, output: { ok: true, leaked: '[redacted]', nested: ['[redacted]'], note: 'fine' } });
+      const printed = await logsOf(chatty.execution.id); if (typeof printed === 'number') throw new Error(`no logs: ${printed}`);
+      expect(printed).toMatchObject({ executionId: chatty.execution.id, attempt: 1, truncated: false });
+      expect(printed.text).toContain('started with [redacted]'); expect(printed.text).toContain('warning: {"q":"[redacted]"}'); expect(printed.text).toContain('raw [redacted]');
+      // Not in the log, not in the output, and not anywhere in Cloud's rows for this execution.
+      const stored = JSON.stringify([await h.sql`SELECT * FROM function_executions WHERE id = ${chatty.execution.id}`, await h.sql`SELECT * FROM function_execution_logs WHERE execution_id = ${chatty.execution.id}`]);
+      for (const secret of ['api-key-value', 'quo"ted\\value', 'quo\\"ted\\\\value']) expect([secret, stored.includes(secret)]).toEqual([secret, false]);
+
+      // A function that throws: the category as before, and now the stack to read, with the secret in its message removed.
+      const threw = await once('throws', `export default function handler() { throw new Error('upstream refused ' + process.env.API_KEY); };`, { secretNames: ['API_KEY'] });
+      expect(threw.execution).toMatchObject({ state: 'failed', errorCategory: 'function.threw', output: null, hasLogs: true });
+      const stack = await logsOf(threw.execution.id); if (typeof stack === 'number') throw new Error('no logs');
+      expect(stack.text).toContain('upstream refused [redacted]'); expect(stack.text).toContain('handler'); expect(stack.text).not.toContain('api-key-value');
+      // A default export that is not a function passes the deploy check and is reported by the worker, with the reason in the log.
+      const notCallable = await once('not-callable', 'export default 42;'); expect(notCallable.execution).toMatchObject({ state: 'failed', errorCategory: 'function.invalid' });
+      expect(await logsOf(notCallable.execution.id)).toMatchObject({ text: expect.stringContaining('default export is not a function') });
+      // Nothing printed: no log row, and the route says so.
+      const quiet = await once('quiet', 'export default () => 1;'); expect(quiet.execution).toMatchObject({ state: 'succeeded', hasLogs: false }); expect(await logsOf(quiet.execution.id)).toBe(404);
+      // A flood is cut at a fixed size and marked, and the function is not blocked by a full pipe.
+      const flood = await once('flood', `export default () => { const line = 'x'.repeat(999); for (let i = 0; i < 400; i++) console.log(line); return 'done'; };`);
+      expect(flood.execution).toMatchObject({ state: 'succeeded', output: 'done', hasLogs: true });
+      const cut = await logsOf(flood.execution.id); if (typeof cut === 'number') throw new Error('no logs'); expect(cut.truncated).toBe(true); expect(cut.text.length).toBeLessThanOrEqual(65536); expect(cut.text.length).toBeGreaterThan(50000);
+      // A timed-out function keeps what it printed before it was killed.
+      const slow = await once('slow', `export default async () => { console.log('before the wait'); await new Promise(resolve => setTimeout(resolve, 60000)); };`, { timeoutSeconds: 1 });
+      expect(slow.execution).toMatchObject({ state: 'timed_out', hasLogs: true }); expect(await logsOf(slow.execution.id)).toMatchObject({ text: expect.stringContaining('before the wait') });
+
+      // Logs are read with the execution's own permission and scope: no session, another organization's path, an unknown execution.
+      const saved = new Map(h.cookies); h.cookies.clear(); expect((await h.call(`${f.envPath}/executions/${chatty.execution.id}/logs`)).status).toBe(401); for (const [name, value] of saved) h.cookies.set(name, value);
+      expect(await logsOf(id())).toBe(404);
+      expect((await h.call(`/platform/v1/orgs/${id()}/projects/${f.scope.projectId}/environments/${f.scope.environmentId}/executions/${chatty.execution.id}/logs`)).status).toBe(404);
+
+      // Retention: after the period the input, output and logs are gone and the execution says when; newer ones are untouched.
+      // A finished execution cannot be changed, so the test ages two of them with the guard off, and turns it back on.
+      const refusedChange = (query: Promise<unknown>) => query.then(() => 'changed', error => String((error as { constraint?: string }).constraint));
+      expect(await refusedChange(h.sql`UPDATE function_executions SET completed_at = now() - interval '31 days' WHERE id = ${chatty.execution.id}`)).toBe('function_execution_final');
+      await h.sql`ALTER TABLE function_executions DISABLE TRIGGER function_execution_guard`;
+      await h.sql`UPDATE function_executions SET completed_at = now() - interval '31 days' WHERE id IN (${chatty.execution.id}, ${threw.execution.id})`;
+      await h.sql`ALTER TABLE function_executions ENABLE TRIGGER function_execution_guard`;
+      // Removing them is the one change a finished execution allows, and only in exactly that form: not with another output, not while keeping the logs flag, not twice.
+      expect(await refusedChange(h.sql`UPDATE function_executions SET input = 'null'::jsonb, output = '"forged"'::jsonb, has_logs = false, pruned_at = now() WHERE id = ${chatty.execution.id}`)).toBe('function_execution_final');
+      expect(await refusedChange(h.sql`UPDATE function_executions SET input = 'null'::jsonb, output = NULL, has_logs = false, pruned_at = now(), state = 'failed' WHERE id = ${chatty.execution.id}`)).toBe('function_execution_final');
+      expect(await refusedChange(h.sql`UPDATE function_execution_logs SET body = 'rewritten' WHERE execution_id = ${chatty.execution.id}`)).toBe('function_execution_log_immutable');
+      expect(await h.functions.prune()).toBe(2); expect(await h.functions.prune()).toBe(0);
+      expect(await refusedChange(h.sql`UPDATE function_executions SET pruned_at = now() WHERE id = ${chatty.execution.id}`)).toBe('function_execution_final');
+      const pruned = await f.execution(chatty.execution.id); expect(pruned).toMatchObject({ state: 'succeeded', output: null, hasLogs: false }); expect(pruned.prunedAt).not.toBeNull();
+      expect(await logsOf(chatty.execution.id)).toBe(404); expect((await h.sql`SELECT input FROM function_executions WHERE id = ${chatty.execution.id}`)[0].input).toBeNull();
+      expect(await f.execution(flood.execution.id)).toMatchObject({ output: 'done', hasLogs: true, prunedAt: null });
+    } finally { rmSync(root, { recursive: true, force: true }); }
+
+    // Calendar schedules. A bad expression or zone is refused when the schedule is made, with the reason.
+    const fn = await f.deploy('reporter', 'export default (input) => input;'); const schedulesPath = `${functionsPath}/${fn.id}/schedules`;
+    for (const [bad, message] of [[{ cron: '61 9 * * *', timeZone: 'UTC' }, 'The minute field is out of range'], [{ cron: '0 0 31 2 *', timeZone: 'UTC' }, 'This schedule names a date that never occurs'], [{ cron: '0 9 * * *', timeZone: 'Mars/Olympus' }, 'Unknown time zone'],
+      [{ cron: '0 9 * *  ', timeZone: 'UTC' }, 'A schedule expression has five fields: minute, hour, day of month, month, day of week']] as const) {
+      const response = await f.post(schedulesPath, bad); expect(response.status).toBe(400); expect(((await response.json()) as { error: { message: string } }).error.message).toBe(message);
+    }
+    // Neither kind, both kinds, names instead of numbers, and an input past the limit are not schedules at all.
+    for (const bad of [{}, { cron: '0 9 * * *' }, { timeZone: 'UTC' }, { cron: '0 9 * * *', timeZone: 'UTC', intervalSeconds: 60 }, { cron: '0 9 * * MON', timeZone: 'UTC' }, { cron: '@daily', timeZone: 'UTC' }, { cron: '0 9 * * *', timeZone: 'UTC', input: 'x'.repeat(70000) }])
+      expect((await f.post(schedulesPath, bad)).status).toBe(400);
+    const made = await f.post(schedulesPath, { cron: ' 30  9 * * 1-5 ', timeZone: 'Europe/Brussels', input: { report: 'daily' } }); expect(made.status).toBe(201);
+    const schedule = parseComponent('FunctionScheduleReceipt', await made.json()).schedule;
+    expect(schedule).toMatchObject({ intervalSeconds: null, cron: '30 9 * * 1-5', timeZone: 'Europe/Brussels', input: { report: 'daily' }, state: 'active', lastRunAt: null, lastSkippedAt: null, lastSkipReason: null });
+    // Its next run is the next weekday 09:30 on Brussels' clocks, whatever the date of this test run.
+    const wall = (instant: string) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Brussels', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(instant));
+    expect(wall(schedule.nextRunAt)).toMatch(/^(Mon|Tue|Wed|Thu|Fri),? 09:30$/); expect(new Date(schedule.nextRunAt).getTime()).toBeGreaterThan(Date.now()); expect(new Date(schedule.nextRunAt).getTime()).toBeLessThan(Date.now() + 4 * 86_400_000);
+    const interval = parseComponent('FunctionScheduleReceipt', await (await f.post(schedulesPath, { intervalSeconds: 3600 })).json()).schedule; expect(interval).toMatchObject({ intervalSeconds: 3600, cron: null, timeZone: null, input: null });
+
+    // Due: it runs once with its input, and the slot after is again a weekday 09:30 in the future, not an interval later.
+    const due = () => h.sql`UPDATE function_schedules SET next_run_at = now() - interval '3 days' WHERE id = ${schedule.id}`;
+    await due(); const fired = await h.functions.tick(id()); expect(fired).toHaveLength(1); expect(fired[0]).toMatchObject({ trigger: 'schedule', scheduleId: schedule.id, functionId: fn.id });
+    expect((await h.sql`SELECT input FROM function_executions WHERE id = ${fired[0]!.id}`)[0].input).toEqual({ report: 'daily' });
+    const after = (await f.schedules(fn.id)).find(item => item.id === schedule.id)!; expect(wall(after.nextRunAt)).toMatch(/^(Mon|Tue|Wed|Thu|Fri),? 09:30$/); expect(new Date(after.nextRunAt).getTime()).toBeGreaterThan(Date.now()); expect(after.lastRunAt).not.toBeNull();
+    // The previous run is still open when the next slot comes: skipped, and the schedule itself now says so.
+    await due(); expect(await h.functions.tick(id())).toEqual([]);
+    const skipped = (await f.schedules(fn.id)).find(item => item.id === schedule.id)!; expect(skipped.lastSkipReason).toBe('overlap'); expect(skipped.lastSkippedAt).not.toBeNull(); expect(new Date(skipped.nextRunAt).getTime()).toBeGreaterThan(Date.now());
+    // Paused and resumed: the next slot is the calendar's, from now.
+    const paused = parseComponent('FunctionScheduleReceipt', await (await f.post(`${f.envPath}/schedules/${schedule.id}`, { kind: 'pause' }, skipped.revision)).json()).schedule; await due();
+    const resumed = parseComponent('FunctionScheduleReceipt', await (await f.post(`${f.envPath}/schedules/${schedule.id}`, { kind: 'resume' }, paused.revision)).json()).schedule;
+    expect(wall(resumed.nextRunAt)).toMatch(/^(Mon|Tue|Wed|Thu|Fri),? 09:30$/); expect(new Date(resumed.nextRunAt).getTime()).toBeGreaterThan(Date.now());
+    // The database refuses a schedule that is both kinds or neither, whatever wrote it.
+    const refused = (query: Promise<unknown>) => query.then(() => 'stored', () => 'refused');
+    expect(await refused(h.sql`UPDATE function_schedules SET interval_seconds = 60 WHERE id = ${schedule.id}`)).toBe('refused');
+    expect(await refused(h.sql`UPDATE function_schedules SET cron = NULL, time_zone = NULL WHERE id = ${schedule.id}`)).toBe('refused');
+    expect(await refused(h.sql`UPDATE function_schedules SET time_zone = NULL WHERE id = ${schedule.id}`)).toBe('refused');
   }, 120000);
 
   test('billing follows the provider\'s signed events once each and in the provider\'s order, through every subscription state', async () => {

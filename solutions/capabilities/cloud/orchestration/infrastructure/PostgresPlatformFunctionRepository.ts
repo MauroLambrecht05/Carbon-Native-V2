@@ -2,16 +2,25 @@ import { randomUUID } from 'node:crypto';
 import type { HeldLease, LeaseOutcome, PostgresWorkerRepository, WorkerLeaseInput } from '@carbon/catalog';
 import {
   PlatformFault, parseComponent, type EnvironmentScope, type Function as PlatformFunction, type FunctionCommand, type FunctionDeploy, type FunctionExecution, type FunctionRevision, type FunctionSchedule,
-  type WorkerFunctionComplete,
+  type FunctionExecutionLogs, type WorkerFunctionComplete,
 } from '@carbon/contracts/platform';
 import { PostgresPlatformAuthority, type OrganizationActor } from '@carbon/identity';
 import type { UsageGate } from '@carbon/billing';
-import type { CommandIdentity, PlatformFunctionRepository } from '../application/ports/PlatformFunctionRepository.ts';
+import type { CommandIdentity, PlatformFunctionRepository, ScheduleSpec } from '../application/ports/PlatformFunctionRepository.ts';
+import { nextCronTime, parseCron } from '../domain/CronSchedule.ts';
 
 type Row = Record<string, any>;
 type Tx = Bun.TransactionSQL;
 type Permission = 'metadata.read' | 'resources.configure' | 'data.write';
-export interface FunctionLimits { readonly functions: number; readonly revisions: number; readonly schedulesPerFunction: number; readonly openExecutions: number }
+export interface FunctionLimits { readonly functions: number; readonly revisions: number; readonly schedulesPerFunction: number; readonly openExecutions: number; /** Days an ended execution keeps its input, output and logs. */ readonly retentionDays?: number }
+const RETENTION_DAYS = 30;
+
+/** The first slot of a calendar schedule after now. A stored expression was valid when it was stored; the runtime's zone data decides the instant. */
+function nextSlot(cron: string, timeZone: string): Date {
+  const next = nextCronTime(parseCron(cron), timeZone, new Date());
+  if (!next) throw new PlatformFault('validation', 'This schedule never runs');
+  return next;
+}
 /** How long an execution may wait for a worker before it is given up on. */
 const QUEUE_SECONDS = 600;
 /** Time past a function's own timeout before Cloud stops waiting for the worker to report. */
@@ -30,10 +39,12 @@ function revisionView(row: Row): FunctionRevision {
 function executionView(row: Row): FunctionExecution {
   return parseComponent('FunctionExecution', { id: row.id, scope: scopeOf(row), functionId: row.function_id, revisionNumber: row.revision_number, codeDigest: row.code_digest, state: row.state, trigger: row.trigger,
     scheduleId: row.schedule_id ?? null, retryOf: row.retry_of ?? null, attempt: row.attempt, output: row.output ?? null, errorCategory: row.error_category ?? null, createdBy: row.created_by ?? null, revision: String(row.revision),
-    createdAt: row.created_at.toISOString(), startedAt: row.started_at?.toISOString() ?? null, completedAt: row.completed_at?.toISOString() ?? null });
+    createdAt: row.created_at.toISOString(), startedAt: row.started_at?.toISOString() ?? null, completedAt: row.completed_at?.toISOString() ?? null,
+    hasLogs: row.has_logs === true, prunedAt: row.pruned_at?.toISOString() ?? null });
 }
 function scheduleView(row: Row): FunctionSchedule {
-  return parseComponent('FunctionSchedule', { id: row.id, functionId: row.function_id, intervalSeconds: row.interval_seconds, state: row.state, nextRunAt: row.next_run_at.toISOString(), lastRunAt: row.last_run_at?.toISOString() ?? null,
+  return parseComponent('FunctionSchedule', { id: row.id, functionId: row.function_id, intervalSeconds: row.interval_seconds ?? null, cron: row.cron ?? null, timeZone: row.time_zone ?? null, input: row.input ?? null, state: row.state,
+    nextRunAt: row.next_run_at.toISOString(), lastRunAt: row.last_run_at?.toISOString() ?? null, lastSkippedAt: row.last_skipped_at?.toISOString() ?? null, lastSkipReason: row.last_skip_reason ?? null,
     revision: String(row.revision), createdAt: row.created_at.toISOString() });
 }
 
@@ -216,6 +227,16 @@ export class PostgresPlatformFunctionRepository extends PostgresPlatformAuthorit
     return this.sql.begin(async tx => { await this.authorize(tx, input, scope, 'metadata.read'); return executionView(await this.executionRow(tx, scope, executionId)); });
   }
 
+  /** What the execution printed. Read with the same permission as the execution itself. */
+  async executionLogs(input: OrganizationActor, scope: EnvironmentScope, executionId: string): Promise<FunctionExecutionLogs> {
+    return this.sql.begin(async tx => {
+      await this.authorize(tx, input, scope, 'metadata.read'); const execution = await this.executionRow(tx, scope, executionId);
+      const row = (await tx<Row[]>`SELECT * FROM function_execution_logs WHERE execution_id = ${execution.id}`)[0];
+      if (!row) throw new PlatformFault('not_found', 'This execution has no logs');
+      return parseComponent('FunctionExecutionLogs', { executionId: execution.id, attempt: row.attempt, text: row.body, truncated: row.truncated, recordedAt: row.recorded_at.toISOString() });
+    });
+  }
+
   async executionCommand(input: OrganizationActor, scope: EnvironmentScope, executionId: string, kind: 'cancel' | 'retry', ids: { executionId: string; leaseId: string }, expectedRevision: string, command: CommandIdentity) {
     return this.sql.begin(async tx => {
       const actor = await this.authorize(tx, input, scope, 'data.write'); const row = await this.executionRow(tx, scope, executionId, true); const key = `execution:${row.id}`;
@@ -248,12 +269,15 @@ export class PostgresPlatformFunctionRepository extends PostgresPlatformAuthorit
     return row;
   }
 
-  async createSchedule(input: OrganizationActor, scope: EnvironmentScope, functionId: string, scheduleId: string, intervalSeconds: number, command: CommandIdentity) {
+  async createSchedule(input: OrganizationActor, scope: EnvironmentScope, functionId: string, scheduleId: string, spec: ScheduleSpec, command: CommandIdentity) {
     return this.sql.begin(async tx => {
       const actor = await this.authorize(tx, input, scope, 'resources.configure'); const fn = await this.row(tx, scope, functionId, true); const key = `schedules:${fn.id}`;
       const existing = await this.replay(tx, actor.accountId, key, command, result => parseComponent('FunctionScheduleReceipt', result)); if (existing) return existing;
       if ((await tx`SELECT 1 FROM function_schedules WHERE function_id = ${fn.id} AND state <> 'deleted'`).length >= this.limits.schedulesPerFunction) throw new PlatformFault('quota', 'This function has reached its schedule limit', { quota: 'function_schedules' });
-      const row = (await tx<Row[]>`INSERT INTO function_schedules (id, function_id, interval_seconds, next_run_at, created_by) VALUES (${scheduleId}, ${fn.id}, ${intervalSeconds}, now() + make_interval(secs => ${intervalSeconds}), ${actor.accountId}) RETURNING *`)[0]!;
+      const body = JSON.stringify(spec.input ?? null);
+      const row = 'cron' in spec
+        ? (await tx<Row[]>`INSERT INTO function_schedules (id, function_id, cron, time_zone, input, next_run_at, created_by) VALUES (${scheduleId}, ${fn.id}, ${spec.cron}, ${spec.timeZone}, ${body}::text::jsonb, ${nextSlot(spec.cron, spec.timeZone)}, ${actor.accountId}) RETURNING *`)[0]!
+        : (await tx<Row[]>`INSERT INTO function_schedules (id, function_id, interval_seconds, input, next_run_at, created_by) VALUES (${scheduleId}, ${fn.id}, ${spec.intervalSeconds}, ${body}::text::jsonb, now() + make_interval(secs => ${spec.intervalSeconds}), ${actor.accountId}) RETURNING *`)[0]!;
       const receipt = parseComponent('FunctionScheduleReceipt', { schedule: scheduleView(row), message: 'Schedule created' });
       await this.remember(tx, actor.accountId, key, command, receipt);
       await this.event(tx, scope, 'function_schedule', row.id, 'schedule.created', row.revision, command.requestId, { accountId: actor.accountId });
@@ -275,9 +299,10 @@ export class PostgresPlatformFunctionRepository extends PostgresPlatformAuthorit
       if (String(row.revision) !== expectedRevision) throw new PlatformFault('conflict', 'The schedule changed; refresh before retrying');
       const state = kind === 'pause' ? 'paused' : kind === 'resume' ? 'active' : 'deleted';
       if (row.state === state) throw new PlatformFault('conflict', `This schedule is already ${state}`);
-      // Resuming starts a fresh interval from now; the runs missed while paused are not made up.
+      // Resuming starts from now: a fresh interval, or the next calendar slot. The runs missed while paused are not made up.
+      const resumed = kind === 'resume' && row.cron ? nextSlot(row.cron, row.time_zone) : null;
       const updated = (await tx<Row[]>`UPDATE function_schedules SET state = ${state}, revision = revision + 1,
-        next_run_at = CASE WHEN ${kind === 'resume'} THEN now() + make_interval(secs => interval_seconds) ELSE next_run_at END WHERE id = ${row.id} RETURNING *`)[0]!;
+        next_run_at = CASE WHEN ${resumed !== null} THEN ${resumed}::timestamptz WHEN ${kind === 'resume'} THEN now() + make_interval(secs => interval_seconds) ELSE next_run_at END WHERE id = ${row.id} RETURNING *`)[0]!;
       // A deleted schedule is reported as it was, paused: the contract has no deleted state because nothing can read one afterwards.
       const receipt = parseComponent('FunctionScheduleReceipt', { schedule: scheduleView({ ...updated, state: state === 'deleted' ? 'paused' : state }), message: kind === 'pause' ? 'Schedule paused' : kind === 'resume' ? 'Schedule resumed' : 'Schedule deleted' });
       await this.remember(tx, actor.accountId, key, command, receipt);
@@ -319,6 +344,11 @@ export class PostgresPlatformFunctionRepository extends PostgresPlatformAuthorit
       // A result that arrives after the deadline is not accepted: the execution is timed out by the reconciler instead.
       if (row.deadline_at <= new Date()) return { fault: new PlatformFault('conflict', 'This execution is past its deadline') };
       await this.workers.completeIn(tx, held.lease, lease.requestId);
+      // What it printed is kept whatever the outcome: a failure is the one that needs reading.
+      if (result.logs && result.logs.text.length) {
+        await tx`INSERT INTO function_execution_logs (execution_id, attempt, body, truncated) VALUES (${row.id}, ${row.attempt}, ${result.logs.text}, ${result.logs.truncated})`;
+        await tx`UPDATE function_executions SET has_logs = true WHERE id = ${row.id}`; row.has_logs = true;
+      }
       const updated = result.outcome === 'succeeded'
         ? await this.finish(tx, row, 'succeeded', null, result.output, lease.requestId, { workerId: held.worker.id })
         // A failure the function reports is its own and is not retried automatically; only a lost worker is.
@@ -328,6 +358,19 @@ export class PostgresPlatformFunctionRepository extends PostgresPlatformAuthorit
   }
 
   // ── Cloud's own timers ───────────────────────────────────────────────────
+
+  async prune(limit: number): Promise<number> {
+    const days = this.limits.retentionDays ?? RETENTION_DAYS;
+    return this.sql.begin(async tx => {
+      const rows = await tx<{ id: string }[]>`SELECT id FROM function_executions WHERE pruned_at IS NULL AND completed_at IS NOT NULL AND completed_at < now() - make_interval(days => ${days})
+        ORDER BY completed_at FOR UPDATE SKIP LOCKED LIMIT ${limit}`;
+      for (const row of rows) {
+        await tx`DELETE FROM function_execution_logs WHERE execution_id = ${row.id}`;
+        await tx`UPDATE function_executions SET input = 'null'::jsonb, output = NULL, has_logs = false, pruned_at = now() WHERE id = ${row.id}`;
+      }
+      return rows.length;
+    });
+  }
 
   async reconcile(requestId: string, limit: number) {
     return this.sql.begin(async tx => {
@@ -356,17 +399,21 @@ export class PostgresPlatformFunctionRepository extends PostgresPlatformAuthorit
         const schedule = (await tx<Row[]>`SELECT * FROM function_schedules WHERE id = ${candidate.id} AND state = 'active' AND next_run_at <= now() FOR UPDATE SKIP LOCKED`)[0];
         if (!schedule) return undefined;
         const fn = (await tx<Row[]>`SELECT * FROM functions WHERE id = ${schedule.function_id} FOR UPDATE`)[0]!; const scope = scopeOf(fn); const slot = schedule.next_run_at as Date;
-        // One run for however many slots were missed, then the next slot after now on the original rhythm.
-        await tx`UPDATE function_schedules SET last_run_at = now(), revision = revision + 1,
+        // One run for however many slots were missed, then the next slot after now: on the original rhythm for an interval, by the calendar for a cron expression.
+        if (schedule.cron) await tx`UPDATE function_schedules SET last_run_at = now(), revision = revision + 1, next_run_at = ${nextSlot(schedule.cron, schedule.time_zone)} WHERE id = ${schedule.id}`;
+        else await tx`UPDATE function_schedules SET last_run_at = now(), revision = revision + 1,
           next_run_at = next_run_at + make_interval(secs => interval_seconds * (floor(extract(epoch FROM (now() - next_run_at)) / interval_seconds)::integer + 1)) WHERE id = ${schedule.id}`;
-        const skip = async (reason: string) => { await this.event(tx, scope, 'function_schedule', schedule.id, `schedule.skipped.${reason}`, Number(schedule.revision) + 1, requestId); return undefined; };
+        const skip = async (reason: 'overlap' | 'function_disabled' | 'limit' | 'unavailable') => {
+          await tx`UPDATE function_schedules SET last_skipped_at = now(), last_skip_reason = ${reason} WHERE id = ${schedule.id}`;
+          await this.event(tx, scope, 'function_schedule', schedule.id, `schedule.skipped.${reason}`, Number(schedule.revision) + 1, requestId); return undefined;
+        };
         if (fn.state !== 'active') return skip('function_disabled');
         // The previous run of this schedule has not finished: this slot is skipped rather than piling up.
         if ((await tx`SELECT 1 FROM function_executions WHERE schedule_id = ${schedule.id} AND state IN ('queued', 'running')`).length) return skip('overlap');
         const revision = (await tx<Row[]>`SELECT * FROM function_revisions WHERE function_id = ${fn.id} AND number = ${fn.active_revision}`)[0]!;
         try {
           // In a savepoint, so a refusal part-way leaves no execution without a lease behind.
-          return executionView(await tx.savepoint(point => this.enqueue(point as unknown as Tx, fn, revision, { id: randomUUID(), leaseId: randomUUID(), trigger: 'schedule', scheduleId: schedule.id, scheduledFor: slot, input: null, createdBy: null, requestId })) as Row);
+          return executionView(await tx.savepoint(point => this.enqueue(point as unknown as Tx, fn, revision, { id: randomUUID(), leaseId: randomUUID(), trigger: 'schedule', scheduleId: schedule.id, scheduledFor: slot, input: schedule.input ?? null, createdBy: null, requestId })) as Row);
         } catch (error) {
           // No room, or a secret the revision names is gone: the slot is skipped and recorded, and the schedule carries on.
           if (error instanceof PlatformFault && ['quota', 'validation', 'not_found', 'conflict'].includes(error.code)) return skip(error.code === 'quota' ? 'limit' : 'unavailable');

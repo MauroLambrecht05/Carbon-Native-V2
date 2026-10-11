@@ -16,7 +16,7 @@ if (import.meta.main) {
     while (!stopping) {
       // Leases first: a lost worker's build gets its retry before the build is judged stuck.
       // Then functions: executions that can no longer finish are ended, and schedules that are due are fired.
-      try { await leases.reclaim(crypto.randomUUID()); await builds.reconcile(crypto.randomUUID()); await functions.reconcile(crypto.randomUUID()); await functions.tick(crypto.randomUUID()); }
+      try { await leases.reclaim(crypto.randomUUID()); await builds.reconcile(crypto.randomUUID()); await functions.reconcile(crypto.randomUUID()); await functions.tick(crypto.randomUUID()); await functions.prune(); }
       catch { console.error(JSON.stringify({ event: 'worker.lease.sweep_unavailable' })); }
       await Bun.sleep(5000);
     }

@@ -32,8 +32,9 @@ and a time limit of 1 to 300 seconds. It needs `resources.configure`.
 - Each later deploy adds the next revision and makes it the active one.
 - Every secret named must exist and be enabled in the environment at that
   moment.
-- The code is stored as given. Cloud does not run, import or check it. A syntax
-  error is found the first time the revision runs.
+- The code is parsed, and refused with `400` if it is not a valid JavaScript
+  module or has no default export. It is never run, imported or evaluated in
+  Cloud: a module that throws when loaded deploys, and fails on the worker.
 
 The code is one ES module of at most 262,144 characters. Its default export is
 called with the input, and what it returns is the output:
@@ -137,15 +138,52 @@ function as environment variables.
   slot.
 - A revision names a secret, not a version of it. An execution gets the value
   current when the worker fetches it (G-103).
-- Nothing stops a function from returning a secret as its output, and the
-  output is stored and readable with `metadata.read` (G-106).
+- A function may return or print a secret. The worker replaces every exact
+  occurrence of one of the lease's secret values with `[redacted]` in the
+  output and in the log before either leaves the machine, including where the
+  value sits inside JSON text. A secret shorter than four characters, or one
+  the function has encoded or split, is not recognised.
 
 ## Schedules
 
-`POST .../functions/{id}/schedules` with `{ "intervalSeconds": N }`, from 60
-seconds to 7 days. The first run is one interval after creation. A scheduled
-execution has a null input. There is no cron expression and no time zone
-(G-101).
+A schedule is one of two kinds, made with `POST .../functions/{id}/schedules`:
+
+- `{ "intervalSeconds": N }`, from 60 seconds to 7 days. The first run is one
+  interval after creation.
+- `{ "cron": "30 9 * * 1-5", "timeZone": "Europe/Brussels" }`: a five-field
+  cron expression read on the clocks of an IANA time zone.
+
+Either kind takes an optional `input` of at most 65,536 bytes, which every
+execution of that schedule is called with. Without one the input is null.
+
+### Cron expressions
+
+```
+minute  hour  day-of-month  month  day-of-week
+0-59    0-23  1-31          1-12   0-6 (0 is Sunday; 7 is also Sunday)
+```
+
+Each field is `*`, a number, a range `a-b`, a step `*/n` or `a-b/n`, or a
+comma-separated list of those. Names (`MON`, `JAN`) and shorthands (`@daily`)
+are not accepted. When both day fields are restricted, a day matches if either
+does, as in cron. An expression that names a date that never occurs, such as
+the 31st of February, is refused when the schedule is made, with the reason.
+
+### Daylight saving
+
+- A wall-clock time that does not exist on a day, because the clocks went
+  forward, does not fire that day. It is not moved to the next hour.
+- A wall-clock time that happens twice, because the clocks went back, fires
+  once, at its first occurrence.
+
+So `0 * * * *` in a zone with daylight saving fires 23 times on the short day
+and 24 on the long one. A schedule that must run every hour of real time
+should be an interval, or use `UTC`.
+
+The zone's rules come from the runtime Cloud runs on. A zone's rules can change
+by law; a schedule then follows the rules of the runtime in use.
+
+### How schedules fire
 
 Cloud's sweeper process fires due schedules each time it runs.
 
@@ -155,14 +193,16 @@ Cloud's sweeper process fires due schedules each time it runs.
 - **Overlap.** If the schedule's previous execution is still queued or running,
   the slot is skipped.
 - **Missed slots.** If several slots passed while nothing was firing, one
-  execution runs, and the next slot is the next one after now on the original
-  rhythm.
+  execution runs. The next slot is the next one after now: on the original
+  rhythm for an interval, by the calendar for a cron expression.
 - **No room.** If the environment is at its open-execution limit, the slot is
   skipped.
-- **Pause and resume.** A paused schedule never fires. Resuming starts a fresh
-  interval from now.
+- **Pause and resume.** A paused schedule never fires. Resuming starts from
+  now: a fresh interval, or the next calendar slot.
 
-Every skipped slot is recorded as a `schedule.skipped.*` event with the reason.
+Every skipped slot is recorded as a `schedule.skipped.*` event with the reason,
+and the schedule itself carries the last one as `lastSkippedAt` and
+`lastSkipReason` (`overlap`, `function_disabled`, `limit` or `unavailable`).
 
 ## Limits
 
@@ -177,6 +217,8 @@ These are fixed constants, not plan quotas (G-107).
 | Code | 262,144 characters |
 | Input | 65,536 bytes |
 | Output | 262,144 bytes |
+| Log per execution | 65,536 characters |
+| Schedule input | 65,536 bytes |
 | Time limit | 1 to 300 seconds |
 | Attempts | 3 |
 
@@ -208,8 +250,36 @@ For each execution the worker:
 6. erases the workspace, then reports the output or an error category.
 
 The result is written to a file by a small harness, not read from standard
-output, so what a function prints cannot be mistaken for its result. Standard
-output and standard error are discarded.
+output, so what a function prints cannot be mistaken for its result.
+
+## Logs
+
+What a function writes to standard output and standard error is kept, together,
+in the order the worker received it. If the function throws, or its module
+fails to load, the error's stack is written there too. The worker keeps the
+first 60,000 bytes, goes on reading so the function is never blocked on a full
+pipe, and marks the log as truncated.
+
+Before the log leaves the worker, every exact occurrence of one of the lease's
+secret values is replaced with `[redacted]`.
+
+`GET .../executions/{id}/logs` returns the text, whether it was truncated, and
+the attempt that produced it. It needs `metadata.read`, like the execution. An
+execution that printed nothing has no log and answers `404`; its `hasLogs` is
+false. A log is written once and cannot be changed.
+
+Logs arrive with the result, not while the function runs: a running execution
+has none yet, and one whose worker was lost never gets one (G-102).
+
+## Retention
+
+Thirty days after an execution ends, its input, output and log are removed. The
+execution stays, with its state, times and error category, and `prunedAt` says
+when its contents were removed. This is the only change a finished execution
+ever allows, and the database accepts it only in exactly that form.
+
+The sweeper process does this each time it runs. Revisions, events and
+idempotency records are not removed (G-106).
 
 | Category | Cause |
 |---|---|
@@ -234,10 +304,11 @@ Section 16 of [the backend plan](platform-backend-plan.md) asks for more than
 this. See G-100 to G-113 in [the gap ledger](left-off/gaps.md). The main ones:
 
 - No isolation or resource limits (G-100).
-- No logs (G-102).
+- Logs arrive only when an execution reports, not while it runs (G-102).
 - Only an account session can invoke: no app users, service accounts, HTTP or
   event triggers (G-104).
-- Interval schedules only (G-101).
+- A schedule has no overlap or missed-run policy to choose, and no credential
+  of its own (G-101).
 - No drafts, packaging, dependencies or promotion between environments (G-105).
 - Functions are stored in Cloud, not owned by Database as the plan says
   (G-112).

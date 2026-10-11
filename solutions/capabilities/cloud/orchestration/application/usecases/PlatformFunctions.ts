@@ -1,14 +1,26 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { WorkerLeaseInput } from '@carbon/catalog';
 import {
-  PlatformFault, parseComponent, type CommandOptions, type EnvironmentScope, type FunctionCommand, type FunctionDeploy, type FunctionDetails, type FunctionExecution, type FunctionExecutionCommand, type FunctionExecutionPage,
+  PlatformFault, parseComponent, type CommandOptions, type EnvironmentScope, type FunctionCommand, type FunctionDeploy, type FunctionDetails, type FunctionExecution, type FunctionExecutionCommand, type FunctionExecutionLogs, type FunctionExecutionPage,
   type FunctionExecutionReceipt, type FunctionInvoke, type FunctionPage, type FunctionReceipt, type FunctionRevisionDetails, type FunctionScheduleCommand, type FunctionScheduleCreate, type FunctionScheduleList,
   type FunctionScheduleReceipt, type PageRequest, type WorkerFunctionComplete, type WorkerFunctionInput,
 } from '@carbon/contracts/platform';
 import { tokenDigest, tokenMatches, type AccountAuthentication, type MessageProtector, type OrganizationActor } from '@carbon/identity';
 import type { CommandIdentity, PlatformFunctionRepository } from '../ports/PlatformFunctionRepository.ts';
+import { CronError, nextCronTime, parseCron } from '../../domain/CronSchedule.ts';
 
 const MAX_INPUT_BYTES = 65536;
+
+/**
+ * Refuses code that could never run: text that does not parse as a module, or a module with no default export.
+ * The code is parsed, never evaluated or imported: nothing a developer deploys executes in Cloud's process.
+ */
+function checkModule(code: string): void {
+  let exports: readonly string[];
+  try { exports = new Bun.Transpiler({ loader: 'js' }).scan(code).exports; }
+  catch { throw new PlatformFault('validation', 'The function code is not a valid JavaScript module'); }
+  if (!exports.includes('default')) throw new PlatformFault('validation', 'The function module has no default export');
+}
 
 /** Developers deploy functions, run them, follow their executions and schedule them through the browser session. */
 export class AccountFunctions {
@@ -41,6 +53,7 @@ export class AccountFunctions {
    */
   async deploy(token: string, csrf: string, input: EnvironmentScope, value: FunctionDeploy, options: CommandOptions, requestId: string): Promise<FunctionReceipt> {
     const scope = parseComponent('EnvironmentScope', input); const deploy = parseComponent('FunctionDeploy', value);
+    checkModule(deploy.code);
     const codeDigest = createHash('sha256').update(deploy.code, 'utf8').digest('hex');
     return this.repository.deploy(await this.actor(token, csrf), scope, randomUUID(), { ...deploy, secretNames: [...deploy.secretNames].sort() }, codeDigest, this.identity(options, requestId, { scope, deploy: { ...deploy, code: codeDigest } }));
   }
@@ -73,6 +86,9 @@ export class AccountFunctions {
   async execution(token: string, input: EnvironmentScope, executionId: string): Promise<FunctionExecution> {
     return this.repository.execution(await this.actor(token), parseComponent('EnvironmentScope', input), parseComponent('Id', executionId));
   }
+  async executionLogs(token: string, input: EnvironmentScope, executionId: string): Promise<FunctionExecutionLogs> {
+    return this.repository.executionLogs(await this.actor(token), parseComponent('EnvironmentScope', input), parseComponent('Id', executionId));
+  }
   async executionCommand(token: string, csrf: string, input: EnvironmentScope, executionId: string, value: FunctionExecutionCommand, options: CommandOptions, requestId: string): Promise<FunctionExecutionReceipt> {
     const scope = parseComponent('EnvironmentScope', input); parseComponent('Id', executionId); const command = parseComponent('FunctionExecutionCommand', value);
     return this.repository.executionCommand(await this.actor(token, csrf), scope, executionId, command.kind, { executionId: randomUUID(), leaseId: randomUUID() }, this.revision(options),
@@ -81,7 +97,14 @@ export class AccountFunctions {
 
   async createSchedule(token: string, csrf: string, input: EnvironmentScope, functionId: string, value: FunctionScheduleCreate, options: CommandOptions, requestId: string): Promise<FunctionScheduleReceipt> {
     const scope = parseComponent('EnvironmentScope', input); parseComponent('Id', functionId); const schedule = parseComponent('FunctionScheduleCreate', value);
-    return this.repository.createSchedule(await this.actor(token, csrf), scope, functionId, randomUUID(), schedule.intervalSeconds, this.identity(options, requestId, { scope, functionId, schedule }));
+    if (Buffer.byteLength(JSON.stringify(schedule.input ?? null)) > MAX_INPUT_BYTES) throw new PlatformFault('validation', 'The schedule input exceeds the size limit');
+    if ('cron' in schedule) {
+      // Checked here, with the reason, so a bad expression, an unknown zone or a schedule that could never run is refused when it is made.
+      try { if (!nextCronTime(parseCron(schedule.cron), schedule.timeZone, new Date())) throw new CronError('This schedule never runs'); }
+      catch (error) { throw new PlatformFault('validation', error instanceof CronError ? error.message : 'The schedule expression is not valid'); }
+    }
+    const spec = 'cron' in schedule ? { cron: schedule.cron.trim().split(/\s+/).join(' '), timeZone: schedule.timeZone, input: schedule.input ?? null } : { intervalSeconds: schedule.intervalSeconds, input: schedule.input ?? null };
+    return this.repository.createSchedule(await this.actor(token, csrf), scope, functionId, randomUUID(), spec, this.identity(options, requestId, { scope, functionId, schedule }));
   }
   async schedules(token: string, input: EnvironmentScope, functionId: string): Promise<FunctionScheduleList> {
     return parseComponent('FunctionScheduleList', { items: await this.repository.schedules(await this.actor(token), parseComponent('EnvironmentScope', input), parseComponent('Id', functionId)) });
@@ -114,4 +137,6 @@ export class FunctionOrchestration {
   constructor(private readonly repository: PlatformFunctionRepository) {}
   async reconcile(requestId: string, limit = 50) { parseComponent('Id', requestId); return this.repository.reconcile(requestId, limit); }
   async tick(requestId: string, limit = 50) { parseComponent('Id', requestId); return this.repository.tick(requestId, limit); }
+  /** Removes the input, output and logs of executions past the retention period. */
+  async prune(limit = 500) { return this.repository.prune(limit); }
 }

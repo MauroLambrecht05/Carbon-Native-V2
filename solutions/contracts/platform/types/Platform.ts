@@ -382,7 +382,7 @@ export type FunctionCommand = { readonly "kind": "activate"; readonly "revision"
 
 export type FunctionInvoke = { readonly "input": unknown; };
 
-export type FunctionExecution = { readonly "id": Id; readonly "scope": EnvironmentScope; readonly "functionId": Id; readonly "revisionNumber": number; readonly "codeDigest": Digest; readonly "state": "queued" | "running" | "succeeded" | "failed" | "timed_out" | "cancelled"; readonly "trigger": "manual" | "schedule" | "retry"; readonly "scheduleId": Id | null; readonly "retryOf": Id | null; readonly "attempt": number; readonly "output": unknown; readonly "errorCategory": string | null; readonly "createdBy": Id | null; readonly "revision": Revision; readonly "createdAt": Timestamp; readonly "startedAt": Timestamp | null; readonly "completedAt": Timestamp | null; };
+export type FunctionExecution = { readonly "id": Id; readonly "scope": EnvironmentScope; readonly "functionId": Id; readonly "revisionNumber": number; readonly "codeDigest": Digest; readonly "state": "queued" | "running" | "succeeded" | "failed" | "timed_out" | "cancelled"; readonly "trigger": "manual" | "schedule" | "retry"; readonly "scheduleId": Id | null; readonly "retryOf": Id | null; readonly "attempt": number; readonly "output": unknown; readonly "errorCategory": string | null; readonly "createdBy": Id | null; readonly "revision": Revision; readonly "createdAt": Timestamp; readonly "startedAt": Timestamp | null; readonly "completedAt": Timestamp | null; readonly "hasLogs": boolean; readonly "prunedAt": Timestamp | null; };
 
 export type FunctionExecutionPage = { readonly "items": ReadonlyArray<FunctionExecution>; readonly "nextCursor": string | null; };
 
@@ -390,9 +390,9 @@ export type FunctionExecutionReceipt = { readonly "execution": FunctionExecution
 
 export type FunctionExecutionCommand = { readonly "kind": "cancel" | "retry"; };
 
-export type FunctionScheduleCreate = { readonly "intervalSeconds": number; };
+export type FunctionScheduleCreate = { readonly "intervalSeconds": number; readonly "input"?: unknown; } | { readonly "cron": string; readonly "timeZone": string; readonly "input"?: unknown; };
 
-export type FunctionSchedule = { readonly "id": Id; readonly "functionId": Id; readonly "intervalSeconds": number; readonly "state": "active" | "paused"; readonly "nextRunAt": Timestamp; readonly "lastRunAt": Timestamp | null; readonly "revision": Revision; readonly "createdAt": Timestamp; };
+export type FunctionSchedule = { readonly "id": Id; readonly "functionId": Id; readonly "intervalSeconds": number | null; readonly "state": "active" | "paused"; readonly "nextRunAt": Timestamp; readonly "lastRunAt": Timestamp | null; readonly "revision": Revision; readonly "createdAt": Timestamp; readonly "cron": string | null; readonly "timeZone": string | null; readonly "input": unknown; readonly "lastSkippedAt": Timestamp | null; readonly "lastSkipReason": "overlap" | "function_disabled" | "limit" | "unavailable" | null; };
 
 export type FunctionScheduleList = { readonly "items": ReadonlyArray<FunctionSchedule>; };
 
@@ -400,9 +400,11 @@ export type FunctionScheduleCommand = { readonly "kind": "pause" | "resume" | "d
 
 export type FunctionScheduleReceipt = { readonly "schedule": FunctionSchedule; readonly "message": string; };
 
+export type FunctionExecutionLogs = { readonly "executionId": Id; readonly "attempt": number; readonly "text": string; readonly "truncated": boolean; readonly "recordedAt": Timestamp; };
+
 export type WorkerFunctionInput = { readonly "executionId": Id; readonly "scope": EnvironmentScope; readonly "functionId": Id; readonly "revisionNumber": number; readonly "code": string; readonly "codeDigest": Digest; readonly "input": unknown; readonly "attempt": number; readonly "timeoutSeconds": number; };
 
-export type WorkerFunctionComplete = { readonly "outcome": "succeeded"; readonly "output": unknown; } | { readonly "outcome": "failed"; readonly "errorCategory": string; };
+export type WorkerFunctionComplete = { readonly "outcome": "succeeded"; readonly "output": unknown; readonly "logs"?: { readonly "text": string; readonly "truncated": boolean; }; } | { readonly "outcome": "failed"; readonly "errorCategory": string; readonly "logs"?: { readonly "text": string; readonly "truncated": boolean; }; };
 
 export type VectorCollectionDefinition = { readonly "name": string; readonly "dimension": number; readonly "metric": "cosine" | "l2" | "inner"; };
 
@@ -937,6 +939,7 @@ export interface Components {
   FunctionScheduleList: FunctionScheduleList;
   FunctionScheduleCommand: FunctionScheduleCommand;
   FunctionScheduleReceipt: FunctionScheduleReceipt;
+  FunctionExecutionLogs: FunctionExecutionLogs;
   WorkerFunctionInput: WorkerFunctionInput;
   WorkerFunctionComplete: WorkerFunctionComplete;
   VectorCollectionDefinition: VectorCollectionDefinition;

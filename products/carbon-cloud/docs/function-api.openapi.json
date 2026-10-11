@@ -74,7 +74,7 @@
             "browserSession": []
           }
         ],
-        "description": "Stores the code as a new immutable revision and makes it the active one. The first deploy of a name creates the function. The body may be up to 393,216 bytes. Requires resources.configure.",
+        "description": "Stores the code as a new immutable revision and makes it the active one. The first deploy of a name creates the function. The body may be up to 393,216 bytes. Requires resources.configure. Code that does not parse as a JavaScript module, or has no default export, answers 400; the code is parsed and never run.",
         "parameters": [
           {
             "$ref": "#/components/parameters/MutationOrigin"
@@ -489,7 +489,7 @@
             "browserSession": []
           }
         ],
-        "description": "Runs the function every intervalSeconds, first one interval from now. Requires resources.configure.",
+        "description": "Runs the function on a fixed interval, first one interval from now, or on a five-field cron expression read in an IANA time zone. An expression or zone that is not valid answers 400 with the reason. Requires resources.configure.",
         "parameters": [
           {
             "$ref": "#/components/parameters/MutationOrigin"
@@ -656,6 +656,55 @@
             "$ref": "account-api.openapi.json#/components/responses/Error"
           },
           "429": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/orgs/{orgId}/projects/{projectId}/environments/{environmentId}/executions/{executionId}/logs": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrgId"
+        },
+        {
+          "$ref": "#/components/parameters/ProjectId"
+        },
+        {
+          "$ref": "#/components/parameters/EnvironmentId"
+        },
+        {
+          "$ref": "#/components/parameters/ExecutionId"
+        }
+      ],
+      "get": {
+        "operationId": "getFunctionExecutionLogs",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "description": "What the execution wrote to standard output and standard error, and the stack of an error it threw, with the lease's secret values removed by the worker. Answers 404 when the execution printed nothing, has not reported yet, or is past retention. Requires metadata.read.",
+        "responses": {
+          "200": {
+            "description": "The log",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/FunctionExecutionLogs"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
             "$ref": "account-api.openapi.json#/components/responses/Error"
           }
         }

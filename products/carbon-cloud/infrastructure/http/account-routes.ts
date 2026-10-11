@@ -231,7 +231,7 @@ export function createAccountRoutes(auth: AccountAuthentication, origin: string,
         return json({ receipt: await imports.enqueue(token, csrf, scope, parseComponent('DataImportJobCreate', await body(393216)), options, requestId) }, 202);
       }
       // Functions, their revisions, executions and schedules.
-      const functionRoute = new RegExp(`^${BASE}/orgs/([^/]+)/projects/([^/]+)/environments/([^/]+)/(functions|executions|schedules)(?:/([^/]+)(?:/(revisions|executions|schedules|invoke)(?:/([^/]+))?)?)?$`).exec(url.pathname);
+      const functionRoute = new RegExp(`^${BASE}/orgs/([^/]+)/projects/([^/]+)/environments/([^/]+)/(functions|executions|schedules)(?:/([^/]+)(?:/(revisions|executions|schedules|invoke|logs)(?:/([^/]+))?)?)?$`).exec(url.pathname);
       if (functionRoute) {
         if (!functions) throw new PlatformFault('capability', 'Functions are not configured');
         const scope = parseComponent('EnvironmentScope', { orgId: functionRoute[1], projectId: functionRoute[2], environmentId: functionRoute[3] });
@@ -249,6 +249,7 @@ export function createAccountRoutes(auth: AccountAuthentication, origin: string,
           if (get && id && sub === 'schedules' && !subId) return json(await functions.schedules(session, scope, id));
           if (post && id && sub === 'schedules' && !subId) return json(await functions.createSchedule(session, csrf, scope, id, parseComponent('FunctionScheduleCreate', await body()), options(), requestId), 201);
         }
+        if (kind === 'executions' && id && sub === 'logs' && !subId && get) return json(await functions.executionLogs(session, scope, id));
         if (kind === 'executions' && id && !sub) {
           if (get) return json(await functions.execution(session, scope, id));
           if (post) return json(await functions.executionCommand(session, csrf, scope, id, parseComponent('FunctionExecutionCommand', await body()), options(), requestId));

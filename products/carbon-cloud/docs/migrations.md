@@ -191,6 +191,18 @@ trigger function, and a trigger on every existing canonical table), and
 realtime structures untouched. 0009 changes behaviour for existing tables: every
 row change from then on also writes one feed row in the same transaction.
 
+Functions gain calendar schedules, logs and retention in Cloud migration
+`0032_function_calendar_logs.sql`. It makes `function_schedules.interval_seconds`
+nullable and adds `cron`, `time_zone`, `input` and the last-skip columns, with
+constraints that a schedule is exactly one kind; adds `function_execution_logs`;
+and adds `has_logs` and `pruned_at` to `function_executions`. It replaces the
+`protect_function_record` trigger function so that a finished execution allows
+one change, the removal of its input, output and logs. It is additive.
+Recovery: code from before 0032 reads a calendar schedule's null interval as
+an error when that schedule comes due, so pause or delete calendar schedules
+before rolling back past it; interval schedules are unaffected. Older code
+never prunes, and ignores the log table.
+
 ## Running migrations as a release step
 
 Phase 18 adds no migration. Each service has `bun run migrate` (apply what is
