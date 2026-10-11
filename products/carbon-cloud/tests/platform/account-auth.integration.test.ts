@@ -25,7 +25,8 @@ import { createLiveServices } from "../../infrastructure/browser/http/live-servi
 import { createOperatorRoutes } from "../../infrastructure/http/operator-routes.ts";
 import { createBillingWebhookRoutes } from "../../infrastructure/http/billing-webhook-routes.ts";
 import { AccountBilling, BillingWebhooks, FakeCheckoutSessionProvider, PostgresBilling, UsageGate, type Plan, type PlanId } from "@carbon/billing";
-import { OperatorAdministration, OperatorConsole, PostgresOperators } from "@carbon/identity";
+import { OperatorAdministration, OperatorConsole, PostgresOperators, type OrganizationActor } from "@carbon/identity";
+import type { PlatformFault } from "@carbon/contracts/platform";
 import { SignJWT } from "jose";
 import { AccountRealms, AppAuthentication, HttpOidcClient, PostgresAppAuthRepository, PostgresAppMailQueue } from "@carbon/auth";
 import { createAppRoutes } from "../../infrastructure/http/app-routes.ts";
@@ -227,7 +228,7 @@ async function harness(functionLimits?: FunctionLimits, plans?: Record<PlanId, P
     const redirected = await githubCallback(url.searchParams.get('state')!); expect(redirected.status).toBe(303);
     return redirected.headers.get('location')!.split('#token=')[1]!;
   };
-  return { sql, protector, secretProtector, workerApi, workerFetch, updates, store, provenancePublicKey: provenanceSigner.publicKey(), leases, builds, functions: new FunctionOrchestration(functionRepository), usageGate, billing, checkouts, webhook, webhookHandler, webhookSecret, operatorAdmin, operator, browserFetch, browserCookies, organizationLifecycle, catalogLifecycle, app, idp, deliverApp, assertionPublicKey:assertionKeys.publicKey, assertionKey, mail, cookies, call, challenge, complete, token, freshRequest, freshComplete, profile, emailToken, emailComplete, createOrganization, organizationCommand, restoreCookies,
+  return { raw: (request: Request) => handler(request, '127.0.0.1'), sql, protector, secretProtector, workerApi, workerFetch, updates, store, provenancePublicKey: provenanceSigner.publicKey(), leases, builds, functions: new FunctionOrchestration(functionRepository), usageGate, billing, checkouts, webhook, webhookHandler, webhookSecret, operatorAdmin, operator, browserFetch, browserCookies, organizationLifecycle, catalogLifecycle, app, idp, deliverApp, assertionPublicKey:assertionKeys.publicKey, assertionKey, mail, cookies, call, challenge, complete, token, freshRequest, freshComplete, profile, emailToken, emailComplete, createOrganization, organizationCommand, restoreCookies,
     catalogCommand, createProject,
     invitation, invitationToken, invitationProof,
     githubStart, githubCallback, githubComplete, githubBegin, githubCalls,
@@ -2142,6 +2143,36 @@ suite("real account authentication", () => {
     expect((await h.sql`SELECT count(*)::integer AS n FROM worker_leases WHERE purpose = 'function' AND state IN ('granted', 'claimed')`)[0].n).toBe(0);
   }, 60000);
 
+  test('cancelling an execution while its worker is heartbeating always succeeds: the two never wait on each other', async () => {
+    const h = await harness(); const f = await functionFixture(h, 'function-race'); const fn = await f.deploy('waits', 'export default () => 1;');
+    const beat = (lease: { lease: { id: string }; leaseToken: string }) => h.workerApi(`/worker/v1/leases/${lease.lease.id}`, { kind: 'heartbeat' }, f.held(lease)).then(response => response.status);
+
+    // A cancellation updates the lease and then writes an event that refers to the worker. A heartbeat locks the worker and
+    // then the lease. If the heartbeat's lock on the worker also shut out references to it, each would wait for the other
+    // and PostgreSQL would have to kill one. This plays the cancellation's two steps by hand around a real heartbeat.
+    const first = await f.invoke(fn.id); const held = await f.claim(); expect((await f.on(held)).status).toBe(200);
+    const workerId = (await h.sql`SELECT worker_id FROM worker_leases WHERE id = ${held.lease.id}`)[0].worker_id as string;
+    let pending: Promise<number> | undefined;
+    const waited = await h.sql.begin(async tx => {
+      await tx`SELECT 1 FROM worker_leases WHERE id = ${held.lease.id} FOR UPDATE`;
+      // The heartbeat starts now: it takes the worker and stops at the lease this transaction holds.
+      pending = beat(held); await Bun.sleep(400);
+      // What writing an event about the worker needs. It must be granted at once, with the heartbeat still waiting.
+      const started = Date.now(); await tx`SELECT 1 FROM workers WHERE id = ${workerId} FOR KEY SHARE`; return Date.now() - started;
+    });
+    expect(waited).toBeLessThan(300); expect(await pending!).toBe(200);
+    expect((await f.post(`${f.envPath}/executions/${first.id}`, { kind: 'cancel' }, (await f.execution(first.id)).revision)).status).toBe(200);
+
+    // And the real thing, raced many times: every cancellation succeeds, and a heartbeat either got in first or learns of it.
+    for (let round = 0; round < 15; round++) {
+      const execution = await f.invoke(fn.id, round); const lease = await f.claim(); expect((await f.on(lease)).status).toBe(200);
+      const running = await f.execution(execution.id); expect(running.state).toBe('running');
+      const [cancelled, ...beats] = await Promise.all([f.post(`${f.envPath}/executions/${execution.id}`, { kind: 'cancel' }, running.revision).then(response => response.status), beat(lease), beat(lease), beat(lease)]);
+      expect(cancelled).toBe(200); for (const status of beats) expect([200, 409, 410]).toContain(status);
+      expect((await f.execution(execution.id)).state).toBe('cancelled');
+    }
+  }, 120000);
+
   test('function limits hold under each kind of growth, and a schedule that finds no room skips its slot', async () => {
     const h = await harness({ functions: 2, revisions: 2, schedulesPerFunction: 1, openExecutions: 2 }); const f = await functionFixture(h, 'function-limits'); const functionsPath = `${f.envPath}/functions`;
     const deploy = (name: string, code = 'export default () => 1;') => f.post(functionsPath, { name, code, secretNames: [], timeoutSeconds: 10 });
@@ -2229,6 +2260,118 @@ suite("real account authentication", () => {
       if (marker === undefined) delete process.env.CARBON_WORKER_TOKEN; else process.env.CARBON_WORKER_TOKEN = marker;
       rmSync(root, { recursive: true, force: true });
     }
+  }, 120000);
+
+  test('a device or personal credential reaches builds, releases and functions as its account, inside its own scope and permissions and nowhere else', async () => {
+    const h = await harness(); const fixture = await functionFixture(h, 'credential-api'); const id = () => crypto.randomUUID();
+    const f = { ...fixture, accountId: (await h.sql`SELECT id FROM accounts WHERE primary_email = 'owner@example.test'`)[0].id as string }; const expiresAt = new Date(Date.now() + 86400_000).toISOString();
+    const fn = await f.deploy('report', 'export default (input) => input;');
+    // A second environment in the same project, and a second project: places the credentials below were not issued for.
+    const base = `/platform/v1/orgs/${f.scope.orgId}/projects/${f.scope.projectId}`;
+    const project = parseComponent('CatalogProject', await (await h.call(base)).json());
+    const other = parseComponent('EnvironmentScope', parseComponent('CatalogReceipt', (await (await h.catalogCommand(`${base}/environments`, { name: 'Staging', kind: 'staging', services: ['database'] }, project.revision)).json() as { receipt: unknown }).receipt).scope);
+    const otherPath = `/platform/v1/orgs/${other.orgId}/projects/${other.projectId}/environments/${other.environmentId}`;
+
+    // What a tool sends: its credential, and nothing a browser would. No cookie, no Origin, no CSRF token.
+    const tool = (token: string, path: string, method = 'GET', body?: unknown, extra: Record<string, string> = {}) => h.raw(new Request(origin + path, { method, body: body === undefined ? undefined : JSON.stringify(body),
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', 'idempotency-key': id(), ...extra } }));
+    const personalFor = async (scope: Record<string, string>, permissions: string[]) => parseComponent('PersonalCredentialIssue', await (await f.post('/platform/v1/account/personal-credentials', { name: `tool ${id().slice(0, 8)}`, scope, permissions, expiresAt })).json());
+    const deviceFor = async (scope: Record<string, string>, permissions: string[]) => {
+      const challenge = parseComponent('DeviceAuthorizationChallenge', await (await h.call('/platform/v1/device/authorizations', 'POST', { clientName: 'Carbon CLI', deviceName: 'Workstation', scope, permissions })).json());
+      const review = parseComponent('DeviceAuthorizationReview', await (await h.call('/platform/v1/account/device-authorizations/review', 'POST', { userCode: challenge.userCode })).json());
+      expect((await f.post('/platform/v1/account/device-authorizations', { kind: 'approve', userCode: challenge.userCode }, review.revision)).status).toBe(200);
+      const issued = parseComponent('DeviceTokenResponse', await (await h.call('/platform/v1/device/token', 'POST', { deviceCode: challenge.deviceCode })).json()); if (issued.state !== 'authorized') throw new Error('expected a device token');
+      return issued;
+    };
+    const functions = `${f.envPath}/functions`; const builds = `${f.envPath}/builds`;
+    const build = { repositoryUrl: 'https://github.com/carbon-team/desktop.git', commitSha: 'a'.repeat(40), targets: ['nsis'], secretNames: [], platform: 'windows' };
+
+    // Read-only, for this environment: it reads, and that is all it does.
+    const reader = (await personalFor(f.scope, ['metadata.read'])).token;
+    const listed = await tool(reader, functions); expect(listed.status).toBe(200); expect(parseComponent('FunctionPage', await listed.json()).items.map(item => item.id)).toEqual([fn.id]);
+    expect((await tool(reader, `${functions}/${fn.id}`)).status).toBe(200); expect((await tool(reader, builds)).status).toBe(200); expect((await tool(reader, `${f.envPath}/releases`)).status).toBe(200);
+    for (const [path, body] of [[`${functions}/${fn.id}/invoke`, { input: 1 }], [functions, { name: 'second', code: 'export default () => 1;', secretNames: [], timeoutSeconds: 30 }], [builds, build],
+      [`${functions}/${fn.id}/schedules`, { intervalSeconds: 60 }]] as const) expect([path, (await tool(reader, path, 'POST', body)).status]).toEqual([path, 403]);
+    // Reading a revision's code takes more than metadata.read, for a credential as for a member.
+    expect((await tool(reader, `${functions}/${fn.id}/revisions/1`)).status).toBe(403);
+    // Anywhere outside its scope the resource does not exist as far as it can tell: the sibling environment, and an organization that is not its own.
+    expect((await tool(reader, `${otherPath}/functions`)).status).toBe(404); expect((await tool(reader, `${otherPath}/builds`)).status).toBe(404);
+    expect((await tool(reader, `/platform/v1/orgs/${id()}/projects/${f.scope.projectId}/environments/${f.scope.environmentId}/functions`)).status).toBe(404);
+
+    // With data.write it runs a function; with release.publish it queues a build. Each only what it was given, and the result is the account's.
+    const runner = (await deviceFor(f.scope, ['metadata.read', 'data.write'])).token;
+    const invoked = await tool(runner, `${functions}/${fn.id}/invoke`, 'POST', { input: { from: 'tool' } }); expect(invoked.status).toBe(202);
+    const execution = parseComponent('FunctionExecutionReceipt', await invoked.json()).execution; expect(execution).toMatchObject({ state: 'queued', trigger: 'manual', createdBy: f.accountId });
+    expect((await tool(runner, `${f.envPath}/executions/${execution.id}`)).status).toBe(200);
+    expect((await tool(runner, builds, 'POST', build)).status).toBe(403); expect((await tool(runner, functions, 'POST', { name: 'second', code: 'export default () => 1;', secretNames: [], timeoutSeconds: 30 })).status).toBe(403);
+    const publisher = (await personalFor(f.scope, ['metadata.read', 'release.publish'])).token;
+    const queued = await tool(publisher, builds, 'POST', build); expect(queued.status).toBe(201);
+    const made = parseComponent('BuildReceipt', await queued.json()).build; expect((await h.sql`SELECT created_by FROM platform_builds WHERE id = ${made.id}`)[0].created_by).toBe(f.accountId);
+    expect((await tool(publisher, `${functions}/${fn.id}/invoke`, 'POST', { input: 1 })).status).toBe(403);
+    // The same command twice is one command, for a credential as for a session.
+    const key = id(); const once = await tool(runner, `${functions}/${fn.id}/invoke`, 'POST', { input: 2 }, { 'idempotency-key': key }); const twice = await tool(runner, `${functions}/${fn.id}/invoke`, 'POST', { input: 2 }, { 'idempotency-key': key });
+    expect(parseComponent('FunctionExecutionReceipt', await twice.json()).execution.id).toBe(parseComponent('FunctionExecutionReceipt', await once.json()).execution.id);
+
+    // A credential issued for the whole project works in each of its environments, and still not in another project.
+    const wide = (await personalFor({ orgId: f.scope.orgId, projectId: f.scope.projectId }, ['metadata.read'])).token;
+    expect((await tool(wide, functions)).status).toBe(200); expect((await tool(wide, `${otherPath}/functions`)).status).toBe(200);
+    expect((await tool(wide, `${functions}/${fn.id}/invoke`, 'POST', { input: 1 })).status).toBe(403);
+
+    // A credential never has more than its account has now. Here the account's role is lowered underneath a credential that lists data.write,
+    // without the revision change that would normally retire it: the credential still cannot do what its account no longer can.
+    const capped = (await personalFor(f.scope, ['metadata.read', 'data.write'])).token;
+    expect((await tool(capped, `${functions}/${fn.id}/invoke`, 'POST', { input: 1 })).status).toBe(202);
+    // The database refuses to leave an organization without an owner, so the test sets that guard aside for these two statements.
+    await h.sql`ALTER TABLE memberships DISABLE TRIGGER USER`;
+    await h.sql`UPDATE memberships SET role = 'Viewer' WHERE account_id = ${f.accountId} AND org_id = ${f.scope.orgId}`;
+    expect((await tool(capped, functions)).status).toBe(200); expect((await tool(capped, `${functions}/${fn.id}/invoke`, 'POST', { input: 1 })).status).toBe(403);
+    await h.sql`UPDATE memberships SET role = 'Owner' WHERE account_id = ${f.accountId} AND org_id = ${f.scope.orgId}`;
+    await h.sql`ALTER TABLE memberships ENABLE TRIGGER USER`;
+
+    // Underneath the routes, the authority itself: a credential is never recently authenticated, whatever it lists, and the
+    // actor must carry the credential's own token. A different token for the same credential and account is not that credential.
+    class Probe extends PostgresPlatformAuthority { check(actor: OrganizationActor) { return this.sql.begin(async tx => (await this.actor(tx, actor)).fresh as boolean).then(fresh => `fresh=${fresh}`, error => (error as PlatformFault).code); } }
+    const cappedRow = (await h.sql`SELECT id, permission_revision::text AS revision FROM personal_credentials WHERE token_hash = ${tokenDigest(capped)}`)[0];
+    const asCredential = (tokenHash: string): OrganizationActor => ({ accountId: f.accountId, sessionId: cappedRow.id, securityRevision: '0', permissionRevision: cappedRow.revision, tokenHash, csrfHash: '', delegation: 'personal' });
+    expect(await new Probe(h.sql).check(asCredential(tokenDigest(capped)))).toBe('fresh=false');
+    expect(await new Probe(h.sql).check(asCredential(tokenDigest(reader)))).toBe('unauthenticated');
+    expect(await new Probe(h.sql).check({ ...asCredential(tokenDigest(capped)), delegation: 'device' })).toBe('unauthenticated');
+    // A browser session on these routes is still held to its CSRF token.
+    expect((await h.call(`${functions}/${fn.id}/invoke`, 'POST', { input: 1 }, { 'x-csrf-token': 'not-the-token' })).status).toBe(403);
+
+    // Everything that is not builds, releases or functions takes a session and nothing else, whatever the credential was given.
+    const everything = (await deviceFor({ orgId: f.scope.orgId }, ['metadata.read', 'members.manage', 'organization.manage', 'signing.manage', 'billing.manage'])).token;
+    for (const path of ['/platform/v1/account/session', '/platform/v1/account/profile', '/platform/v1/orgs', `/platform/v1/orgs/${f.scope.orgId}`, `/platform/v1/orgs/${f.scope.orgId}/members`, `/platform/v1/orgs/${f.scope.orgId}/audit`,
+      `/platform/v1/orgs/${f.scope.orgId}/projects`, base, f.envPath, `${f.envPath}/secrets`, `${f.envPath}/credentials`, `${f.envPath}/signing-profiles`, `/platform/v1/orgs/${f.scope.orgId}/billing`, '/platform/v1/account/personal-credentials']) {
+      const response = await tool(everything, path); const body = await response.text();
+      expect([path, response.status === 401 || (response.status === 200 && body === '{"session":null}')]).toEqual([path, true]);
+    }
+    for (const [path, body] of [[`/platform/v1/orgs/${f.scope.orgId}/members`, { email: 'x@example.test', role: 'Admin' }], [`${f.envPath}/secrets`, { name: 'INJECTED', value: 'value-from-a-tool' }],
+      [`${f.envPath}/signing-profiles`, { name: 'p', secretName: 'KEY' }], ['/platform/v1/account/personal-credentials', { name: 'minted', scope: f.scope, permissions: ['metadata.read'], expiresAt }]] as const)
+      expect([path, (await tool(everything, path, 'POST', body)).status]).toEqual([path, 403]);
+    expect((await h.sql`SELECT count(*)::integer AS n FROM environment_secrets WHERE name = 'INJECTED'`)[0].n).toBe(0);
+
+    // A browser's rules still hold for a browser. A page of another origin cannot use a credential it got hold of, and a
+    // request that carries a cookie is a session request: the credential beside it is not looked at.
+    expect((await tool(runner, `${functions}/${fn.id}/invoke`, 'POST', { input: 1 }, { origin: 'https://evil.example.test' })).status).toBe(403);
+    expect((await tool(reader, functions, 'GET', undefined, { 'sec-fetch-site': 'cross-site' })).status).toBe(403);
+    expect((await tool(runner, `${functions}/${fn.id}/invoke`, 'POST', { input: 1 }, { cookie: '__Host-carbon-session=as_' + 'A'.repeat(43) })).status).toBe(403);
+    // A session cannot be presented as a bearer token, and a credential of another kind is not one of these.
+    const session = h.cookies.get('__Host-carbon-session')!;
+    expect((await tool(session, functions)).status).toBe(401); expect((await tool(`dc_${'A'.repeat(43)}`, functions)).status).toBe(401); expect((await tool(`pt_${'A'.repeat(43)}`, functions)).status).toBe(401);
+    expect((await tool(f.worker.token, functions)).status).toBe(401);
+
+    // Revoked, expired, and retired by a change to what the account may do: each stops on its next use.
+    const grants = parseComponent('DeviceGrantPage', await (await h.call('/platform/v1/account/devices')).json()).items; const runnerGrant = grants.find(item => item.permissions.includes('data.write'))!;
+    expect((await f.post(`/platform/v1/account/devices/${runnerGrant.id}`, { kind: 'revoke' }, runnerGrant.revision)).status).toBe(200);
+    expect((await tool(runner, functions)).status).toBe(401); expect((await tool(runner, `${functions}/${fn.id}/invoke`, 'POST', { input: 1 })).status).toBe(401);
+    await h.sql`UPDATE personal_credentials SET expires_at = now() - interval '1 second' WHERE token_hash = ${tokenDigest(publisher)}`;
+    expect((await tool(publisher, builds)).status).toBe(401);
+    expect((await tool(reader, functions)).status).toBe(200);
+    await h.sql`UPDATE accounts SET permission_revision = permission_revision + 1 WHERE id = ${f.accountId}`;
+    expect((await tool(reader, functions)).status).toBe(401); expect((await tool(wide, functions)).status).toBe(401);
+    // The browser session is the same account and is not a credential: it goes on working.
+    expect((await h.call(functions)).status).toBe(200);
   }, 120000);
 
   test('functions are checked when deployed, keep what they printed with secrets removed, run on calendar schedules, and forget old inputs and outputs', async () => {

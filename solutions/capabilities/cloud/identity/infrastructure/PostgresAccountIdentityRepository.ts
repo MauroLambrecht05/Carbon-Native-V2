@@ -142,6 +142,14 @@ export class PostgresAccountIdentityRepository implements AccountIdentityReposit
     return result;
   }
 
+  async findDelegation(kind: 'device' | 'personal', tokenHash: string) {
+    // Two tables with the same shape. The name is chosen from two literals here, never from input.
+    const table = kind === 'device' ? 'device_grants' : 'personal_credentials';
+    const row = (await this.sql.unsafe(`SELECT c.id, c.account_id, a.permission_revision::text AS permission_revision FROM ${table} c JOIN accounts a ON a.id = c.account_id
+      WHERE c.token_hash = $1 AND c.status = 'active' AND c.expires_at > now() AND a.state = 'active'`, [tokenHash]))[0];
+    return row ? { accountId: row.account_id as string, credentialId: row.id as string, permissionRevision: row.permission_revision as string } : null;
+  }
+
   async findSession(tokenHash: string): Promise<BrowserSession | null> {
     const rows = await this.sql<SessionRow[]>`
       SELECT s.id, s.account_id, s.created_at, s.expires_at, s.fresh_until, s.device_name, s.csrf_hash,

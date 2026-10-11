@@ -1,7 +1,13 @@
 import type { MemberAccess, OrganizationCommand, OrganizationCreate, OrganizationMember, OrganizationReceipt, OrganizationSummary, OwnershipTransfer } from "@carbon/contracts/platform";
 import type { FreshAuthBinding } from "../../domain/entities/AccountIdentity.ts";
 
-export interface OrganizationActor extends FreshAuthBinding { readonly permissionRevision: string }
+/**
+ * Who a request speaks for. Normally a browser session. With `delegation`, a device or personal credential acting
+ * as its account: `sessionId` is then the credential's ID and `tokenHash` the credential's, there is no CSRF
+ * token, and the actor can do no more than the credential was given.
+ */
+export interface OrganizationActor extends FreshAuthBinding { readonly permissionRevision: string; readonly delegation?: DelegationKind }
+export type DelegationKind = 'device' | 'personal';
 export interface OrganizationMutation {
   readonly actor: OrganizationActor;
   readonly orgId?: string;

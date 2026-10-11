@@ -145,7 +145,10 @@ export class PostgresWorkerRepository extends PostgresPlatformAuthority implemen
 
   /** Every worker call re-reads the worker, its credential and its organization. */
   private async authenticate(tx: Tx, tokenHash: string): Promise<Row> {
-    const row = (await tx<Row[]>`SELECT w.*, w.revision::text, o.state AS organization_state FROM workers w JOIN organizations o ON o.id = w.org_id WHERE w.token_hash = ${tokenHash} FOR UPDATE OF w`)[0];
+    // NO KEY UPDATE, not UPDATE: nothing here changes the worker's key, and the stronger lock would also block every
+    // transaction that merely refers to this worker, such as one writing an event about it. A cancellation does exactly
+    // that while holding the lease this call is about to lock, and the two would then wait on each other forever.
+    const row = (await tx<Row[]>`SELECT w.*, w.revision::text, o.state AS organization_state FROM workers w JOIN organizations o ON o.id = w.org_id WHERE w.token_hash = ${tokenHash} FOR NO KEY UPDATE OF w`)[0];
     if (!row || row.status !== 'active' || row.credential_expires_at <= new Date() || row.organization_state !== 'active') throw invalidWorker();
     await tx`UPDATE workers SET last_seen_at = now() WHERE id = ${row.id}`;
     return row;

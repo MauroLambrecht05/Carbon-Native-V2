@@ -42,7 +42,16 @@ export class PostgresPlatformAuthority extends PostgresOrganizationAuthority imp
     const effective = accountGrants({ id: actor.accountId, kind: 'account', audience: 'dashboard', credentialId: actor.sessionId, permissionRevision: actor.permissionRevision },
       { accountId: actor.accountId, orgId: scope.orgId, role: org.role as Role, state: 'active', permissionRevision: actor.permissionRevision, projectAccess,
         projectIds, grants }, scope, resource);
-    return parseComponent("AccessSnapshot", { scope, permissions: effective.map(grant => grant.permission), permissionRevision: actor.permissionRevision,
+    // A credential narrows what its account may do; it never widens it. It applies only inside the scope it was issued
+    // for, and only for the permissions it lists. Outside that scope the resource does not exist as far as it can tell.
+    let permissions = effective.map(grant => grant.permission);
+    if (current.delegated) {
+      const inside = current.delegated_org_id === scope.orgId && (current.delegated_project_id === null || current.delegated_project_id === scope.projectId)
+        && (current.delegated_environment_id === null || current.delegated_environment_id === scope.environmentId);
+      if (!inside) throw new PlatformFault("not_found", scope.environmentId ? "Environment not found" : scope.projectId ? "Project not found" : "Organization not found");
+      permissions = permissions.filter(permission => (current.delegated_permissions as string[]).includes(permission));
+    }
+    return parseComponent("AccessSnapshot", { scope, permissions, permissionRevision: actor.permissionRevision,
       membershipRevision: org.membership_revision, organizationRevision: org.org_revision,
       ...(project ? { projectRevision: project.project_revision } : {}), ...(environment ? { environmentRevision: environment.environment_revision } : {}) });
   }

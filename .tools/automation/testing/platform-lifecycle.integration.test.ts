@@ -725,7 +725,8 @@ suite('Cloud-to-owning-service lifecycle over real HTTP and PostgreSQL', () => {
     // Someone else's row is not this reader's business.
     const stranger = crypto.randomUUID(); const names = databaseEnvironmentIdentifiers(scope.environmentId);
     await h.database.unsafe(`INSERT INTO "${names.schema}"."ct_${tableId.replaceAll('-', '')}" (owner, body) VALUES ($1::uuid, 'not yours')`, [stranger]);
-    const second = await insert('two'); const frame = (await stream.next())!;
+    // The next frame that carries events: a heartbeat may come first, and says nothing about either row.
+    const second = await insert('two'); let frame; do { frame = (await stream.next())!; } while (frame.message.state === 'heartbeat');
     expect(frame.message.events.map(event => [event.operation, event.rowId])).toEqual([['insert', second.rowId]]); const resume = frame.id!;
     // Quiet periods carry heartbeats, so the client can tell a silent stream from a dead one.
     let beat; do { beat = (await stream.next())!; } while (beat.message.state !== 'heartbeat'); expect(beat.message.events).toEqual([]); expect(beat.id).toBe(resume);

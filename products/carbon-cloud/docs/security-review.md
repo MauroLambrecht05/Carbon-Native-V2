@@ -16,7 +16,7 @@ against real PostgreSQL and an S3-compatible store.
 
 | # | Item | Status |
 |---|---|---|
-| 1 | Threat model reviewed for every principal and trust boundary | **Not met.** No threat model document exists |
+| 1 | Threat model reviewed for every principal and trust boundary | **Partly.** Written by the author ([threat-model.md](threat-model.md)); not reviewed by anyone else |
 | 2 | Cookie, CSRF, CORS, CSP, redirect and session-fixation protections | Met in code and tests; not verified in a browser |
 | 3 | No passwords | Met |
 | 4 | Tokens and secrets one-time, hashed or encrypted, redacted, rotation-tested | Met, with one exception: function outputs |
@@ -34,11 +34,10 @@ against real PostgreSQL and an S3-compatible store.
 
 ### 1. Threat model
 
-Not written. The trust boundaries are described piecemeal in the feature
-documents ([signed-data.md](signed-data.md), [workers.md](workers.md),
-[registry-publishing.md](registry-publishing.md),
-[billing-operators.md](billing-operators.md)), but nobody has walked each
-principal against each boundary in one place (G-159).
+[threat-model.md](threat-model.md) walks each principal against each trust
+boundary, names the test behind each claim, and lists what is not defended at
+all. The author wrote it. The checklist asks for it to be reviewed, and nobody
+else has read it (G-159).
 
 ### 2. Browser protections
 
@@ -53,6 +52,10 @@ principal against each boundary in one place (G-159).
 
 Not verified in a real browser: nothing here has run in Chrome or Firefox
 (G-151).
+
+Outside the browser, a device or personal credential is accepted on a fixed
+set of routes and nowhere else, never together with a cookie
+([credential-api.md](credential-api.md)).
 
 ### 3. Passwords
 

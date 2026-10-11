@@ -5,7 +5,7 @@ import {
   type FunctionExecutionReceipt, type FunctionInvoke, type FunctionPage, type FunctionReceipt, type FunctionRevisionDetails, type FunctionScheduleCommand, type FunctionScheduleCreate, type FunctionScheduleList,
   type FunctionScheduleReceipt, type PageRequest, type WorkerFunctionComplete, type WorkerFunctionInput,
 } from '@carbon/contracts/platform';
-import { tokenDigest, tokenMatches, type AccountAuthentication, type MessageProtector, type OrganizationActor } from '@carbon/identity';
+import { tokenDigest, type AccountAuthentication, type MessageProtector, type OrganizationActor, requestActor } from '@carbon/identity';
 import type { CommandIdentity, PlatformFunctionRepository } from '../ports/PlatformFunctionRepository.ts';
 import { CronError, nextCronTime, parseCron } from '../../domain/CronSchedule.ts';
 
@@ -26,13 +26,8 @@ function checkModule(code: string): void {
 export class AccountFunctions {
   constructor(private readonly auth: AccountAuthentication, private readonly repository: PlatformFunctionRepository, private readonly cursors: MessageProtector) {}
 
-  private async actor(token: string, csrf?: string): Promise<OrganizationActor> {
-    const session = await this.auth.session(token);
-    if (!session) throw new PlatformFault('unauthenticated', 'Sign in to manage functions');
-    if (csrf !== undefined && !tokenMatches(csrf, session.csrfHash)) throw new PlatformFault('forbidden', 'Invalid CSRF token');
-    return { accountId: session.account.id, sessionId: session.id, securityRevision: session.account.securityRevision,
-      permissionRevision: session.account.permissionRevision, tokenHash: tokenDigest(token), csrfHash: session.csrfHash };
-  }
+  /** A browser session, or a device or personal credential acting as its account within what it was given. */
+  private actor(token: string, csrf?: string): Promise<OrganizationActor> { return requestActor(this.auth, token, csrf, 'Sign in to manage functions'); }
   private identity(options: CommandOptions, requestId: string, request: unknown): CommandIdentity {
     parseComponent('CommandOptions', options); parseComponent('Id', requestId);
     return { keyDigest: tokenDigest(options.idempotencyKey), requestDigest: tokenDigest(JSON.stringify(request)), requestId };

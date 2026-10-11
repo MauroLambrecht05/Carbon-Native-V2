@@ -101,6 +101,14 @@ export class AccountAuthentication {
     return this.accounts.findSession(tokenDigest(token));
   }
 
+  /** The account a device (`dc_`) or personal (`pt_`) credential acts for, or null when the token is not a usable one. */
+  async delegation(token: string) {
+    const kind = /^dc_[A-Za-z0-9_-]{43}$/.test(token) ? 'device' as const : /^pt_[A-Za-z0-9_-]{43}$/.test(token) ? 'personal' as const : null;
+    if (!kind) return null;
+    const found = await this.accounts.findDelegation(kind, tokenDigest(token));
+    return found ? { ...found, kind } : null;
+  }
+
   private async requireSession(token: string, csrf: string) {
     const session = await this.session(token);
     if (!session) throw new PlatformFault("unauthenticated", "Sign in to authenticate this session");

@@ -80,7 +80,8 @@ export { PostgresExternalAccountRepository } from "./infrastructure/PostgresExte
 export type { ExternalAccountIdentity, ExternalAccountProvider } from "./application/ports/ExternalAccountProvider.ts";
 export { AccountAuthorization } from "./application/usecases/AccountAuthorization.ts";
 export { PostgresPlatformAuthority } from "./infrastructure/PostgresPlatformAuthority.ts";
-export type { OrganizationActor } from "./application/ports/OrganizationRepository.ts";
+export type { DelegationKind, OrganizationActor } from "./application/ports/OrganizationRepository.ts";
+export { requestActor } from "./application/usecases/RequestActor.ts";
 export { assertionTrustFromEnv } from './infrastructure/AssertionTrust.ts';
 export type { AssertionTrust } from './infrastructure/AssertionTrust.ts';
 export { HttpAssertionAuthority } from './infrastructure/HttpAssertionAuthority.ts';

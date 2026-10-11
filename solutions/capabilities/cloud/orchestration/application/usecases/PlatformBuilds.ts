@@ -4,7 +4,7 @@ import {
   PlatformFault, parseComponent, type Build, type BuildArtifact, type BuildArtifactDeclare, type BuildCommand, type BuildCreate, type BuildDetails, type BuildLogAppend, type BuildLogPage,
   type BuildPage, type BuildProvenance, type BuildReceipt, type BuildSource, type CommandOptions, type EnvironmentScope, type PageRequest, type WorkerBuildComplete, type WorkerBuildInput,
 } from '@carbon/contracts/platform';
-import { tokenDigest, tokenMatches, type AccountAuthentication, type MessageProtector, type OrganizationActor } from '@carbon/identity';
+import { tokenDigest, type AccountAuthentication, type MessageProtector, type OrganizationActor, requestActor } from '@carbon/identity';
 import type { ArtifactVerifier, PlatformBuildRepository } from '../ports/PlatformBuildRepository.ts';
 
 /** The exact bytes a build's digest covers: keys in a fixed order, lists sorted, nothing optional left implicit. */
@@ -19,13 +19,8 @@ export function canonicalBuildSource(input: BuildSource): { source: BuildSource;
 export class AccountBuilds {
   constructor(private readonly auth: AccountAuthentication, private readonly repository: PlatformBuildRepository, private readonly cursors: MessageProtector) {}
 
-  private async actor(token: string, csrf?: string): Promise<OrganizationActor> {
-    const session = await this.auth.session(token);
-    if (!session) throw new PlatformFault('unauthenticated', 'Sign in to manage builds');
-    if (csrf !== undefined && !tokenMatches(csrf, session.csrfHash)) throw new PlatformFault('forbidden', 'Invalid CSRF token');
-    return { accountId: session.account.id, sessionId: session.id, securityRevision: session.account.securityRevision,
-      permissionRevision: session.account.permissionRevision, tokenHash: tokenDigest(token), csrfHash: session.csrfHash };
-  }
+  /** A browser session, or a device or personal credential acting as its account within what it was given. */
+  private actor(token: string, csrf?: string): Promise<OrganizationActor> { return requestActor(this.auth, token, csrf, 'Sign in to manage builds'); }
 
   /**
    * Queues a build of one exact commit. The input is canonicalized and digested here and never changes afterwards:

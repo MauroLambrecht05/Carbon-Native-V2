@@ -3,7 +3,7 @@ import {
   PlatformFault, parseComponent, type ChannelCommand, type ChannelDetails, type ChannelList, type ChannelReceipt, type CommandOptions, type EnvironmentScope, type PageRequest, type Release,
   type ReleaseArtifact, type ReleaseCommand, type ReleaseCreate, type ReleasePage, type ReleaseReceipt, type SigningProfile, type SigningProfileCreate, type SigningProfileList,
 } from '@carbon/contracts/platform';
-import { tokenDigest, tokenMatches, type AccountAuthentication, type MessageProtector, type OrganizationActor } from '@carbon/identity';
+import { tokenDigest, type AccountAuthentication, type MessageProtector, type OrganizationActor, requestActor } from '@carbon/identity';
 import { BuildUpdateManifestUseCase } from '@carbon/publishing';
 import { canonicalizeManifest } from '@carbon/signing';
 import { compareVersions } from '@carbon/updating';
@@ -36,13 +36,8 @@ export class AccountReleases {
   constructor(private readonly auth: AccountAuthentication, private readonly repository: PlatformReleaseRepository, private readonly signer: ReleaseSigner, private readonly artifacts: ArtifactReader,
     private readonly cursors: MessageProtector, private readonly settings: ReleaseSettings) {}
 
-  private async actor(token: string, csrf?: string): Promise<OrganizationActor> {
-    const session = await this.auth.session(token);
-    if (!session) throw new PlatformFault('unauthenticated', 'Sign in to manage releases');
-    if (csrf !== undefined && !tokenMatches(csrf, session.csrfHash)) throw new PlatformFault('forbidden', 'Invalid CSRF token');
-    return { accountId: session.account.id, sessionId: session.id, securityRevision: session.account.securityRevision,
-      permissionRevision: session.account.permissionRevision, tokenHash: tokenDigest(token), csrfHash: session.csrfHash };
-  }
+  /** A browser session, or a device or personal credential acting as its account within what it was given. */
+  private actor(token: string, csrf?: string): Promise<OrganizationActor> { return requestActor(this.auth, token, csrf, 'Sign in to manage releases'); }
 
   /** Signs and checks that the secret still holds the key the profile recorded. A rotated or replaced secret must not sign silently. */
   private async sign(scope: EnvironmentScope, key: ProfileKey, bytes: Uint8Array): Promise<string> {

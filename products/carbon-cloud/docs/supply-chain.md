@@ -23,8 +23,8 @@ zig) or the operating-system packages inside the images.
 Moderate and low advisories are printed and do not fail. Image findings with no
 fix available are listed and do not fail.
 
-One directory in the images is left out of the failing scan: esbuild's
-prebuilt binary, a build tool that arrives with vite. It is written in Go and
+One file in the images is left out of the failing scan: esbuild's prebuilt
+binary, a build tool that arrives with vite. It is written in Go and
 reported for the Go standard library it was compiled with; no service runs it,
 and the only fix is an esbuild release built with a newer Go. Its findings are
 still listed by the second, non-failing scan.

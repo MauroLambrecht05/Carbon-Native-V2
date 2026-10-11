@@ -15,6 +15,15 @@ function cookieValue(request: Request, name: string): string {
   return matches.length === 1 ? matches[0]!.slice(name.length + 1) : "";
 }
 
+/**
+ * The only routes that take a device (`dc_`) or personal (`pt_`) credential in place of a browser session: builds,
+ * releases and channels, and functions with their executions and schedules, each inside one environment.
+ *
+ * Signing profiles are not among them: they hold release signing keys and are managed from a browser. Neither is
+ * anything about the account, its organizations, members, secrets, credentials or billing.
+ */
+const CREDENTIAL_ROUTES = new RegExp(`^${BASE}/orgs/[^/]+/projects/[^/]+/environments/[^/]+/(?:builds|releases|channels|functions|executions|schedules)(?:/|$)`);
+
 export function createAccountRoutes(auth: AccountAuthentication, origin: string, security?: AccountSecurity, profile?: AccountProfile, organizations?: OrganizationAccess, invitations?: OrganizationInvitations, github?: ExternalAccountAuthentication, access?: AccountAuthorization, catalog?: AccountCatalog, data?: AccountData, imports?: AccountImports, credentials?: AccountEnvironmentCredentials, secrets?: AccountEnvironmentSecrets, repositories?: AccountRepositories, devices?: AccountDeviceAuthorization, serviceAccounts?: AccountServiceAccounts, personal?: AccountPersonalCredentials, legacy?: AccountLegacyTokens, workers?: AccountWorkers, audit?: AccountAudit, realms?: AccountRealms, personalExchange?: PersonalCredentialExchange, builds?: AccountBuilds, releases?: AccountReleases, exports?: AccountExports, blobs?: AccountBlobs, vectors?: AccountEngine, graph?: AccountEngine, functions?: AccountFunctions, registry?: AccountRegistry, billing?: AccountBilling) {
   const secure = new URL(origin).protocol === "https:";
   const names = { session: `${secure ? "__Host-" : ""}carbon-session`, csrf: `${secure ? "__Host-" : ""}carbon-csrf`, browser: `${secure ? "__Host-" : ""}carbon-browser` };
@@ -72,7 +81,12 @@ export function createAccountRoutes(auth: AccountAuthentication, origin: string,
       // The provider's top-level redirect is authorized by single-use state,
       // PKCE and the bound SameSite=Lax browser cookie, not by its Origin.
       if (!githubCallback && ((requestOrigin && requestOrigin !== origin) || request.headers.get("sec-fetch-site") === "cross-site")) throw new PlatformFault("forbidden", "Cross-origin request denied");
-      if (!["GET", "HEAD"].includes(request.method) && requestOrigin !== origin) throw new PlatformFault("forbidden", "State changes require the configured origin");
+      // A tool presents a device or personal credential instead of a session. It is taken only on the routes named in
+      // CREDENTIAL_ROUTES, never together with a cookie, and never from a page of another origin (refused just above).
+      // A credential is not ambient, so a request carrying one does not need a browser's Origin to change something.
+      const bearer = /^Bearer ((?:dc|pt)_[A-Za-z0-9_-]{43})$/.exec(request.headers.get("authorization") ?? "")?.[1];
+      const credential = bearer && !request.headers.has("cookie") && CREDENTIAL_ROUTES.test(url.pathname) ? bearer : undefined;
+      if (!["GET", "HEAD"].includes(request.method) && requestOrigin !== origin && !(credential && !requestOrigin)) throw new PlatformFault("forbidden", "State changes require the configured origin");
       if (githubCallback) {
         if (!github) throw new PlatformFault("capability", "GitHub identity is not configured");
         if (url.search.length > 4096) throw new PlatformFault("validation", "GitHub callback exceeds the limit");
@@ -121,7 +135,7 @@ export function createAccountRoutes(auth: AccountAuthentication, origin: string,
       if (buildRoute) {
         if (!builds) throw new PlatformFault('capability', 'Builds are not configured');
         const scope = parseComponent('EnvironmentScope', { orgId: buildRoute[1], projectId: buildRoute[2], environmentId: buildRoute[3] });
-        const session = cookieValue(request, names.session); const csrf = request.headers.get('x-csrf-token') ?? ''; const buildId = buildRoute[4];
+        const session = credential ?? cookieValue(request, names.session); const csrf = request.headers.get('x-csrf-token') ?? ''; const buildId = buildRoute[4];
         if (request.method === 'GET' && buildRoute[5] === '/provenance') return json(await builds.provenance(session, scope, buildId!));
         if (request.method === 'GET' && buildRoute[5]) {
           for (const key of url.searchParams.keys()) if (!['after', 'limit'].includes(key) || url.searchParams.getAll(key).length !== 1) throw new PlatformFault('validation', 'Unsupported log query');
@@ -136,7 +150,7 @@ export function createAccountRoutes(auth: AccountAuthentication, origin: string,
       if (releaseRoute) {
         if (!releases) throw new PlatformFault('capability', 'Releases are not configured');
         const scope = parseComponent('EnvironmentScope', { orgId: releaseRoute[1], projectId: releaseRoute[2], environmentId: releaseRoute[3] });
-        const session = cookieValue(request, names.session); const csrf = request.headers.get('x-csrf-token') ?? ''; const kind = releaseRoute[4]; const id = releaseRoute[5];
+        const session = credential ?? cookieValue(request, names.session); const csrf = request.headers.get('x-csrf-token') ?? ''; const kind = releaseRoute[4]; const id = releaseRoute[5];
         const options = () => parseComponent('CommandOptions', { idempotencyKey: request.headers.get('idempotency-key') ?? '', expectedRevision: request.headers.get('if-match')?.replace(/^"([1-9][0-9]*)"$/, '$1') });
         if (kind === 'signing-profiles' && !id) {
           if (request.method === 'GET') return json(await releases.profiles(session, scope));
@@ -235,7 +249,7 @@ export function createAccountRoutes(auth: AccountAuthentication, origin: string,
       if (functionRoute) {
         if (!functions) throw new PlatformFault('capability', 'Functions are not configured');
         const scope = parseComponent('EnvironmentScope', { orgId: functionRoute[1], projectId: functionRoute[2], environmentId: functionRoute[3] });
-        const session = cookieValue(request, names.session); const csrf = request.headers.get('x-csrf-token') ?? ''; const [kind, id, sub, subId] = [functionRoute[4], functionRoute[5], functionRoute[6], functionRoute[7]];
+        const session = credential ?? cookieValue(request, names.session); const csrf = request.headers.get('x-csrf-token') ?? ''; const [kind, id, sub, subId] = [functionRoute[4], functionRoute[5], functionRoute[6], functionRoute[7]];
         const options = () => parseComponent('CommandOptions', { idempotencyKey: request.headers.get('idempotency-key') ?? '', expectedRevision: request.headers.get('if-match')?.replace(/^"([1-9][0-9]*)"$/, '$1') }); const get = request.method === 'GET'; const post = request.method === 'POST';
         if (kind === 'functions') {
           if (get && !id) return json(await functions.list(session, scope, page()));
