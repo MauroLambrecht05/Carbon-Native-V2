@@ -292,6 +292,7 @@ jobs:
           ./products/carbon-registry
           ./products/carbon-cli
           ./.tools/automation/testing
+          ./.tools/automation/ci/supply-chain.test.ts
           --timeout 240000
 
   # The end-to-end evidence: the CLI, the build pipeline, both renderers and a

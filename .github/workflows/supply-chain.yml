@@ -1,0 +1,155 @@
+name: Supply chain
+
+# What this repository receives from others, and what it would ship: known
+# vulnerabilities in pinned dependencies, a bill of materials, and whether the
+# service images build, start and are free of fixable critical findings.
+#
+# This is its own workflow, not a job in ci.yml, because its answer changes
+# when the world does. An advisory published overnight fails this workflow on
+# the next run without failing the build of an unrelated change. It runs on
+# every push and pull request, and once a week so a quiet repository still
+# hears about new advisories.
+#
+# How to act on a failure: products/carbon-cloud/docs/supply-chain.md.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dependencies:
+    name: dependency advisories
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.10"
+
+      # High and critical advisories block unless .config/audit-exceptions.json
+      # holds a dated exception for them; an expired exception blocks too.
+      - name: javascript advisories
+        run: bun .tools/automation/ci/audit.ts
+
+      # cargo-audit reads the lockfile and the RustSec database; nothing is
+      # compiled. Exceptions, with their reasons, live in
+      # .tools/orchestration/bazel/cargo/.cargo/audit.toml.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - name: rust advisories
+        working-directory: .tools/orchestration/bazel/cargo
+        run: cargo audit --file Cargo.lock
+
+  sbom:
+    name: bill of materials
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.10"
+      # Derived from the two lockfiles alone, so the same commit always gives
+      # the same file.
+      - name: generate
+        run: bun .tools/automation/ci/sbom.ts carbon-native.cdx.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: carbon-native.cdx.json
+          if-no-files-found: error
+
+  images:
+    name: image (${{ matrix.service.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - { name: cloud, product: carbon-cloud, port: 8080 }
+          - { name: database, product: carbon-database, port: 54321 }
+          - { name: registry, product: carbon-registry, port: 54323 }
+    services:
+      # pgvector because Carbon Database's schema needs it; the other two are
+      # content with any PostgreSQL 16.
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: carbon
+          POSTGRES_PASSWORD: carbon_ci_only
+          POSTGRES_DB: carbon
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U carbon -d carbon"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: build
+        run: docker build -f products/${{ matrix.service.product }}/composition/docker/control-plane.Dockerfile -t carbon/${{ matrix.service.name }}:ci .
+
+      # Registry writes its built-in packages to the bucket when it starts, so
+      # the image is run against a real S3-compatible store (the same one, by
+      # the same digest, as ci.yml's integration job).
+      - name: start an object store
+        env:
+          AWS_ACCESS_KEY_ID: carbon_ci
+          AWS_SECRET_ACCESS_KEY: carbon_ci_only_secret
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          docker run -d --name store -p 127.0.0.1:9000:9000 \
+            -e RUSTFS_ACCESS_KEY=carbon_ci -e RUSTFS_SECRET_KEY=carbon_ci_only_secret \
+            rustfs/rustfs@sha256:1803faef57627e2d9c2e7d89d655d712ddded5389040054987163043fecb6a3c /data
+          made=no
+          for attempt in $(seq 1 30); do
+            if aws --endpoint-url http://127.0.0.1:9000 s3 mb s3://carbon; then made=yes; break; fi
+            sleep 2
+          done
+          if [ "$made" != yes ]; then docker logs store; exit 1; fi
+
+      # The image as a deployment would run it: migrations as their own step,
+      # then the service told not to migrate. It must come up ready.
+      - name: migrate, start, and wait until ready
+        env:
+          COMMON: >-
+            --network host
+            -e DATABASE_URL=postgres://carbon:carbon_ci_only@127.0.0.1:5432/carbon
+            -e OBJECT_STORE_ENDPOINT=http://127.0.0.1:9000
+            -e OBJECT_STORE_ACCESS_KEY_ID=carbon_ci
+            -e OBJECT_STORE_SECRET_ACCESS_KEY=carbon_ci_only_secret
+            -e OBJECT_STORE_BUCKET=carbon
+            -e OBJECT_STORE_PUBLIC_BASE_URL=http://127.0.0.1:9000/carbon
+            -e CONTROL_PLANE_URL=http://127.0.0.1:8080
+            -e PORT=${{ matrix.service.port }}
+        run: |
+          docker run --rm $COMMON carbon/${{ matrix.service.name }}:ci bun products/${{ matrix.service.product }}/composition/migrate.ts
+          docker run --rm $COMMON carbon/${{ matrix.service.name }}:ci bun products/${{ matrix.service.product }}/composition/migrate.ts status
+          docker run -d --name service $COMMON -e CARBON_MIGRATE_ON_START=disabled carbon/${{ matrix.service.name }}:ci
+          ready=no
+          for attempt in $(seq 1 30); do
+            if [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:${{ matrix.service.port }}/readyz)" = 200 ]; then ready=yes; break; fi
+            sleep 2
+          done
+          docker logs service
+          if [ "$ready" != yes ]; then exit 1; fi
+          curl -fsS http://127.0.0.1:${{ matrix.service.port }}/healthz
+
+      # Critical and high findings that have a fix available fail the job.
+      # Findings with no fix yet are listed by the second run and do not.
+      - name: scan for fixable vulnerabilities
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/aquasecurity/trivy:0.57.1 image \
+            --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 --no-progress carbon/${{ matrix.service.name }}:ci
+      - name: list findings without a fix
+        if: always()
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/aquasecurity/trivy:0.57.1 image \
+            --scanners vuln --severity CRITICAL,HIGH --exit-code 0 --no-progress carbon/${{ matrix.service.name }}:ci || true

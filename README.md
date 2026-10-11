@@ -106,6 +106,7 @@ V2/
 ├── features.json                      # Feature flags (SIMD, zero-copy, Zig plugins)
 ├── package.json                       # Third-party npm deps for the TypeScript tier
 ├── bun.lock                           # …and its lockfile
+├── audit-exceptions.json              # Dated exceptions to the dependency advisory gate
 ├── bunfig.toml                        # Bun's own settings
 ├── tsconfig.base.json                 # @carbon/* path aliases (this replaces bun workspaces)
 ├── BUILD.bazel                        # Exposes the tsconfig to Bazel targets

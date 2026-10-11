@@ -1,0 +1,14 @@
+[
+  {
+    "advisory": "GHSA-wrjc-x8rr-h8h6",
+    "package": "react-router",
+    "reason": "Open redirect through a backslash in a navigation target. Fixed only in react-router 7, a major upgrade of the console and the website. The console never navigates to a caller-supplied address: returnTo is checked against its own route table (safeReturn). Remove this when the router is upgraded.",
+    "reviewBy": "2027-01-31"
+  },
+  {
+    "advisory": "GHSA-337j-9hxr-rhxg",
+    "package": "react-router",
+    "reason": "Affects server-side rendering hydration (deserializeErrors). Neither the console nor the website renders on a server: both are static client builds. Fixed only in react-router 7. Remove this when the router is upgraded.",
+    "reviewBy": "2027-01-31"
+  }
+]

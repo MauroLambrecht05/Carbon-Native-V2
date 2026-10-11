@@ -27,7 +27,7 @@ against real PostgreSQL and an S3-compatible store.
 | 9 | Explicit visibility for public objects; no guessable private keys | Met for what is built |
 | 10 | Payment data stays with the provider; webhook signatures and replay windows | Met; never run against the provider |
 | 11 | Deliberate policies for export, deletion, audit and backup retention, operator access | **Partly.** Operator access yes; retention mostly undecided |
-| 12 | Dependency and container scanning, SBOM, signed releases, patch procedure | **Not met** |
+| 12 | Dependency and container scanning, SBOM, signed releases, patch procedure | **Partly.** Scanning, SBOM and procedure yes; signed service images no |
 | 13 | Independent security review | **Not done** |
 
 ## Item by item
@@ -156,9 +156,11 @@ Never run against the real provider (G-136).
 
 ### 12. Supply chain
 
-Not met. There is no dependency scanning, no container scanning, no SBOM and no
-patch procedure. Builds produced by the platform get signed provenance; the
-platform's own services and containers do not (G-161).
+Partly met. A workflow audits the JavaScript and Rust lockfiles, writes a bill
+of materials, and builds, starts and scans each service image; the procedure
+for a failure is in [supply-chain.md](supply-chain.md). Builds produced by the
+platform get signed provenance; the platform's own service images are not
+signed or published (G-161).
 
 ### 13. Independent review
 
