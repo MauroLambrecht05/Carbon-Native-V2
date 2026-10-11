@@ -23,6 +23,16 @@ zig) or the operating-system packages inside the images.
 Moderate and low advisories are printed and do not fail. Image findings with no
 fix available are listed and do not fail.
 
+One directory in the images is left out of the failing scan: esbuild's
+prebuilt binary, a build tool that arrives with vite. It is written in Go and
+reported for the Go standard library it was compiled with; no service runs it,
+and the only fix is an esbuild release built with a newer Go. Its findings are
+still listed by the second, non-failing scan.
+
+The service images are built without `labs/`: each Dockerfile has its own
+`.dockerignore` beside it. A service does not run an example app, so its image
+does not carry one.
+
 ## When the JavaScript check fails
 
 1. Read the advisory. Decide whether the vulnerable code is reachable from

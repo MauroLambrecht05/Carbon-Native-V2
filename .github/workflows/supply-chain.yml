@@ -144,11 +144,18 @@ jobs:
 
       # Critical and high findings that have a fix available fail the job.
       # Findings with no fix yet are listed by the second run and do not.
+      #
+      # One directory is not scanned: esbuild's prebuilt binary. It is a build
+      # tool that arrives with vite, is written in Go, and is reported for the
+      # Go standard library it was compiled with. No service executes it, and
+      # the only fix is a release of esbuild built with a newer Go. The second
+      # run does scan it, so its findings stay visible.
       - name: scan for fixable vulnerabilities
         run: |
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/aquasecurity/trivy:0.57.1 image \
-            --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 --no-progress carbon/${{ matrix.service.name }}:ci
-      - name: list findings without a fix
+            --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 --no-progress \
+            --skip-dirs "app/.config/node_modules/@esbuild" carbon/${{ matrix.service.name }}:ci
+      - name: list every finding, fixable or not
         if: always()
         run: |
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/aquasecurity/trivy:0.57.1 image \

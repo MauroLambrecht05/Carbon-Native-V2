@@ -1,0 +1,17 @@
+# What this image's build context leaves out. A file with this name beside a
+# Dockerfile replaces the root .dockerignore for that Dockerfile, so the root
+# file's entries are repeated here.
+#
+# On top of them: labs/. A service never runs an example app or an experiment,
+# and an image should not carry code it does not run.
+
+.git/
+node_modules/
+.config/node_modules/
+.tools/orchestration/bazel/cargo/target/
+bazel-*/
+.bazel/
+dist/
+.carbon-cache/
+labs/e2e/
+labs/

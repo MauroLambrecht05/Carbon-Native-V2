@@ -9,7 +9,9 @@ FROM debian:bookworm-slim
 ARG BUN_VERSION=1.3.10
 ENV PATH=/usr/local/bun/bin:$PATH
 
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl unzip \
+# Upgrade first: the base image is rebuilt less often than its packages are
+# fixed, and an image scan fails on a package that has a fix waiting.
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends ca-certificates curl unzip \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local/bun bash -s "bun-v${BUN_VERSION}"
