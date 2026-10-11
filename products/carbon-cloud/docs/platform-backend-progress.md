@@ -2290,8 +2290,8 @@ met; backup and restore are not built (G-135).
   a Developer sees projects and no billing.
 - **Without a database, in CI:** the subscription rules for every event and for
   any order of delivery, and the provider event parser.
-- **Mutation checks:** 48 deliberate breakages: 13 in billing and its routes, 9
-  in admission and metering, 20 in operators and the deletion gates, and 10 in
+- **Mutation checks:** 48 deliberate breakages: 7 in billing and its routes, 12
+  in admission and metering, 19 in operators and the deletion gates, and 10 in
   the subscription rules and the parser, with the migration's triggers and
   constraints among them. All 48 make a test fail.
 
