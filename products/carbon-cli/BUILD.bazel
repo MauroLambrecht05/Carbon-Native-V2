@@ -81,6 +81,16 @@ bun_test(
 )
 
 bun_test(
+    name = "cloud_platform_command_test",
+    entry = "tests/cloud-platform.command.test.ts",
+    srcs = [
+        ":srcs",
+        ":test_srcs",
+    ],
+    data = _DEPS,
+)
+
+bun_test(
     name = "device_authorization_test",
     entry = "tests/device-authorization.test.ts",
     srcs = [

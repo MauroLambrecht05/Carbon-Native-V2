@@ -14,6 +14,7 @@ import { parseComponent, type Permission } from "@carbon/contracts/platform";
 import { DeviceAuthorizationClient } from "../../../infrastructure/cloud/DeviceAuthorizationClient.ts";
 import { DeviceCredentialStore } from "../../../infrastructure/cloud/DeviceCredentialStore.ts";
 import { RegistryDeviceClient } from "../../../infrastructure/cloud/RegistryDeviceClient.ts";
+import { platformCommand } from "./platform.command.ts";
 
 // Same directory signer.command.ts uses for keys — one place a user looks
 // for anything `carbon` keeps on their machine.
@@ -72,6 +73,12 @@ export async function cloudCommand(rest: string[], dependencies: CloudCommandDep
         return await cloudList(args);
       case "status":
         return await cloudStatus(args);
+      // One environment's builds, releases, channels and functions, through the device login or CARBON_TOKEN.
+      case "builds":
+      case "releases":
+      case "channels":
+      case "functions":
+        return await platformCommand(subcommand, args);
       case "--help":
       case "-h":
       case "help":
@@ -368,7 +375,12 @@ ${c.bold("Subcommands:")}
                from the org token above: a worker token can claim/complete
                any org's queued work, an org token cannot
 
-  ${c.cyan("deploy")}   Queue a build
+  ${c.cyan("builds")}, ${c.cyan("releases")}, ${c.cyan("channels")}, ${c.cyan("functions")}
+               This environment's builds, releases, channels and functions, with the
+               device login or a credential in CARBON_TOKEN. Each prints its own help:
+               carbon cloud functions --help
+
+  ${c.cyan("deploy")}   Queue a build on the legacy build queue (see "builds create" for the current one)
                --repo <git-url>            (required)
                --commit <sha>              (required)
                --target <id>               (required, repeatable)

@@ -74,10 +74,38 @@ On its next use, with `401`:
   is not looked at.
 - A request from a page of another origin is refused whatever it carries.
 
+## From the CLI
+
+`carbon cloud builds`, `releases`, `channels` and `functions` call these routes.
+Each prints its own help, for example `carbon cloud functions --help`.
+
+```
+carbon cloud functions deploy report --file report.js --secret API_KEY
+carbon cloud functions invoke <functionId> --input '{"month":"2026-10"}' --wait
+carbon cloud functions logs <executionId>
+carbon cloud builds create --repo <url> --commit <sha> --target nsis --platform windows
+carbon cloud builds logs <buildId>
+carbon cloud channels publish stable --release <releaseId> --rollout 10
+```
+
+The credential is the active `carbon cloud login`, which must be for one
+environment. For automation, `CARBON_TOKEN` names a device or personal
+credential outright and takes precedence; it then needs `CARBON_CLOUD_URL`,
+`CARBON_ORG`, `CARBON_PROJECT` and `CARBON_ENVIRONMENT`, because a personal
+credential does not say where it is to be used.
+
+Each subcommand prints Cloud's JSON answer on standard output and nothing else,
+so it can be piped. Exit code 0 means Cloud answered; 1 means it refused or
+could not be reached; 2 means the command was used wrongly and nothing was
+sent. A command on something that exists reads its current revision first and
+sends that with the command. `invoke --wait` follows the execution until it is
+over and never invokes twice.
+
+The CLI never prints the credential, and reports a `401` as one fixed sentence
+whatever the response said.
+
 ## What is not built
 
-- The CLI does not use these routes yet; it still has no build, release or
-  function commands (G-128).
 - Service accounts (`cs_`), environment credentials (`ce_`) and app users
   cannot call these routes (G-104).
 - Organizations, projects and environments cannot be read with a credential,

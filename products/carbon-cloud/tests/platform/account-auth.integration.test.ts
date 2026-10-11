@@ -2361,6 +2361,32 @@ suite("real account authentication", () => {
     expect((await tool(session, functions)).status).toBe(401); expect((await tool(`dc_${'A'.repeat(43)}`, functions)).status).toBe(401); expect((await tool(`pt_${'A'.repeat(43)}`, functions)).status).toBe(401);
     expect((await tool(f.worker.token, functions)).status).toBe(401);
 
+    // The real `carbon` binary, as its own process, against Cloud over a real socket. The server here stands where an
+    // ingress would: it accepts the connection and hands Cloud the request under its configured host.
+    const served = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: request => h.raw(new Request(request.url.replace(/^http:\/\/127\.0\.0\.1:\d+/, origin), request)) });
+    try {
+      const carbon = async (token: string, ...args: string[]) => {
+        const child = Bun.spawn([process.execPath, 'products/carbon-cli/main.ts', 'cloud', ...args], { cwd: join(import.meta.dir, '../../../..'), stdout: 'pipe', stderr: 'pipe',
+          env: { ...process.env, CARBON_TOKEN: token, CARBON_CLOUD_URL: `http://127.0.0.1:${served.port}`, CARBON_ORG: f.scope.orgId, CARBON_PROJECT: f.scope.projectId, CARBON_ENVIRONMENT: f.scope.environmentId, NO_COLOR: '1' } });
+        const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+        return { code, stdout, stderr };
+      };
+      const cliList = await carbon(reader, 'functions', 'list'); expect([cliList.code, cliList.stderr]).toEqual([0, '']);
+      expect(parseComponent('FunctionPage', JSON.parse(cliList.stdout)).items.map(item => item.id)).toEqual([fn.id]);
+      const cliInvoke = await carbon(capped, 'functions', 'invoke', fn.id, '--input', '{"from":"cli"}'); expect(cliInvoke.code).toBe(0);
+      const cliExecution = parseComponent('FunctionExecutionReceipt', JSON.parse(cliInvoke.stdout)).execution; expect(cliExecution).toMatchObject({ state: 'queued', createdBy: f.accountId });
+      expect((await h.sql`SELECT input FROM function_executions WHERE id = ${cliExecution.id}`)[0].input).toEqual({ from: 'cli' });
+      // The credential's limits are Cloud's to enforce, and the tool reports them: a read-only credential cannot deploy, and nothing is printed as a result.
+      const moduleFile = join(tmpdir(), `carbon-cli-fn-${id()}.js`); writeFileSync(moduleFile, 'export default () => 2;');
+      try {
+        const refusedDeploy = await carbon(reader, 'functions', 'deploy', 'from-cli', '--file', moduleFile); expect([refusedDeploy.code, refusedDeploy.stdout]).toEqual([1, '']); expect(refusedDeploy.stderr).toContain('forbidden');
+        expect(refusedDeploy.stderr).not.toContain(reader);
+      } finally { rmSync(moduleFile, { force: true }); }
+      const cliBuilds = await carbon(publisher, 'builds', 'list'); expect(cliBuilds.code).toBe(0); expect(parseComponent('BuildPage', JSON.parse(cliBuilds.stdout)).items.map(item => item.id)).toEqual([made.id]);
+      // A credential that does not work is one message, exit code 1, and the token is not echoed.
+      const bad = await carbon(`pt_${'Z'.repeat(43)}`, 'functions', 'list'); expect([bad.code, bad.stdout]).toEqual([1, '']); expect(bad.stderr).toContain('invalid, expired or revoked'); expect(bad.stderr).not.toContain('Z'.repeat(43));
+    } finally { await served.stop(true); }
+
     // Revoked, expired, and retired by a change to what the account may do: each stops on its next use.
     const grants = parseComponent('DeviceGrantPage', await (await h.call('/platform/v1/account/devices')).json()).items; const runnerGrant = grants.find(item => item.permissions.includes('data.write'))!;
     expect((await f.post(`/platform/v1/account/devices/${runnerGrant.id}`, { kind: 'revoke' }, runnerGrant.revision)).status).toBe(200);
