@@ -105,9 +105,9 @@ What is limited inside the services:
 
 | What | Limit | Counted by |
 |---|---|---|
-| Sign-in, recovery and verification links | 20 an hour | A keyed digest of the address and of the peer, in the database |
-| Device authorization requests and polling | 20 an hour; polling no faster than the interval given | The same, in the database |
-| Worker enrollment attempts | A handful per window | The peer, in the database |
+| Sign-in, recovery and verification links | 20 in 15 minutes | A keyed digest of what the request names, in the database |
+| Device authorization requests | 20 in 15 minutes; polling no faster than the interval given | A keyed digest of the peer, in the database |
+| Worker enrollment attempts | 10 in 15 minutes, counted whether or not the code was right | A keyed digest of the peer, in the database |
 | Requests from one worker credential | 1,200 a minute by default (`CARBON_WORKER_REQUESTS_PER_MINUTE`, 60 to 100,000) | A digest of the credential, in the memory of each Cloud instance |
 
 The worker limit is per instance: with several instances behind a balancer a
