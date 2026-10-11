@@ -47,7 +47,7 @@ The ledger falls into three kinds of work:
 - **Needs something from outside.** A deployment (G-03, G-154), a database in CI (G-50), a Windows host with packaging tools and a signing certificate (G-36, G-37), an isolation mechanism for builds and functions (G-38, G-100), real AWS KMS, a real identity provider and the real payment provider (G-01, G-136), and an independent reviewer (G-159).
 - **Needs the owner's decision.** Every such question is in [decisions.md](../decisions.md) with the default in force. "Keep" closes one.
 
-Suggested order for what can be done in the repository: the CLI commands over the credential routes (G-128); the rest of the console (G-147); table deletion, schema changes as jobs, promotion and restricted SQL (G-64 to G-67); backup and restore (G-135); removal of Cloud's own rows at final deletion (G-09); owning-service and account events in the organization log (G-17, G-21); the cleanup sweeps (G-47, G-62, G-73, G-83, G-121, G-132); general rate limiting (G-18, G-60, G-80); then the legacy paths.
+Suggested order for what can be done in the repository: the rest of the console (G-147), area by area, following `LiveFunctionPages` and `LiveDeliveryPages`: live pages over a live contract, a rendering test in `tests/browser/live.test.tsx`, and a walkthrough against the real API in `account-auth.integration.test.ts`; table deletion, schema changes as jobs, promotion and restricted SQL (G-64 to G-67); backup and restore (G-135); removal of Cloud's own rows at final deletion (G-09); owning-service and account events in the organization log (G-17, G-21); the cleanup sweeps (G-47, G-62, G-73, G-83, G-121, G-132); general rate limiting (G-18, G-60, G-80); then the legacy paths.
 
 ## Deferred work
 

@@ -2506,20 +2506,33 @@ scope and permissions. Closes the server half of G-128 and part of G-104.
 execution could deadlock with the worker's heartbeat and answer 500. Fixed,
 with a test that reproduces it deterministically.
 
+**The CLI** (`a289c71`, `8fd414b`). `carbon cloud builds`, `releases`,
+`channels` and `functions`, with the device login or a credential in
+`CARBON_TOKEN`; tested as commands, as requests on the wire, and as the real
+binary against a served Cloud. Closes the CLI workflows of G-128 and most of
+G-11.
+
+**The console** (`4639b9f`, `8fd414b`). Functions, builds, signing profiles,
+releases and update channels work against the live service, with pages written
+for what the service has, each rendered from live answers and walked against
+the real API. Five more areas of G-147.
+
 **Documents.** [threat-model.md](threat-model.md) (the author's own; closes
 part of G-159) and [decisions.md](decisions.md), which gathers every question
 that is a choice and not work, with the default in force and its reason.
 
-Deliberate breakages in this phase so far: 22 for functions, 17 for erasure and
-11 for credential access. Every one fails a test, after three scenarios were
-added for erasure and three for credentials, and one redundant check found by a
+Deliberate breakages in this phase so far: 22 for functions, 17 for erasure, 11
+for credential access, 26 for the CLI, and 17 and 16 for the two console areas.
+All but two fail a test, after scenarios were added where one first survived;
+the two are equivalent to the original, and one redundant check found by a
 surviving breakage was removed.
 
 The latest full regression passed 763 of 764 tests; the one failure was an
 older stream test that read a heartbeat frame as an event frame, since fixed.
 
 **Still open.** The ledger. Its largest parts are the rest of the console
-(G-147), isolation of builds and functions (G-38, G-100), backup and restore
-(G-135), the data features Phase 10 did not reach (G-64 to G-67), the CLI
-commands (G-128), and everything that needs something from outside the
-repository.
+(G-147: secrets and credentials, workers, data, application authentication,
+storage, vectors, graph, realtime, Registry, billing, operators), isolation of
+builds and functions (G-38, G-100), backup and restore (G-135), the data
+features Phase 10 did not reach (G-64 to G-67), and everything that needs
+something from outside the repository.
