@@ -2233,3 +2233,78 @@ legacy paths or do not exist (G-128). New gaps are G-126 to G-134.
 
 Phase 15 stops here. Phase 16 (billing, quotas, operators and recovery) is next
 in [the handoff](left-off/handoff.md).
+
+## 2026-10-11: Phase 16, billing, quotas, operators and deletion gates (partly complete)
+
+Phase 16 added a subscription projection and metering to `@carbon/billing`,
+operators to `@carbon/identity`, and the gates on final deletion
+([billing-operators.md](billing-operators.md),
+[billing-operator-api.openapi.json](billing-operator-api.openapi.json), Cloud
+migration `0031_billing_operators.sql`).
+
+- **Billing.** Signed provider events go into an inbox and update a local
+  subscription with six states. The plan every other part of Cloud reads
+  follows it. Invoices are metadata and the provider's link.
+- **Quota.** One gate admits charged work under a lock per organization,
+  against the plan's allowance and the organization's own budget, and records
+  usage once per thing that happened. Function invocations are now a plan
+  allowance; build minutes obey budgets and are written to the shared meter.
+- **Operators.** Separate accounts with three roles, an `op_` credential, an
+  API that refuses browsers, a reason and the current revision for every act,
+  and a permanent record. No impersonation exists.
+- **Deletion gates.** A legal hold stops final deletion of an organization and
+  everything in it. A subscription the provider may still charge stops the
+  organization's. Finishing a scheduled deletion early takes two operators.
+
+Proof gate ("provider webhook replay, quota races, operator audit,
+backup/restore and irreversible-deletion gates pass"). Four of the five are
+met; backup and restore are not built (G-135).
+
+- **Webhook replay:** a wrong secret, a changed body, an old timestamp and a
+  missing signature store nothing; the same event again, and five at once, is
+  applied once; an older event arriving late is stale; every state from free
+  through checkout, active, past due, cancellation scheduled and ended, with
+  the plan following; an ended subscription is not revived by any event;
+  unmatched and unknown events are kept and change nothing; invoices keep their
+  newest facts and drop a link that is not https.
+- **Quota races:** eight invocations arriving together across two environments
+  against an allowance of five admit exactly five; a cancelled execution gives
+  its place back; a lost worker's retry is one invocation; recording again
+  records nothing; last month and other organizations do not count; a paid plan
+  raises the limit; a cap budget refuses under a race; a warn budget lets work
+  through and says so once; a scheduled run with no allowance skips its slot;
+  build minutes obey a budget and are metered under the build's name.
+- **Operator audit:** an operator credential opens only the operator API, and
+  customer credentials do not open it; a browser-shaped request is refused;
+  each command needs its role, a real reason and the current revision; the
+  customer's log shows the act without naming the operator; the record lists
+  every act with who, role, reason and approval, and cannot be changed.
+- **Irreversible-deletion gates:** the timer leaves an organization pending
+  under a legal hold or a live subscription, and leaves its projects and
+  environments pending under a hold; an operator cannot start a deletion; an
+  early deletion needs a second operator with the right role, and is refused if
+  the requester approves, the request lapsed, a hold or subscription appeared,
+  or the organization changed at all since the request; the database refuses a
+  self-approved row.
+- **Billing access:** a Billing member sees totals and invoices and no project;
+  a Developer sees projects and no billing.
+- **Without a database, in CI:** the subscription rules for every event and for
+  any order of delivery, and the provider event parser.
+- **Mutation checks:** 48 deliberate breakages: 13 in billing and its routes, 9
+  in admission and metering, 20 in operators and the deletion gates, and 10 in
+  the subscription rules and the parser, with the migration's triggers and
+  constraints among them. All 48 make a test fail.
+
+The affected regression passed **723 tests, 0 failures and 8,306 assertions across 89 files, with the object-store tests run against a local MinIO container**. Generated contracts are current and the
+TypeScript checks pass.
+
+**Why partly complete.** Backup and restore, which the gate names, are not
+built: there are no recovery points and no restore (G-135). New gaps are G-135
+to G-146. The others to know: nothing has run against the real payment provider
+(G-136); unknown outcomes are kept but nothing resolves them (G-138); only two
+meters exist (G-139); operators have no sign-in of their own (G-141); a legal
+hold stops final deletion but not ordinary deletion of data by the customer
+(G-142).
+
+Phase 16 stops here. Phase 17 (the production frontend) is next in
+[the handoff](left-off/handoff.md).

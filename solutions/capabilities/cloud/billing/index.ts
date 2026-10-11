@@ -23,3 +23,9 @@ export { PostgresBillingRepository } from "./infrastructure/PostgresBillingRepos
 export { FakeCheckoutSessionProvider } from "./infrastructure/FakeCheckoutSessionProvider.ts";
 export { StripeCheckoutProvider, StripeApiError, NoPriceConfiguredError, type StripeConfig } from "./infrastructure/StripeCheckoutProvider.ts";
 export { verifyStripeWebhookSignature } from "./infrastructure/verifyStripeWebhookSignature.ts";
+
+// Subscriptions from provider events, metered usage with budgets, and the account's view of both.
+export { FREE, billable, entitledPlan, project, type BillingEvent, type InvoiceFacts, type InvoiceStatus, type Subscription, type SubscriptionState } from "./domain/Subscription.ts";
+export { parseStripeEvent } from "./infrastructure/StripeEvents.ts";
+export { PostgresBilling, UsageGate, type Meter, type WebhookOutcome } from "./infrastructure/PostgresBilling.ts";
+export { AccountBilling, BillingWebhooks } from "./application/usecases/AccountBilling.ts";

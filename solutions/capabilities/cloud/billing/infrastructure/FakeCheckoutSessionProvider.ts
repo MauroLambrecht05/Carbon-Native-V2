@@ -16,6 +16,6 @@ export class FakeCheckoutSessionProvider implements CheckoutSessionProvider {
     url.searchParams.set("fake_session", crypto.randomUUID());
     url.searchParams.set("org", orgId);
     url.searchParams.set("plan", plan);
-    return { url: url.toString() };
+    return { url: url.toString(), id: `cs_test_${crypto.randomUUID().replaceAll('-', '')}` };
   }
 }

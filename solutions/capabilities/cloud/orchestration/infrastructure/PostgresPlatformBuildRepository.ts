@@ -64,6 +64,8 @@ export class PostgresPlatformBuildRepository extends PostgresPlatformAuthority i
     const updated = (await tx<Row[]>`UPDATE platform_builds SET state = ${state}, used_minutes = ${usedMinutes}, error_category = ${errorCategory}, completed_at = now(), revision = revision + 1
       WHERE id = ${row.id} RETURNING *, revision::text`)[0]!;
     if (usedMinutes > 0) await tx`INSERT INTO usage_records (id, org_id, build_id, duration_ms) VALUES (${randomUUID()}, ${row.org_id}, ${row.id}, ${usedMinutes * 60_000})`;
+    // The same fact in the meter every charged thing shares. The build names it, so it is counted once.
+    if (usedMinutes > 0) await tx`INSERT INTO usage_events (id, org_id, meter, quantity, source_key) VALUES (${randomUUID()}, ${row.org_id}, 'build_minutes', ${usedMinutes}, ${`build:${row.id}`}) ON CONFLICT (source_key) DO NOTHING`;
     await this.event(tx, updated, `build.${state}`, requestId, ids);
     return updated;
   }
@@ -89,6 +91,9 @@ export class PostgresPlatformBuildRepository extends PostgresPlatformAuthority i
           WHERE org_id = ${scope.orgId} AND recorded_at >= date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`)[0]!.minutes);
         const reserved = Number((await tx<{ minutes: string }[]>`SELECT COALESCE(sum(reserved_minutes), 0)::bigint::text AS minutes FROM platform_builds WHERE org_id = ${scope.orgId} AND state IN ('queued', 'running')`)[0]!.minutes);
         if (used + reserved + RESERVED_MINUTES > included) throw new PlatformFault('quota', 'This organization has no build minutes left this month', { quota: 'build_minutes' });
+        // The organization's own budget, if it set one, inside what the plan includes.
+        const budget = (await tx<{ monthly_limit: string; mode: string }[]>`SELECT monthly_limit::text, mode FROM usage_budgets WHERE org_id = ${scope.orgId} AND meter = 'build_minutes'`)[0];
+        if (budget?.mode === 'cap' && used + reserved + RESERVED_MINUTES > Number(budget.monthly_limit)) throw new PlatformFault('quota', 'This organization has reached the budget it set for build minutes this month', { quota: 'build_minutes', budget: 'cap' });
         const row = (await tx<Row[]>`INSERT INTO platform_builds (id, org_id, project_id, environment_id, source, source_digest, created_by, reserved_minutes, deadline_at, request_id)
           VALUES (${input.id}, ${scope.orgId}, ${scope.projectId}, ${scope.environmentId}, ${JSON.stringify(input.source)}::text::jsonb, ${input.sourceDigest}, ${actor.accountId}, ${RESERVED_MINUTES},
             now() + make_interval(mins => ${RESERVED_MINUTES}), ${input.requestId}) RETURNING *, revision::text`)[0]!;

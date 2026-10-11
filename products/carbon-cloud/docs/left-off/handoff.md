@@ -26,24 +26,25 @@ meaningful tests pass together.
 | 13 — partly complete | Implement BE-10 functions and schedules with immutable revisions, secret bindings, leases, limits and durable executions. | Gate met: deploy, invoke, schedule, cancel and retry tests prove revision pinning, secret isolation, idempotency and timeout recovery, and a real worker process runs leased code. Not built from the plan's section 16: isolation and resource limits (G-100), logs (G-102), calendar schedules (G-101), app and service invocation (G-104), drafts, packaging and promotion (G-105). |
 | 14 — complete | Implement BE-11 Registry publisher identity, review, trust, immutable archives, yanking and signed distribution. | Completed: organization-owned publisher names, exact uploads inspected into quarantine, operator review with permanent records, signed statements under a root-signed trust bundle, yanking, security revocation and public distribution, proven from publish to verified install across two tenants over real HTTP. Nothing installs from it yet (G-116); operators are names, not accounts (G-114); keys are not in a KMS (G-115); binaries are checked by header only (G-117). |
 | 15 — partly complete | Implement BE-12 project plugin consumption and the remaining CLI workflows. | Done and proven against the real Registry: a declaration and an exact lock, add, install, update, remove and audit with pinned trust, capability approval, ABI and target compatibility, offline install and recovery from interruptions. Not built: loading an installed package in an app (G-126), Cloud's project plugin API and source proposals (G-127), and the remaining CLI workflows (G-128). The gate's "project APIs" half is not met. |
-| 16 | Implement BE-13 billing, quotas, operator boundaries, recovery, deletion and unknown-outcome resolution. | Provider webhook replay, quota races, operator audit, backup/restore and irreversible-deletion gates pass. |
+| 16 — partly complete | Implement BE-13 billing, quotas, operator boundaries, recovery, deletion and unknown-outcome resolution. | Done and proven: signed provider events applied once and in the provider's order through every subscription state; charged work admitted under one count per organization with budgets and unique metering; operator accounts with roles, reasons, a permanent record and two-person early deletion; legal holds and live subscriptions stopping final deletion. Not built: backup and restore (G-135). Never run against the real provider (G-136); unknown outcomes are kept, not resolved (G-138). |
 | 17 | Complete production browser adapters and the Carbon frontend one vertical slice at a time. | Each frontend-plan walkthrough passes against real services; production bundles contain no mock imports or mock data. |
 | 18 | Complete observability, deployment compatibility, security review, migration reconciliation, canary rollout and cutover. | Sections 25-29 of the backend plan have recorded production evidence, including restore, rotation, rollback and no-mock-fallback drills. |
 | 19 | Close the gap ledger: every open decision and everything an earlier phase could not finish or prove. | Each entry in [gaps.md](gaps.md) is closed with evidence or explicitly accepted by the owner. Includes the hardware- and account-dependent proofs (a real Windows build, signing, isolation, real KMS, a real identity provider) and CI running the database suites. |
 
-## Start with Phase 16
+## Start with Phase 17
 
-Phases 1 to 7, 9, 11, 12 and 14 are complete; Phases 8, 10, 13 and 15 are partly complete.
-Read these files before changing Phase 16 code:
+Phases 1 to 7, 9, 11, 12 and 14 are complete; Phases 8, 10, 13, 15 and 16 are partly complete.
+Read these files before changing Phase 17 code:
 
-- section 19 of [the backend plan](../platform-backend-plan.md), "BE-13: billing, quotas, operators, and recovery", and its proof gate
-- `solutions/capabilities/cloud/billing` (what exists today) and the `org_plans` table the build quota already reads
-- [builds.md](../builds.md): the one place quota is reserved and settled today; blob, vector, function and Registry limits are fixed constants (G-99, G-107)
-- [resource-lifecycle.md](../resource-lifecycle.md): scheduled deletion and suspension, which mark rows and destroy nothing in the owning services yet (G-09)
-- [registry-publishing.md](../registry-publishing.md): review is the first operator action, and operators are still names, not accounts (G-114)
+- [the frontend plan](../platform-frontend-plan.md) and the slice notes `platform-frontend-slice-1.md` to `-10.md`: what was designed, and each walkthrough the proof gate refers to
+- `products/carbon-cloud/presentation` (the browser UI as it is), `composition/browser.tsx`, `composition/create-browser-services.ts` and `composition/vite.mock.config.ts`: where mock services are wired today
+- the OpenAPI documents in this folder: one per backend surface the adapters must speak to
+- the owner's rules for this work: `presentation/` is UI only and is real React; HTTP adapters live in `infrastructure/`; no business logic in `products/`
+- `products/carbon-website` is a separate, deliberately uncommitted redesign (G-25): leave it alone
 
-Phase 16 builds billing, quotas, the operator boundary, recovery, deletion and
-unknown-outcome resolution.
+Phase 17 builds the production browser adapters and the Carbon frontend, one
+vertical slice at a time, each against real services with no mock in the
+production bundle.
 
 ## Deferred work
 

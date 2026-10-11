@@ -28,7 +28,7 @@ organization  active -> deletion_pending -> deleted
 | Project | `delete` false | deletion_pending | archived | Owner or Admin |
 | Organization | `delete` | active | deletion_pending (30 days) | Owner |
 | Organization | `delete-cancel` | deletion_pending | active | Owner |
-| Organization | suspend / reinstate | active / suspended | suspended / active | Cloud operators, no HTTP route |
+| Organization | suspend / reinstate | active / suspended | suspended / active | Cloud operators, through the operator API |
 
 Deleting a project or environment requires the project namespace as
 confirmation; deleting an organization requires its own. Every command needs a
@@ -50,6 +50,10 @@ pending.
   project's namespace is not reused.
 
 ## Final deletion
+
+A legal hold on the organization, or (for the organization itself) a
+subscription the provider may still charge, stops a deletion from becoming
+final: see [billing-operators.md](billing-operators.md).
 
 `bun run --cwd products/carbon-cloud lifecycle-sweeper` makes deletions final
 once their window has passed: environments and projects first, then

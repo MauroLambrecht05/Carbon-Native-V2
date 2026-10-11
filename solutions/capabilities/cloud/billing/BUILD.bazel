@@ -17,6 +17,12 @@ filegroup(
 )
 
 bun_test(
+    name = "subscription_test",
+    entry = "tests/subscription.test.ts",
+    srcs = [":srcs", ":tests"],
+)
+
+bun_test(
     name = "billing_test",
     entry = "tests/billing.test.ts",
     srcs = [":srcs", ":tests"],

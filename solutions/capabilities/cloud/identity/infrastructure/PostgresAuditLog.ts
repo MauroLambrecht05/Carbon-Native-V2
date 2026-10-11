@@ -86,10 +86,16 @@ export class PostgresAuditLog extends PostgresPlatformAuthority implements Audit
       await this.system(tx, orgId, 'organization.reinstated', requestId);
     });
   }
-  /** Makes due organization deletions final. Rows are kept and marked deleted. */
+  /**
+   * Makes due organization deletions final. Rows are kept and marked deleted. An organization under a legal hold, or
+   * with a subscription the provider may still charge, is left pending however long its window has been over.
+   */
   async finalizeDeletions(requestId: string, limit: number): Promise<readonly string[]> {
     return this.sql.begin(async tx => {
-      const rows = await tx<{ id: string }[]>`SELECT id FROM organizations WHERE state = 'deletion_pending' AND deletion_scheduled_at <= now() ORDER BY deletion_scheduled_at FOR UPDATE SKIP LOCKED LIMIT ${limit}`;
+      const rows = await tx<{ id: string }[]>`SELECT o.id FROM organizations o WHERE o.state = 'deletion_pending' AND o.deletion_scheduled_at <= now()
+        AND NOT EXISTS (SELECT 1 FROM legal_holds h WHERE h.org_id = o.id AND h.released_at IS NULL)
+        AND NOT EXISTS (SELECT 1 FROM billing_subscriptions s WHERE s.org_id = o.id AND s.state IN ('active', 'past_due', 'cancel_scheduled'))
+        ORDER BY o.deletion_scheduled_at FOR UPDATE OF o SKIP LOCKED LIMIT ${limit}`;
       for (const row of rows) {
         // The active-owner rule applies to managed organizations only; a deleted one keeps its memberships for the record.
         await tx`UPDATE organizations SET state = 'deleted', deletion_scheduled_at = NULL WHERE id = ${row.id}`;

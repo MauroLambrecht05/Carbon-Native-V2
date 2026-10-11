@@ -1,0 +1,385 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Carbon billing and operator API",
+    "version": "1.0.0",
+    "description": "An organization's billing, the payment provider's event endpoint, and Cloud's operator API."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "paths": {
+    "/platform/v1/orgs/{orgId}/billing": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrgId"
+        }
+      ],
+      "get": {
+        "operationId": "getBilling",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "description": "The subscription, this month's usage per meter and the last 24 invoices. Requires billing.manage. Aggregates only.",
+        "responses": {
+          "200": {
+            "description": "The billing overview",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/BillingOverview"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "commandBilling",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "description": "checkout starts a provider checkout and grants nothing by itself. budget and budget-clear set or remove a monthly budget for one meter. Requires billing.manage.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/MutationOrigin"
+          },
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          },
+          {
+            "$ref": "#/components/parameters/RequestId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/BillingCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The subscription after the command",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/BillingReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/billing/v1/webhooks/stripe": {
+      "post": {
+        "operationId": "receiveProviderEvent",
+        "security": [
+          {
+            "providerSignature": []
+          }
+        ],
+        "description": "One event from the payment provider. The signature over the exact bytes is the only credential. A redelivered event answers 200 with outcome duplicate. Anything but a refusal that fails answers 503 so the provider retries.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "received",
+                    "outcome"
+                  ],
+                  "properties": {
+                    "received": {
+                      "const": true
+                    },
+                    "outcome": {
+                      "enum": [
+                        "applied",
+                        "stale",
+                        "unmatched",
+                        "unhandled",
+                        "duplicate"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/operator/v1/orgs/{orgId}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrgId"
+        }
+      ],
+      "get": {
+        "operationId": "getOperatorOrganization",
+        "security": [
+          {
+            "operatorCredential": []
+          }
+        ],
+        "description": "An organization as an operator sees it: state, legal holds, pending request, what blocks its deletion, and counts of what would be kept. Nothing of its members, projects or data.",
+        "responses": {
+          "200": {
+            "description": "The organization",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/OperatorOrganization"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "commandOperatorOrganization",
+        "security": [
+          {
+            "operatorCredential": []
+          }
+        ],
+        "description": "One operator command, with a reason. Each needs its role; commands that change the organization need its current revision. delete-now-approve must come from a different operator than the request.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/OperatorCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The organization after the command",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/OperatorReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/operator/v1/orgs/{orgId}/actions": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrgId"
+        }
+      ],
+      "get": {
+        "operationId": "listOperatorActions",
+        "security": [
+          {
+            "operatorCredential": []
+          }
+        ],
+        "description": "The permanent record of what operators did to one organization, oldest first.",
+        "responses": {
+          "200": {
+            "description": "Operator actions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "operatorId",
+                          "role",
+                          "action",
+                          "reason",
+                          "approvalId",
+                          "createdAt"
+                        ],
+                        "properties": {
+                          "operatorId": {
+                            "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+                          },
+                          "role": {
+                            "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/OperatorRole"
+                          },
+                          "action": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "type": "string"
+                          },
+                          "approvalId": {
+                            "anyOf": [
+                              {
+                                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "createdAt": {
+                            "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Timestamp"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "browserSession": {
+        "$ref": "account-api.openapi.json#/components/securitySchemes/browserSession"
+      },
+      "operatorCredential": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "An op_ operator credential. Requests carrying a cookie or an Origin header are refused."
+      },
+      "providerSignature": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "stripe-signature",
+        "description": "The provider's timestamped HMAC over the request body."
+      }
+    },
+    "parameters": {
+      "OrgId": {
+        "name": "orgId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+        }
+      },
+      "MutationOrigin": {
+        "$ref": "account-api.openapi.json#/components/parameters/Origin"
+      },
+      "CsrfToken": {
+        "$ref": "account-api.openapi.json#/components/parameters/CsrfToken"
+      },
+      "RequestId": {
+        "$ref": "account-api.openapi.json#/components/parameters/RequestId"
+      }
+    }
+  }
+}

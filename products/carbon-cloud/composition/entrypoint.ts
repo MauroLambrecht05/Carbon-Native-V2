@@ -147,6 +147,15 @@ export async function startServer(config: CarbonCloudConfig) {
         if (accountPlatform?.exportDownloadHandler) return accountPlatform.exportDownloadHandler(request);
         return Response.json({ error: { code: "not_found", message: "Not found" } }, { status: 404 });
       }
+      // Signed payment-provider events, and Cloud's own operator API. Neither takes a customer credential.
+      if (new URL(request.url).pathname.startsWith("/billing/v1/")) {
+        if (accountPlatform?.billingWebhookHandler) return accountPlatform.billingWebhookHandler(request);
+        return Response.json({ error: { code: "not_found", message: "Not found" } }, { status: 404 });
+      }
+      if (new URL(request.url).pathname.startsWith("/operator/v1/")) {
+        if (accountPlatform?.operatorHandler) return accountPlatform.operatorHandler(request);
+        return Response.json({ error: { code: "not_found", message: "Not found" } }, { status: 404 });
+      }
       // The public update feed installed apps poll. Read-only, no credential.
       if (new URL(request.url).pathname.startsWith("/updates/v1/")) {
         if (accountPlatform?.updateHandler) return accountPlatform.updateHandler(request);

@@ -84,3 +84,6 @@ export type { OrganizationActor } from "./application/ports/OrganizationReposito
 export { assertionTrustFromEnv } from './infrastructure/AssertionTrust.ts';
 export type { AssertionTrust } from './infrastructure/AssertionTrust.ts';
 export { HttpAssertionAuthority } from './infrastructure/HttpAssertionAuthority.ts';
+// Cloud's own operators: separate accounts, scoped roles, reasons, two-person approval and a permanent record.
+export { OperatorAdministration, OperatorConsole } from './application/usecases/OperatorConsole.ts';
+export { PostgresOperators, type OperatorIdentity } from './infrastructure/PostgresOperators.ts';

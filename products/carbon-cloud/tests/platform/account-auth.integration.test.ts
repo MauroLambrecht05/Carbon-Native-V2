@@ -21,6 +21,10 @@ import { migrate } from "../../infrastructure/persistence/Database.ts";
 import { AccountBuilds, AccountFunctions, AccountReleases, BuildOrchestration, Ed25519ProvenanceSigner, FunctionOrchestration, PostgresPlatformFunctionRepository, WorkerFunctions, type FunctionLimits, PostgresPlatformBuildRepository, PostgresPlatformReleaseRepository, PublicUpdateFeed, SecretReleaseSigner, WorkerBuilds, verifyBuildProvenance } from "@carbon/orchestration";
 import { decideUpdate, verifyUpdateSignature } from "@carbon/updating";
 import { createUpdateRoutes } from "../../infrastructure/http/update-routes.ts";
+import { createOperatorRoutes } from "../../infrastructure/http/operator-routes.ts";
+import { createBillingWebhookRoutes } from "../../infrastructure/http/billing-webhook-routes.ts";
+import { AccountBilling, BillingWebhooks, FakeCheckoutSessionProvider, PostgresBilling, UsageGate, type Plan, type PlanId } from "@carbon/billing";
+import { OperatorAdministration, OperatorConsole, PostgresOperators } from "@carbon/identity";
 import { SignJWT } from "jose";
 import { AccountRealms, AppAuthentication, HttpOidcClient, PostgresAppAuthRepository, PostgresAppMailQueue } from "@carbon/auth";
 import { createAppRoutes } from "../../infrastructure/http/app-routes.ts";
@@ -39,7 +43,7 @@ async function cleanupDatabases() { while (cleanups.length) { await cleanups.at(
 afterEach(cleanupDatabases, 30000);
 afterAll(cleanupDatabases, 30000);
 
-async function harness(functionLimits?: FunctionLimits) {
+async function harness(functionLimits?: FunctionLimits, plans?: Record<PlanId, Plan>) {
   const url = new URL(databaseUrl!);
   if (url.pathname !== "/carbon_platform_test") throw new Error("Requires the dedicated carbon_platform_test database");
   const admin = new Bun.SQL(url.href, { max: 1 });
@@ -84,13 +88,26 @@ async function harness(functionLimits?: FunctionLimits) {
   const artifactVerifier = { async verify(artifact: { objectKey: string; sizeBytes: number; sha256: string }) { if (!storeAvailable) throw new Error('store down'); const value = objects.get(artifact.objectKey); return !!value && value.byteLength === artifact.sizeBytes && createHash('sha256').update(value).digest('hex') === artifact.sha256; } };
   const buildRepository = new PostgresPlatformBuildRepository(sql, new PostgresWorkerRepository(sql, secretProtector), provenanceSigner); const builds = new BuildOrchestration(buildRepository);
   const releaseRepository = new PostgresPlatformReleaseRepository(sql, origin);
-  const functionRepository = new PostgresPlatformFunctionRepository(sql, new PostgresWorkerRepository(sql, secretProtector), functionLimits);
+  const usageGate = new UsageGate(plans); const billing = new PostgresBilling(sql, usageGate);
+  const functionRepository = new PostgresPlatformFunctionRepository(sql, new PostgresWorkerRepository(sql, secretProtector), functionLimits, usageGate);
+  // Stands in for the payment provider's checkout: it hands out session identifiers, and the test plays the provider's signed events.
+  const checkouts: string[] = []; const fakeCheckout = new FakeCheckoutSessionProvider();
+  const checkout = { async createSession(...args: Parameters<FakeCheckoutSessionProvider['createSession']>) { const session = await fakeCheckout.createSession(...args); checkouts.push(session.id!); return session; } };
+  const webhookSecret = `whsec_${randomBytes(24).toString('hex')}`; const webhookHandler = createBillingWebhookRoutes(new BillingWebhooks(billing, [webhookSecret]));
+  const webhook = (event: unknown, options: { secret?: string; at?: number; signature?: string; body?: string; signatureFor?: string } = {}) => {
+    const body = options.body ?? (typeof event === 'string' ? event : JSON.stringify(event)); const at = options.at ?? Math.floor(Date.now() / 1000);
+    const signature = options.signature ?? `t=${at},v1=${createHmac('sha256', options.secret ?? webhookSecret).update(`${at}.${options.signatureFor ?? body}`).digest('hex')}`;
+    return webhookHandler(new Request(`${origin}/billing/v1/webhooks/stripe`, { method: 'POST', body, headers: { 'stripe-signature': signature, 'content-type': 'application/json' } }));
+  };
+  const operators = new PostgresOperators(sql); const operatorAdmin = new OperatorAdministration(operators); const operatorHandler = createOperatorRoutes(new OperatorConsole(operators));
+  const operator = (token: string, path: string, body?: unknown, overrides: Record<string, string> = {}) => operatorHandler(new Request(`${origin}/operator/v1${path}`, { method: body === undefined ? 'GET' : 'POST',
+    headers: { authorization: `Bearer ${token}`, ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...overrides }, body: body === undefined ? undefined : JSON.stringify(body) }));
   // Reads what a worker uploaded, the way Cloud reads the artifact bucket before it signs.
   const artifactReader = { async read(objectKey: string, maximumBytes: number) { if (!storeAvailable) throw new Error('store down'); const value = objects.get(objectKey); return value && value.byteLength <= maximumBytes ? value : null; } };
   const updateHandler = createUpdateRoutes(new PublicUpdateFeed(releaseRepository));
   // What an installed app does: an anonymous GET of the public feed.
   const updates = (path: string, method = 'GET') => updateHandler(new Request(origin + path, { method }));
-  const makeHandler = (auth: AccountAuthentication) => createAccountRoutes(auth, origin, new AccountSecurity(auth, new PostgresAccountSecurityRepository(sql, mfa), protector, totp), new AccountProfile(auth, new PostgresAccountProfileRepository(sql, mfa), protector, config), new OrganizationAccess(auth, new PostgresOrganizationRepository(sql), protector), new OrganizationInvitations(auth, new PostgresOrganizationInvitationsRepository(sql), new PostgresOrganizationRepository(sql), protector, config), new ExternalAccountAuthentication(auth, new PostgresExternalAccountRepository(sql, mfa), githubProvider, protector, config), new AccountAuthorization(auth, new PostgresPlatformAuthority(sql)), new AccountCatalog(auth, new PostgresCatalogRepository(sql), protector), undefined, undefined, new AccountEnvironmentCredentials(auth, new PostgresEnvironmentCredentialRepository(sql), protector), new AccountEnvironmentSecrets(auth, new PostgresEnvironmentSecretRepository(sql, secretProtector), protector), new AccountRepositories(auth, new PostgresRepositoryIntegrationRepository(sql), repositoryProvider, protector), new AccountDeviceAuthorization(auth,new PostgresDeviceAuthorizationRepository(sql),protector,origin,config.rateLimitKey,new DeviceCredentialAuthentication(sql),assertionIssuer),new AccountServiceAccounts(auth,new PostgresServiceAccountRepository(sql),protector,assertionIssuer),new AccountPersonalCredentials(auth,new PostgresPersonalCredentialRepository(sql),protector),new AccountLegacyTokens(auth,new PostgresLegacyTokenRepository(sql),protector,'accept'),new AccountWorkers(auth,new PostgresWorkerRepository(sql,secretProtector),protector),new AccountAudit(auth,new PostgresAuditLog(sql),protector,{pollMs:15,heartbeatMs:120,maxMs:900}),new AccountRealms(auth,new PostgresAppAuthRepository(sql),protector),new PersonalCredentialExchange(new PersonalCredentialAuthentication(sql),assertionIssuer),new AccountBuilds(auth,buildRepository,protector),new AccountReleases(auth,releaseRepository,new SecretReleaseSigner(new PostgresProviderSecretReader(sql,secretProtector)),artifactReader,protector,{artifactBaseUrl:'https://downloads.example.test/'}),undefined,undefined,undefined,undefined,new AccountFunctions(auth,functionRepository,protector));
+  const makeHandler = (auth: AccountAuthentication) => createAccountRoutes(auth, origin, new AccountSecurity(auth, new PostgresAccountSecurityRepository(sql, mfa), protector, totp), new AccountProfile(auth, new PostgresAccountProfileRepository(sql, mfa), protector, config), new OrganizationAccess(auth, new PostgresOrganizationRepository(sql), protector), new OrganizationInvitations(auth, new PostgresOrganizationInvitationsRepository(sql), new PostgresOrganizationRepository(sql), protector, config), new ExternalAccountAuthentication(auth, new PostgresExternalAccountRepository(sql, mfa), githubProvider, protector, config), new AccountAuthorization(auth, new PostgresPlatformAuthority(sql)), new AccountCatalog(auth, new PostgresCatalogRepository(sql), protector), undefined, undefined, new AccountEnvironmentCredentials(auth, new PostgresEnvironmentCredentialRepository(sql), protector), new AccountEnvironmentSecrets(auth, new PostgresEnvironmentSecretRepository(sql, secretProtector), protector), new AccountRepositories(auth, new PostgresRepositoryIntegrationRepository(sql), repositoryProvider, protector), new AccountDeviceAuthorization(auth,new PostgresDeviceAuthorizationRepository(sql),protector,origin,config.rateLimitKey,new DeviceCredentialAuthentication(sql),assertionIssuer),new AccountServiceAccounts(auth,new PostgresServiceAccountRepository(sql),protector,assertionIssuer),new AccountPersonalCredentials(auth,new PostgresPersonalCredentialRepository(sql),protector),new AccountLegacyTokens(auth,new PostgresLegacyTokenRepository(sql),protector,'accept'),new AccountWorkers(auth,new PostgresWorkerRepository(sql,secretProtector),protector),new AccountAudit(auth,new PostgresAuditLog(sql),protector,{pollMs:15,heartbeatMs:120,maxMs:900}),new AccountRealms(auth,new PostgresAppAuthRepository(sql),protector),new PersonalCredentialExchange(new PersonalCredentialAuthentication(sql),assertionIssuer),new AccountBuilds(auth,buildRepository,protector),new AccountReleases(auth,releaseRepository,new SecretReleaseSigner(new PostgresProviderSecretReader(sql,secretProtector)),artifactReader,protector,{artifactBaseUrl:'https://downloads.example.test/'}),undefined,undefined,undefined,undefined,new AccountFunctions(auth,functionRepository,protector),undefined,new AccountBilling(auth,billing,checkout,origin));
   let auth = makeAuth(); let handler = makeHandler(auth);
   // A stand-in identity provider: real discovery, token and key endpoints over the OIDC client's transport, a real signing key.
   const idpIssuer = 'https://login.example.test'; const idpKeys = generateKeyPairSync('ec', { namedCurve: 'P-256' }); const forgedKeys = generateKeyPairSync('ec', { namedCurve: 'P-256' });
@@ -201,7 +218,7 @@ async function harness(functionLimits?: FunctionLimits) {
     const redirected = await githubCallback(url.searchParams.get('state')!); expect(redirected.status).toBe(303);
     return redirected.headers.get('location')!.split('#token=')[1]!;
   };
-  return { sql, protector, secretProtector, workerApi, workerFetch, updates, store, provenancePublicKey: provenanceSigner.publicKey(), leases, builds, functions: new FunctionOrchestration(functionRepository), organizationLifecycle, catalogLifecycle, app, idp, deliverApp, assertionPublicKey:assertionKeys.publicKey, assertionKey, mail, cookies, call, challenge, complete, token, freshRequest, freshComplete, profile, emailToken, emailComplete, createOrganization, organizationCommand, restoreCookies,
+  return { sql, protector, secretProtector, workerApi, workerFetch, updates, store, provenancePublicKey: provenanceSigner.publicKey(), leases, builds, functions: new FunctionOrchestration(functionRepository), usageGate, billing, checkouts, webhook, webhookHandler, operatorAdmin, operator, organizationLifecycle, catalogLifecycle, app, idp, deliverApp, assertionPublicKey:assertionKeys.publicKey, assertionKey, mail, cookies, call, challenge, complete, token, freshRequest, freshComplete, profile, emailToken, emailComplete, createOrganization, organizationCommand, restoreCookies,
     catalogCommand, createProject,
     invitation, invitationToken, invitationProof,
     githubStart, githubCallback, githubComplete, githubBegin, githubCalls,
@@ -1402,6 +1419,8 @@ suite("real account authentication", () => {
     expect(parseComponent('BuildProvenance', await (await h.call(`${buildsPath}/${created.id}/provenance`)).json())).toEqual(provenance);
     expect((await h.call(`${buildsPath}/${second.id}/provenance`)).status).toBe(404);
     expect((await h.sql`SELECT duration_ms::text FROM usage_records WHERE build_id = ${created.id}`)[0].duration_ms).toBe('180000');
+    // The same three minutes in the shared meter, once, under the build's own name.
+    expect((await h.sql`SELECT meter, quantity::integer, source_key FROM usage_events WHERE org_id = ${org}`) as unknown[]).toEqual([{ meter: 'build_minutes', quantity: 3, source_key: `build:${created.id}` }]);
     expect((await h.sql`SELECT state FROM worker_leases WHERE subject_id = ${created.id}`)[0].state).toBe('completed');
     // 3 minutes used and 30 still held by the second build leave no room for another 30; cancelling the second frees it.
     expect((await post(buildsPath, { ...request, commitSha: 'f'.repeat(40) })).status).toBe(429);
@@ -2198,6 +2217,263 @@ suite("real account authentication", () => {
       rmSync(root, { recursive: true, force: true });
     }
   }, 120000);
+
+  test('billing follows the provider\'s signed events once each and in the provider\'s order, through every subscription state', async () => {
+    const h = await harness(); await h.challenge('owner@example.test'); await h.deliver(); await h.complete();
+    const org = (await organizationResponse(h.createOrganization('Billing team', 'billing-team'))).receipt.id; const csrf = () => h.cookies.get('__Host-carbon-csrf')!; const path = `/platform/v1/orgs/${org}/billing`;
+    const overview = async () => parseComponent('BillingOverview', await (await h.call(path)).json()); const command = (body: unknown) => h.call(path, 'POST', body, { 'x-csrf-token': csrf() });
+    const plan = async () => (await h.sql`SELECT plan FROM org_plans WHERE org_id = ${org}`)[0]?.plan ?? 'free';
+    const inbox = async () => (await h.sql`SELECT count(*)::integer AS n FROM billing_webhook_events`)[0].n;
+    let sequence = 0; const t0 = Math.floor(Date.now() / 1000) - 600; const event = (type: string, object: Record<string, unknown>, created: number) => ({ id: `evt_${++sequence}`, type, created, data: { object } });
+    const deliver = async (value: unknown, options?: Parameters<typeof h.webhook>[1]) => { const response = await h.webhook(value, options); return response.status === 200 ? (await response.json() as { outcome: string }).outcome : response.status; };
+
+    // A new organization is on the free plan, with nothing from the provider.
+    expect(await overview()).toMatchObject({ subscription: { state: 'free', plan: 'free', currentPeriodEnd: null }, invoices: [] }); expect((await overview()).usage.map(item => [item.meter, item.included])).toEqual([['build_minutes', 60], ['function_invocations', 10000]]);
+
+    // Starting a checkout grants nothing. Coming back from the provider's page grants nothing either.
+    expect((await command({ kind: 'checkout', plan: 'free' })).status).toBe(400); expect((await h.call(path, 'POST', { kind: 'checkout', plan: 'pro' }, { 'x-csrf-token': 'bad' })).status).toBe(403);
+    const started = parseComponent('BillingReceipt', await (await command({ kind: 'checkout', plan: 'pro' })).json());
+    expect(started).toMatchObject({ subscription: { state: 'checkout_pending', plan: 'free' }, message: 'Checkout started' }); expect(started.checkoutUrl).toContain('fake_session'); expect(await plan()).toBe('free');
+    const session = h.checkouts.at(-1)!; const completed = event('checkout.session.completed', { id: session, customer: 'cus_1', subscription: 'sub_1' }, t0);
+
+    // Only the provider's signature is a credential. A wrong secret, a changed body, an old timestamp or no signature stores nothing.
+    expect(await deliver(completed, { secret: 'whsec_another_secret_entirely' })).toBe(401); expect(await deliver(completed, { signature: '' })).toBe(401); expect(await deliver(completed, { signature: 't=1,v1=00' })).toBe(401);
+    expect(await deliver(completed, { at: Math.floor(Date.now() / 1000) - 3600 })).toBe(401);
+    const signedFor = JSON.stringify(completed); expect(await deliver(completed, { body: signedFor.replace('sub_1', 'sub_2'), signatureFor: signedFor })).toBe(401);
+    expect(await deliver({ hello: 'world' })).toBe(400); expect(await deliver('not json at all')).toBe(400);
+    expect((await h.webhookHandler(new Request(`${origin}/billing/v1/webhooks/stripe`, { method: 'GET' }))).status).toBe(404); expect((await h.webhookHandler(new Request(`${origin}/billing/v1/webhooks/other`, { method: 'POST', body: '{}' }))).status).toBe(404);
+    expect(await inbox()).toBe(0); expect((await overview()).subscription.state).toBe('checkout_pending');
+
+    // The signed completion event grants the plan. The same event again, or five times at once, changes nothing more.
+    expect(await deliver(completed)).toBe('applied'); const active = (await overview()).subscription; expect(active).toMatchObject({ state: 'active', plan: 'pro' }); expect(await plan()).toBe('pro');
+    expect(await deliver(completed)).toBe('duplicate'); expect((await overview()).subscription).toEqual(active);
+    const update = event('customer.subscription.updated', { id: 'sub_1', status: 'active', cancel_at_period_end: false, current_period_end: t0 + 2592000 }, t0 + 10);
+    expect((await Promise.all([1, 2, 3, 4, 5].map(() => deliver(update)))).sort()).toEqual(['applied', 'duplicate', 'duplicate', 'duplicate', 'duplicate']);
+    expect((await overview()).subscription).toMatchObject({ state: 'active', currentPeriodEnd: new Date((t0 + 2592000) * 1000).toISOString(), revision: String(Number(active.revision) + 1) }); expect(await inbox()).toBe(2);
+    // While a subscription is live, another checkout cannot be started.
+    expect((await command({ kind: 'checkout', plan: 'pro' })).status).toBe(409);
+
+    // Invoices are metadata and a link to the provider's own page. An older event about an invoice does not undo a newer one.
+    const invoice = (id: string, extra: Record<string, unknown> = {}) => ({ id, subscription: 'sub_1', number: `CARBON-${id}`, amount_due: 2900, currency: 'usd', hosted_invoice_url: `https://invoice.stripe.com/i/${id}`, period_start: t0, period_end: t0 + 2592000, ...extra });
+    expect(await deliver(event('invoice.paid', invoice('in_1'), t0 + 30))).toBe('applied'); expect(await deliver(event('invoice.finalized', invoice('in_1'), t0 + 20))).toBe('unhandled');
+    expect((await overview()).invoices).toEqual([{ id: 'in_1', number: 'CARBON-in_1', status: 'paid', amountCents: 2900, currency: 'usd', hostedUrl: 'https://invoice.stripe.com/i/in_1', periodStart: new Date(t0 * 1000).toISOString(), periodEnd: new Date((t0 + 2592000) * 1000).toISOString() }]);
+    // A link that is not https is not kept.
+    expect(await deliver(event('invoice.finalized', invoice('in_0', { hosted_invoice_url: 'javascript:alert(1)' }), t0 + 31))).toBe('applied'); expect((await overview()).invoices.find(item => item.id === 'in_0')!.hostedUrl).toBeNull();
+
+    // A failed payment: late, but still on the plan until the provider ends it. Paying brings it back.
+    expect(await deliver(event('invoice.payment_failed', invoice('in_2'), t0 + 40))).toBe('applied'); expect((await overview()).subscription.state).toBe('past_due'); expect(await plan()).toBe('pro');
+    // An event the provider created earlier arrives now: it is recorded as stale and changes nothing.
+    expect(await deliver(event('customer.subscription.updated', { id: 'sub_1', status: 'active', cancel_at_period_end: true, current_period_end: t0 + 1 }, t0 + 35))).toBe('stale'); expect((await overview()).subscription.state).toBe('past_due');
+    expect(await deliver(event('invoice.paid', invoice('in_2'), t0 + 50))).toBe('applied'); expect((await overview()).subscription.state).toBe('active'); expect((await overview()).invoices.find(item => item.id === 'in_2')!.status).toBe('paid');
+
+    // Cancelled at the end of the period: still on the plan, and said so. Then ended: back to free.
+    expect(await deliver(event('customer.subscription.updated', { id: 'sub_1', status: 'active', cancel_at_period_end: true, current_period_end: t0 + 2592000 }, t0 + 60))).toBe('applied');
+    expect((await overview()).subscription).toMatchObject({ state: 'cancel_scheduled', plan: 'pro' }); expect(await plan()).toBe('pro');
+    expect(await deliver(event('customer.subscription.deleted', { id: 'sub_1' }, t0 + 70))).toBe('applied'); expect((await overview()).subscription).toMatchObject({ state: 'ended', plan: 'free' }); expect(await plan()).toBe('free');
+    // Nothing brings an ended subscription back: not a late event, and not a new one. Only a completed checkout grants a plan.
+    expect(await deliver(event('customer.subscription.updated', { id: 'sub_1', status: 'active', cancel_at_period_end: false, current_period_end: t0 + 2592000 }, t0 + 65))).toBe('stale');
+    expect(await deliver(event('customer.subscription.updated', { id: 'sub_1', status: 'active', cancel_at_period_end: false, current_period_end: t0 + 2592000 }, t0 + 80))).toBe('unhandled'); expect(await plan()).toBe('free');
+
+    // Events Cloud cannot tie to an organization are accepted, kept for an operator, and change nothing.
+    expect(await deliver(event('customer.subscription.updated', { id: 'sub_unknown', status: 'active', cancel_at_period_end: false, current_period_end: t0 }, t0 + 90))).toBe('unmatched');
+    expect(await deliver(event('checkout.session.completed', { id: 'cs_someone_elses', customer: 'cus_9', subscription: 'sub_9' }, t0 + 91))).toBe('unmatched');
+    expect(await deliver(event('customer.created', { id: 'cus_1' }, t0 + 92))).toBe('unhandled'); expect(await deliver(event('checkout.session.completed', { id: session }, t0 + 93))).toBe('unhandled');
+    expect((await h.billing.unmatched()).map(item => item.type)).toEqual(['customer.subscription.updated', 'checkout.session.completed']);
+    // A second checkout after the first ended is a new subscription. An abandoned session's completion no longer counts for the plan it was not for.
+    await command({ kind: 'checkout', plan: 'pro' }); const abandoned = h.checkouts.at(-1)!; await command({ kind: 'checkout', plan: 'pro' }); const second = h.checkouts.at(-1)!; expect(second).not.toBe(abandoned);
+    expect(await deliver(event('checkout.session.completed', { id: second, customer: 'cus_1', subscription: 'sub_2' }, t0 + 100))).toBe('applied'); expect((await overview()).subscription).toMatchObject({ state: 'active', plan: 'pro' });
+    expect(await deliver(event('customer.subscription.deleted', { id: 'sub_1' }, t0 + 110))).toBe('unmatched'); expect(await plan()).toBe('pro');
+
+    // The organization's own log says what happened to its subscription, in order. The inbox keeps a digest, not the payload.
+    expect((await h.sql`SELECT action FROM platform_events WHERE org_id = ${org} AND source = 'billing' ORDER BY sequence`).map((row: { action: string }) => row.action.replace('billing.subscription.', '')))
+      .toEqual(['checkout_pending', 'active', 'active', 'past_due', 'active', 'cancel_scheduled', 'ended', 'checkout_pending', 'checkout_pending', 'active']);
+    expect(JSON.stringify(await h.sql`SELECT * FROM billing_webhook_events`)).not.toContain('invoice.stripe.com');
+
+    // Billing is its own permission. A Billing member sees totals and invoices and nothing of the projects; a Developer sees projects and nothing of billing.
+    const projectScope = parseComponent('EnvironmentScope', parseComponent('CatalogReceipt', (await (await h.createProject(org)).json() as { receipt: unknown }).receipt).scope);
+    const projectPath = `/platform/v1/orgs/${org}/projects/${projectScope.projectId}/environments/${projectScope.environmentId}`; expect((await h.call(projectPath)).status).toBe(200);
+    const owner = new Map(h.cookies); const join = async (email: string, role: string) => { h.cookies.clear(); await h.challenge(email); await h.deliver(); await h.complete();
+      const id = (await h.sql`SELECT id FROM accounts WHERE primary_email = ${email}`)[0].id; await h.sql`INSERT INTO memberships (id, account_id, org_id, role, state, project_access) VALUES (${crypto.randomUUID()}, ${id}, ${org}, ${role}, 'active', 'all')`;
+      await h.sql`UPDATE accounts SET permission_revision = permission_revision + 1 WHERE id = ${id}`; };
+    await join('finance@example.test', 'Billing'); const seen = await h.call(path); expect(seen.status).toBe(200); expect(parseComponent('BillingOverview', await seen.json()).invoices).toHaveLength(3);
+    expect((await command({ kind: 'budget', meter: 'build_minutes', monthlyLimit: 30, mode: 'warn' })).status).toBe(200); expect((await h.call(projectPath)).status).not.toBe(200); expect((await h.call(`${projectPath}/functions`)).status).not.toBe(200);
+    await join('developer@example.test', 'Developer'); expect((await h.call(projectPath)).status).toBe(200); expect((await h.call(path)).status).toBe(403); expect((await command({ kind: 'checkout', plan: 'pro' })).status).toBe(403);
+    expect((await command({ kind: 'budget-clear', meter: 'build_minutes' })).status).toBe(403);
+    h.cookies.clear(); await h.challenge('outsider@example.test'); await h.deliver(); await h.complete(); expect((await h.call(path)).status).toBe(404);
+    h.restoreCookies(owner); expect((await overview()).usage.find(item => item.meter === 'build_minutes')!.budget).toMatchObject({ monthlyLimit: 30, mode: 'warn' });
+  }, 60000);
+
+  test('charged work is admitted under one count per organization: racing requests cannot pass the plan or a budget, and each thing that ran is metered once', async () => {
+    const h = await harness(undefined, { free: { id: 'free', includedBuildMinutesPerMonth: 60, includedFunctionInvocationsPerMonth: 5 }, pro: { id: 'pro', includedBuildMinutesPerMonth: 6000, includedFunctionInvocationsPerMonth: 8 } });
+    const f = await functionFixture(h, 'quota-team'); const billingPath = `/platform/v1/orgs/${f.org}/billing`;
+    // A second environment of the same organization: the allowance is the organization's, not an environment's.
+    const other = parseComponent('EnvironmentScope', parseComponent('CatalogReceipt', (await (await h.createProject(f.org, 'Other app', 'other-app')).json() as { receipt: unknown }).receipt).scope);
+    const otherPath = `/platform/v1/orgs/${f.org}/projects/${other.projectId}/environments/${other.environmentId}`;
+    const first = await f.deploy('job', 'export default () => 1;'); const second = parseComponent('FunctionReceipt', await (await f.post(`${otherPath}/functions`, { name: 'job', code: 'export default () => 2;', secretNames: [], timeoutSeconds: 30 })).json()).function;
+    const invoke = (path: string, id: string) => f.post(`${path}/functions/${id}/invoke`, { input: null });
+    const usage = async () => { const item = parseComponent('BillingOverview', await (await h.call(billingPath)).json()).usage.find(row => row.meter === 'function_invocations')!; return [item.used, item.reserved, item.included]; };
+    const metered = async () => (await h.sql`SELECT count(*)::integer AS n FROM usage_events WHERE org_id = ${f.org} AND meter = 'function_invocations'`)[0].n;
+
+    // Eight arrive together across two environments; the plan includes five. Exactly five are admitted.
+    const racing = await Promise.all([1, 2, 3, 4].flatMap(() => [invoke(f.envPath, first.id), invoke(otherPath, second.id)]));
+    expect(racing.map(response => response.status).sort()).toEqual([202, 202, 202, 202, 202, 429, 429, 429]);
+    expect(await usage()).toEqual([0, 5, 5]); expect(await metered()).toBe(0); expect((await invoke(f.envPath, first.id)).status).toBe(429);
+    const open = async (path: string, id: string) => parseComponent('FunctionExecutionPage', await (await h.call(`${path}/functions/${id}/executions`)).json()).items.filter(item => item.state === 'queued');
+
+    // What ran is metered, once. What was cancelled before a worker took it gives its place back and costs nothing.
+    await f.finish(); await f.finish({ outcome: 'failed', errorCategory: 'function.threw' }); expect(await usage()).toEqual([2, 3, 5]); expect(await metered()).toBe(2);
+    const waiting = [...await open(f.envPath, first.id), ...await open(otherPath, second.id)][0]!;
+    expect((await f.post(`/platform/v1/orgs/${f.org}/projects/${waiting.scope.projectId}/environments/${waiting.scope.environmentId}/executions/${waiting.id}`, { kind: 'cancel' }, waiting.revision)).status).toBe(200);
+    expect(await usage()).toEqual([2, 2, 5]); expect(await metered()).toBe(2);
+    expect((await invoke(f.envPath, first.id)).status).toBe(202); expect((await invoke(otherPath, second.id)).status).toBe(429);
+    // One that a lost worker ran twice is still one invocation.
+    const lost = await f.claim(); expect((await f.on(lost)).status).toBe(200); await f.lose(lost.lease.id); expect(await h.leases.reclaim(crypto.randomUUID())).toHaveLength(1);
+    // Every execution still open is run to the end, the retried one among them on its second attempt.
+    const attempts: number[] = [];
+    for (;;) { const next = await f.offer(); if (next.state !== 'leased') break; if (next.lease.subjectId === lost.lease.subjectId) attempts.push(next.lease.attempt);
+      expect((await f.on(next)).status).toBe(200); expect((await f.on(next, '/complete', { outcome: 'succeeded', output: null })).status).toBe(200); }
+    expect(attempts).toEqual([2]); expect(await usage()).toEqual([5, 0, 5]);
+    expect(await metered()).toBe(5); expect((await h.sql`SELECT source_key FROM usage_events WHERE source_key = ${`function-execution:${lost.lease.subjectId}`}`)).toHaveLength(1);
+    // Recording the same thing again records nothing, and a recorded fact cannot be edited away.
+    expect(await h.sql.begin(tx => h.usageGate.record(tx, f.org, 'function_invocations', 1, `function-execution:${lost.lease.subjectId}`))).toBe(false); expect(await metered()).toBe(5);
+    expect(await h.sql`UPDATE usage_events SET quantity = 1000 WHERE org_id = ${f.org}`.then(() => 'finished', error => String((error as Error).message))).toContain('A usage event is permanent');
+    expect(await h.sql`DELETE FROM usage_events WHERE org_id = ${f.org}`.then(() => 'finished', error => String((error as Error).message))).toContain('A usage event is permanent');
+    // Last month's usage does not count against this month.
+    await h.sql`INSERT INTO usage_events (id, org_id, meter, quantity, source_key, occurred_at) VALUES (${crypto.randomUUID()}, ${f.org}, 'function_invocations', 1000, 'last-month', date_trunc('month', now()) - interval '1 day')`;
+    expect((await usage())[0]).toBe(5);
+    // Another organization's usage is not this one's.
+    const stranger = (await organizationResponse(h.createOrganization('Quota other', 'quota-other'))).receipt.id; await h.sql.begin(tx => h.usageGate.record(tx, stranger, 'function_invocations', 1000, 'stranger-usage')); expect((await usage())[0]).toBe(5);
+
+    // A paid plan includes more.
+    expect((await invoke(f.envPath, first.id)).status).toBe(429);
+    await h.sql`INSERT INTO org_plans (org_id, plan) VALUES (${f.org}, 'pro') ON CONFLICT (org_id) DO UPDATE SET plan = 'pro'`; expect((await usage())[2]).toBe(8); expect((await invoke(f.envPath, first.id)).status).toBe(202);
+
+    // A budget the organization set for itself. In cap mode it refuses past the line, even though the plan would allow more.
+    const budget = (body: unknown) => h.call(billingPath, 'POST', body, { 'x-csrf-token': f.csrf() });
+    expect((await budget({ kind: 'budget', meter: 'function_invocations', monthlyLimit: 6, mode: 'cap' })).status).toBe(200);
+    expect((await invoke(otherPath, second.id)).status).toBe(429); expect((await Promise.all([1, 2, 3].map(() => invoke(f.envPath, first.id)))).map(response => response.status)).toEqual([429, 429, 429]);
+    // In warn mode it lets the work through and says so once this month, however many times the line is crossed.
+    expect((await budget({ kind: 'budget', meter: 'function_invocations', monthlyLimit: 6, mode: 'warn' })).status).toBe(200);
+    expect((await Promise.all([invoke(f.envPath, first.id), invoke(otherPath, second.id), invoke(f.envPath, first.id)])).map(response => response.status).sort()).toEqual([202, 202, 429]);
+    expect((await h.sql`SELECT count(*)::integer AS n FROM platform_events WHERE org_id = ${f.org} AND action = 'billing.budget.warning.function_invocations'`)[0].n).toBe(1);
+    expect((await budget({ kind: 'budget-clear', meter: 'function_invocations' })).status).toBe(200); expect(await usage()).toEqual([5, 3, 8]);
+    // A scheduled run that finds no allowance left skips its slot instead of running unpaid.
+    const schedule = parseComponent('FunctionScheduleReceipt', await (await f.post(`${f.envPath}/functions/${first.id}/schedules`, { intervalSeconds: 60 })).json()).schedule;
+    await h.sql`UPDATE function_schedules SET next_run_at = now() - interval '1 second' WHERE id = ${schedule.id}`; expect(await h.functions.tick(crypto.randomUUID())).toEqual([]);
+    expect((await h.sql`SELECT action FROM function_events WHERE resource_id = ${schedule.id} ORDER BY sequence`).map((row: { action: string }) => row.action)).toEqual(['schedule.created', 'schedule.skipped.limit']);
+
+    // Build minutes obey a budget too, and a finished build is metered under its own name.
+    await h.sql`INSERT INTO usage_events (id, org_id, meter, quantity, source_key) VALUES (${crypto.randomUUID()}, ${f.org}, 'build_minutes', 7, 'build:example')`;
+    const build = { repositoryUrl: 'https://github.com/carbon-team/desktop.git', commitSha: 'c'.repeat(40), targets: ['nsis'], secretNames: [], platform: 'windows' };
+    expect((await budget({ kind: 'budget', meter: 'build_minutes', monthlyLimit: 10, mode: 'cap' })).status).toBe(200); expect((await f.post(`${f.envPath}/builds`, build)).status).toBe(429);
+    expect((await budget({ kind: 'budget-clear', meter: 'build_minutes' })).status).toBe(200); const created = await f.post(`${f.envPath}/builds`, build); expect(created.status).toBe(201);
+    const made = parseComponent('BuildReceipt', await created.json()).build; expect((await f.post(`${f.envPath}/builds/${made.id}`, { kind: 'cancel' }, made.revision)).status).toBe(200);
+    // Cancelled before any attempt ran: no minutes, so nothing is metered for it.
+    expect((await h.sql`SELECT count(*)::integer AS n FROM usage_events WHERE source_key = ${`build:${made.id}`}`)[0].n).toBe(0);
+  }, 90000);
+
+  test('operators are their own accounts: scoped roles, a reason and the current revision for every act, two people for an irreversible one, and legal holds and live subscriptions stop final deletion', async () => {
+    const h = await harness(); await h.challenge('owner@example.test'); await h.deliver(); await h.complete();
+    const org = (await organizationResponse(h.createOrganization('Operated team', 'operated-team'))).receipt.id; const csrf = () => h.cookies.get('__Host-carbon-csrf')!; const ownerId = (await h.sql`SELECT id FROM accounts WHERE primary_email = 'owner@example.test'`)[0].id;
+    const settings = `/platform/v1/orgs/${org}/settings`; const organization = async () => (await (await h.call(`/platform/v1/orgs/${org}`)).json() as { organization: { revision: string; state: string } }).organization;
+    const orgCommand = async (command: unknown) => h.call(settings, 'POST', command, { 'if-match': (await organization()).revision, 'x-csrf-token': csrf() });
+    const make = async (email: string, roles: ('support' | 'security' | 'recovery')[]) => { const id = await h.operatorAdmin.create(email, email.split('@')[0]!, roles); return { id, token: await h.operatorAdmin.issue(id) }; };
+    const support = await make('support@carbon.example', ['support']); const security = await make('security@carbon.example', ['security']); const alice = await make('alice@carbon.example', ['recovery']); const bob = await make('bob@carbon.example', ['recovery']);
+    const view = async (who = support) => parseComponent('OperatorOrganization', await (await h.operator(who.token, `/orgs/${org}`)).json());
+    const act = async (who: { token: string }, body: Record<string, unknown>) => h.operator(who.token, `/orgs/${org}`, { reason: 'Ticket 4821, reviewed with the on-call lead', ...body });
+    const revision = async () => (await view()).revision; const rejected = (promise: Promise<unknown>) => promise.then(() => 'finished', error => String((error as Error).message));
+
+    // An operator credential opens the operator API and nothing else; a customer credential does not open it.
+    for (const token of ['', 'op_short', `op_${'A'.repeat(43)}`, h.cookies.get('__Host-carbon-session')!]) expect((await h.operator(token, `/orgs/${org}`)).status).toBe(401);
+    expect((await h.operator(support.token, `/orgs/${org}`, undefined, { cookie: 'a=b' })).status).toBe(403); expect((await h.operator(support.token, `/orgs/${org}`, undefined, { origin })).status).toBe(403);
+    const saved = new Map(h.cookies); h.cookies.clear();
+    expect((await h.call(`/platform/v1/orgs/${org}`, 'GET', undefined, { authorization: `Bearer ${support.token}` })).status).not.toBe(200); expect((await h.call(`/platform/v1/orgs/${org}/billing`, 'GET', undefined, { authorization: `Bearer ${support.token}` })).status).not.toBe(200);
+    expect((await h.workerApi('/worker/v1/leases/claim', undefined, { authorization: `Bearer ${support.token}` })).status).toBe(401); h.restoreCookies(saved);
+    expect((await h.operator(support.token, `/orgs/${crypto.randomUUID()}`)).status).toBe(404); expect((await h.operator(support.token, '/accounts')).status).toBe(404);
+    // What an operator sees of an organization: its state and counts. Nothing of its members, projects or data.
+    const seen = await view(); expect(seen).toMatchObject({ id: org, slug: 'operated-team', state: 'active', subscriptionState: 'free', legalHolds: [], pendingApproval: null, deletionBlockers: ['not_scheduled'] });
+    expect(Object.keys(seen).sort()).toEqual(['deletionBlockers', 'deletionScheduledAt', 'id', 'legalHolds', 'pendingApproval', 'retained', 'revision', 'slug', 'state', 'subscriptionState', 'suspensionReason']); expect(JSON.stringify(seen)).not.toContain('owner@example.test');
+
+    // Suspension: the right role, a real reason, and the revision the operator was looking at.
+    const suspend = async (who: { token: string }, extra: Record<string, unknown> = {}) => act(who, { kind: 'suspend', reasonCode: 'payment.abuse', expectedRevision: await revision(), ...extra });
+    expect((await suspend(alice)).status).toBe(403); expect((await suspend(support, { reason: 'because' })).status).toBe(400); expect((await suspend(support, { reason: undefined })).status).toBe(400);
+    expect((await suspend(support, { expectedRevision: '999' })).status).toBe(409); expect((await suspend(support, { kind: 'impersonate' })).status).toBe(400); expect((await organization()).state).toBe('active');
+    expect(parseComponent('OperatorReceipt', await (await suspend(support)).json())).toMatchObject({ organization: { state: 'suspended', suspensionReason: 'payment.abuse' }, message: 'Organization suspended' });
+    expect((await suspend(support)).status).toBe(409); expect((await h.createProject(org)).status).toBe(403); expect((await h.call(`/platform/v1/orgs/${org}`)).status).toBe(200);
+    expect((await act(security, { kind: 'reinstate', expectedRevision: await revision() })).status).toBe(200); expect((await organization()).state).toBe('active'); expect((await h.createProject(org)).status).toBe(202);
+    // The customer's log says Cloud acted and what it did. It does not name the operator.
+    const logged = await h.sql`SELECT action, actor_kind, actor_id FROM platform_events WHERE org_id = ${org} AND source = 'operator' ORDER BY sequence`;
+    expect(logged.map((row: { action: string }) => row.action)).toEqual(['operator.organization.suspended', 'operator.organization.reinstated']); expect(logged.every((row: { actor_kind: string; actor_id: string | null }) => row.actor_kind === 'system' && row.actor_id === null)).toBe(true);
+
+    // An operator cannot start a deletion. Only what the owner already scheduled can be finished early.
+    expect((await act(alice, { kind: 'delete-now-request', expectedRevision: await revision() })).status).toBe(409);
+    expect((await orgCommand({ kind: 'delete', confirmation: 'operated-team' })).status).toBe(200); expect((await view()).deletionBlockers).toEqual(['recovery_window']);
+    expect(await h.organizationLifecycle.finalizeDeletions(crypto.randomUUID())).toEqual([]);
+
+    // A legal hold stops final deletion by the timer, for the organization and for everything in it.
+    expect((await act(support, { kind: 'hold-place' })).status).toBe(403); expect((await act(security, { kind: 'hold-place', reason: 'Preservation request 2026-118 from counsel' })).status).toBe(200);
+    const held = await view(); expect(held.legalHolds).toHaveLength(1); expect(held.legalHolds[0]!.reason).toBe('Preservation request 2026-118 from counsel'); expect(held.deletionBlockers).toEqual(['recovery_window', 'legal_hold']);
+    await h.sql`UPDATE organizations SET deletion_scheduled_at = now() - interval '1 second' WHERE id = ${org}`; expect((await view()).deletionBlockers).toEqual(['legal_hold']);
+    expect(await h.organizationLifecycle.finalizeDeletions(crypto.randomUUID())).toEqual([]); expect((await organization()).state).toBe('deletion_pending');
+    const environment = (await h.sql`SELECT id, project_id FROM environments WHERE org_id = ${org} LIMIT 1`)[0];
+    await h.sql`UPDATE environments SET state = 'deletion_pending', deletion_scheduled_at = now() - interval '1 second', deletion_requested_by = ${ownerId} WHERE id = ${environment.id}`;
+    await h.sql`UPDATE projects SET state = 'deletion_pending', deletion_scheduled_at = now() - interval '1 second', deletion_requested_by = ${ownerId} WHERE id = ${environment.project_id}`;
+    expect(await h.catalogLifecycle.finalizeDeletions(crypto.randomUUID())).toEqual([]);
+    // Nor can anyone finish it early while the hold stands.
+    expect((await act(alice, { kind: 'delete-now-request', expectedRevision: await revision() })).status).toBe(409);
+    expect((await act(security, { kind: 'hold-release', holdId: crypto.randomUUID() })).status).toBe(404); expect((await act(alice, { kind: 'hold-release', holdId: held.legalHolds[0]!.id })).status).toBe(403);
+    expect((await act(security, { kind: 'hold-release', holdId: held.legalHolds[0]!.id })).status).toBe(200); expect((await act(security, { kind: 'hold-release', holdId: held.legalHolds[0]!.id })).status).toBe(404);
+
+    // A subscription the provider may still charge stops it as well: an organization is not deleted out from under its own billing.
+    await h.sql`INSERT INTO billing_subscriptions (org_id, state, plan, provider, provider_customer_id, provider_subscription_id) VALUES (${org}, 'past_due', 'pro', 'stripe', 'cus_1', 'sub_1')`;
+    expect((await view()).deletionBlockers).toEqual(['billable_subscription']); expect(await h.organizationLifecycle.finalizeDeletions(crypto.randomUUID())).toEqual([]);
+    // The environment and project are no longer held, so their own deletion goes ahead.
+    expect((await h.catalogLifecycle.finalizeDeletions(crypto.randomUUID())).length).toBeGreaterThan(0);
+    await h.sql`UPDATE organizations SET deletion_scheduled_at = now() + interval '20 days' WHERE id = ${org}`;
+
+    // Finishing a deletion early is irreversible, so it takes two operators with the recovery role.
+    const request = async (who = alice) => act(who, { kind: 'delete-now-request', expectedRevision: await revision(), reason: 'Owner asked in ticket 5120 to skip the window' });
+    expect((await request(support)).status).toBe(403); expect((await request()).status).toBe(200); expect((await request(bob)).status).toBe(409);
+    let pending = (await view()).pendingApproval!; expect(pending).toMatchObject({ action: 'organization.delete_now', requestedBy: alice.id, state: 'pending', reason: 'Owner asked in ticket 5120 to skip the window' });
+    const decide = (who: { token: string }, kind: 'delete-now-approve' | 'delete-now-reject', approvalId = pending.id) => act(who, { kind, approvalId });
+    // Not the one who asked, not another role, and not for a request that does not exist.
+    expect((await decide(alice, 'delete-now-approve')).status).toBe(403); expect((await decide(support, 'delete-now-approve')).status).toBe(403); expect((await decide(bob, 'delete-now-approve', crypto.randomUUID())).status).toBe(404);
+    // Every gate is checked again at the moment of approval: the subscription, a hold placed since, a change to the organization, and time.
+    expect((await decide(bob, 'delete-now-approve')).status).toBe(409); expect((await organization()).state).toBe('deletion_pending');
+    await h.sql`UPDATE billing_subscriptions SET state = 'ended', plan = 'free' WHERE org_id = ${org}`;
+    expect((await act(security, { kind: 'hold-place' })).status).toBe(200); expect((await decide(bob, 'delete-now-approve')).status).toBe(409);
+    // Placing the hold changed the organization, so the request no longer describes it, even after the hold is released.
+    expect((await act(security, { kind: 'hold-release', holdId: (await view()).legalHolds[0]!.id })).status).toBe(200); expect((await decide(bob, 'delete-now-approve')).status).toBe(409);
+    expect((await decide(bob, 'delete-now-reject')).status).toBe(200); expect((await view()).pendingApproval).toBeNull(); expect((await decide(bob, 'delete-now-approve')).status).toBe(404);
+    // A request nobody decides in a day lapses, and does not block a new one.
+    expect((await request()).status).toBe(200); pending = (await view()).pendingApproval!; await h.sql`UPDATE operator_approvals SET expires_at = now() - interval '1 second' WHERE id = ${pending.id}`;
+    expect((await decide(bob, 'delete-now-approve')).status).toBe(409); expect((await view()).pendingApproval).toBeNull(); expect((await organization()).state).toBe('deletion_pending');
+    // The owner cancels and schedules again in between: the request was for the earlier decision, not this one.
+    expect((await request()).status).toBe(200); pending = (await view()).pendingApproval!;
+    expect((await orgCommand({ kind: 'delete-cancel' })).status).toBe(200); expect((await decide(bob, 'delete-now-approve')).status).toBe(409); expect((await organization()).state).toBe('active');
+    expect((await orgCommand({ kind: 'delete', confirmation: 'operated-team' })).status).toBe(200); expect((await decide(bob, 'delete-now-approve')).status).toBe(409); expect((await decide(bob, 'delete-now-reject')).status).toBe(200);
+
+    // Asked by one, approved by another, with nothing in the way: the organization is deleted, now and for good.
+    expect((await request()).status).toBe(200); pending = (await view()).pendingApproval!;
+    expect(parseComponent('OperatorReceipt', await (await decide(bob, 'delete-now-approve')).json())).toMatchObject({ organization: { state: 'deleted', pendingApproval: null, deletionScheduledAt: null }, message: 'Organization deleted' });
+    expect((await h.call(`/platform/v1/orgs/${org}`)).status).toBe(404); expect((await decide(bob, 'delete-now-approve')).status).toBe(404); expect((await request()).status).toBe(409);
+    expect(await h.organizationLifecycle.finalizeDeletions(crypto.randomUUID())).toEqual([]);
+
+    // The record: who, in which role, what, why, and under which approval. It cannot be changed, and the database itself refuses a self-approval.
+    const actions = (await (await h.operator(security.token, `/orgs/${org}/actions`)).json() as { items: { operatorId: string; role: string; action: string; reason: string; approvalId: string | null }[] }).items;
+    expect(actions.map(item => item.action)).toEqual(['organization.suspended', 'organization.reinstated', 'legal_hold.placed', 'legal_hold.released', 'organization.delete_now.requested', 'legal_hold.placed', 'legal_hold.released',
+      'organization.delete_now.rejected', 'organization.delete_now.requested', 'organization.delete_now.requested', 'organization.delete_now.rejected', 'organization.delete_now.requested', 'organization.deleted']);
+    expect(actions.at(-1)).toMatchObject({ operatorId: bob.id, role: 'recovery', approvalId: pending.id }); expect(actions[0]).toMatchObject({ operatorId: support.id, role: 'support', reason: 'Ticket 4821, reviewed with the on-call lead' });
+    expect(actions.every(item => item.reason.length >= 10)).toBe(true);
+    expect(await rejected(h.sql`UPDATE operator_actions SET reason = 'rewritten afterwards' WHERE org_id = ${org}`)).toContain('An operator action record is permanent');
+    expect(await rejected(h.sql`DELETE FROM operator_actions WHERE org_id = ${org}`)).toContain('An operator action record is permanent');
+    expect(await rejected(h.sql`INSERT INTO operator_approvals (id, action, org_id, target_revision, requested_by, reason, state, decided_by, decided_at, expires_at) VALUES (${crypto.randomUUID()}, 'organization.delete_now', ${org}, 1, ${alice.id}, 'Approved by myself, quietly', 'executed', ${alice.id}, now(), now())`)).not.toBe('finished');
+
+    // A disabled operator, and an expired credential, open nothing.
+    await h.operatorAdmin.disable(support.id); expect((await h.operator(support.token, `/orgs/${org}`)).status).toBe(401);
+    await h.sql`UPDATE operator_credentials SET expires_at = now() - interval '1 second' WHERE operator_id = ${security.id}`; expect((await h.operator(security.token, `/orgs/${org}`)).status).toBe(401);
+    expect(JSON.stringify(await h.sql`SELECT * FROM operator_credentials`)).not.toContain(alice.token);
+  }, 90000);
 
   test('device authorization approves bounded CLI access, discloses once, rate-limits polling, and revokes durably', async()=>{
     const h=await harness();await h.challenge();await h.deliver();await h.complete();const orgId=(await organizationResponse(h.createOrganization('Device team','device-team'))).receipt.id;const project=parseComponent('CatalogReceipt',(await (await h.createProject(orgId)).json() as {receipt:unknown}).receipt);const environmentResponse=await h.catalogCommand(`/platform/v1/orgs/${orgId}/projects/${project.scope.projectId}/environments`,{name:'CLI',kind:'development',services:['database','registry']},project.revision);const environment=parseComponent('CatalogReceipt',(await environmentResponse.json() as {receipt:unknown}).receipt);

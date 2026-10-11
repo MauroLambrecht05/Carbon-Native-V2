@@ -5,6 +5,7 @@ import {
   type WorkerFunctionComplete,
 } from '@carbon/contracts/platform';
 import { PostgresPlatformAuthority, type OrganizationActor } from '@carbon/identity';
+import type { UsageGate } from '@carbon/billing';
 import type { CommandIdentity, PlatformFunctionRepository } from '../application/ports/PlatformFunctionRepository.ts';
 
 type Row = Record<string, any>;
@@ -37,7 +38,7 @@ function scheduleView(row: Row): FunctionSchedule {
 }
 
 export class PostgresPlatformFunctionRepository extends PostgresPlatformAuthority implements PlatformFunctionRepository {
-  constructor(sql: Bun.SQL, private readonly workers: PostgresWorkerRepository, private readonly limits: FunctionLimits = { functions: 50, revisions: 500, schedulesPerFunction: 5, openExecutions: 20 }) { super(sql); }
+  constructor(sql: Bun.SQL, private readonly workers: PostgresWorkerRepository, private readonly limits: FunctionLimits = { functions: 50, revisions: 500, schedulesPerFunction: 5, openExecutions: 20 }, private readonly usage?: UsageGate) { super(sql); }
 
   private async authorize(tx: Tx, input: OrganizationActor, scope: EnvironmentScope, permission: Permission) {
     await this.lockAccounts(tx, [input.accountId], true); const current = await this.actor(tx, input);
@@ -83,6 +84,12 @@ export class PostgresPlatformFunctionRepository extends PostgresPlatformAuthorit
     if ((await tx`SELECT 1 FROM function_executions WHERE environment_id = ${scope.environmentId} AND state IN ('queued', 'running')`).length >= this.limits.openExecutions) {
       throw new PlatformFault('quota', 'This environment already has the maximum number of executions in progress', { quota: 'function_executions' });
     }
+    if (this.usage) {
+      // An execution in progress holds one invocation of the month's allowance until it ends. Counted under the organization's usage lock, across all its environments.
+      await this.usage.lock(tx, scope.orgId);
+      const open = Number((await tx`SELECT count(*)::text AS total FROM function_executions WHERE org_id = ${scope.orgId} AND state IN ('queued', 'running')`)[0].total);
+      await this.usage.admit(tx, scope.orgId, 'function_invocations', await this.usage.used(tx, scope.orgId, 'function_invocations') + open + 1, input.requestId);
+    }
     const row = (await tx<Row[]>`INSERT INTO function_executions (id, org_id, project_id, environment_id, function_id, revision_number, code_digest, trigger, schedule_id, scheduled_for, retry_of, input, created_by, deadline_at, request_id)
       VALUES (${input.id}, ${scope.orgId}, ${scope.projectId}, ${scope.environmentId}, ${fn.id}, ${revision.number}, ${revision.code_digest}, ${input.trigger}, ${input.scheduleId ?? null}, ${input.scheduledFor ?? null},
         ${input.retryOf ?? null}, ${JSON.stringify(input.input ?? null)}::text::jsonb, ${input.createdBy}, now() + make_interval(secs => ${QUEUE_SECONDS + revision.timeout_seconds}), ${input.requestId}) RETURNING *`)[0]!;
@@ -96,6 +103,8 @@ export class PostgresPlatformFunctionRepository extends PostgresPlatformAuthorit
     const updated = (await tx<Row[]>`UPDATE function_executions SET state = ${state}, error_category = ${errorCategory}, output = ${state === 'succeeded' ? JSON.stringify(output ?? null) : null}::text::jsonb,
       completed_at = now(), revision = revision + 1 WHERE id = ${row.id} RETURNING *`)[0]!;
     await this.event(tx, scopeOf(row), 'function_execution', row.id, `execution.${state}`, updated.revision, requestId, ids);
+    // Charged once, and only if a worker started it. One that never ran gives its place back by leaving the open states.
+    if (this.usage && row.attempt > 0) await this.usage.record(tx, row.org_id, 'function_invocations', 1, `function-execution:${row.id}`);
     return updated;
   }
 

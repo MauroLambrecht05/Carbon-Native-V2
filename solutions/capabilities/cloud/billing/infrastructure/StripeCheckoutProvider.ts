@@ -65,8 +65,8 @@ export class StripeCheckoutProvider implements CheckoutSessionProvider {
     });
     if (!res.ok) throw new StripeApiError(res.status, await res.text());
 
-    const session = (await res.json()) as { url: string | null };
+    const session = (await res.json()) as { url: string | null; id?: string };
     if (!session.url) throw new StripeApiError(res.status, "session created with no url");
-    return { url: session.url };
+    return { url: session.url, id: session.id };
   }
 }

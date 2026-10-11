@@ -14,6 +14,8 @@ import type { PlanId } from "../../domain/value-objects/Plan.ts";
 
 export interface CheckoutSession {
   readonly url: string;
+  /** The provider's identifier for the session. Its completion event names it, which is how Cloud knows whose checkout finished. */
+  readonly id?: string;
 }
 
 export interface CheckoutSessionProvider {

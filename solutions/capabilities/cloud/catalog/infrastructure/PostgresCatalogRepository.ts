@@ -219,9 +219,11 @@ export class PostgresCatalogRepository extends PostgresPlatformAuthority impleme
     return this.sql.begin(async tx => {
       const finalized: Scope[] = [];
       const environments = await tx<Record<string, any>[]>`SELECT e.id, e.org_id, e.project_id, e.deletion_requested_by FROM environments e
-        WHERE e.state = 'deletion_pending' AND e.deletion_scheduled_at <= now() ORDER BY e.deletion_scheduled_at FOR UPDATE SKIP LOCKED LIMIT ${limit}`;
+        WHERE e.state = 'deletion_pending' AND e.deletion_scheduled_at <= now() AND NOT EXISTS (SELECT 1 FROM legal_holds h WHERE h.org_id = e.org_id AND h.released_at IS NULL)
+        ORDER BY e.deletion_scheduled_at FOR UPDATE OF e SKIP LOCKED LIMIT ${limit}`;
       const projects = await tx<Record<string, any>[]>`SELECT p.id, p.org_id, p.deletion_requested_by FROM projects p
-        WHERE p.state = 'deletion_pending' AND p.deletion_scheduled_at <= now() ORDER BY p.deletion_scheduled_at FOR UPDATE SKIP LOCKED LIMIT ${limit}`;
+        WHERE p.state = 'deletion_pending' AND p.deletion_scheduled_at <= now() AND NOT EXISTS (SELECT 1 FROM legal_holds h WHERE h.org_id = p.org_id AND h.released_at IS NULL)
+        ORDER BY p.deletion_scheduled_at FOR UPDATE OF p SKIP LOCKED LIMIT ${limit}`;
       const remove = async (row: Record<string, any>, actor: string) => {
         const revision = (await tx`UPDATE environments SET state = 'deleted', deletion_scheduled_at = NULL, revision = revision + 1, authority_revision = authority_revision + 1, updated_at = now()
           WHERE id = ${row.id} RETURNING revision::text`)[0].revision;

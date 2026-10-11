@@ -153,6 +153,17 @@ from before 0030 ignores these tables, but its lease sweeper would then retry
 and expire `function` leases without ending their executions, so cancel open
 executions before rolling back.
 
+0031 adds billing, metering, operators and legal holds: `billing_webhook_events`,
+`billing_checkouts`, `billing_subscriptions`, `billing_invoices`, `usage_events`,
+`usage_budgets`, `usage_warnings`, `operators`, `operator_roles`,
+`operator_credentials`, `operator_approvals`, `operator_actions` and
+`legal_holds`. Triggers make usage events and operator action records
+permanent, and a constraint refuses an approval decided by its own requester.
+It is additive; `org_plans` and `usage_records` are kept and still written.
+Recovery: code from before 0031 ignores these tables, and would then make
+deletions final without regard to legal holds or live subscriptions, so do not
+roll back while a hold is in force.
+
 Foreign keys need no migration in Database: they are a new kind of entry in the
 existing `canonical_data_constraints` catalog.
 

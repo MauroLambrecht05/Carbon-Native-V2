@@ -19,6 +19,10 @@ import { AccountRealms, AppAuthentication, HttpOidcClient, PostgresAppAuthReposi
 import { createAppRoutes } from '../infrastructure/http/app-routes.ts';
 import { AccountBuilds, AccountFunctions, AccountReleases, BuildOrchestration, FunctionOrchestration, PostgresPlatformFunctionRepository, WorkerFunctions, Ed25519ProvenanceSigner, PostgresPlatformBuildRepository, PostgresPlatformReleaseRepository, PublicUpdateFeed, S3ArtifactReader, S3ArtifactVerifier, SecretReleaseSigner, WorkerBuilds } from '@carbon/orchestration';
 import { createUpdateRoutes } from '../infrastructure/http/update-routes.ts';
+import { createOperatorRoutes } from '../infrastructure/http/operator-routes.ts';
+import { createBillingWebhookRoutes } from '../infrastructure/http/billing-webhook-routes.ts';
+import { AccountBilling, BillingWebhooks, PostgresBilling, StripeCheckoutProvider, UsageGate, type CheckoutSessionProvider } from '@carbon/billing';
+import { OperatorConsole, PostgresOperators } from '@carbon/identity';
 import { createWorkerRoutes } from '../infrastructure/http/worker-routes.ts';
 import { createAccountRoutes } from "../infrastructure/http/account-routes.ts";
 import { serviceAssertionIssuerFromEnv } from './service-assertion-signing.ts';
@@ -29,6 +33,10 @@ export interface AccountPlatformConfig {
   /** Transports for vector and graph commands. */
   readonly engines?: { readonly vectors: EngineTransport; readonly graph: EngineTransport };
   readonly registry?: RegistryTransport;
+  /** Billing through the payment provider. Without it, organizations stay on the free plan and no provider event is accepted. */
+  readonly billing?: { readonly checkout: CheckoutSessionProvider; readonly webhookSecrets: readonly string[] };
+  /** The operator API. Off unless asked for. */
+  readonly operators?: boolean;
   /** Transport for blob commands to the service that owns blob storage. */
   readonly blobs?: BlobTransport;
   /** Private storage for table exports. Exports exist when this and the data transport are both configured. */
@@ -126,7 +134,7 @@ export function accountPlatformConfigFromEnv(env: NodeJS.ProcessEnv = process.en
   const personalAssertions = env.CARBON_PERSONAL_ASSERTIONS === 'enabled' ? serviceAssertionIssuerFromEnv(env) : undefined;
   return {
     origin, termsVersion: required("CARBON_TERMS_VERSION"), rateLimitKey,
-    activeKeyId: required("CARBON_ACCOUNT_ACTIVE_KEY_ID"), encryptionKeys: keys as Record<string, string>, notification, github, githubRepositories, secrets, workers, artifactStore, artifactPublicBaseUrl, provenance, serviceAccountAssertions, deviceAssertions, legacyTokens: legacyTokenConfigFromEnv(env), appAssertions, personalAssertions, data: dataClientFromEnv(env), imports: importClientFromEnv(env), exportStore: exportStoreFromEnv(env), blobs: blobClientFromEnv(env), engines: engineClientsFromEnv(env), registry: registryClientFromEnv(env),
+    activeKeyId: required("CARBON_ACCOUNT_ACTIVE_KEY_ID"), encryptionKeys: keys as Record<string, string>, notification, github, githubRepositories, secrets, workers, artifactStore, artifactPublicBaseUrl, provenance, serviceAccountAssertions, deviceAssertions, legacyTokens: legacyTokenConfigFromEnv(env), appAssertions, personalAssertions, data: dataClientFromEnv(env), imports: importClientFromEnv(env), exportStore: exportStoreFromEnv(env), blobs: blobClientFromEnv(env), engines: engineClientsFromEnv(env), registry: registryClientFromEnv(env), billing: billingFromEnv(env), operators: env.CARBON_OPERATORS === 'enabled',
   };
 }
 
@@ -152,7 +160,8 @@ export function composeAccountPlatform(sql: Bun.SQL, config: AccountPlatformConf
   const buildRepository = workerRepository && config.artifactStore ? new PostgresPlatformBuildRepository(sql, workerRepository,
     config.provenance ? new Ed25519ProvenanceSigner(config.provenance.keyId, config.provenance.privateKey) : undefined) : undefined;
   // Functions run on worker leases, so they exist exactly when workers do.
-  const functionRepository = workerRepository ? new PostgresPlatformFunctionRepository(sql, workerRepository) : undefined;
+  const usageGate = new UsageGate(); const billing = new PostgresBilling(sql, usageGate);
+  const functionRepository = workerRepository ? new PostgresPlatformFunctionRepository(sql, workerRepository, undefined, usageGate) : undefined;
   // Releases are made from builds and signed with keys held as environment secrets, so they need both.
   const releaseRepository = buildRepository && secretProtector && config.artifactStore && config.artifactPublicBaseUrl ? new PostgresPlatformReleaseRepository(sql, config.origin) : undefined;
   const accountReleases = releaseRepository ? new AccountReleases(auth, releaseRepository, new SecretReleaseSigner(new PostgresProviderSecretReader(sql, secretProtector!)), new S3ArtifactReader(config.artifactStore!),
@@ -168,7 +177,10 @@ export function composeAccountPlatform(sql: Bun.SQL, config: AccountPlatformConf
     handler: createAccountRoutes(auth, config.origin, security, new AccountProfile(auth, new PostgresAccountProfileRepository(sql, mfa), protector, config), new OrganizationAccess(auth, new PostgresOrganizationRepository(sql), protector), new OrganizationInvitations(auth, new PostgresOrganizationInvitationsRepository(sql), new PostgresOrganizationRepository(sql), protector, config), github, new AccountAuthorization(auth, new PostgresPlatformAuthority(sql)), new AccountCatalog(auth, new PostgresCatalogRepository(sql), protector), config.data ? new AccountData(auth, new PostgresAccountDataAuthority(sql), config.data, protector) : undefined, importJobs ? new AccountImports(auth, importJobs) : undefined, new AccountEnvironmentCredentials(auth, environmentCredentials, protector), environmentSecrets ? new AccountEnvironmentSecrets(auth, environmentSecrets, protector) : undefined, accountRepositories, new AccountDeviceAuthorization(auth,new PostgresDeviceAuthorizationRepository(sql),protector,config.origin,config.rateLimitKey,new DeviceCredentialAuthentication(sql),config.deviceAssertions),new AccountServiceAccounts(auth,new PostgresServiceAccountRepository(sql),protector,config.serviceAccountAssertions),new AccountPersonalCredentials(auth,new PostgresPersonalCredentialRepository(sql),protector),new AccountLegacyTokens(auth,new PostgresLegacyTokenRepository(sql),protector,config.legacyTokens?.policy??'issue'),workerRepository?new AccountWorkers(auth,workerRepository,protector):undefined,new AccountAudit(auth,auditLog,protector),new AccountRealms(auth,appRepository,protector),new PersonalCredentialExchange(new PersonalCredentialAuthentication(sql),config.personalAssertions),buildRepository?new AccountBuilds(auth,buildRepository,protector):undefined,accountReleases,exportJobs?new AccountExports(auth,exportJobs,config.origin):undefined,config.blobs?new AccountBlobs(auth,new PostgresAccountDataAuthority(sql),config.blobs):undefined,
       config.engines?new AccountEngine('vectors',auth,new PostgresAccountDataAuthority(sql),config.engines.vectors):undefined,config.engines?new AccountEngine('graph',auth,new PostgresAccountDataAuthority(sql),config.engines.graph):undefined,
       functionRepository?new AccountFunctions(auth,functionRepository,protector):undefined,
-      config.registry?new AccountRegistry(auth,new PostgresAccountRegistryAuthority(sql),config.registry):undefined),
+      config.registry?new AccountRegistry(auth,new PostgresAccountRegistryAuthority(sql),config.registry):undefined,
+      config.billing?new AccountBilling(auth,billing,config.billing.checkout,config.origin):undefined),
+    billingWebhookHandler: config.billing ? createBillingWebhookRoutes(new BillingWebhooks(billing, config.billing.webhookSecrets)) : undefined,
+    operatorHandler: config.operators ? createOperatorRoutes(new OperatorConsole(new PostgresOperators(sql))) : undefined,
     buildOrchestration: buildRepository ? new BuildOrchestration(buildRepository) : undefined,
     functionOrchestration: functionRepository ? new FunctionOrchestration(functionRepository) : undefined,
     updateHandler: releaseRepository ? createUpdateRoutes(new PublicUpdateFeed(releaseRepository)) : undefined,
@@ -186,4 +198,14 @@ export function composeAccountPlatform(sql: Bun.SQL, config: AccountPlatformConf
     deliverMail: new DeliverAccountMail(new PostgresAccountMailQueue(sql), protector, notification),
     expireAccountProofs: () => externalAccounts.expire(),
   };
+}
+
+/** Billing is on when CARBON_BILLING is `enabled`, and then the provider key, price and webhook secret are all required. */
+export function billingFromEnv(env: NodeJS.ProcessEnv = process.env): { checkout: CheckoutSessionProvider; webhookSecrets: readonly string[] } | undefined {
+  if (!env.CARBON_BILLING || env.CARBON_BILLING === 'disabled') return undefined;
+  if (env.CARBON_BILLING !== 'enabled') throw new Error('CARBON_BILLING must be enabled or disabled');
+  const need = (name: string): string => { const value = env[name]; if (!value) throw new Error(`Billing requires ${name}`); return value; };
+  // Two secrets are accepted while the provider's signing secret is being rotated.
+  const webhookSecrets = [need('STRIPE_WEBHOOK_SECRET'), ...(env.STRIPE_WEBHOOK_SECRET_PREVIOUS ? [env.STRIPE_WEBHOOK_SECRET_PREVIOUS] : [])];
+  return { checkout: new StripeCheckoutProvider({ secretKey: need('STRIPE_SECRET_KEY'), priceIds: { pro: need('STRIPE_PRICE_ID_PRO') } }), webhookSecrets };
 }

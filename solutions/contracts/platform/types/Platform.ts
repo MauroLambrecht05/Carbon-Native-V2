@@ -304,6 +304,32 @@ export type BuildMaterials = { readonly "resolvedCommit": string; readonly "depe
 
 export type BuildProvenance = { readonly "statement": { readonly "version": 1; readonly "buildId": Id; readonly "scope": EnvironmentScope; readonly "attempt": number; readonly "workerId": Id; readonly "source": BuildSource; readonly "sourceDigest": Digest; readonly "materials": BuildMaterials; readonly "artifacts": ReadonlyArray<{ readonly "target": string; readonly "objectKey": string; readonly "sizeBytes": number; readonly "sha256": Digest; }>; readonly "startedAt": Timestamp; readonly "finishedAt": Timestamp; }; readonly "statementDigest": Digest; readonly "signature": { readonly "keyId": string; readonly "algorithm": "ed25519"; readonly "value": string; } | null; };
 
+export type BillingPlan = "free" | "pro";
+
+export type BillingSubscription = { readonly "state": "free" | "checkout_pending" | "active" | "past_due" | "cancel_scheduled" | "ended"; readonly "plan": BillingPlan; readonly "currentPeriodEnd": Timestamp | null; readonly "revision": Revision; };
+
+export type BillingInvoice = { readonly "id": string; readonly "number": string | null; readonly "status": "open" | "paid" | "failed" | "void"; readonly "amountCents": number; readonly "currency": string; readonly "hostedUrl": string | null; readonly "periodStart": Timestamp | null; readonly "periodEnd": Timestamp | null; };
+
+export type BillingUsage = { readonly "meter": "build_minutes" | "function_invocations"; readonly "used": number; readonly "reserved": number; readonly "included": number; readonly "budget": { readonly "monthlyLimit": number; readonly "mode": "warn" | "cap"; readonly "revision": Revision; } | null; };
+
+export type BillingOverview = { readonly "subscription": BillingSubscription; readonly "usage": ReadonlyArray<BillingUsage>; readonly "invoices": ReadonlyArray<BillingInvoice>; };
+
+export type BillingCommand = { readonly "kind": "checkout"; readonly "plan": "pro"; } | { readonly "kind": "budget"; readonly "meter": "build_minutes" | "function_invocations"; readonly "monthlyLimit": number; readonly "mode": "warn" | "cap"; } | { readonly "kind": "budget-clear"; readonly "meter": "build_minutes" | "function_invocations"; };
+
+export type BillingReceipt = { readonly "subscription": BillingSubscription; readonly "checkoutUrl": string | null; readonly "message": string; };
+
+export type OperatorRole = "support" | "security" | "recovery";
+
+export type OperatorApproval = { readonly "id": Id; readonly "action": "organization.delete_now"; readonly "orgId": Id; readonly "requestedBy": Id; readonly "reason": string; readonly "state": "pending" | "executed" | "rejected"; readonly "expiresAt": Timestamp; readonly "createdAt": Timestamp; };
+
+export type OperatorLegalHold = { readonly "id": Id; readonly "reason": string; readonly "placedAt": Timestamp; };
+
+export type OperatorOrganization = { readonly "id": Id; readonly "slug": string | null; readonly "state": "active" | "suspended" | "deletion_pending" | "deleted"; readonly "revision": Revision; readonly "suspensionReason": string | null; readonly "deletionScheduledAt": Timestamp | null; readonly "subscriptionState": "free" | "checkout_pending" | "active" | "past_due" | "cancel_scheduled" | "ended"; readonly "legalHolds": ReadonlyArray<OperatorLegalHold>; readonly "pendingApproval": OperatorApproval | null; readonly "deletionBlockers": ReadonlyArray<"not_scheduled" | "recovery_window" | "legal_hold" | "billable_subscription">; readonly "retained": { readonly "events": number; readonly "invoices": number; readonly "operatorActions": number; }; };
+
+export type OperatorCommand = { readonly "kind": "suspend"; readonly "reason": string; readonly "expectedRevision": Revision; readonly "reasonCode": string; } | { readonly "kind": "reinstate" | "delete-now-request"; readonly "reason": string; readonly "expectedRevision": Revision; } | { readonly "kind": "hold-place"; readonly "reason": string; } | { readonly "kind": "hold-release"; readonly "reason": string; readonly "holdId": Id; } | { readonly "kind": "delete-now-approve" | "delete-now-reject"; readonly "reason": string; readonly "approvalId": Id; };
+
+export type OperatorReceipt = { readonly "organization": OperatorOrganization; readonly "message": string; };
+
 export type RegistrySlug = string;
 
 export type RegistryPackageName = string;
@@ -863,6 +889,19 @@ export interface Components {
   WorkerBuildInput: WorkerBuildInput;
   BuildMaterials: BuildMaterials;
   BuildProvenance: BuildProvenance;
+  BillingPlan: BillingPlan;
+  BillingSubscription: BillingSubscription;
+  BillingInvoice: BillingInvoice;
+  BillingUsage: BillingUsage;
+  BillingOverview: BillingOverview;
+  BillingCommand: BillingCommand;
+  BillingReceipt: BillingReceipt;
+  OperatorRole: OperatorRole;
+  OperatorApproval: OperatorApproval;
+  OperatorLegalHold: OperatorLegalHold;
+  OperatorOrganization: OperatorOrganization;
+  OperatorCommand: OperatorCommand;
+  OperatorReceipt: OperatorReceipt;
   RegistrySlug: RegistrySlug;
   RegistryPackageName: RegistryPackageName;
   RegistrySemver: RegistrySemver;
