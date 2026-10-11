@@ -197,6 +197,95 @@ jobs:
         if: runner.os != 'Linux'
         run: bazel test //... --test_output=errors
 
+  # The platform's integration suites against real PostgreSQL and a real
+  # S3-compatible object store. Without the CARBON_*_TEST_* variables these
+  # suites skip their database scenarios and pass in seconds, which is what
+  # every other job in this workflow sees. This job is the one that runs them.
+  #
+  # Linux, not Windows: the suites need three containers, and GitHub's Windows
+  # runners cannot run Linux containers. It does not depend on the OS matrix
+  # toggle for the same reason.
+  #
+  # `bun test` on directories, not `bazel test`: several scenarios live in
+  # files that have no Bazel target of their own, and the command below is the
+  # one the platform work has used as its regression since Phase 1 (see
+  # products/carbon-cloud/docs/left-off/handoff.md). The two databases match
+  # the development setup: Cloud's is plain PostgreSQL 16, and the one the
+  # owning services share needs pgvector.
+  integration:
+    name: integration (postgres, object store)
+    needs: structure
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      platform-db:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: carbon_test
+          POSTGRES_PASSWORD: carbon_test_local_only
+          POSTGRES_DB: carbon_platform_test
+        ports: ["55439:5432"]
+        options: >-
+          --health-cmd "pg_isready -U carbon_test -d carbon_platform_test"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      service-db:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: carbon_test
+          POSTGRES_PASSWORD: carbon_test_local_only
+          POSTGRES_DB: carbon_service_test
+        ports: ["55440:5432"]
+        options: >-
+          --health-cmd "pg_isready -U carbon_test -d carbon_service_test"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      CARBON_PLATFORM_TEST_DATABASE_URL: postgres://carbon_test:carbon_test_local_only@127.0.0.1:55439/carbon_platform_test
+      CARBON_SERVICE_TEST_DATABASE_URL: postgres://carbon_test:carbon_test_local_only@127.0.0.1:55440/carbon_service_test
+      CARBON_OBJECT_STORE_TEST_ENDPOINT: http://127.0.0.1:55441
+      CARBON_OBJECT_STORE_TEST_BUCKET: carbon-artifacts
+      CARBON_OBJECT_STORE_TEST_ACCESS_KEY_ID: carbon_test
+      CARBON_OBJECT_STORE_TEST_SECRET_ACCESS_KEY: carbon_test_local_only
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.10"
+
+      - name: install js deps
+        run: |
+          bun install --cwd .config --frozen-lockfile
+          ./.tools/automation/bootstrap/link-node-modules.sh
+
+      # A service container cannot be given a command, and MinIO needs one, so
+      # it is started here. The bucket is made with MinIO's own client.
+      - name: start the object store
+        run: |
+          docker run -d --name carbon-objectstore-test -p 127.0.0.1:55441:9000 \
+            -e MINIO_ROOT_USER=carbon_test -e MINIO_ROOT_PASSWORD=carbon_test_local_only \
+            minio/minio server /data
+          for attempt in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:55441/minio/health/ready && break
+            sleep 2
+          done
+          docker run --rm --network host --entrypoint sh minio/mc -c \
+            "mc alias set ci http://127.0.0.1:55441 carbon_test carbon_test_local_only && mc mb --ignore-existing ci/carbon-artifacts"
+
+      - name: integration suites
+        run: >-
+          bun test
+          ./solutions/contracts/platform
+          ./solutions/capabilities/cloud
+          ./solutions/capabilities/distribution
+          ./solutions/integrations
+          ./solutions/infrastructure/operations
+          ./products/carbon-cloud
+          ./products/carbon-updater
+          ./products/carbon-database/tests
+          ./products/carbon-registry
+          ./products/carbon-cli
+          ./.tools/automation/testing
+          --timeout 240000
+
   # The end-to-end evidence: the CLI, the build pipeline, both renderers and a
   # backend binary working together. Nothing else exercises that combination.
   examples:
