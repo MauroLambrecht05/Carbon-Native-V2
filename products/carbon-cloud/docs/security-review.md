@@ -9,8 +9,8 @@ security review the plan requires before customer data is admitted. That review
 has not happened (G-159). Treat every "met" below as "the author believes so
 and points at a test", not as a finding by someone whose job was to break it.
 
-Tests named here that use PostgreSQL run on a development machine only; CI has
-no database (G-50).
+Tests named here that use PostgreSQL run in CI's `integration` job, on Linux,
+against real PostgreSQL and an S3-compatible store.
 
 ## Summary
 

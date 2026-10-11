@@ -82,7 +82,6 @@ The rest of the gate is not, and is listed here.
 | G-41 | The provenance signing key has no published public key, no rotation list and no revocation; consumers must be given the key out of band. The statement is Carbon's own format, not in-toto or SLSA | Publishing keys belongs with release signing | Phase 9 (releases) |
 | G-42 | The worker holds write access to the whole artifact bucket. Cloud verifies an object once, before accepting success; an object replaced afterwards is not detected, and a worker could overwrite another build's objects. Objects are not write-once | Needs per-build upload grants (presigned URLs under the build's prefix) and object immutability or versioning in the bucket | Phase 11 (blob storage) or sooner if workers are not all trusted |
 | G-43 | Cloud verifies an artifact by reading the whole object inside the completion request. Large installers make that request slow, and there is no size-based timeout or background verification | Simple first implementation | Verification moves to a job, or measured limits are documented |
-| G-44 | The artifact store test runs only when `CARBON_OBJECT_STORE_TEST_*` is set. It passed against a local MinIO container; CI does not run it, and it has not run against AWS S3 or Cloudflare R2 | CI has no object store service | CI starts MinIO, and one run against a real provider is recorded |
 | G-45 | The lockfile rule covers a bun lockfile at the repository root only. A project in a subdirectory or a workspace package is not supported, and `Cargo.lock` is digested when present but not required | Carbon apps today are root-level bun projects | A project layout that needs it |
 | G-46 | Log redaction removes exact secret values and the lines of multi-line values. An encoded form of a secret (base64, URL-encoded, split across lines) is not removed | Exact matching only | A decision on which encodings to cover |
 | G-47 | Objects uploaded by failed, cancelled and lost attempts stay in the bucket forever | No cleanup job | Phase 11 (retention and cleanup) |
@@ -126,7 +125,7 @@ entries here.
 | G-71 | An export contains only rows its creator's policy-preview access can read. There is no administrative export of every row | The data API has no administrative row access by design | A separately audited administrative path |
 | G-72 | Exported rows are always in ID order; a custom sort is not supported. Exports cannot be listed beyond the latest 50 | Keyset paging by ID is what makes resuming exact | A need for it |
 | G-73 | If a worker dies after writing a part and before recording it, and the job is then cancelled or fails, that one object is never deleted: the sweep only knows recorded parts | The store port has no listing | The sweep lists a job's prefix, or the bucket gets a lifecycle rule |
-| G-74 | `S3ExportStore` has run only against a local MinIO container, in a test CI skips; the job tests use an in-memory stand-in for the bucket. A download streams each part through Cloud's memory (up to one page of rows at a time) | CI has no object store | The export tests run against MinIO in CI (with G-44), and once against a real provider |
+| G-74 | A table export download streams each part through Cloud's memory, up to one page of rows at a time | Simple first implementation | Streaming from the bucket to the response, or the limit accepted |
 | G-75 | The export worker's entry point (`data-export-worker.ts`) and the `CARBON_DATA_EXPORTS` configuration have no test of their own | Small glue | A configuration test |
 
 ## Open: from Phase 11 (blob storage)
@@ -142,7 +141,6 @@ entries here.
 | G-82 | Quota is per bucket. There is no environment or organization total, and no plan limit | No plan policy yet | Phase 16 |
 | G-83 | If cleanup cannot delete an abandoned upload's bytes, it does not try again: the transfer is already closed. Those bytes stay until removed by hand or by a bucket lifecycle rule | The store port has no listing | Cleanup lists a bucket's prefix, or the bucket gets a lifecycle rule |
 | G-84 | The legacy storage engine and its routes (`/api/projects/.../storage`, `/storage/v1/object/public/...`, base64 JSON uploads) still exist beside canonical blobs, unhardened | Retiring them needs the unified frontend | Phase 17 |
-| G-85 | `S3BlobStore` has run only against a local MinIO container, in a test CI skips; the scenario tests use an in-memory stand-in for the bucket | CI has no object store | With G-44 |
 | G-87 | There is no range request, no conditional request, no object metadata or tags, no copy or move, and no listing by delimiter | Not needed for the proof gate | A need for them |
 
 ## Open: from Phase 12 (realtime, vectors, graph)
@@ -263,13 +261,7 @@ walkthrough of the frontend plan; this is the first.
 | G-162 | There is no per-organization feature flag, so a canary set of organizations cannot be enabled: every flag is per deployment. Legacy organizations can be claimed one at a time by an owner; there is no bulk import and no reconciliation report comparing legacy and canonical records | Nothing to cut over to yet | Cohort flags, and an import with a report |
 | G-163 | Cloud's assertion-key rotation is proven at the verifier only, not across running services. One mutation check in Phase 18, on the ledger-name guard, ended by hanging the test instead of failing it | The rotation needs three processes sharing trust configuration | A process-level rotation: Database and Registry restarted on trust that lists both keys, Cloud switched, the old key removed |
 | G-164 | Readiness checks the database and the schema, nothing else. A service whose object storage, payment provider, email provider, key custodian or peer service is unreachable still reports ready | Deliberate for a first pass: a shared dependency failing should not take every instance out of rotation | A decision per dependency on whether it gates readiness |
-| G-165 | Most of the verification the plan's section 25 lists is not built: browser end-to-end tests, load and soak tests, fault injection against a deployment, tests on a Windows runner with real packaging, and the database suites in CI (G-50) | Each needs infrastructure the repository does not have | With Phase 19 |
-
-## Open: verification
-
-| # | Gap | Why open | Closes when |
-|---|---|---|---|
-| G-50 | **CI does not run the PostgreSQL-backed tests.** The workflow has no database, so `account_auth_test` and the other integration suites skip their database scenarios there and pass in about two seconds. Every "CI green" in this log means typechecks, lint, unit tests, the contract and conformance tests and the Rust build passed. The database scenarios have only ever been run on the development machine | CI runs on Windows runners, where service containers are not available | CI starts PostgreSQL (and MinIO, G-44) and sets the `CARBON_*_TEST_DATABASE_URL` variables |
+| G-165 | Much of the verification the plan's section 25 lists is not built: browser end-to-end tests, load and soak tests, fault injection against a deployment, and tests on a Windows runner with real packaging. The database suites run on Linux in CI and nowhere else: not on Windows or macOS runners | Each needs infrastructure the repository does not have | Each kind of test exists and runs |
 
 ## Open: local environment
 
@@ -284,6 +276,7 @@ walkthrough of the frontend plan; this is the first.
 
 | Gap | From | Closed by |
 |---|---|---|
+| G-50: CI did not run the PostgreSQL-backed tests. G-44, G-74, G-85: the object-store adapters ran only on a development machine | Phases 7 to 11 | Phase 19: the `integration` job in `ci.yml` starts two PostgreSQL containers and an S3-compatible store and runs the whole regression with the `CARBON_*_TEST_*` variables set: 746 tests on its first complete run, where one legacy test failed on a tie in a test double's ordering and was fixed. The store is RustFS, because MinIO no longer publishes a public image. Still not run: any of it against AWS S3 or Cloudflare R2 (kept in G-154) |
 | G-163 (most of it): the operational endpoints, the `migrate` scripts and `CARBON_MIGRATE_ON_START` were never run as processes | Phase 18 | Phase 19: `service-processes.integration.test.ts` starts each service's `main.ts` and `migrate.ts` against a database of its own and checks them over a real socket. It found that Cloud's `start` script launched a file that starts nothing, that Cloud's `/healthz` was answered by the legacy route table and so never logged or counted, and that Database and Registry crashed on an unmigrated database instead of reporting it. All three are fixed |
 | G-158 (the schema half): a rollback after a migration had no procedure | Phase 18 | Phase 19: `CARBON_NEWER_SCHEMA=allowed` lets a version serve a schema that is ahead of it and nothing else; a service told not to migrate refuses to start on a schema it may not serve. Tested per service as a process, and documented in operations.md |
 | G-145 (most of it): `/billing/v1/` and `/operator/v1/` routing, `billingFromEnv` and the `operator-admin` tool were never run as processes. G-151 (one part): serving the console was tested at the handler only | Phases 16 and 17 | Phase 19: the same process test delivers signed provider events (current and previous secret) to a running Cloud, creates, uses and disables an operator with the tool, and fetches the console's page, a client route and an asset through the real server |

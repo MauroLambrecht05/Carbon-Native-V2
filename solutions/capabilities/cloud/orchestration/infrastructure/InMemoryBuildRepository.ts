@@ -34,7 +34,10 @@ export class InMemoryBuildRepository implements BuildRepository {
   }
 
   async listByOrg(orgId: string, limit: number): Promise<Build[]> {
+    // Newest first. Two builds created in the same millisecond keep the order they were created in, newest first:
+    // the sort is stable, so reversing insertion order first decides the tie.
     return [...this.rows.values()]
+      .reverse()
       .filter((b) => b.toProps().orgId === orgId)
       .sort((a, b) => b.toProps().createdAt.getTime() - a.toProps().createdAt.getTime())
       .slice(0, limit);
