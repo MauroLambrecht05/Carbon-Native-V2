@@ -257,18 +257,19 @@ jobs:
           ./.tools/automation/bootstrap/link-node-modules.sh
 
       # A service container cannot be given a command, and MinIO needs one, so
-      # it is started here. The bucket is made with MinIO's own client.
+      # it is started here, from MinIO's own registry: the image is not on Docker
+      # Hub. The bucket is made with the AWS CLI the runner already has.
       - name: start the object store
         run: |
           docker run -d --name carbon-objectstore-test -p 127.0.0.1:55441:9000 \
             -e MINIO_ROOT_USER=carbon_test -e MINIO_ROOT_PASSWORD=carbon_test_local_only \
-            minio/minio server /data
+            quay.io/minio/minio server /data
           for attempt in $(seq 1 30); do
             curl -fsS http://127.0.0.1:55441/minio/health/ready && break
             sleep 2
           done
-          docker run --rm --network host --entrypoint sh minio/mc -c \
-            "mc alias set ci http://127.0.0.1:55441 carbon_test carbon_test_local_only && mc mb --ignore-existing ci/carbon-artifacts"
+          AWS_ACCESS_KEY_ID=carbon_test AWS_SECRET_ACCESS_KEY=carbon_test_local_only AWS_DEFAULT_REGION=us-east-1 \
+            aws --endpoint-url http://127.0.0.1:55441 s3 mb s3://carbon-artifacts
 
       - name: integration suites
         run: >-
