@@ -117,9 +117,14 @@ drifted, and exits non-zero unless the database is exactly at this code's
 version. The same commands exist for `carbon-database` and `carbon-registry`.
 
 By default a service also applies its own migrations when it starts. To run
-them as a separate release step, set `CARBON_MIGRATE_ON_START=disabled`: the
-service then starts against the schema it finds and reports not ready until it
-is the right one.
+them as a separate release step, set `CARBON_MIGRATE_ON_START=disabled`. The
+service then applies nothing, and **refuses to start** on a schema it may not
+serve, printing what it found (pending migrations, a newer schema, or a
+history that differs). A deployment that forgot its migration step fails at
+once instead of serving errors.
+
+While it runs, a service keeps checking: if the schema moves under it, its
+`/readyz` fails and its `/healthz` does not.
 
 ### Order
 
@@ -135,8 +140,25 @@ Migrations are additive, and each has a recovery note in
 An older version stays ready only until the schema moves: after step 3 its
 `/readyz` fails, by design, so steps 3 to 5 should be close together.
 
-Running Cloud, Database and Registry one version apart has not been tested
-(G-158).
+### Rolling back after a migration
+
+A migration is never undone. To go back to the previous version of the code
+against the newer schema:
+
+1. Read the recovery notes in [migrations.md](migrations.md) for every
+   migration the newer release added. Some change behaviour for older code.
+2. Start the previous version with `CARBON_MIGRATE_ON_START=disabled` and
+   `CARBON_NEWER_SCHEMA=allowed`.
+
+With that setting a service accepts a database that has everything it ships,
+unchanged, plus migrations from a newer release. It still refuses a database
+that is behind, and one whose history differs. The setting cannot be combined
+with migrating on start. Remove it once the newer version is back.
+
+This is tested with each service as a real process
+(`service-processes.integration.test.ts`). What is not tested is the two
+versions of the *code* talking to each other: a new Cloud calling an old
+Database or Registry, or the reverse (G-158).
 
 ## Rotating keys and secrets
 
@@ -190,6 +212,8 @@ Written from the code. Not used in an incident.
 - **Effect:** every change is a transaction, so work in flight is either
   committed or not there.
 - **Do:** when the database is back, check `migrate status`, then `/readyz`.
+  A service that was restarted while the database was away exits and is
+  started again by whatever runs it; that is expected.
   Workers that lost their leases are handled by the lease sweeper; nothing
   needs to be restarted by hand.
 

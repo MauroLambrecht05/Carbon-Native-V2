@@ -4,7 +4,7 @@
 // what a build IS or does — that's cloud-orchestration. This only wires.
 
 import { createFrontendRoutes } from '../infrastructure/http/frontend-routes.ts';
-import { composeOperations } from './operations.ts';
+import { composeOperations, prepareServiceSchema } from './operations.ts';
 import {
   ClaimNextBuildUseCase,
   CompleteBuildUseCase,
@@ -100,8 +100,8 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): CarbonCloud
 export async function startServer(config: CarbonCloudConfig) {
   const sql = openDatabase(config.databaseUrl);
   // By default a service brings its own schema up to date when it starts. A deployment that runs migrations as a release step
-  // turns this off; the service then starts against the schema it finds, and reports not ready until it is the right one.
-  if (process.env.CARBON_MIGRATE_ON_START !== "disabled") await migrate(sql);
+  // turns this off; the service then refuses to start on a schema it may not serve.
+  await prepareServiceSchema(sql, migrate);
 
   const builds = new PostgresBuildRepository(sql);
   const identity = new PostgresIdentityRepository(sql);

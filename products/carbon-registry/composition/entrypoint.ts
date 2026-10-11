@@ -14,7 +14,7 @@ import { RegistryEngine } from "../infrastructure/services/RegistryEngine.ts";
 import { TrustSigner } from "../infrastructure/services/TrustSigner.ts";
 import { buildRegistryRoutes } from "../infrastructure/http/routes.ts";
 import { startRegistryServer } from "../infrastructure/http/server.ts";
-import { composeOperations } from "./operations.ts";
+import { composeOperations, prepareServiceSchema } from "./operations.ts";
 
 export interface CarbonRegistryConfig {
   readonly internalPlatform?: LifecyclePlatformConfig;
@@ -67,8 +67,8 @@ export function publishingFromEnv(env: NodeJS.ProcessEnv, objectStore: CarbonReg
 export async function buildRegistrySystem(config: CarbonRegistryConfig) {
   const sql = openDatabase(config.databaseUrl);
   // By default a service brings its own schema up to date when it starts. A deployment that runs migrations as a release step
-  // turns this off; the service then starts against the schema it finds, and reports not ready until it is the right one.
-  if (process.env.CARBON_MIGRATE_ON_START !== "disabled") await migrate(sql);
+  // turns this off; the service then refuses to start on a schema it may not serve.
+  await prepareServiceSchema(sql, migrate);
 
   const s3 = new Bun.S3Client({
     endpoint: config.objectStore.endpoint,

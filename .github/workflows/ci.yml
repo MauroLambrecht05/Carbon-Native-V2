@@ -256,20 +256,27 @@ jobs:
           bun install --cwd .config --frozen-lockfile
           ./.tools/automation/bootstrap/link-node-modules.sh
 
-      # A service container cannot be given a command, and MinIO needs one, so
-      # it is started here, from MinIO's own registry: the image is not on Docker
-      # Hub. The bucket is made with the AWS CLI the runner already has.
+      # The object store is RustFS, an S3-compatible server that checks request
+      # signatures. MinIO, which the suites were first written against, no
+      # longer publishes an image to a public registry. The image is pinned by
+      # digest: the store tests passed against exactly this one. A service
+      # container cannot be given a command, so it is started here, and the
+      # bucket is made with the AWS CLI the runner already has.
       - name: start the object store
+        env:
+          AWS_ACCESS_KEY_ID: carbon_test
+          AWS_SECRET_ACCESS_KEY: carbon_test_local_only
+          AWS_DEFAULT_REGION: us-east-1
         run: |
           docker run -d --name carbon-objectstore-test -p 127.0.0.1:55441:9000 \
-            -e MINIO_ROOT_USER=carbon_test -e MINIO_ROOT_PASSWORD=carbon_test_local_only \
-            quay.io/minio/minio server /data
+            -e RUSTFS_ACCESS_KEY=carbon_test -e RUSTFS_SECRET_KEY=carbon_test_local_only \
+            rustfs/rustfs@sha256:1803faef57627e2d9c2e7d89d655d712ddded5389040054987163043fecb6a3c /data
+          made=no
           for attempt in $(seq 1 30); do
-            curl -fsS http://127.0.0.1:55441/minio/health/ready && break
+            if aws --endpoint-url http://127.0.0.1:55441 s3 mb s3://carbon-artifacts; then made=yes; break; fi
             sleep 2
           done
-          AWS_ACCESS_KEY_ID=carbon_test AWS_SECRET_ACCESS_KEY=carbon_test_local_only AWS_DEFAULT_REGION=us-east-1 \
-            aws --endpoint-url http://127.0.0.1:55441 s3 mb s3://carbon-artifacts
+          if [ "$made" != yes ]; then docker logs carbon-objectstore-test; exit 1; fi
 
       - name: integration suites
         run: >-

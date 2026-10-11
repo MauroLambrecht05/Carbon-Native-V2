@@ -1395,26 +1395,35 @@ suite('Cloud-to-owning-service lifecycle over real HTTP and PostgreSQL', () => {
       const shipped = readdirSync(service.directory).filter(file => file.endsWith('.sql')).sort(); const ledger = () => service.sql.unsafe(`SELECT version, checksum, applied_at FROM ${service.ledger} ORDER BY version`);
       const before = JSON.stringify(await ledger()); const status = () => migrationStatus(service.sql, service.ledger, service.directory);
       // Freshly migrated: exactly the schema this code ships.
-      expect(await status()).toEqual({ applied: shipped, pending: [], drift: null, current: true });
+      expect(await status()).toEqual({ applied: shipped, pending: [], drift: null, ahead: [], current: true });
       const operations = service.compose(service.sql, { CARBON_METRICS_TOKEN: scrape }); const ready = async () => { const response = (await operations.routes(get('/readyz')))!; return [response.status, await response.json()]; };
       expect(await ready()).toEqual([200, { ready: true, checks: { database: 'ok', migrations: 'ok' } }]);
 
       // The code is ahead of the database: a migration has not been run. Not ready, and it says which check.
       const last = shipped.at(-1)!; const row = (await service.sql.unsafe(`SELECT * FROM ${service.ledger} WHERE version = $1`, [last]))[0];
       await service.sql.unsafe(`DELETE FROM ${service.ledger} WHERE version = $1`, [last]);
-      expect(await status()).toEqual({ applied: shipped.slice(0, -1), pending: [last], drift: null, current: false }); expect(await ready()).toEqual([503, { ready: false, checks: { database: 'ok', migrations: 'failed' } }]);
+      expect(await status()).toEqual({ applied: shipped.slice(0, -1), pending: [last], drift: null, ahead: [], current: false }); expect(await ready()).toEqual([503, { ready: false, checks: { database: 'ok', migrations: 'failed' } }]);
       await service.sql.unsafe(`INSERT INTO ${service.ledger} (version, checksum, applied_at) VALUES ($1, $2, $3)`, [row.version, row.checksum, row.applied_at]);
       // The database is ahead of the code: an older release is running against a newer schema.
       await service.sql.unsafe(`INSERT INTO ${service.ledger} (version, checksum) VALUES ('9999_from_a_newer_release.sql', $1)`, ['a'.repeat(64)]);
-      expect(await status()).toMatchObject({ pending: [], drift: '9999_from_a_newer_release.sql', current: false }); expect((await ready())[0]).toBe(503);
+      expect(await status()).toMatchObject({ pending: [], drift: null, ahead: ['9999_from_a_newer_release.sql'], current: false }); expect((await ready())[0]).toBe(503);
+      // The rollback setting accepts exactly this, and nothing else: not a database that is behind, and not an edited history.
+      const rollback = service.compose(service.sql, { CARBON_NEWER_SCHEMA: 'allowed' }); const rollbackReady = async () => (await rollback.routes(get('/readyz')))!.status;
+      expect(await rollbackReady()).toBe(200);
+      await service.sql.unsafe(`UPDATE ${service.ledger} SET checksum = $1 WHERE version = $2`, ['c'.repeat(64), shipped[0]]); expect(await rollbackReady()).toBe(503);
+      await service.sql.unsafe(`UPDATE ${service.ledger} SET checksum = $1 WHERE version = $2`, [JSON.parse(before)[0].checksum, shipped[0]]);
+      expect(() => service.compose(service.sql, { CARBON_NEWER_SCHEMA: 'yes' })).not.toThrow(); expect((await service.compose(service.sql, { CARBON_NEWER_SCHEMA: 'yes' }).routes(get('/readyz')))!.status).toBe(503);
       await service.sql.unsafe(`DELETE FROM ${service.ledger} WHERE version = '9999_from_a_newer_release.sql'`);
       // A migration that was edited after it ran, or a ledger changed by hand.
       await service.sql.unsafe(`UPDATE ${service.ledger} SET checksum = $1 WHERE version = $2`, ['b'.repeat(64), shipped[1]]);
-      expect(await status()).toMatchObject({ drift: shipped[1], pending: [], current: false }); expect((await ready())[0]).toBe(503);
+      expect(await status()).toMatchObject({ drift: shipped[1], pending: [], ahead: [], current: false }); expect((await ready())[0]).toBe(503);
       await service.sql.unsafe(`UPDATE ${service.ledger} SET checksum = $1 WHERE version = $2`, [JSON.parse(before)[1].checksum, shipped[1]]);
       // Looking changed nothing: the ledger is byte for byte what it was, and a ledger that does not exist was not created.
       expect(await status()).toMatchObject({ current: true }); expect(JSON.stringify(await ledger())).toBe(before); expect(await ready()).toEqual([200, { ready: true, checks: { database: 'ok', migrations: 'ok' } }]);
-      expect(await migrationStatus(service.sql, 'no_such_ledger', service.directory)).toEqual({ applied: [], pending: shipped, drift: null, current: false });
+      expect(await migrationStatus(service.sql, 'no_such_ledger', service.directory)).toEqual({ applied: [], pending: shipped, drift: null, ahead: [], current: false });
+      // Behind is never servable, whatever the rollback setting says.
+      await service.sql.unsafe(`DELETE FROM ${service.ledger} WHERE version = $1`, [last]); expect(await rollbackReady()).toBe(503);
+      await service.sql.unsafe(`INSERT INTO ${service.ledger} (version, checksum, applied_at) VALUES ($1, $2, $3)`, [row.version, row.checksum, row.applied_at]);
       expect((await service.sql`SELECT to_regclass('public.no_such_ledger') AS name`)[0].name).toBeNull();
       await expect(migrationStatus(service.sql, 'ledger; DROP TABLE x', service.directory).then(() => 'ran', () => 'refused')).resolves.toBe('refused');
 

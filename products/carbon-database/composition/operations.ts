@@ -1,5 +1,12 @@
 import { join } from "node:path";
-import { Metrics, migrationStatus, observe, operationsRoutes, type OperationsConfig, type Sample } from "@carbon/operations";
+import { allowNewerSchema, Metrics, migrationStatus, observe, prepareSchema, schemaServable, operationsRoutes, type OperationsConfig, type Sample } from "@carbon/operations";
+
+const LEDGER = "database_schema_migrations";
+const MIGRATIONS = join(import.meta.dir, "../infrastructure/persistence/migrations");
+
+/** Applies this service's migrations at start, or with `CARBON_MIGRATE_ON_START=disabled` refuses to start on a schema it may not serve. */
+export const prepareServiceSchema = (sql: Bun.SQL, migrate: (sql: Bun.SQL) => Promise<unknown>, env: NodeJS.ProcessEnv = process.env) =>
+  prepareSchema({ sql, ledger: LEDGER, directory: MIGRATIONS, migrate: () => migrate(sql), env });
 
 type Row = { name: string; label: string | null; value: string | number | null };
 const HELP: Record<string, string> = {
@@ -32,7 +39,7 @@ export function composeOperations(sql: Bun.SQL, env: NodeJS.ProcessEnv = process
     service: "carbon-database", metrics: new Metrics(), metricsToken: env.CARBON_METRICS_TOKEN || undefined, collect: [() => gauges(sql)],
     checks: {
       database: async () => { await sql`SELECT 1`; },
-      migrations: async () => { const status = await migrationStatus(sql, "database_schema_migrations", join(import.meta.dir, "../infrastructure/persistence/migrations")); if (!status.current) throw new Error("schema is not current"); },
+      migrations: async () => { if (!schemaServable(await migrationStatus(sql, LEDGER, MIGRATIONS), allowNewerSchema(env))) throw new Error("schema is not servable"); },
       ...extraChecks,
     },
   };

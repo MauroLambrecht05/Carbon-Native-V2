@@ -197,6 +197,7 @@ Phase 18 adds no migration. Each service has `bun run migrate` (apply what is
 pending) and `bun run migrate status` (print applied, pending and drift as
 JSON, change nothing, exit non-zero unless the database is exactly at this
 code's version). With `CARBON_MIGRATE_ON_START=disabled` a service does not
-migrate when it starts, and its `/readyz` fails until the schema is the one it
-ships. The status check creates nothing: against a database with no ledger
+migrate when it starts and refuses to start on a schema it may not serve; with
+`CARBON_NEWER_SCHEMA=allowed` as well, it serves a schema that is ahead of it,
+which is how a rollback is done. The status check creates nothing: against a database with no ledger
 table it reports everything as pending. See [operations.md](operations.md).

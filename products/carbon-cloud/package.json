@@ -13,7 +13,7 @@
     "function-worker": "bun ./composition/function-worker.ts",
     "operator-admin": "bun ./composition/operator-admin.ts",
     "lifecycle-sweeper": "bun ./composition/lifecycle-sweeper.ts",
-    "start": "bun ./composition/entrypoint.ts",
+    "start": "bun ./main.ts",
     "dev:mock": "vite --config composition/vite.mock.config.ts",
     "build:mock": "vite build --config composition/vite.mock.config.ts",
     "preview:mock": "vite preview --config composition/vite.mock.config.ts --host 127.0.0.1 --port 5176 --strictPort",

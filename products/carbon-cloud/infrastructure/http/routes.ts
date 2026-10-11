@@ -144,11 +144,9 @@ const DASHBOARD_HTML = `<!doctype html><html lang="en"><meta charset="utf-8">
 
 /** Bun.serve's `routes` object. The composition root is what calls Bun.serve. */
 export function buildRoutes(deps: RouteDeps) {
+  // /healthz, /readyz and /metrics are not here: the entrypoint's observed handler serves them, so they are
+  // logged and counted like every other request.
   const routes = {
-    "/healthz": {
-      GET: () => new Response("ok"),
-    },
-
     "/": {
       GET: () => new Response(DASHBOARD_HTML, { headers: { "content-type": "text/html" } }),
     },

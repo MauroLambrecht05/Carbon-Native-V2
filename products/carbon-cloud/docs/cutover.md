@@ -35,6 +35,7 @@ enable one at a time.
 | `CARBON_CONSOLE_DIR` | Serving the production console |
 | `CARBON_METRICS_TOKEN` | The metrics endpoint |
 | `CARBON_MIGRATE_ON_START=disabled` | Migrations as a separate release step |
+| `CARBON_NEWER_SCHEMA=allowed` | An older version serving a newer schema, for a rollback |
 
 These are per deployment. There is no per-organization flag, so "enable for a
 canary set of organizations" cannot be done yet (G-162).
@@ -54,10 +55,10 @@ What supports that today:
 
 What works against it:
 
-- An older version reports **not ready** against a newer schema
-  ([operations.md](operations.md)). That is deliberate, but it means a
-  rollback after a migration needs the readiness check relaxed or the previous
-  version rebuilt with the newer migration files. Neither is tested (G-158).
+- An older version reports **not ready** against a newer schema unless it is
+  started with the rollback setting ([operations.md](operations.md), "Rolling
+  back after a migration"). The setting is tested with each service as a
+  process. Two versions of the code talking to each other are not (G-158).
 - Some migrations change behaviour for older code, not just add tables. Their
   recovery notes say so, for example: rolling back past 0031 makes deletions
   final without regard to legal holds.

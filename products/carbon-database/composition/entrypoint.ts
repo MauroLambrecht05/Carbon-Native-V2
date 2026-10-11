@@ -20,7 +20,7 @@ import { MigrationEngine } from "../infrastructure/persistence/MigrationEngine.t
 import { SnapshotEngine } from "../infrastructure/persistence/SnapshotEngine.ts";
 import { buildDatabaseRoutes } from "../infrastructure/http/routes.ts";
 import { startDatabaseServer } from "../infrastructure/http/server.ts";
-import { composeOperations } from "./operations.ts";
+import { composeOperations, prepareServiceSchema } from "./operations.ts";
 
 export interface CarbonDatabaseConfig {
   readonly internalPlatform?: LifecyclePlatformConfig;
@@ -73,8 +73,8 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): CarbonDatab
 export async function buildDatabaseSystem(config: CarbonDatabaseConfig) {
   const sql = openDatabase(config.databaseUrl);
   // By default a service brings its own schema up to date when it starts. A deployment that runs migrations as a release step
-  // turns this off; the service then starts against the schema it finds, and reports not ready until it is the right one.
-  if (process.env.CARBON_MIGRATE_ON_START !== "disabled") await migrate(sql);
+  // turns this off; the service then refuses to start on a schema it may not serve.
+  await prepareServiceSchema(sql, migrate);
 
   const s3 = new Bun.S3Client({
     endpoint: config.objectStore.endpoint,

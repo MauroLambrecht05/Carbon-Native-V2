@@ -39,6 +39,12 @@ bun_test(
 )
 
 bun_test(
+    name = "service_processes_test",
+    entry = "service-processes.integration.test.ts",
+    deps = ["//products/carbon-cloud:srcs", "//products/carbon-database:srcs", "//products/carbon-registry:srcs"],
+)
+
+bun_test(
     name = "platform_service_migrations_test",
     entry = "platform-service-migrations.integration.test.ts",
     deps = ["//products/carbon-database:srcs", "//products/carbon-registry:srcs"],
