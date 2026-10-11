@@ -96,11 +96,14 @@ export function validateConstraint(input: DataConstraint, columns: readonly Nati
     const column = selected[0]!;
     if (['json', 'jsonb', 'text[]', 'integer[]'].includes(column.type) || (column.type === 'boolean' && constraint.check.operator !== 'ne')) fail();
     validateValue({ ...column, nullable: false }, constraint.check.value);
+  } else if (constraint.kind === 'foreign-key') {
+    // One scalar column. Whether the referenced table and its key exist and match is checked against the catalog.
+    if (selected.length !== 1 || ['json', 'jsonb', 'text[]', 'integer[]', 'boolean'].includes(selected[0]!.type)) fail();
   } else if (selected.some(column => column.type === 'json')) fail();
 }
 
 export function sameConstraintRule(left: DataConstraint, right: DataConstraint): boolean {
   const shape = (constraint: DataConstraint) => [constraint.kind, constraint.columns,
-    constraint.kind === 'check' ? [constraint.check.column, constraint.check.operator, constraint.check.value] : null];
+    constraint.kind === 'check' ? [constraint.check.column, constraint.check.operator, constraint.check.value] : constraint.kind === 'foreign-key' ? constraint.references.tableId.toLowerCase() : null];
   return JSON.stringify(shape(left)) === JSON.stringify(shape(right));
 }

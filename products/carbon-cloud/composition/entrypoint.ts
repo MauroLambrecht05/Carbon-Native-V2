@@ -142,6 +142,11 @@ export async function startServer(config: CarbonCloudConfig) {
         const requestId = crypto.randomUUID();
         return Response.json({ error: { code: "capability", message: "App authentication is not configured", requestId } }, { status: 501, headers: { "x-request-id": requestId, "cache-control": "no-store" } });
       }
+      // Single-use export download addresses. The token in the path is the credential.
+      if (new URL(request.url).pathname.startsWith("/platform/v1/exports/download/")) {
+        if (accountPlatform?.exportDownloadHandler) return accountPlatform.exportDownloadHandler(request);
+        return Response.json({ error: { code: "not_found", message: "Not found" } }, { status: 404 });
+      }
       // The public update feed installed apps poll. Read-only, no credential.
       if (new URL(request.url).pathname.startsWith("/updates/v1/")) {
         if (accountPlatform?.updateHandler) return accountPlatform.updateHandler(request);

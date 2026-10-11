@@ -138,3 +138,12 @@ make release artifacts, channel revisions and signing profiles append-only, and
 copy release events into `platform_events`. It is additive and leaves the legacy
 `releases`-in-object-storage layout untouched. Recovery: code from before 0028
 ignores these tables.
+
+0029 adds table exports: `data_export_jobs`, `data_export_parts`,
+`data_export_downloads`, `data_export_commands` and `data_export_events`, with a
+trigger that copies export events into `platform_events`. It is additive.
+Recovery: code from before 0029 ignores these tables; objects already written to
+the export bucket would then need to be removed by hand.
+
+Foreign keys need no migration in Database: they are a new kind of entry in the
+existing `canonical_data_constraints` catalog.

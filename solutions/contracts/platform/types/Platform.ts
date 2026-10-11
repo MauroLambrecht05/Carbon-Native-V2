@@ -304,6 +304,18 @@ export type BuildMaterials = { readonly "resolvedCommit": string; readonly "depe
 
 export type BuildProvenance = { readonly "statement": { readonly "version": 1; readonly "buildId": Id; readonly "scope": EnvironmentScope; readonly "attempt": number; readonly "workerId": Id; readonly "source": BuildSource; readonly "sourceDigest": Digest; readonly "materials": BuildMaterials; readonly "artifacts": ReadonlyArray<{ readonly "target": string; readonly "objectKey": string; readonly "sizeBytes": number; readonly "sha256": Digest; }>; readonly "startedAt": Timestamp; readonly "finishedAt": Timestamp; }; readonly "statementDigest": Digest; readonly "signature": { readonly "keyId": string; readonly "algorithm": "ed25519"; readonly "value": string; } | null; };
 
+export type DataExportCreate = { readonly "kind": "export.enqueue"; readonly "commandId": Id; readonly "tableId": Id; readonly "format": "jsonl" | "csv"; readonly "selection"?: DataRowSelection; readonly "access": { readonly "mode": "policy-preview"; readonly "userId"?: Id; }; };
+
+export type DataExportJob = { readonly "id": Id; readonly "scope": EnvironmentScope; readonly "tableId": Id; readonly "format": "jsonl" | "csv"; readonly "state": "queued" | "running" | "ready" | "failed" | "cancelled" | "expired"; readonly "rows": number; readonly "bytes": number; readonly "errorCode": string | null; readonly "createdBy": Id; readonly "revision": Revision; readonly "createdAt": Timestamp; readonly "completedAt": Timestamp | null; readonly "expiresAt": Timestamp | null; };
+
+export type DataExportReceipt = { readonly "job": DataExportJob; };
+
+export type DataExportList = { readonly "items": ReadonlyArray<DataExportJob>; };
+
+export type DataExportCancel = { readonly "commandId": Id; readonly "revision": Revision; };
+
+export type DataExportDownload = { readonly "url": string; readonly "expiresAt": Timestamp; };
+
 export type SemanticVersion = string;
 
 export type UpdatePlatform = string;
@@ -520,11 +532,11 @@ export type DataSchemaChange = { readonly "kind": "rename"; readonly "name": Dat
 
 export type DataSchemaQuery = { readonly "kind": "table.preview"; readonly "tableId": Id; readonly "change": DataSchemaChange; };
 
-export type DataSchemaPreview = { readonly "tableId": Id; readonly "revision": Revision; readonly "definition": DataTableDefinition; readonly "destructive": boolean; readonly "dependencies": ReadonlyArray<string>; };
+export type DataSchemaPreview = { readonly "tableId": Id; readonly "revision": Revision; readonly "definition": DataTableDefinition; readonly "destructive": boolean; readonly "dependencies": ReadonlyArray<string>; readonly "blocked": boolean; };
 
 export type AccountDataSchemaPreview = { readonly "scope": EnvironmentScope; readonly "preview": DataSchemaPreview; };
 
-export type DataConstraint = { readonly "id": Id; readonly "name": DataIdentifier; readonly "columns": ReadonlyArray<DataIdentifier>; readonly "kind": "unique" | "index"; } | { readonly "id": Id; readonly "name": DataIdentifier; readonly "columns": ReadonlyArray<DataIdentifier>; readonly "kind": "check"; readonly "check": { readonly "column": DataIdentifier; readonly "operator": "gte" | "lte" | "ne"; readonly "value": unknown; }; };
+export type DataConstraint = { readonly "id": Id; readonly "name": DataIdentifier; readonly "columns": ReadonlyArray<DataIdentifier>; readonly "kind": "unique" | "index"; } | { readonly "id": Id; readonly "name": DataIdentifier; readonly "columns": ReadonlyArray<DataIdentifier>; readonly "kind": "check"; readonly "check": { readonly "column": DataIdentifier; readonly "operator": "gte" | "lte" | "ne"; readonly "value": unknown; }; } | { readonly "id": Id; readonly "name": DataIdentifier; readonly "columns": ReadonlyArray<DataIdentifier>; readonly "kind": "foreign-key"; readonly "references": { readonly "tableId": Id; }; };
 
 export type DataTypesQuery = { readonly "kind": "table.types"; readonly "tableId": Id; readonly "revision"?: Revision; };
 
@@ -715,6 +727,12 @@ export interface Components {
   WorkerBuildInput: WorkerBuildInput;
   BuildMaterials: BuildMaterials;
   BuildProvenance: BuildProvenance;
+  DataExportCreate: DataExportCreate;
+  DataExportJob: DataExportJob;
+  DataExportReceipt: DataExportReceipt;
+  DataExportList: DataExportList;
+  DataExportCancel: DataExportCancel;
+  DataExportDownload: DataExportDownload;
   SemanticVersion: SemanticVersion;
   UpdatePlatform: UpdatePlatform;
   ChannelName: ChannelName;

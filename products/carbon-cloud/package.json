@@ -8,6 +8,7 @@
     "account-mail-worker": "bun ./composition/account-mail-worker.ts",
     "catalog-worker": "bun ./composition/catalog-worker.ts",
     "data-import-worker": "bun ./composition/data-import-worker.ts",
+    "data-export-worker": "bun ./composition/data-export-worker.ts",
     "worker-lease-sweeper": "bun ./composition/worker-lease-sweeper.ts",
     "lifecycle-sweeper": "bun ./composition/lifecycle-sweeper.ts",
     "start": "bun ./composition/entrypoint.ts",

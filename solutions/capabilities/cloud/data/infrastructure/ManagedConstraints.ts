@@ -11,7 +11,7 @@ async function signature(tx: Bun.TransactionSQL, target: string, tableId: string
         FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid WHERE i.indrelid = ${target}::regclass AND c.relname = ${name}
           AND NOT i.indisunique AND NOT EXISTS (SELECT 1 FROM pg_constraint k WHERE k.conindid = i.indexrelid)`
     : await tx`SELECT concat(c.contype, ':', c.convalidated, ':', c.condeferrable, ':', pg_get_constraintdef(c.oid, false)) AS signature
-        FROM pg_constraint c WHERE c.conrelid = ${target}::regclass AND c.conname = ${name} AND c.contype = ${constraint.kind === 'unique' ? 'u' : 'c'}::"char"`;
+        FROM pg_constraint c WHERE c.conrelid = ${target}::regclass AND c.conname = ${name} AND c.contype = ${constraint.kind === 'unique' ? 'u' : constraint.kind === 'foreign-key' ? 'f' : 'c'}::"char"`;
   if (rows.length !== 1) throw new PlatformFault('conflict', 'Managed native constraint requires review');
   return rows[0].signature;
 }
@@ -36,7 +36,10 @@ export async function refreshManagedConstraints(tx: Bun.TransactionSQL, target: 
   }
 }
 
-export async function replaceManagedConstraint(tx: Bun.TransactionSQL, schema: string, target: string, tableId: string, definition: NativeDefinition, before?: DataConstraint, after?: DataConstraint) {
+/** The native table and key column a foreign key points at, resolved from the catalog by the caller. */
+export interface ForeignTarget { readonly target: string; readonly column: string }
+
+export async function replaceManagedConstraint(tx: Bun.TransactionSQL, schema: string, target: string, tableId: string, definition: NativeDefinition, before?: DataConstraint, after?: DataConstraint, foreign?: ForeignTarget) {
   if (before && after && sameConstraintRule(before, after)) {
     await tx`UPDATE public.canonical_data_constraints SET descriptor = ${JSON.stringify(after)}::text::jsonb WHERE table_id = ${tableId} AND constraint_id = ${before.id}`;
     return;
@@ -51,6 +54,11 @@ export async function replaceManagedConstraint(tx: Bun.TransactionSQL, schema: s
     const name = identifier(nativeName(tableId, after.id)); const columns = after.columns.map(identifier).join(', ');
     if (after.kind === 'index') await tx.unsafe(`CREATE INDEX ${name} ON ${target} (${columns})`);
     else if (after.kind === 'unique') await tx.unsafe(`ALTER TABLE ${target} ADD CONSTRAINT ${name} UNIQUE (${columns})`);
+    else if (after.kind === 'foreign-key') {
+      if (!foreign) throw new PlatformFault('validation', 'The referenced table is required');
+      // No cascading: a referenced row cannot be deleted or re-keyed while rows point at it.
+      await tx.unsafe(`ALTER TABLE ${target} ADD CONSTRAINT ${name} FOREIGN KEY (${columns}) REFERENCES ${foreign.target} (${identifier(foreign.column)}) ON DELETE RESTRICT ON UPDATE RESTRICT`);
+    }
     else if (after.kind === 'check') {
       const column = definition.columns.find(column => column.name === after.check.column)!;
       const operator = { gte: '>=', lte: '<=', ne: '<>' }[after.check.operator];

@@ -20,7 +20,7 @@ meaningful tests pass together.
 | 7 — complete | Implement BE-06 build orchestration: immutable source snapshots, quota reservations, attempts, leases, heartbeats, cancellation and ordered logs. | Completed: builds on worker leases with an immutable digested input, serialized quota reservation, attempts with lost-worker retry, gapless append-only logs, immutable artifact declarations, cancellation and deadlines, all proven durably. Artifact verification and a worker runtime are Phase 8 (G-27, G-35). |
 | 8 — partly complete | Implement disposable Windows x64 execution, dependency locks, NSIS/WiX packaging, signing and provenance. | Done and proven: Cloud verifies declared artifacts against object storage, signed provenance, a worker runtime with pinned checkout, required lockfile, log redaction, disposable workspace and cancellation. Not proven: a real NSIS/WiX build, Authenticode signing, and resource or egress limits (G-36 to G-38). The gate is not met until those are. |
 | 9 — complete | Implement BE-07 releases, channel revisions, rollout/promotion/withdrawal and updater compatibility. | Completed: immutable releases over verified artifacts, signing profiles, signed channel revisions, promotion, rollout, withdrawal with a stop list, a public feed, and one conformance fixture run by the publisher's code and the TypeScript, standalone and Rust updaters. No packaged app has updated from the feed yet (G-57). |
-| 10 | Finish BE-08 relational work: private exports, foreign keys, impact previews, asynchronous schema work, migration promotion and restricted SQL. | Authorization, cancellation, resumability, dependency impact and large-job recovery pass real Database integration tests. |
+| 10 — partly complete | Finish BE-08 relational work: private exports, foreign keys, impact previews, asynchronous schema work, migration promotion and restricted SQL. | Done and proven against real Database: foreign keys, cross-table impact previews, and private resumable exports with authorization, cancellation and crash recovery. Not built: restricted SQL, migration promotion, asynchronous schema changes, table deletion (G-64 to G-67). |
 | 11 | Implement BE-09 blob storage with private objects, signed bounded transfers, metadata authority, retention and cleanup. | Two-tenant upload/download/delete, interrupted transfer, expiry, quota and orphan cleanup scenarios pass. |
 | 12 | Implement BE-09 vector, graph and realtime parity with canonical environment authority and durable outbox semantics. | Exact-scope CRUD/query isolation and reconnect/replay/revocation tests pass for every service. |
 | 13 | Implement BE-10 functions and schedules with immutable revisions, secret bindings, leases, limits and durable executions. | Deploy/invoke/schedule/cancel/retry tests prove revision pinning, secret isolation, idempotency and timeout recovery. |
@@ -31,18 +31,18 @@ meaningful tests pass together.
 | 18 | Complete observability, deployment compatibility, security review, migration reconciliation, canary rollout and cutover. | Sections 25-29 of the backend plan have recorded production evidence, including restore, rotation, rollback and no-mock-fallback drills. |
 | 19 | Close the gap ledger: every open decision and everything an earlier phase could not finish or prove. | Each entry in [gaps.md](gaps.md) is closed with evidence or explicitly accepted by the owner. Includes the hardware- and account-dependent proofs (a real Windows build, signing, isolation, real KMS, a real identity provider) and CI running the database suites. |
 
-## Start with Phase 10
+## Start with Phase 11
 
-Phases 1 to 7 and 9 are complete and Phase 8 is partly complete. Read these
-files before changing Phase 10 code:
+Phases 1 to 7 and 9 are complete; Phases 8 and 10 are partly complete. Read
+these files before changing Phase 11 code:
 
-- section 14 of [the backend plan](../platform-backend-plan.md), "BE-08: relational data and policy lifecycle", and its proof gate
-- the relational sections of the progress log (metadata, restricted row operations, schema changes, imports)
-- `solutions/capabilities/cloud/data/` and `products/carbon-database/`
-- [gaps.md](gaps.md), G-55: release compatibility is waiting on migration warnings from this phase
+- section 15.1 of [the backend plan](../platform-backend-plan.md), "Blobs", and its proof gate
+- [data-exports.md](../data-exports.md): the export store and single-use download are the nearest existing pattern for private objects and bounded transfers
+- `products/carbon-database/infrastructure/services/StorageEngine.ts` (the legacy storage engine) and `solutions/capabilities/cloud/data/`
+- [gaps.md](gaps.md), G-42, G-47, G-62 and G-73: artifact immutability and object cleanup are waiting on this phase
 
-Phase 10 finishes relational work: private exports, foreign keys, impact
-previews, asynchronous schema work, migration promotion and restricted SQL.
+Phase 11 builds blob storage: private objects, signed bounded transfers,
+metadata authority, retention and cleanup.
 
 ## Deferred work
 

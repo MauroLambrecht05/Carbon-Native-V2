@@ -12,3 +12,8 @@ export type { AccountDataAuthority, DataTransport } from './application/ports/Ac
 export { validateDefinition, validatePolicies, identifier, type NativeColumn, type NativePolicy, type NativeDefinition, type NativePolicySet } from './domain/NativeTable.ts';
 export type { NativeDataAuthority, NativeTableRecord, NativeRow, NativeRowAccess, NativeTablesRepository } from './application/ports/NativeTables.ts';
 export { AccountImports } from './application/usecases/AccountImports.ts';
+export { AccountExports, ExportDownloads, RunExportJobs } from './application/usecases/Exports.ts';
+export type { ExportDownloadSource, ExportJobs, ExportLease, ExportPart, ExportStore } from './application/ports/ExportJobs.ts';
+export { PostgresExportJobs } from './infrastructure/PostgresExportJobs.ts';
+export { S3ExportStore, type ExportStoreConfig } from './infrastructure/S3ExportStore.ts';
+export { encodeExportRows, exportColumns, type ExportFormat } from './domain/ExportEncoding.ts';

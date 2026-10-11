@@ -184,6 +184,107 @@ suite('canonical native PostgreSQL policies', () => {
     await h.sql.unsafe(`ALTER TABLE ${target} ADD CONSTRAINT "${native}" CHECK (amount >= 0)`);
     expect((await rejected(change('8', { kind: 'rename', name: 'drifted' }))).code).toBe('conflict');
   });
+  test('foreign keys point at a primary key in the same environment, refuse orphans and referenced deletions, and block key changes with a cross-table impact preview', async () => {
+    const h = await harness(); const authority = h.environments[0]!; const elsewhere = h.environments[1]!; const user = uuid(); const actor = app(authority, user);
+    const fault = (error: { code?: string; errno?: string; name?: string }): string => error.name === 'ContractError' ? 'validation' : error.errno ?? error.code ?? String(error);
+    const policies = () => ({ enabled: true, rules: [{ id: uuid(), name: 'Owner', kind: 'owner' as const, ownerColumn: 'owner', operations: ['select', 'insert', 'update', 'delete'] as ('select' | 'insert' | 'update' | 'delete')[] }] });
+    const ownerColumn = { name: 'owner', type: 'uuid' as const, nullable: false };
+    const customers = uuid(); const orders = uuid(); const keyless = uuid();
+    const customerDefinition = (): NativeDefinition => ({ name: 'customers', columns: [ownerColumn, { name: 'code', type: 'text', nullable: false }, { name: 'label', type: 'text', nullable: true }], primaryKey: 'code', policies: policies() });
+    const link: DataConstraint = { id: uuid(), name: 'order_customer', kind: 'foreign-key', columns: ['customer'], references: { tableId: customers } };
+    const orderDefinition = (constraint: DataConstraint = link, type: 'text' | 'uuid' = 'text'): NativeDefinition => ({ name: 'orders',
+      columns: [ownerColumn, { name: 'customer', type, nullable: true }, { name: 'total', type: 'integer', nullable: false }], policies: policies(), constraints: [constraint] });
+    const alter = (tableId: string, revision: string, change: DataSchemaChange, confirmation?: string) => h.data.command({ ...authority, requestId: uuid() }, { kind: 'table.alter', tableId, revision, commandId: uuid(), change, ...(confirmation ? { confirmation } : {}) });
+    const tables = async () => (await h.sql`SELECT name FROM canonical_data_tables ORDER BY name`).map((row: { name: string }) => row.name);
+
+    // What a foreign key may point at.
+    expect(fault(await rejected(h.data.create(authority, orders, orderDefinition())))).toBe('not_found');
+    await h.data.create(authority, customers, customerDefinition());
+    await h.data.create(authority, keyless, { name: 'keyless', columns: [ownerColumn, { name: 'code', type: 'text', nullable: false }], policies: policies() });
+    expect(fault(await rejected(h.data.create(authority, orders, orderDefinition(link, 'uuid'))))).toBe('validation');
+    expect(fault(await rejected(h.data.create(authority, orders, orderDefinition({ ...link, references: { tableId: keyless } }))))).toBe('validation');
+    // Another environment's table does not exist as far as this one can tell.
+    expect(fault(await rejected(h.data.create(elsewhere, uuid(), orderDefinition())))).toBe('not_found');
+    expect(fault(await rejected(h.data.create(authority, orders, { ...orderDefinition(), constraints: [{ ...link, columns: ['customer', 'total'] } as unknown as DataConstraint] })))).toBe('validation');
+    expect(await tables()).toEqual(['customers', 'keyless']);
+    await h.data.create(authority, orders, orderDefinition());
+    const names = databaseEnvironmentIdentifiers(authority.scope.environmentId); const physical = (id: string) => `"${names.schema}"."ct_${id.replaceAll('-', '')}"`;
+    const native = async (id: string) => (await h.sql`SELECT confdeltype::text AS on_delete, confupdtype::text AS on_update, convalidated FROM pg_constraint WHERE conrelid = ${physical(id)}::regclass AND contype = 'f'`) as unknown[];
+    // Real native constraint, with no cascading.
+    expect(await native(orders)).toEqual([{ on_delete: 'r', on_update: 'r', convalidated: true }]);
+
+    // Rows: an order needs an existing customer or none; a referenced customer cannot be deleted.
+    const acme = await h.data.insert(actor, customers, access, { owner: user, code: 'acme', label: 'Acme' });
+    const order = await h.data.insert(actor, orders, access, { owner: user, customer: 'acme', total: '10' });
+    await h.data.insert(actor, orders, access, { owner: user, customer: null, total: '5' });
+    expect(fault(await rejected(h.data.insert(actor, orders, access, { owner: user, customer: 'ghost', total: '1' })))).toBe('23503');
+    expect(fault(await rejected(h.data.update(actor, orders, access, order.id, order.revision, { customer: 'ghost' })))).toBe('23503');
+    expect(fault(await rejected(h.data.delete(actor, customers, access, acme.id, acme.revision)))).toBe('23503');
+    expect(fault(await rejected(h.data.update(actor, customers, access, acme.id, acme.revision, { code: 'acme2' })))).toBe('23503');
+    expect(await h.data.query(actor, orders, access)).toHaveLength(2); expect(await h.data.query(actor, customers, access)).toHaveLength(1);
+
+    // Impact preview across tables: changing the referenced key names the tables that depend on it and is marked blocked.
+    const inbound = `inbound-foreign-key:${orders}:${link.id}`;
+    const renameKey: DataSchemaChange = { kind: 'column.edit', original: 'code', column: { name: 'identifier', type: 'text', nullable: false } };
+    const retypeKey: DataSchemaChange = { kind: 'column.edit', original: 'code', column: { name: 'code', type: 'uuid', nullable: false } };
+    expect(await h.data.preview(authority, customers, renameKey)).toMatchObject({ blocked: true, dependencies: ['primary-key', inbound] });
+    expect(await h.data.preview(authority, customers, { kind: 'primary-key', column: null })).toMatchObject({ blocked: true, destructive: true, dependencies: ['primary-key:code', inbound] });
+    expect(await h.data.preview(authority, customers, { kind: 'column.edit', original: 'label', column: { name: 'title', type: 'text', nullable: true } })).toMatchObject({ blocked: false, dependencies: [] });
+    expect(await h.data.preview(authority, customers, { kind: 'column.edit', original: 'code', column: { name: 'code', type: 'text', nullable: false, default: { kind: 'literal', value: 'x' } } })).toMatchObject({ blocked: false });
+    expect(await h.data.preview(authority, orders, { kind: 'constraint.set', constraint: { ...link, name: 'renamed_link' } })).toMatchObject({ blocked: false, destructive: false });
+    // A preview of a foreign key that could not be created fails the same way the change would.
+    expect(fault(await rejected(h.data.preview(authority, orders, { kind: 'constraint.set', constraint: { ...link, id: uuid(), name: 'bad', references: { tableId: keyless } } })))).toBe('validation');
+    expect(fault(await rejected(h.data.preview(authority, orders, { kind: 'constraint.set', constraint: { ...link, id: uuid(), name: 'bad', references: { tableId: uuid() } } })))).toBe('not_found');
+    for (const change of [renameKey, retypeKey, { kind: 'primary-key', column: null }, { kind: 'primary-key', column: 'label' }] as DataSchemaChange[]) expect(fault(await rejected(alter(customers, '1', change, 'customers')))).toBe('conflict');
+    expect((await h.data.get(authority, customers)).revision).toBe('1');
+    // Changes that leave the key alone go through, and a table rename does not disturb the link.
+    expect((await alter(customers, '1', { kind: 'column.edit', original: 'label', column: { name: 'title', type: 'text', nullable: true } })).revision).toBe('2');
+    expect((await alter(customers, '2', { kind: 'rename', name: 'clients' })).revision).toBe('3');
+
+    // The referencing column can be renamed; the link follows it and is still enforced. Its type cannot drift from the key's.
+    expect((await alter(orders, '1', { kind: 'column.edit', original: 'customer', column: { name: 'buyer', type: 'text', nullable: true } })).revision).toBe('2');
+    expect((await h.data.get(authority, orders)).definition.constraints).toEqual([{ ...link, columns: ['buyer'] }]);
+    expect(fault(await rejected(h.data.insert(actor, orders, access, { owner: user, buyer: 'ghost', total: '1' })))).toBe('23503');
+    expect(['42804', 'validation', '0A000']).toContain(fault(await rejected(alter(orders, '2', { kind: 'column.edit', original: 'buyer', column: { name: 'buyer', type: 'uuid', nullable: true } }, 'orders'))));
+    expect((await h.data.get(authority, orders)).revision).toBe('2'); expect(await native(orders)).toHaveLength(1);
+
+    // Adding a link to a table whose rows already break it changes nothing.
+    const invoices = uuid(); const late: DataConstraint = { id: uuid(), name: 'invoice_customer', kind: 'foreign-key', columns: ['customer'], references: { tableId: customers } };
+    await h.data.create(authority, invoices, { name: 'invoices', columns: [ownerColumn, { name: 'customer', type: 'text', nullable: false }], policies: policies() });
+    const stray = await h.data.insert(actor, invoices, access, { owner: user, customer: 'nobody' });
+    expect(fault(await rejected(alter(invoices, '1', { kind: 'constraint.set', constraint: late })))).toBe('23503');
+    expect((await h.data.get(authority, invoices)).revision).toBe('1'); expect(await native(invoices)).toEqual([]); expect(await h.sql`SELECT 1 FROM canonical_data_constraints WHERE table_id = ${invoices}`).toHaveLength(0);
+    await h.data.delete(actor, invoices, access, stray.id, stray.revision);
+    expect((await alter(invoices, '1', { kind: 'constraint.set', constraint: late })).revision).toBe('2');
+    expect((await h.data.preview(authority, customers, renameKey)).dependencies).toEqual(['primary-key', `inbound-foreign-key:${invoices}:${late.id}`, inbound].sort((a, b) => a === 'primary-key' ? -1 : b === 'primary-key' ? 1 : a.split(':')[1]!.localeCompare(b.split(':')[1]!)));
+
+    // Once nothing references the key, it can change.
+    expect(fault(await rejected(alter(orders, '2', { kind: 'constraint.delete', constraintId: link.id })))).toBe('validation');
+    expect((await alter(orders, '2', { kind: 'constraint.delete', constraintId: link.id }, 'orders')).revision).toBe('3');
+    expect(fault(await rejected(alter(customers, '3', renameKey, 'clients')))).toBe('conflict');
+    expect((await alter(invoices, '2', { kind: 'constraint.delete', constraintId: late.id }, 'invoices')).revision).toBe('3');
+    expect(await h.data.preview(authority, customers, renameKey)).toMatchObject({ blocked: false, dependencies: ['primary-key'] });
+    expect((await alter(customers, '3', renameKey, 'clients')).revision).toBe('4');
+    expect(await native(orders)).toEqual([]); await h.data.insert(actor, orders, access, { owner: user, buyer: 'ghost', total: '1' });
+
+    // A table can reference itself.
+    const categories = uuid(); const parent: DataConstraint = { id: uuid(), name: 'category_parent', kind: 'foreign-key', columns: ['parent'], references: { tableId: categories } };
+    await h.data.create(authority, categories, { name: 'categories', columns: [ownerColumn, { name: 'slug', type: 'text', nullable: false }, { name: 'parent', type: 'text', nullable: true }], primaryKey: 'slug', policies: policies(), constraints: [parent] });
+    const root = await h.data.insert(actor, categories, access, { owner: user, slug: 'root', parent: null }); await h.data.insert(actor, categories, access, { owner: user, slug: 'leaf', parent: 'root' });
+    expect(fault(await rejected(h.data.insert(actor, categories, access, { owner: user, slug: 'lost', parent: 'nowhere' })))).toBe('23503');
+    expect(fault(await rejected(h.data.delete(actor, categories, access, root.id, root.revision)))).toBe('23503');
+    expect(await h.data.preview(authority, categories, { kind: 'primary-key', column: null })).toMatchObject({ blocked: true, dependencies: ['primary-key:slug', `inbound-foreign-key:${categories}:${parent.id}`] });
+    expect(fault(await rejected(alter(categories, '1', { kind: 'primary-key', column: null }, 'categories')))).toBe('conflict');
+
+    // A link changed behind the catalog's back is noticed before the next schema change.
+    const nativeName = (await h.sql`SELECT conname FROM pg_constraint WHERE conrelid = ${physical(categories)}::regclass AND contype = 'f'`)[0].conname;
+    await h.sql.unsafe(`ALTER TABLE ${physical(categories)} DROP CONSTRAINT "${nativeName}"`);
+    expect(fault(await rejected(alter(categories, '1', { kind: 'column.add', column: { name: 'note', type: 'text', nullable: true } })))).toBe('conflict');
+    await h.sql.unsafe(`ALTER TABLE ${physical(categories)} ADD CONSTRAINT "${nativeName}" FOREIGN KEY (parent) REFERENCES ${physical(categories)} (slug) ON DELETE CASCADE`);
+    expect(fault(await rejected(alter(categories, '1', { kind: 'column.add', column: { name: 'note', type: 'text', nullable: true } })))).toBe('conflict');
+    expect((await h.data.get(authority, categories)).revision).toBe('1');
+  });
+
   test('user keys can be added, replaced and cleared atomically without replacing internal row identities', async () => {
     const h = await harness(); const authority = h.environments[0]!; const id = uuid(); const user = uuid(); const actor = app(authority, user);
     await h.data.create(authority, id, { ...definition(), columns: [...definition().columns, { name: 'slug', type: 'text', nullable: true }, { name: 'number', type: 'integer', nullable: false, default: { kind: 'literal', value: '1' } }] });

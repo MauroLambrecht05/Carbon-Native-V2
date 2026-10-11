@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { compileRowSelection } from './RowSelection.ts';
 import { compileRowOrder } from './RowOrder.ts';
-import { planSchemaChange } from '../domain/SchemaChange.ts';
+import { changesReferencedKey, planSchemaChange } from '../domain/SchemaChange.ts';
 import { nativePrimaryKeyName, replaceNativePrimaryKey } from './NativePrimaryKey.ts';
-import { assertManagedConstraints, refreshManagedConstraints, replaceManagedConstraint } from './ManagedConstraints.ts';
-import type { DataSchemaChange } from '@carbon/contracts/platform';
+import { assertManagedConstraints, refreshManagedConstraints, replaceManagedConstraint, type ForeignTarget } from './ManagedConstraints.ts';
+import type { DataConstraint, DataSchemaChange } from '@carbon/contracts/platform';
 import type { DataQuery } from '@carbon/contracts/platform';
 import { postgresArray } from './PostgresParameters.ts';
 import { applyNativeImport } from './NativeImportExecutor.ts';
@@ -211,13 +211,33 @@ export class PostgresNativeTables implements NativeTablesRepository {
       return parseComponent('DataTable', table);
     });
   }
+  /** Resolves and checks what a foreign key points at: a table in this environment whose primary key has the column's type. */
+  private async foreignTarget(tx: Bun.TransactionSQL, authority: NativeDataAuthority, id: string, definition: NativeDefinition, constraint: DataConstraint): Promise<ForeignTarget | undefined> {
+    if (constraint.kind !== 'foreign-key') return undefined;
+    const referenced = constraint.references.tableId.toLowerCase() === id.toLowerCase() ? definition : (await this.table(tx, authority, constraint.references.tableId)).definition;
+    const key = referenced.columns.find(column => column.name === referenced.primaryKey);
+    if (!key) throw new PlatformFault('validation', 'The referenced table has no primary key');
+    if (definition.columns.find(column => column.name === constraint.columns[0])!.type !== key.type) throw new PlatformFault('validation', 'The column type does not match the referenced primary key');
+    const names = databaseEnvironmentIdentifiers(authority.scope.environmentId);
+    return { target: `"${names.schema}".${physical(constraint.references.tableId)}`, column: key.name };
+  }
+  /** Foreign keys in other tables (and this one) that point at this table's primary key. */
+  private async inbound(tx: Bun.TransactionSQL, authority: NativeDataAuthority, id: string): Promise<string[]> {
+    const rows = await tx`SELECT c.table_id, c.constraint_id FROM public.canonical_data_constraints c JOIN public.canonical_data_tables t ON t.id = c.table_id
+      WHERE t.environment_id = ${authority.scope.environmentId} AND c.descriptor->>'kind' = 'foreign-key' AND lower(c.descriptor->'references'->>'tableId') = ${id.toLowerCase()}
+      ORDER BY c.table_id, c.constraint_id LIMIT 32`;
+    return rows.map((row: { table_id: string; constraint_id: string }) => `inbound-foreign-key:${row.table_id}:${row.constraint_id}`);
+  }
   async preview(authority: NativeDataAuthority, id: string, change: DataSchemaChange) {
     if (!['account','service_account'].includes(authority.principal.kind)) throw new PlatformFault('forbidden', 'Management metadata authority is required');
     return this.transact(async tx => {
       await this.environment(tx, authority, 'metadata.read'); const table = await this.table(tx, authority, id);
       const plan = planSchemaChange(table.definition, change);
+      if (change.kind === 'constraint.set') await this.foreignTarget(tx, authority, id, plan.definition, change.constraint);
+      // Impact across tables: a change to the key other tables point at is shown with those tables and cannot be applied.
+      const inbound = changesReferencedKey(table.definition, change) ? await this.inbound(tx, authority, id) : [];
       await this.authorizeAgain(authority, 'metadata.read');
-      return parseComponent('DataSchemaPreview', { tableId: id, revision: table.revision, ...plan });
+      return parseComponent('DataSchemaPreview', { tableId: id, revision: table.revision, ...plan, dependencies: [...plan.dependencies, ...inbound], blocked: inbound.length > 0 });
     });
   }
   async alter(authority: NativeDataAuthority, id: string, revision: string, change: DataSchemaChange, confirmation?: string): Promise<NativeTableRecord> {
@@ -229,13 +249,15 @@ export class PostgresNativeTables implements NativeTablesRepository {
       if (table.revision !== revision) throw new PlatformFault('conflict', 'Table revision changed');
       const plan = planSchemaChange(table.definition, change);
       if (plan.destructive && confirmation !== table.definition.name) throw new PlatformFault('validation', 'Confirm the current table name for a destructive schema change');
+      if (changesReferencedKey(table.definition, change) && (await this.inbound(tx, authority, id)).length) throw new PlatformFault('conflict', 'Other tables reference this key; remove their foreign keys first');
+      const foreign = change.kind === 'constraint.set' ? await this.foreignTarget(tx, authority, id, plan.definition, change.constraint) : undefined;
       const names = databaseEnvironmentIdentifiers(authority.scope.environmentId); const target = `"${names.schema}".${physical(id)}`;
       await assertManagedConstraints(tx, target, id, table.definition);
       if (change.kind === 'primary-key') await replaceNativePrimaryKey(tx, target, id, table.definition.primaryKey, plan.definition.primaryKey);
       else if (change.kind === 'constraint.set' || change.kind === 'constraint.delete') {
         const constraintId = change.kind === 'constraint.set' ? change.constraint.id : change.constraintId;
         await replaceManagedConstraint(tx, names.schema, target, id, plan.definition,
-          table.definition.constraints?.find(constraint => constraint.id === constraintId), change.kind === 'constraint.set' ? change.constraint : undefined);
+          table.definition.constraints?.find(constraint => constraint.id === constraintId), change.kind === 'constraint.set' ? change.constraint : undefined, foreign);
       }
       else if (change.kind !== 'rename') {
         // Rebuild managed policies and the row-size check atomically around the DDL.
@@ -304,6 +326,8 @@ export class PostgresNativeTables implements NativeTablesRepository {
     return this.transact(async tx => {
       const environment = await this.environment(tx, authority, 'resources.configure');
       const names = databaseEnvironmentIdentifiers(authority.scope.environmentId);
+      const foreign = new Map<string, ForeignTarget | undefined>();
+      for (const constraint of definition.constraints ?? []) foreign.set(constraint.id, await this.foreignTarget(tx, authority, id, definition, constraint));
       const columns = definition.columns.map(column => `${identifier(column.name)} ${pgTypes[column.type]}${column.nullable ? '' : ' NOT NULL'}${defaultSql(column)}`);
       if (definition.primaryKey) columns.push(`CONSTRAINT ${identifier(nativePrimaryKeyName(id))} UNIQUE (${identifier(definition.primaryKey)})`);
       columns.push(`CONSTRAINT carbon_row_size CHECK (pg_catalog.octet_length(pg_catalog.row_to_json(ROW(${definition.columns.map(column => identifier(column.name)).join(',')}))::text) <= 65536)`);
@@ -313,7 +337,7 @@ export class PostgresNativeTables implements NativeTablesRepository {
       const scope = authority.scope;
       await tx`INSERT INTO public.canonical_data_tables (id, resource_id, org_id, project_id, environment_id, name, definition)
         VALUES (${id}, ${environment.id}, ${scope.orgId}, ${scope.projectId}, ${scope.environmentId}, ${definition.name}, ${JSON.stringify(definition)}::text::jsonb)`;
-      for (const constraint of definition.constraints ?? []) await replaceManagedConstraint(tx, names.schema, `"${names.schema}".${physical(id)}`, id, definition, undefined, constraint);
+      for (const constraint of definition.constraints ?? []) await replaceManagedConstraint(tx, names.schema, `"${names.schema}".${physical(id)}`, id, definition, undefined, constraint, foreign.get(constraint.id));
       await this.authorizeAgain(authority, 'resources.configure');
       await this.audit(tx, authority, id, 'table.create', { revision: '1' });
       return { id, revision: '1', definition };

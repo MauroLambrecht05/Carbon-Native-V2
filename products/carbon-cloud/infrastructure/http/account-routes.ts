@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { AccountBuilds, AccountReleases } from '@carbon/orchestration';
 import type { AccountRealms } from '@carbon/auth';
 import type { AccountCatalog, AccountEnvironmentCredentials, AccountWorkers, AccountEnvironmentSecrets, AccountRepositories, CatalogCommand } from '@carbon/catalog';
-import type { AccountData, AccountImports } from '@carbon/data';
+import type { AccountData, AccountExports, AccountImports } from '@carbon/data';
 import { AccountAuthentication, opaqueToken, type PersonalCredentialExchange, type AccountAudit, type AccountPersonalCredentials, type AccountLegacyTokens, type AccountDeviceAuthorization, type AccountServiceAccounts, type AccountSecurity, type AccountProfile, type OrganizationAccess, type OrganizationInvitations, type ExternalAccountAuthentication, type AccountAuthorization } from "@carbon/identity";
 import { ContractError, PlatformFault, parseComponent, type ErrorCode } from "@carbon/contracts/platform";
 
@@ -14,7 +14,7 @@ function cookieValue(request: Request, name: string): string {
   return matches.length === 1 ? matches[0]!.slice(name.length + 1) : "";
 }
 
-export function createAccountRoutes(auth: AccountAuthentication, origin: string, security?: AccountSecurity, profile?: AccountProfile, organizations?: OrganizationAccess, invitations?: OrganizationInvitations, github?: ExternalAccountAuthentication, access?: AccountAuthorization, catalog?: AccountCatalog, data?: AccountData, imports?: AccountImports, credentials?: AccountEnvironmentCredentials, secrets?: AccountEnvironmentSecrets, repositories?: AccountRepositories, devices?: AccountDeviceAuthorization, serviceAccounts?: AccountServiceAccounts, personal?: AccountPersonalCredentials, legacy?: AccountLegacyTokens, workers?: AccountWorkers, audit?: AccountAudit, realms?: AccountRealms, personalExchange?: PersonalCredentialExchange, builds?: AccountBuilds, releases?: AccountReleases) {
+export function createAccountRoutes(auth: AccountAuthentication, origin: string, security?: AccountSecurity, profile?: AccountProfile, organizations?: OrganizationAccess, invitations?: OrganizationInvitations, github?: ExternalAccountAuthentication, access?: AccountAuthorization, catalog?: AccountCatalog, data?: AccountData, imports?: AccountImports, credentials?: AccountEnvironmentCredentials, secrets?: AccountEnvironmentSecrets, repositories?: AccountRepositories, devices?: AccountDeviceAuthorization, serviceAccounts?: AccountServiceAccounts, personal?: AccountPersonalCredentials, legacy?: AccountLegacyTokens, workers?: AccountWorkers, audit?: AccountAudit, realms?: AccountRealms, personalExchange?: PersonalCredentialExchange, builds?: AccountBuilds, releases?: AccountReleases, exports?: AccountExports) {
   const secure = new URL(origin).protocol === "https:";
   const names = { session: `${secure ? "__Host-" : ""}carbon-session`, csrf: `${secure ? "__Host-" : ""}carbon-csrf`, browser: `${secure ? "__Host-" : ""}carbon-browser` };
   const cookie = (name: string, value: string, seconds: number, httpOnly = true) => `${name}=${value}; Path=/; Max-Age=${seconds}; SameSite=Lax${httpOnly ? "; HttpOnly" : ""}${secure ? "; Secure" : ""}`;
@@ -228,6 +228,23 @@ export function createAccountRoutes(auth: AccountAuthentication, origin: string,
           expectedRevision: request.headers.get('if-match')?.replace(/^"([1-9][0-9]*)"$/, '$1') });
         if (importRoute[5] === 'cancel') return json({ receipt: await imports.cancel(token, csrf, scope, importRoute[4]!, parseComponent('DataImportJobCancel', await body()), options) }, 202);
         return json({ receipt: await imports.enqueue(token, csrf, scope, parseComponent('DataImportJobCreate', await body(393216)), options, requestId) }, 202);
+      }
+      // Exports are POST-only, like imports: reading one needs the session and CSRF token, never a bare link.
+      const exportRoute = new RegExp(`^${BASE}/orgs/([^/]+)/projects/([^/]+)/environments/([^/]+)/data/exports(?:/(list)|/([^/]+)/(status|cancel|download))?$`).exec(url.pathname);
+      if (exportRoute && request.method === 'POST') {
+        if (!exports) throw new PlatformFault('capability', 'Exports are not configured');
+        if (url.search) throw new PlatformFault('validation', 'Export scope belongs in the path');
+        const scope = parseComponent('EnvironmentScope', { orgId: exportRoute[1], projectId: exportRoute[2], environmentId: exportRoute[3] });
+        const token = cookieValue(request, names.session); const csrf = request.headers.get('x-csrf-token') ?? ''; const action = exportRoute[4] ?? exportRoute[6];
+        if (action === 'list' || action === 'status' || action === 'download') {
+          const input = await body();
+          if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).length) throw new PlatformFault('validation', 'This request requires an empty JSON object');
+          if (action === 'list') return json(await exports.list(token, csrf, scope));
+          if (action === 'status') return json({ job: await exports.get(token, csrf, scope, exportRoute[5]!) });
+          return json(await exports.download(token, csrf, scope, exportRoute[5]!, requestId), 201);
+        }
+        if (action === 'cancel') return json(await exports.cancel(token, csrf, scope, exportRoute[5]!, parseComponent('DataExportCancel', await body()), parseComponent('CommandOptions', { idempotencyKey: request.headers.get('idempotency-key') ?? '', expectedRevision: request.headers.get('if-match')?.replace(/^"([1-9][0-9]*)"$/, '$1') })), 202);
+        return json(await exports.enqueue(token, csrf, scope, parseComponent('DataExportCreate', await body()), parseComponent('CommandOptions', { idempotencyKey: request.headers.get('idempotency-key') ?? '', expectedRevision: request.headers.get('if-match')?.replace(/^"([1-9][0-9]*)"$/, '$1') }), requestId), 202);
       }
       const dataRoute = new RegExp(`^${BASE}/orgs/([^/]+)/projects/([^/]+)/environments/([^/]+)/data$`).exec(url.pathname);
       if (dataRoute && request.method === 'POST') {

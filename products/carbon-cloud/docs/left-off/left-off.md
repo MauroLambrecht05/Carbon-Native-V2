@@ -1,6 +1,6 @@
 # Carbon platform left-off checkpoint
 
-Checkpoint: 2026-10-10, after Phase 9: releases, channels and updater conformance.
+Checkpoint: 2026-10-11, after Phase 10: relational data (partly complete).
 
 The overall platform plan remains unfinished. The rough scope estimate is about
 **30% of the complete backend-and-frontend goal**, with backend foundations in
@@ -54,6 +54,9 @@ the **low 40% range** and the requested production frontend redesign still at
   promotion, rollout, withdrawal with a stop list, and a public update feed.
 - One shared update conformance fixture, run by the TypeScript updater, the
   Rust runtime updater and the standalone updater.
+- Foreign keys between tables of one environment, with schema previews that show
+  and block changes other tables depend on.
+- Private, resumable, cancellable table exports with single-use downloads.
 
 The service-account implementation is described in
 [service-accounts.md](../service-accounts.md), its wire surface in
@@ -64,12 +67,11 @@ legacy permissions are inferred.
 
 ## Last verified state
 
-- Affected Bun regression: **675 tests passed, 1 skipped (the object-store test, which needs a configured store) and 0 failed, with 6,455 assertions across 82 files. The set is wider than before: it now includes the distribution capabilities and the standalone updater**,
+- Affected Bun regression: **679 tests, 0 failures and 6,661 assertions across 83 files, with the two object-store tests run against a local MinIO container**,
   including the real HTTP/PostgreSQL cross-service suites. These database
   scenarios run on the development machine only: CI has no database and skips
   them (G-50).
 - The Rust updater's 18 tests pass, including the conformance fixture.
-- The artifact store test passed against a local MinIO container (not in CI).
 - Solutions, Carbon Cloud, Database, Registry and CLI TypeScript checks passed.
 - Generated platform types are current.
 - The build OpenAPI document parses as JSON.
@@ -111,13 +113,15 @@ build queue and the legacy end-user routes still work as before. Existing legacy
 implementations elsewhere in the repository still need review against the new
 isolation, durability and trust requirements before they count as complete.
 
-Phase 8 is **partly complete** and Phase 9 is complete. By the owner's decision
-(2026-10-10), open decisions and everything a phase could not finish or prove
-are collected in [gaps.md](gaps.md) and worked in a final Phase 19; phases do
-not stop for them.
+Phases 8 and 10 are **partly complete**; Phase 9 is complete. Phase 10 has
+foreign keys, cross-table impact previews and exports, and does not have
+restricted SQL, migration promotion, asynchronous schema changes or table
+deletion (G-64 to G-67). By the owner's decision (2026-10-10), open decisions
+and everything a phase could not finish or prove are collected in
+[gaps.md](gaps.md) and worked in a final Phase 19; phases do not stop for them.
 
-The next bounded goal is **Phase 10: relational exports, foreign keys, impact
-previews, asynchronous schema work, migration promotion and restricted SQL**.
-Continue with exactly one phase from [handoff.md](handoff.md) per future work
-session. Finish that phase's proof gate, update both checkpoint documents, and
-stop before beginning the next phase unless the user explicitly combines them.
+The next bounded goal is **Phase 11: blob storage with private objects, signed
+bounded transfers, metadata authority, retention and cleanup**. Continue with
+exactly one phase from [handoff.md](handoff.md) per future work session. Finish
+that phase's proof gate, update both checkpoint documents, and stop before
+beginning the next phase unless the user explicitly combines them.

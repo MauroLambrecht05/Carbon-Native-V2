@@ -111,6 +111,28 @@ The rest of the gate is not, and is listed here.
 | G-62 | Withdrawing a release leaves its artifacts in the bucket and reachable by URL | No object lifecycle yet | Phase 11 |
 | G-63 | A channel shows its latest 100 revisions; older ones are stored but cannot be listed. Releases cannot be filtered by state | Paging was not needed yet | When a channel passes 100 revisions |
 
+## Open: from Phase 10 (relational data)
+
+Phase 10 delivered foreign keys with cross-table impact previews and private,
+resumable exports. Its plan line also lists asynchronous schema work, migration
+promotion and restricted SQL, which were not built. They are the first four
+entries here.
+
+| # | Gap | Why open | Closes when |
+|---|---|---|---|
+| G-64 | **Restricted SQL is not built.** There is no administrative SQL surface: no saved queries, no asynchronous SQL jobs with cancellation and statement timeouts, no allow/deny matrix, no redacted history | Not reached in Phase 10. The legacy Database raw-SQL route still exists and is not hardened | A restricted-role SQL job runner with a published matrix passes tenant-isolation tests |
+| G-65 | **Migration promotion is not built.** A schema cannot be compared between environments or promoted from one to another | Not reached in Phase 10 | A reviewed plan promotes a schema between two environments and reports what it would change first |
+| G-66 | **Schema changes are synchronous.** A change runs inside one request with a five-second statement timeout, so a change that rewrites or validates a large table fails instead of running as a job | Not reached in Phase 10 | Long schema changes run as cancellable jobs with progress and recovery |
+| G-67 | **A table cannot be deleted.** There is no `table.delete`, and so no impact preview for one | The catalog keeps audit rows that reference the table; deletion needs a retired state | Tables can be retired with a preview that lists inbound foreign keys |
+| G-68 | Foreign keys are single-column, reference only a primary key, and never cascade. There is no `set null` or `cascade`, and no composite key | The simplest safe form first | A need for them |
+| G-69 | PostgreSQL checks foreign keys without row policies, so a writer to a referencing table can learn whether a key exists in a table they cannot read | Inherent to native foreign keys | A decision: accept, or check references under policy in application code |
+| G-70 | An export ends when its creator's session ends or expires, even mid-run, because the job re-resolves that session's authority at every claim. Imports behave the same way | Background jobs have no identity of their own | Jobs act under a durable grant instead of a browser session |
+| G-71 | An export contains only rows its creator's policy-preview access can read. There is no administrative export of every row | The data API has no administrative row access by design | A separately audited administrative path |
+| G-72 | Exported rows are always in ID order; a custom sort is not supported. Exports cannot be listed beyond the latest 50 | Keyset paging by ID is what makes resuming exact | A need for it |
+| G-73 | If a worker dies after writing a part and before recording it, and the job is then cancelled or fails, that one object is never deleted: the sweep only knows recorded parts | The store port has no listing | The sweep lists a job's prefix, or the bucket gets a lifecycle rule |
+| G-74 | `S3ExportStore` has run only against a local MinIO container, in a test CI skips; the job tests use an in-memory stand-in for the bucket. A download streams each part through Cloud's memory (up to one page of rows at a time) | CI has no object store | The export tests run against MinIO in CI (with G-44), and once against a real provider |
+| G-75 | The export worker's entry point (`data-export-worker.ts`) and the `CARBON_DATA_EXPORTS` configuration have no test of their own | Small glue | A configuration test |
+
 ## Open: verification
 
 | # | Gap | Why open | Closes when |

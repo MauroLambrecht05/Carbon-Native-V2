@@ -1812,3 +1812,71 @@ Phase 19 rather than blocking phases as they come up.
 Phase 9 stops here. Phase 10 (relational exports, foreign keys, impact previews,
 asynchronous schema work, migration promotion and restricted SQL) is next in
 [the handoff](left-off/handoff.md).
+
+## 2026-10-11: Phase 10, relational data (partly complete)
+
+Phase 10 built two of the things its plan line names and none of the other
+three. It is reported as **partly complete**.
+
+Built:
+
+- **Foreign keys.** A managed constraint of kind `foreign-key`: one column that
+  must hold a value of another table's primary key in the same environment, as
+  a native PostgreSQL foreign key with no cascading
+  ([native-data.md](native-data.md)).
+- **Impact previews across tables.** A schema preview of a change to a
+  referenced primary key lists every referencing constraint and is marked
+  `blocked`; applying it is refused until those foreign keys are removed.
+- **Private exports.** Durable Cloud jobs that page a table's rows out of
+  Database under the creator's live authority, store them as parts in a private
+  bucket with a checkpoint per part, and are downloaded through a single-use,
+  60-second address ([data-exports.md](data-exports.md), migration
+  `0029_data_exports.sql`).
+
+Not built: restricted SQL, migration promotion, asynchronous schema changes, and
+table deletion (G-64 to G-67).
+
+Proof for foreign keys, against real PostgreSQL through the native-table
+repository: a reference must be to a table in the same environment with a
+primary key of the same type; orphan inserts and updates, and deletes or re-keys
+of a referenced row, are refused; adding a link to a table with violating rows
+changes nothing; a key change on a referenced table is blocked and previewed
+with the referencing constraints, and goes through once they are removed; a
+referencing column can be renamed and stays enforced; a table can reference
+itself; and a native constraint altered behind the catalog is detected.
+
+Proof for exports, over the real Cloud account API, the real Database service
+over HTTP, and PostgreSQL, with 10,203 rows:
+
+- **Authorization:** session, CSRF, origin, command identity and a recent
+  authentication to start; a member without data access can do nothing; a
+  colleague with full access can read the status but not download; a job whose
+  creator's session ends fails at its next claim without contacting Database;
+  Database independently refuses a job whose principal is no longer current.
+- **Resumability and large-job recovery:** the export takes several claims; a
+  storage outage leaves the uncounted part uncounted and the job waiting; a
+  worker killed between writing and recording a part is replaced after its lease
+  expires, and the new worker rewrites the same object. The file has exactly the
+  10,203 rows the creator may read, each once, in order, and none of the seven
+  rows that belong to someone else.
+- **Cancellation:** immediate when no worker holds the job, at the next
+  checkpoint when one does; stored parts are then deleted.
+- **Downloads:** one use, 60 seconds, creator only, authority rechecked at use,
+  a refused attempt spends the address, and only the token's hash is stored.
+- **Consistency:** a schema change part-way fails the export; an expired export
+  is not downloadable and its objects are deleted.
+- **Format:** exact decimal strings, CSV quoting, and a guard against
+  spreadsheet formulas in text cells.
+- **Mutation checks:** 29 deliberate breakages each make a test fail: 8 for foreign keys (key change while referenced, the blocked flag, inbound dependencies, the primary-key and type rules, preview validation, cascading, inbound lookup) and 21 for exports (authority at claim and at download, token reuse and expiry, creator-only download, readiness, freshness, the data permission, the in-progress limit, cancellation at checkpoint, lease exclusivity, resume position, schema change, deterministic part keys, store-before-checkpoint, outage handling, the sweep, the formula guard and CSV quoting). Lease exclusivity is enforced in two places, and both had to be removed before a test failed.
+
+The affected regression passed **679 tests, 0 failures and 6,661 assertions across 83 files, with the two object-store tests run against a local MinIO container**. Generated contracts are
+current and the TypeScript checks pass.
+
+One finding outside the feature: on Bun 1.3.10, `await expect(promise).rejects`
+can hang forever when the promise's work uses `Bun.SQL`. The tests capture the
+error with `.then` instead.
+
+New gaps are G-64 to G-75.
+
+Phase 10 stops here, partly complete. Phase 11 (blob storage) is next in
+[the handoff](left-off/handoff.md).

@@ -60,6 +60,41 @@ including values supplied by defaults. Statement and lock timeouts are five seco
 The result-byte check runs after PostgreSQL decoding; this is not a streaming
 result implementation.
 
+## Foreign keys
+
+A table can require that a column holds a value of another table's primary key.
+In the schema this is a constraint of kind `foreign-key` with one column and the
+referenced table's ID:
+
+```json
+{ "id": "...", "name": "order_customer", "kind": "foreign-key", "columns": ["customer"], "references": { "tableId": "..." } }
+```
+
+- The referenced table must be in the same environment and have a primary key.
+  A table in another environment is reported as not found.
+- The column's type must equal the key's type. JSON, array and boolean columns
+  cannot be foreign keys. A table may reference itself.
+- The column may be null, meaning "no reference".
+- It is a native PostgreSQL foreign key with no cascading: a row cannot be
+  inserted or updated to point at a key that does not exist, and a referenced
+  row cannot be deleted or have its key changed. Both are refused as conflicts.
+- Adding a foreign key to a table whose existing rows break it changes nothing.
+
+**Impact across tables.** While any table references a table's primary key, that
+key cannot be dropped, replaced, renamed or have its type changed. A schema
+preview (`table.preview`) of such a change lists every referencing constraint as
+`inbound-foreign-key:{tableId}:{constraintId}` in `dependencies` and sets
+`blocked: true`; applying it is refused with a conflict until those foreign keys
+are removed. Other changes to the referenced table, including renaming it, are
+unaffected. Renaming the referencing column keeps the link.
+
+A foreign key changed or dropped in PostgreSQL behind the catalog's back is
+detected, like other managed constraints, before the next schema change.
+
+PostgreSQL checks foreign keys without applying row policies. Someone who may
+insert into a referencing table can therefore learn whether a key exists in the
+referenced table, even if they cannot read that row.
+
 ## Native import execution primitive
 
 `PostgresNativeTables.applyImport` accepts the shared `DataImportExecution`

@@ -1,7 +1,8 @@
 import { resolve } from "node:path";
 import { AccountCatalog, AccountEnvironmentCredentials, AccountEnvironmentSecrets, AccountRepositories, EnvelopeSecretProtector, LocalAesSecretKeyCustodian, AwsKmsSecretKeyCustodian, CatalogLifecycle, PostgresProviderSecretReader, AccountWorkers, WorkerLeases, WorkerProtocol, PostgresWorkerRepository, PostgresCatalogRepository, PostgresEnvironmentCredentialRepository, PostgresEnvironmentSecretRepository, PostgresRepositoryIntegrationRepository } from '@carbon/catalog';
-import { AccountData, AccountImports, PostgresImportJobs, RunImportJobs, PostgresAccountDataAuthority, type DataTransport, type ImportTransport } from '@carbon/data';
-import { dataClientFromEnv, importClientFromEnv } from './data-platform.ts';
+import { AccountData, AccountExports, AccountImports, ExportDownloads, PostgresExportJobs, PostgresImportJobs, RunExportJobs, RunImportJobs, PostgresAccountDataAuthority, type DataTransport, type ExportStore, type ImportTransport } from '@carbon/data';
+import { dataClientFromEnv, exportStoreFromEnv, importClientFromEnv } from './data-platform.ts';
+import { createExportRoutes } from '../infrastructure/http/export-routes.ts';
 import {
   AccountAuthentication, AccountDeviceAuthorization, AccountServiceAccounts, DeliverAccountMail, DeviceCredentialAuthentication, EnvelopeMessageProtector, PostgresAccountIdentityRepository, PostgresDeviceAuthorizationRepository, PostgresServiceAccountRepository, AccountPersonalCredentials, PostgresPersonalCredentialRepository, PersonalCredentialAuthentication, PersonalCredentialExchange, AccountAudit, OrganizationLifecycle, PostgresAuditLog, AccountLegacyTokens, PostgresLegacyTokenRepository,
   PostgresAccountMailQueue, type AccountNotification,
@@ -25,6 +26,8 @@ import { serviceAssertionIssuerFromEnv } from './service-assertion-signing.ts';
 export interface AccountPlatformConfig {
   readonly data?: DataTransport;
   readonly imports?: ImportTransport;
+  /** Private storage for table exports. Exports exist when this and the data transport are both configured. */
+  readonly exportStore?: ExportStore;
   readonly origin: string;
   readonly termsVersion: string;
   readonly rateLimitKey: string;
@@ -118,7 +121,7 @@ export function accountPlatformConfigFromEnv(env: NodeJS.ProcessEnv = process.en
   const personalAssertions = env.CARBON_PERSONAL_ASSERTIONS === 'enabled' ? serviceAssertionIssuerFromEnv(env) : undefined;
   return {
     origin, termsVersion: required("CARBON_TERMS_VERSION"), rateLimitKey,
-    activeKeyId: required("CARBON_ACCOUNT_ACTIVE_KEY_ID"), encryptionKeys: keys as Record<string, string>, notification, github, githubRepositories, secrets, workers, artifactStore, artifactPublicBaseUrl, provenance, serviceAccountAssertions, deviceAssertions, legacyTokens: legacyTokenConfigFromEnv(env), appAssertions, personalAssertions, data: dataClientFromEnv(env), imports: importClientFromEnv(env),
+    activeKeyId: required("CARBON_ACCOUNT_ACTIVE_KEY_ID"), encryptionKeys: keys as Record<string, string>, notification, github, githubRepositories, secrets, workers, artifactStore, artifactPublicBaseUrl, provenance, serviceAccountAssertions, deviceAssertions, legacyTokens: legacyTokenConfigFromEnv(env), appAssertions, personalAssertions, data: dataClientFromEnv(env), imports: importClientFromEnv(env), exportStore: exportStoreFromEnv(env),
   };
 }
 
@@ -126,6 +129,7 @@ export function composeAccountPlatform(sql: Bun.SQL, config: AccountPlatformConf
   const protector = new EnvelopeMessageProtector(config.activeKeyId, config.encryptionKeys);
   const totp = new Rfc6238Totp();
   const importJobs = config.imports ? new PostgresImportJobs(sql, protector) : undefined;
+  const exportJobs = config.exportStore && config.data ? new PostgresExportJobs(sql) : undefined;
   const mfa = new PostgresMfaVerification(protector, totp);
   const repository = new PostgresAccountIdentityRepository(sql, mfa);
   const auth = new AccountAuthentication(repository, protector, config);
@@ -154,7 +158,7 @@ export function composeAccountPlatform(sql: Bun.SQL, config: AccountPlatformConf
     ? new ResendAccountNotification(config.notification.apiKey, config.notification.from)
     : new DevelopmentInboxNotification(config.notification.directory);
   return {
-    handler: createAccountRoutes(auth, config.origin, security, new AccountProfile(auth, new PostgresAccountProfileRepository(sql, mfa), protector, config), new OrganizationAccess(auth, new PostgresOrganizationRepository(sql), protector), new OrganizationInvitations(auth, new PostgresOrganizationInvitationsRepository(sql), new PostgresOrganizationRepository(sql), protector, config), github, new AccountAuthorization(auth, new PostgresPlatformAuthority(sql)), new AccountCatalog(auth, new PostgresCatalogRepository(sql), protector), config.data ? new AccountData(auth, new PostgresAccountDataAuthority(sql), config.data, protector) : undefined, importJobs ? new AccountImports(auth, importJobs) : undefined, new AccountEnvironmentCredentials(auth, environmentCredentials, protector), environmentSecrets ? new AccountEnvironmentSecrets(auth, environmentSecrets, protector) : undefined, accountRepositories, new AccountDeviceAuthorization(auth,new PostgresDeviceAuthorizationRepository(sql),protector,config.origin,config.rateLimitKey,new DeviceCredentialAuthentication(sql),config.deviceAssertions),new AccountServiceAccounts(auth,new PostgresServiceAccountRepository(sql),protector,config.serviceAccountAssertions),new AccountPersonalCredentials(auth,new PostgresPersonalCredentialRepository(sql),protector),new AccountLegacyTokens(auth,new PostgresLegacyTokenRepository(sql),protector,config.legacyTokens?.policy??'issue'),workerRepository?new AccountWorkers(auth,workerRepository,protector):undefined,new AccountAudit(auth,auditLog,protector),new AccountRealms(auth,appRepository,protector),new PersonalCredentialExchange(new PersonalCredentialAuthentication(sql),config.personalAssertions),buildRepository?new AccountBuilds(auth,buildRepository,protector):undefined,accountReleases),
+    handler: createAccountRoutes(auth, config.origin, security, new AccountProfile(auth, new PostgresAccountProfileRepository(sql, mfa), protector, config), new OrganizationAccess(auth, new PostgresOrganizationRepository(sql), protector), new OrganizationInvitations(auth, new PostgresOrganizationInvitationsRepository(sql), new PostgresOrganizationRepository(sql), protector, config), github, new AccountAuthorization(auth, new PostgresPlatformAuthority(sql)), new AccountCatalog(auth, new PostgresCatalogRepository(sql), protector), config.data ? new AccountData(auth, new PostgresAccountDataAuthority(sql), config.data, protector) : undefined, importJobs ? new AccountImports(auth, importJobs) : undefined, new AccountEnvironmentCredentials(auth, environmentCredentials, protector), environmentSecrets ? new AccountEnvironmentSecrets(auth, environmentSecrets, protector) : undefined, accountRepositories, new AccountDeviceAuthorization(auth,new PostgresDeviceAuthorizationRepository(sql),protector,config.origin,config.rateLimitKey,new DeviceCredentialAuthentication(sql),config.deviceAssertions),new AccountServiceAccounts(auth,new PostgresServiceAccountRepository(sql),protector,config.serviceAccountAssertions),new AccountPersonalCredentials(auth,new PostgresPersonalCredentialRepository(sql),protector),new AccountLegacyTokens(auth,new PostgresLegacyTokenRepository(sql),protector,config.legacyTokens?.policy??'issue'),workerRepository?new AccountWorkers(auth,workerRepository,protector):undefined,new AccountAudit(auth,auditLog,protector),new AccountRealms(auth,appRepository,protector),new PersonalCredentialExchange(new PersonalCredentialAuthentication(sql),config.personalAssertions),buildRepository?new AccountBuilds(auth,buildRepository,protector):undefined,accountReleases,exportJobs?new AccountExports(auth,exportJobs,config.origin):undefined),
     buildOrchestration: buildRepository ? new BuildOrchestration(buildRepository) : undefined,
     updateHandler: releaseRepository ? createUpdateRoutes(new PublicUpdateFeed(releaseRepository)) : undefined,
     appHandler: createAppRoutes(new AppAuthentication(appRepository, protector, { rateLimitKey: config.rateLimitKey }, new HttpOidcClient(),
@@ -165,6 +169,8 @@ export function composeAccountPlatform(sql: Bun.SQL, config: AccountPlatformConf
     workerHandler: workerRepository ? createWorkerRoutes(new WorkerProtocol(workerRepository, config.rateLimitKey), config.origin, buildRepository && config.artifactStore ? new WorkerBuilds(buildRepository, new S3ArtifactVerifier(config.artifactStore)) : undefined) : undefined,
     workerLeases: workerRepository ? new WorkerLeases(workerRepository) : undefined,
     runImports: importJobs && config.imports ? new RunImportJobs(importJobs, config.imports) : undefined,
+    runExports: exportJobs ? new RunExportJobs(exportJobs, config.data!, config.exportStore!) : undefined,
+    exportDownloadHandler: exportJobs ? createExportRoutes(new ExportDownloads(exportJobs, config.exportStore!)) : undefined,
     deliverMail: new DeliverAccountMail(new PostgresAccountMailQueue(sql), protector, notification),
     expireAccountProofs: () => externalAccounts.expire(),
   };

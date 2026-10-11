@@ -50,3 +50,15 @@ export function planSchemaChange(input: NativeDefinition, inputChange: DataSchem
   }
   return { definition: validateDefinition(definition), destructive, dependencies };
 }
+
+/**
+ * Whether a change alters the key other tables' foreign keys point at: the primary key itself, or the name or type of
+ * its column. Such a change is refused while any table references this one.
+ */
+export function changesReferencedKey(definition: NativeDefinition, change: DataSchemaChange): boolean {
+  const key = definition.primaryKey; if (!key) return false;
+  if (change.kind === 'primary-key') return change.column !== key;
+  if (change.kind === 'column.drop') return change.name === key;
+  if (change.kind === 'column.edit' && change.original === key) return change.column.name !== key || change.column.type !== definition.columns.find(column => column.name === key)!.type;
+  return false;
+}

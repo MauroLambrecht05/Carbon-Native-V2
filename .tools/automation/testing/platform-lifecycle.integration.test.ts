@@ -6,7 +6,9 @@ import { AccountCatalog, PostgresCatalogRepository, PostgresProvisioningReposito
   PostgresServiceLifecycleRepository, PostgresDatabaseEnvironmentDriver, databaseEnvironmentIdentifiers, type ProvisioningWork } from '@carbon/catalog';
 import { parseComponent, serviceLifecycleBody, dataPermission, dataRequestPath, canonicalRegistryRequest, registryRequestPath } from '@carbon/contracts/platform';
 import { AppAuthentication, PostgresAppAuthRepository } from '@carbon/auth';
-import { HttpDataClient, AccountData, PostgresAccountDataAuthority, AccountImports, PostgresImportJobs, HttpImportClient, RunImportJobs } from '@carbon/data';
+import { HttpDataClient, AccountData, PostgresAccountDataAuthority, AccountImports, PostgresImportJobs, HttpImportClient, RunImportJobs, AccountExports, ExportDownloads, PostgresExportJobs, RunExportJobs,
+  type ExportJobs, type ExportStore } from '@carbon/data';
+import { createExportRoutes } from '../../../products/carbon-cloud/infrastructure/http/export-routes.ts';
 import { migrate as migrateCloud } from '../../../products/carbon-cloud/infrastructure/persistence/Database.ts';
 import { migrate as migrateDatabase } from '../../../products/carbon-database/infrastructure/persistence/Database.ts';
 import { migrate as migrateRegistry } from '../../../products/carbon-registry/infrastructure/persistence/Database.ts';
@@ -62,6 +64,12 @@ async function harness() {
   const auth = new AccountAuthentication(new PostgresAccountIdentityRepository(cloud, mfa), protector, config);
   const importJobs = new PostgresImportJobs(cloud, protector); const importClient = new HttpImportClient(databaseServer.url.origin, issuer);
   const importWorker = new RunImportJobs(importJobs, importClient);
+  // Stands in for the private export bucket. A test can make the next writes fail, as a storage outage would.
+  const exportObjects = new Map<string, Uint8Array>(); const exportWrites: string[] = []; let failWrites = 0;
+  const exportStore: ExportStore = {
+    async put(key, bytes) { if (failWrites > 0) { failWrites--; throw new Error('storage unavailable'); } exportWrites.push(key); exportObjects.set(key, bytes); },
+    async get(key) { return exportObjects.get(key) ?? null; }, async delete(key) { exportObjects.delete(key); } };
+  const exportJobs = new PostgresExportJobs(cloud);
   const account = crypto.randomUUID(); const session = crypto.randomUUID(); const token = opaqueToken('as'); const csrf = opaqueToken('csrf');
   // Verified account/session fixture; all catalog and remote identities are created through the real APIs below.
   await cloud`INSERT INTO accounts (id, primary_email, name, verified_at, terms_version) VALUES (${account}, 'owner@example.test', 'Owner', now(), 'fixture')`;
@@ -69,7 +77,9 @@ async function harness() {
     VALUES (${session}, ${account}, ${tokenDigest(token)}, ${tokenDigest(csrf)}, 1, 'Fixture', now() + interval '8 hours', now() + interval '10 minutes')`;
   const apiHandler = createAccountRoutes(auth, origin, undefined, undefined, new OrganizationAccess(auth, new PostgresOrganizationRepository(cloud), protector), undefined, undefined, undefined,
     new AccountCatalog(auth, new PostgresCatalogRepository(cloud), protector), new AccountData(auth, new PostgresAccountDataAuthority(cloud), new HttpDataClient(databaseServer.url.origin, issuer), protector), new AccountImports(auth, importJobs),
-    undefined, undefined, undefined, undefined, new AccountServiceAccounts(auth, new PostgresServiceAccountRepository(cloud), protector, issuer));
+    undefined, undefined, undefined, undefined, new AccountServiceAccounts(auth, new PostgresServiceAccountRepository(cloud), protector, issuer),
+    undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, new AccountExports(auth, exportJobs, origin));
+  const downloadHandler = createExportRoutes(new ExportDownloads(exportJobs, exportStore));
   const api = (path: string, input?: unknown, revision?: string, overrides?: Record<string, string>) => apiHandler(new Request(origin + path, { method: input === undefined ? 'GET' : 'POST',
     headers: { origin, cookie: `__Host-carbon-session=${token}`, 'x-csrf-token': csrf, 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID(), ...(revision ? { 'if-match': revision } : {}), ...Object.fromEntries(new Headers(overrides)) },
     body: input === undefined ? undefined : JSON.stringify(input) }), '127.0.0.1');
@@ -102,7 +112,11 @@ async function harness() {
     principal: { id: account, kind: 'account', audience: 'dashboard', credentialId: session, permissionRevision: (await cloud`SELECT permission_revision::text FROM accounts WHERE id = ${account}`)[0].permission_revision },
     role: 'Owner', requestId: crypto.randomUUID(),
   });
-  return { cloud, database, registry, issuer, protector, worker, repo, api, create, signed, signedData, clientData, account, organization, databaseProvider, registryProvider, databaseServer, registryServer,
+  // A fresh worker over the same database and storage, as after a process restart. `jobs` lets a test break one step.
+  const exportWorker = (jobs: ExportJobs = new PostgresExportJobs(cloud)) => new RunExportJobs(jobs, dataClient, exportStore);
+  const download = (url: string, method = 'GET') => downloadHandler(new Request(url, { method }));
+  return { exportJobs, restartExports: (): ExportJobs => new PostgresExportJobs(cloud), exportWorker, exportObjects, exportWrites, failExportWrites: (count: number) => { failWrites = count; }, download, session,
+    cloud, database, registry, issuer, protector, worker, repo, api, create, signed, signedData, clientData, account, organization, databaseProvider, registryProvider, databaseServer, registryServer,
     importJobs, importClient, importWorker, restartImports: () => new PostgresImportJobs(cloud, protector),
     interceptAuthority: (callback?: (call: number) => Promise<void>) => { authorityCalls = 0; beforeAuthority = callback; },
     restart: () => { authority = composeServiceAuthority(cloud, trust); databaseHandler = composeDatabase(database, { trust, authorityOrigin: cloudServer.url.origin }); registryHandler = composeRegistry(registry, { trust, authorityOrigin: cloudServer.url.origin }); },
@@ -244,6 +258,183 @@ suite('Cloud-to-owning-service lifecycle over real HTTP and PostgreSQL', () => {
     expect(await status(revoked.operationId)).toMatchObject({ operation: { state: 'failed' }, outcomeUnknown: false, result: null });
     expect((await h.database`SELECT count(*)::int AS count FROM canonical_data_commands WHERE command_id = ${revoked.commandId}`)[0].count).toBe(0);
   }, 30000);
+  test('private exports are durable jobs: authorized at every step, resumable after outages and crashes, cancellable, and downloadable once', async () => {
+    const h = await harness(); const created = await h.create('export-api', ['database']); expect(await h.worker.execute()).toBe(true);
+    const scope = parseComponent('EnvironmentScope', created.scope);
+    const envPath = `/platform/v1/orgs/${scope.orgId}/projects/${scope.projectId}/environments/${scope.environmentId}`; const dataPath = envPath + '/data'; const exportsPath = dataPath + '/exports';
+    const env = parseComponent('CatalogEnvironmentDetails', await (await h.api(envPath)).json()); const tableId = crypto.randomUUID(); const stranger = crypto.randomUUID();
+    const create = { kind: 'table.create', commandId: crypto.randomUUID(), tableId, definition: { name: 'ledger', columns: [{ name: 'owner', type: 'uuid', nullable: false }, { name: 'body', type: 'text', nullable: false },
+      { name: 'amount', type: 'decimal', nullable: false }, { name: 'tags', type: 'text[]', nullable: true }], policies: { enabled: true, rules: [{ id: crypto.randomUUID(), name: 'Owner', kind: 'owner', ownerColumn: 'owner', operations: ['select', 'insert', 'update', 'delete'] }] } } };
+    expect((await h.api(dataPath, create, env.environment.revision, { 'idempotency-key': create.commandId })).status).toBe(200);
+    // 10,203 rows the account owns, a few awkward ones, and 7 that belong to someone else. Written straight into the native table.
+    const names = databaseEnvironmentIdentifiers(scope.environmentId); const target = `"${names.schema}"."ct_${tableId.replaceAll('-', '')}"`; const OWNED = 10203;
+    await h.database.unsafe(`INSERT INTO ${target} (owner, body, amount) SELECT $1::uuid, 'row ' || g, (g::numeric / 100) FROM generate_series(1, ${OWNED - 3}) g`, [h.account]);
+    await h.database.unsafe(`INSERT INTO ${target} (owner, body, amount, tags) VALUES ($1::uuid, '=SUM(A1:A9)', 9007199254740993.123456789, ARRAY['a,b', 'c"d']), ($1::uuid, E'two\nlines, "quoted"', -0.50, NULL), ($1::uuid, ' padded ', 0, ARRAY[]::text[])`, [h.account]);
+    await h.database.unsafe(`INSERT INTO ${target} (owner, body, amount) SELECT $1::uuid, 'not yours ' || g, 1 FROM generate_series(1, 7) g`, [stranger]);
+    const command = (overrides: Record<string, unknown> = {}) => ({ kind: 'export.enqueue', commandId: crypto.randomUUID(), tableId, format: 'jsonl', access: { mode: 'policy-preview', userId: h.account }, ...overrides });
+    const enqueue = async (input: Record<string, unknown>, overrides: Record<string, string> = {}) => h.api(exportsPath, input, undefined, { 'idempotency-key': input.commandId as string, ...overrides });
+    const queued = async (input: Record<string, unknown>) => { const response = await enqueue(input); expect(response.status).toBe(202); return parseComponent('DataExportReceipt', await response.json()).job; };
+    const status = async (id: string) => parseComponent('DataExportJob', (await (await h.api(`${exportsPath}/${id}/status`, {})).json() as { job: unknown }).job);
+    const row = async (id: string) => (await h.cloud`SELECT state, attempt, part_count, row_count::integer AS row_count, after_row_id, lease_id, error_code FROM data_export_jobs WHERE id = ${id}`)[0];
+    const due = async (id: string) => { await h.cloud`UPDATE data_export_jobs SET next_attempt_at = now() - interval '1 second' WHERE id = ${id}`; };
+    const drain = async () => { for (let turn = 0; turn < 20 && await h.exportWorker().execute(); turn++); };
+    const link = async (id: string) => { const response = await h.api(`${exportsPath}/${id}/download`, {}); expect(response.status).toBe(201); return parseComponent('DataExportDownload', await response.json()); };
+
+    // Starting an export: session, CSRF, origin, a matching command identity, and a recently authenticated session.
+    const first = command();
+    expect((await enqueue(first, { cookie: '' })).status).toBe(401); expect((await enqueue(first, { 'x-csrf-token': 'bad' })).status).toBe(403);
+    expect((await enqueue(first, { origin: 'https://foreign.example.test' })).status).toBe(403); expect((await enqueue(first, { 'idempotency-key': crypto.randomUUID() })).status).toBe(400);
+    expect((await enqueue({ ...first, format: 'xlsx' })).status).toBe(400); expect((await enqueue({ ...first, access: { mode: 'application' } })).status).toBe(400);
+    await h.cloud`UPDATE account_sessions SET fresh_until = now() - interval '1 second' WHERE id = ${h.session}`; expect((await enqueue(first)).status).toBe(403);
+    await h.cloud`UPDATE account_sessions SET fresh_until = now() + interval '10 minutes' WHERE id = ${h.session}`;
+    expect(await h.cloud`SELECT id FROM data_export_jobs`).toHaveLength(0);
+    const both = await Promise.all([enqueue(first), enqueue(first)]); expect(both.map(response => response.status)).toEqual([202, 202]);
+    const job = parseComponent('DataExportReceipt', await both[0]!.json()).job; expect(parseComponent('DataExportReceipt', await both[1]!.json()).job.id).toBe(job.id);
+    expect(job).toMatchObject({ scope, tableId, format: 'jsonl', state: 'queued', rows: 0, bytes: 0, errorCode: null, createdBy: h.account, completedAt: null, expiresAt: null });
+    expect((await enqueue({ ...first, format: 'csv' })).status).toBe(409); expect(await h.cloud`SELECT id FROM data_export_jobs`).toHaveLength(1);
+    // Nothing can be downloaded before the export is ready.
+    expect((await h.api(`${exportsPath}/${job.id}/download`, {})).status).toBe(409);
+
+    // A large export takes several claims. The first reads its 20 pages and hands the job back.
+    expect(await h.exportWorker().execute()).toBe(true);
+    expect(await row(job.id)).toMatchObject({ state: 'running', attempt: 1, part_count: 20, row_count: 10000, lease_id: null });
+    // Storage goes down: the part that could not be stored is not counted, and the job waits rather than failing.
+    h.failExportWrites(1); expect(await h.exportWorker().execute()).toBe(true);
+    expect(await row(job.id)).toMatchObject({ state: 'running', attempt: 2, part_count: 20, row_count: 10000, lease_id: null });
+    expect(await h.exportWorker().execute()).toBe(false); await due(job.id);
+    // The worker dies after storing a part but before recording it. Its lease runs out; nothing else is lost.
+    const written = h.exportWrites.length;
+    // The real repository with some steps replaced. Everything else runs unchanged against the real database.
+    const replacing = (overrides: Partial<ExportJobs>): ExportJobs => new Proxy(h.restartExports(), { get: (target, key) => {
+      const replaced = (overrides as Record<string | symbol, unknown>)[key]; if (replaced) return replaced;
+      const value = (target as unknown as Record<string | symbol, unknown>)[key]; return typeof value === 'function' ? value.bind(target) : value; } });
+    const dying = replacing({ checkpoint: async () => { throw new Error('process killed'); }, release: async () => { throw new Error('process killed'); } });
+    expect(String(await h.exportWorker(dying).execute().then(() => 'finished', error => error))).toContain('process killed');
+    expect(h.exportWrites.length).toBe(written + 1); const orphan = h.exportWrites.at(-1)!;
+    const stuck = await row(job.id); expect(stuck).toMatchObject({ state: 'running', attempt: 3, part_count: 20, row_count: 10000 }); expect(stuck.lease_id).not.toBeNull();
+    // While that lease is live nobody else can take the job.
+    expect(await h.exportWorker().execute()).toBe(false);
+    await h.cloud`UPDATE data_export_jobs SET lease_expires_at = now() - interval '1 second' WHERE id = ${job.id}`;
+    // A new worker resumes from the checkpoint and writes the same part to the same key.
+    expect(await h.exportWorker().execute()).toBe(true);
+    expect(h.exportWrites.filter(key => key === orphan)).toHaveLength(2);
+    const ready = await status(job.id); expect(ready).toMatchObject({ state: 'ready', rows: OWNED, errorCode: null }); expect(ready.expiresAt).not.toBeNull();
+    expect(await row(job.id)).toMatchObject({ attempt: 4, part_count: 21, row_count: OWNED, lease_id: null });
+    expect(parseComponent('DataExportList', await (await h.api(`${exportsPath}/list`, {})).json()).items.map(item => item.id)).toEqual([job.id]);
+
+    // Download: one address, one use, exactly the rows the creator may see, each once.
+    const address = await link(job.id); expect(address.url).toMatch(/^https:\/\/cloud\.example\.test\/platform\/v1\/exports\/download\/ex_[A-Za-z0-9_-]{43}$/);
+    expect(new Date(address.expiresAt).getTime() - Date.now()).toBeLessThanOrEqual(60_000);
+    expect((await h.download(address.url, 'POST')).status).toBe(405); expect((await h.download(address.url + '?x=1')).status).toBe(404);
+    const response = await h.download(address.url); expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('application/x-ndjson'); expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(response.headers.get('content-disposition')).toBe(`attachment; filename="export-${job.id}.jsonl"`);
+    const text = await response.text(); expect(Buffer.byteLength(text)).toBe(ready.bytes); expect(response.headers.get('content-length')).toBe(String(ready.bytes));
+    const lines = text.trimEnd().split('\n').map(line => JSON.parse(line) as { id: string; values: Record<string, unknown> });
+    expect(lines).toHaveLength(OWNED); expect(new Set(lines.map(line => line.id)).size).toBe(OWNED);
+    expect(lines.every(line => line.values.owner === h.account)).toBe(true); expect(text).not.toContain('not yours');
+    // Rows come out in ID order, and values are exactly what the data API returns.
+    expect(lines.map(line => line.id)).toEqual([...lines.map(line => line.id)].sort());
+    expect(lines.find(line => line.values.body === '=SUM(A1:A9)')!.values).toEqual({ owner: h.account, body: '=SUM(A1:A9)', amount: '9007199254740993.123456789', tags: ['a,b', 'c"d'] });
+    expect(new Set(lines.map(line => line.values.body)).size).toBe(OWNED);
+    expect((await h.download(address.url)).status).toBe(404);
+    const unused = await link(job.id); await h.cloud`UPDATE data_export_downloads SET expires_at = now() - interval '1 second' WHERE used_at IS NULL`; expect((await h.download(unused.url)).status).toBe(404);
+    expect((await h.download(`https://cloud.example.test/platform/v1/exports/download/ex_${'A'.repeat(43)}`)).status).toBe(404);
+    expect(JSON.stringify(await h.cloud`SELECT * FROM data_export_downloads`)).not.toContain(address.url.split('/').at(-1)!);
+
+    // CSV with a projection and a filter: a header, exact numbers, quoted awkward text, and no cell a spreadsheet would run.
+    const csv = await queued(command({ format: 'csv', selection: { columns: ['body', 'amount', 'tags'], filters: [{ column: 'amount', operator: 'lt', value: '0.04' }] } })); await drain();
+    expect(await status(csv.id)).toMatchObject({ state: 'ready', rows: 5 });
+    const sheet = (await (await h.download((await link(csv.id)).url)).text()).split('\r\n'); expect(sheet[0]).toBe('_id,body,amount,tags'); expect(sheet.at(-1)).toBe('');
+    const cells = sheet.slice(1, -1).map(line => line.slice(37)).sort();
+    expect(cells).toEqual(['" padded ",0,[]', '"two\nlines, ""quoted""",-0.50,', 'row 1,0.01000000000000000000,', 'row 2,0.02000000000000000000,', 'row 3,0.03000000000000000000,'].sort());
+    const guarded = await queued(command({ format: 'csv', selection: { columns: ['body', 'tags'], filters: [{ column: 'body', operator: 'eq', value: '=SUM(A1:A9)' }] } })); await drain();
+    expect((await (await h.download((await link(guarded.id)).url)).text()).split('\r\n')[1]!.slice(37)).toBe(`'=SUM(A1:A9),"[""a,b"",""c\\""d""]"`);
+    // An export that matches nothing is still a valid file.
+    const empty = await queued(command({ format: 'csv', selection: { filters: [{ column: 'body', operator: 'eq', value: 'no such row' }] } })); await drain();
+    expect(await status(empty.id)).toMatchObject({ state: 'ready', rows: 0 }); expect(await (await h.download((await link(empty.id)).url)).text()).toBe('_id,owner,body,amount,tags\r\n');
+    const nothing = await queued(command({ access: { mode: 'policy-preview' } })); await drain();
+    expect(await status(nothing.id)).toMatchObject({ state: 'ready', rows: 0, bytes: 0 }); expect(await (await h.download((await link(nothing.id)).url)).text()).toBe('');
+
+    // Cancellation. Before any worker has it, it ends at once.
+    const idle = await queued(command()); const cancel = (id: string, revision: string, commandId = crypto.randomUUID()) => h.api(`${exportsPath}/${id}/cancel`, { commandId, revision }, revision, { 'idempotency-key': commandId });
+    expect((await cancel(idle.id, '9')).status).toBe(409);
+    const cancelId = crypto.randomUUID(); const cancelled = await cancel(idle.id, idle.revision, cancelId); expect(cancelled.status).toBe(202);
+    const receipt = parseComponent('DataExportReceipt', await cancelled.json()); expect(receipt.job).toMatchObject({ state: 'cancelled', errorCode: 'cancelled' });
+    expect(parseComponent('DataExportReceipt', await (await cancel(idle.id, idle.revision, cancelId)).json())).toEqual(receipt);
+    expect((await cancel(idle.id, receipt.job.revision)).status).toBe(409); expect(await h.exportWorker().execute()).toBe(false);
+    // While a worker holds it, the worker is told at its next checkpoint and stops; what it stored is removed.
+    const busy = await queued(command()); let asked = false;
+    const interrupted = replacing({ checkpoint: async (lease, part) => {
+      if (part.number === 3 && !asked) { asked = true; const current = await status(busy.id); expect(parseComponent('DataExportReceipt', await (await cancel(busy.id, current.revision)).json()).job.state).toBe('running'); }
+      return h.exportJobs.checkpoint(lease, part); } });
+    expect(await h.exportWorker(interrupted).execute()).toBe(true);
+    expect(await row(busy.id)).toMatchObject({ state: 'cancelled', part_count: 2, error_code: 'cancelled', lease_id: null });
+    expect((await h.api(`${exportsPath}/${busy.id}/download`, {})).status).toBe(409);
+    const stored = () => [...h.exportObjects.keys()].filter(key => key.includes(busy.id));
+    expect(stored()).toHaveLength(3); expect(await h.exportWorker().sweep()).toBe(2);
+    // The part that was stored but never recorded is the one thing a sweep cannot find.
+    expect(stored()).toEqual([expect.stringMatching(/000003$/)]); expect(await h.cloud`SELECT 1 FROM data_export_parts WHERE job_id = ${busy.id}`).toHaveLength(0);
+
+    // A schema change part-way through ends the export instead of mixing two shapes of row.
+    const reshaped = await queued(command()); expect(await h.exportWorker().execute()).toBe(true); expect(await row(reshaped.id)).toMatchObject({ state: 'running', part_count: 20 });
+    const alter = { kind: 'table.alter', commandId: crypto.randomUUID(), tableId, revision: '1', change: { kind: 'column.add', column: { name: 'note', type: 'text', nullable: true } } };
+    expect((await h.api(dataPath, alter, '1', { 'idempotency-key': alter.commandId })).status).toBe(200);
+    expect(await h.exportWorker().execute()).toBe(true); expect(await status(reshaped.id)).toMatchObject({ state: 'failed', errorCode: 'schema_changed', expiresAt: null });
+    expect((await h.api(`${exportsPath}/${reshaped.id}/download`, {})).status).toBe(409);
+
+    // Authority is live. A job whose creator can no longer read the data stops at its next claim, and an issued address stops working.
+    const revoked = await queued(command()); expect(await h.exportWorker().execute()).toBe(true); const pending = await link(job.id);
+    await h.cloud`UPDATE account_sessions SET expires_at = now() - interval '1 second' WHERE id = ${h.session}`;
+    // Cloud itself ends the job at the claim: Database is never asked.
+    let contacted = 0; h.interceptAuthority(async () => { contacted++; });
+    expect(await h.exportWorker().execute()).toBe(true); h.interceptAuthority(); expect(contacted).toBe(0); expect(await row(revoked.id)).toMatchObject({ state: 'failed', error_code: 'access_revoked' });
+    expect((await h.download(pending.url)).status).toBe(404);
+    await h.cloud`UPDATE account_sessions SET expires_at = now() + interval '8 hours' WHERE id = ${h.session}`;
+    // The refused attempt spent the address.
+    expect((await h.download(pending.url)).status).toBe(404);
+    // Database also refuses a job's requests once Cloud says the principal is no longer current.
+    const refused = await queued(command()); h.interceptAuthority(async () => { await h.cloud`UPDATE accounts SET permission_revision = permission_revision + 1 WHERE id = ${h.account}`; });
+    expect(await h.exportWorker().execute()).toBe(true); h.interceptAuthority(); expect(await row(refused.id)).toMatchObject({ state: 'failed', error_code: 'access_revoked', part_count: 0 });
+
+    // Other members. One who may see metadata but not data can do nothing with exports; one with full access can follow
+    // someone else's export but cannot take its data, because it was read under the creator's access.
+    const member = async (role: string, email: string) => {
+      const id = crypto.randomUUID(); const memberToken = opaqueToken('as'); const memberCsrf = opaqueToken('csrf');
+      await h.cloud`INSERT INTO accounts (id, primary_email, name, verified_at, terms_version) VALUES (${id}, ${email}, ${role}, now(), 'fixture')`;
+      await h.cloud`INSERT INTO account_sessions (id, account_id, token_hash, csrf_hash, security_revision, device_name, expires_at, fresh_until)
+        VALUES (${crypto.randomUUID()}, ${id}, ${tokenDigest(memberToken)}, ${tokenDigest(memberCsrf)}, 1, 'Fixture', now() + interval '8 hours', now() + interval '10 minutes')`;
+      await h.cloud`INSERT INTO memberships (id, account_id, org_id, role, state, project_access) VALUES (${crypto.randomUUID()}, ${id}, ${scope.orgId}, ${role}, 'active', 'all')`;
+      return { cookie: `__Host-carbon-session=${memberToken}`, 'x-csrf-token': memberCsrf };
+    };
+    const viewer = await member('Viewer', 'viewer@example.test'); const colleague = await member('Owner', 'colleague@example.test'); const attempt = command();
+    for (const [path, body] of [[exportsPath, attempt], [`${exportsPath}/list`, {}], [`${exportsPath}/${csv.id}/status`, {}], [`${exportsPath}/${csv.id}/download`, {}], [`${exportsPath}/${csv.id}/cancel`, { commandId: attempt.commandId, revision: '1' }]] as const)
+      expect((await h.api(path, body, path.endsWith('/cancel') ? '1' : undefined, { ...viewer, 'idempotency-key': attempt.commandId })).status).toBe(403);
+    expect((await h.api(`${exportsPath}/${csv.id}/status`, {}, undefined, colleague)).status).toBe(200);
+    expect((await h.api(`${exportsPath}/${csv.id}/download`, {}, undefined, colleague)).status).toBe(403);
+    expect(await h.cloud`SELECT 1 FROM data_export_jobs WHERE command_id = ${attempt.commandId}`).toHaveLength(0);
+
+    // At most five exports in progress per environment.
+    const open: string[] = []; for (let index = 0; index < 5; index++) open.push((await queued(command())).id);
+    expect((await enqueue(command())).status).toBe(429);
+    for (const id of open) expect((await cancel(id, '1')).status).toBe(202);
+
+    // Expiry: the export stops being downloadable and its objects are deleted.
+    await h.cloud`UPDATE data_export_jobs SET expires_at = now() - interval '1 second' WHERE id = ${job.id}`;
+    const late = await h.api(`${exportsPath}/${job.id}/download`, {}); expect(late.status).toBe(409);
+    expect([...h.exportObjects.keys()].filter(key => key.includes(job.id))).toHaveLength(21);
+    expect(await h.exportWorker().sweep(1000)).toBeGreaterThanOrEqual(21);
+    expect(await status(job.id)).toMatchObject({ state: 'expired', rows: OWNED }); expect([...h.exportObjects.keys()].filter(key => key.includes(job.id))).toEqual([]);
+    expect(await h.cloud`SELECT 1 FROM data_export_parts p JOIN data_export_jobs j ON j.id = p.job_id WHERE j.state <> 'ready'`).toHaveLength(0);
+
+    // The audit trail of the first export, and no token or row content in anything durable.
+    const actions = (await h.cloud`SELECT action, actor_kind FROM platform_events WHERE resource_kind = 'data_export' AND resource_id = ${job.id} ORDER BY transaction_id, sequence`).map((event: { action: string; actor_kind: string }) => `${event.action}:${event.actor_kind}`);
+    expect(actions).toEqual(['export.queued:account', 'export.started:system', 'export.ready:system', 'export.download_issued:account', 'export.downloaded:account', 'export.download_issued:account', 'export.download_issued:account',
+      'export.download_refused:account', 'export.expired:system']);
+    const durable = JSON.stringify({ jobs: await h.cloud`SELECT request, error_code, state FROM data_export_jobs`, events: await h.cloud`SELECT * FROM data_export_events` });
+    expect(durable).not.toContain('row 1'); expect(durable).not.toContain('ex_');
+  }, 240000);
+
   test('table catalog is paginated, scoped and available to metadata-only accounts with current schema policies', async () => {
     const h = await harness(); const created = await h.create('catalog-data', ['database']); expect(await h.worker.execute()).toBe(true);
     const scope = parseComponent('EnvironmentScope', created.scope);
