@@ -16,7 +16,9 @@ export function startRegistryServer(config: ServerConfig): Server<undefined> {
       const url = new URL(req.url);
 
       // Pass API requests to router
-      if (url.pathname.startsWith("/api") || url.pathname.startsWith('/internal/platform/v1/')) {
+      // The legacy API, signed platform commands, canonical publishing and distribution, and what operators ask.
+      // Canonical publishing was unreachable here until it was added to this list: the routes existed and no request got to them.
+      if (url.pathname.startsWith("/api") || url.pathname.startsWith('/internal/platform/v1/') || url.pathname.startsWith('/registry/v1/') || ["/healthz", "/readyz", "/metrics"].includes(url.pathname)) {
         return await config.handler(req);
       }
 

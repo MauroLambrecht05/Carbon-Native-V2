@@ -30,6 +30,12 @@ bun_test(
 )
 
 bun_test(
+    name = "key_rotation_test",
+    entry = "tests/key-rotation.test.ts",
+    srcs = [":srcs", ":tests"],
+)
+
+bun_test(
     name = "totp_test",
     entry = "tests/totp.test.ts",
     srcs = [":srcs", ":tests"],

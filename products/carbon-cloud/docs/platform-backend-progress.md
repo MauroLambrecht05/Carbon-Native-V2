@@ -2375,3 +2375,83 @@ Nothing was checked in a real browser (G-151). New gaps are G-147 to G-153.
 
 Phase 17 stops here. Phase 18 (observability, deployment, security review and
 cutover) is next in [the handoff](left-off/handoff.md).
+
+## 2026-10-11: Phase 18, observability, release steps and review documents (partly complete)
+
+**The gate is not met.** Phase 18 asks for recorded production evidence for
+sections 25 to 29 of the backend plan, including restore, rotation, rollback
+and no-mock-fallback drills. There is no deployment, so there is no such
+evidence (G-154). What this phase did is build what a deployment would need
+and exercise it on a development machine. It adds no migration and no contract.
+
+- **A shared operations package**, `solutions/infrastructure/operations`
+  (`@carbon/operations`): redaction of secret-shaped text, a route vocabulary
+  that turns a path into a route with no identifiers or customer words in it,
+  bounded in-memory metrics, readiness checks with a time limit, and a
+  read-only comparison of a migration ledger with the migrations the code
+  ships.
+- **Three endpoints on each service.** `/healthz`, `/readyz` (database
+  reachable, and the schema exactly the one this code ships) and `/metrics`
+  (Prometheus text, only with a scrape token of at least 24 characters, `404`
+  otherwise). Each service reports its own queue depths and ages from one
+  query.
+- **Request logs.** One JSON line per request with the route, method, status,
+  duration and request identifier, and nothing a caller sent.
+- **Migrations as a release step.** `migrate` and `migrate status` for each
+  service, and `CARBON_MIGRATE_ON_START=disabled`.
+- **Rotation drills in tests:** Registry's signing key through active,
+  retiring and revoked with Registry restarted on the new key; the message
+  encryption key; the payment provider's webhook secret with an overlap.
+- **Documents:** [operations.md](operations.md) (endpoints, metrics, release
+  order, rotations, runbooks), [security-review.md](security-review.md) (the
+  plan's thirteen checklist items against the tests, as a self-review) and
+  [cutover.md](cutover.md) (the plan's eight steps and what each still needs).
+
+**A defect found.** Registry's server did not forward `/registry/v1/`, so the
+publishing and distribution routes built in Phase 14 could not be reached
+through the running service. Every Phase 14 test called the handler directly.
+The server now forwards the prefix and a test checks each prefix through the
+server's own routing. Cloud and Database have no such test yet (G-163).
+
+**Proven**, on a development machine against real PostgreSQL:
+
+- each service reports not ready against an empty database, a database one
+  migration behind, one ahead, and one whose history was edited, and ready
+  only at its own version; the status check creates no table;
+- a path with identifiers, tokens and customer-chosen names is logged and
+  counted as a route containing none of them, and secret-shaped text is
+  removed from failure lines;
+- the metrics endpoint does not exist without the token and cannot grow
+  without bound;
+- a version signed by a retiring Registry key still installs, one signed by a
+  revoked key is refused, Registry will not start on a bundle that does not
+  list its key as active, and an installer cannot be walked back to an older
+  bundle;
+- a provider event signed with the previous webhook secret is accepted during
+  the overlap and refused after it.
+
+`migrate status` was also run by hand for each service against an empty
+database: 31, 10 and 4 migrations pending, exit code 1, no table created.
+
+**Mutation checks.** 32 deliberate breakages, and all 32 made a test stop
+passing: 22 in the operations package, 7 in migration reconciliation and
+readiness against real databases, 2 in Registry's server routing, and 1 in
+webhook secret rotation. One of the 32, removing the guard on the ledger
+name, made the test hang and not fail; it is counted, and noted in G-163.
+
+The affected regression passed **742 tests, 0 failures and 9,035 assertions across 93 files, with the object-store tests run against a local MinIO container**.
+The TypeScript checks pass. The operations, key-rotation and Registry
+server-routing tests need no database and are Bazel targets, so they run in
+CI; the readiness and rotation drills need PostgreSQL and do not (G-50).
+
+**Why partly complete.** No drill has run in a deployment. There is no restore
+drill at all, because there are no backups (G-135). Running services one
+version apart, and rolling back after a migration, are untested (G-158). The
+security review is the author's own; there is no threat model and no
+independent review, and four of the thirteen checklist items are not met
+(G-159). No canary cohort can be enabled (G-162). Tracing, alert rules and
+most of the plan's verification strategy do not exist (G-156, G-165). New gaps
+are G-154 to G-165.
+
+Phase 18 stops here. Phase 19, closing [the gap ledger](left-off/gaps.md), is
+the last phase.

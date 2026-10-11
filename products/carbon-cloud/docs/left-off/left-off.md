@@ -1,6 +1,6 @@
 # Carbon platform left-off checkpoint
 
-Checkpoint: 2026-10-11, after Phase 17: the first part of the console against the live service.
+Checkpoint: 2026-10-11, after Phase 18: observability, release steps, rotation drills and the security and cutover documents.
 
 The overall platform plan remains unfinished. The rough scope estimate is about
 **45% of the complete backend-and-frontend goal**: most backend areas exist
@@ -87,6 +87,11 @@ requested production frontend redesign is still at **0%**. These are planning es
 - The console, in part: a production browser composition with no mock in it,
   and live adapters for accounts, organizations, members, invitations, projects
   and environments. Every other area of the console says it is not connected.
+- Operations, in part: liveness, readiness and metrics endpoints on all three
+  services, one structured log line per request with a route and no values,
+  a read-only migration status, migrations as a separate release step, and
+  rotation of Registry's signing key, the message key and the webhook secret
+  exercised in tests. Nothing has run in a deployment.
 
 The service-account implementation is described in
 [service-accounts.md](../service-accounts.md), its wire surface in
@@ -97,7 +102,7 @@ legacy permissions are inferred.
 
 ## Last verified state
 
-- Affected Bun regression: **730 tests, 0 failures and 8,770 assertions across 90 files, with the object-store tests run against a local MinIO container**,
+- Affected Bun regression: **742 tests, 0 failures and 9,035 assertions across 93 files, with the object-store tests run against a local MinIO container**,
   including the real HTTP/PostgreSQL cross-service suites. These database
   scenarios run on the development machine only: CI has no database and skips
   them (G-50).
@@ -143,7 +148,7 @@ build queue and the legacy end-user routes still work as before. Existing legacy
 implementations elsewhere in the repository still need review against the new
 isolation, durability and trust requirements before they count as complete.
 
-Phases 8, 10, 13, 15, 16 and 17 are **partly complete**; Phases 9, 11, 12 and 14 are complete. By
+Phases 8, 10, 13, 15, 16, 17 and 18 are **partly complete**; Phases 9, 11, 12 and 14 are complete. By
 the owner's decision (2026-10-10), open decisions and everything a phase could
 not finish or prove are collected in [gaps.md](gaps.md) and worked in a final
 Phase 19; phases do not stop for them.
@@ -170,8 +175,16 @@ The console's production build talks to the real API for accounts and
 organizations only (G-147), has never run in a real browser (G-151), and has no
 visual design (G-152).
 
-The next bounded goal is **Phase 18: observability, deployment compatibility,
-security review, migration reconciliation, canary rollout and cutover**. Continue
-with exactly one phase from [handoff.md](handoff.md) per future work session.
-Finish that phase's proof gate, update both checkpoint documents, and stop
-before beginning the next phase unless the user explicitly combines them.
+Phase 18's gate asks for production evidence, and there is no deployment, so it
+is not met (G-154). The services can now say whether they are ready and what
+their queues look like, and a release can run migrations as its own step, but
+no restore, rollback or version-skew drill has been run (G-135, G-158), there is
+no threat model or independent security review (G-159), and nothing can be
+enabled for a canary set of organizations (G-162). See
+[operations.md](../operations.md), [security-review.md](../security-review.md)
+and [cutover.md](../cutover.md).
+
+The next bounded goal is **Phase 19: close the gap ledger**. It is the last
+phase. [handoff.md](handoff.md) sorts the ledger into what can be done in the
+repository, what needs something from outside, and what needs the owner's
+decision.

@@ -144,6 +144,9 @@
       "@carbon/contracts/update": [
         "../solutions/contracts/update/types/UpdateManifest.ts"
       ],
+      "@carbon/operations": [
+        "../solutions/infrastructure/operations/index.ts"
+      ],
       "@carbon/logging": [
         "../solutions/infrastructure/logging/index.ts"
       ],

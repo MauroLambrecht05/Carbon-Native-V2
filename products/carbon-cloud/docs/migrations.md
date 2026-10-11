@@ -190,3 +190,13 @@ trigger function, and a trigger on every existing canonical table), and
 `engine_commands`. Both are additive and leave the legacy vector, graph and
 realtime structures untouched. 0009 changes behaviour for existing tables: every
 row change from then on also writes one feed row in the same transaction.
+
+## Running migrations as a release step
+
+Phase 18 adds no migration. Each service has `bun run migrate` (apply what is
+pending) and `bun run migrate status` (print applied, pending and drift as
+JSON, change nothing, exit non-zero unless the database is exactly at this
+code's version). With `CARBON_MIGRATE_ON_START=disabled` a service does not
+migrate when it starts, and its `/readyz` fails until the schema is the one it
+ships. The status check creates nothing: against a database with no ledger
+table it reports everything as pending. See [operations.md](operations.md).

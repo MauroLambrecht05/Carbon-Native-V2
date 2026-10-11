@@ -227,7 +227,7 @@ async function harness(functionLimits?: FunctionLimits, plans?: Record<PlanId, P
     const redirected = await githubCallback(url.searchParams.get('state')!); expect(redirected.status).toBe(303);
     return redirected.headers.get('location')!.split('#token=')[1]!;
   };
-  return { sql, protector, secretProtector, workerApi, workerFetch, updates, store, provenancePublicKey: provenanceSigner.publicKey(), leases, builds, functions: new FunctionOrchestration(functionRepository), usageGate, billing, checkouts, webhook, webhookHandler, operatorAdmin, operator, browserFetch, browserCookies, organizationLifecycle, catalogLifecycle, app, idp, deliverApp, assertionPublicKey:assertionKeys.publicKey, assertionKey, mail, cookies, call, challenge, complete, token, freshRequest, freshComplete, profile, emailToken, emailComplete, createOrganization, organizationCommand, restoreCookies,
+  return { sql, protector, secretProtector, workerApi, workerFetch, updates, store, provenancePublicKey: provenanceSigner.publicKey(), leases, builds, functions: new FunctionOrchestration(functionRepository), usageGate, billing, checkouts, webhook, webhookHandler, webhookSecret, operatorAdmin, operator, browserFetch, browserCookies, organizationLifecycle, catalogLifecycle, app, idp, deliverApp, assertionPublicKey:assertionKeys.publicKey, assertionKey, mail, cookies, call, challenge, complete, token, freshRequest, freshComplete, profile, emailToken, emailComplete, createOrganization, organizationCommand, restoreCookies,
     catalogCommand, createProject,
     invitation, invitationToken, invitationProof,
     githubStart, githubCallback, githubComplete, githubBegin, githubCalls,
@@ -2310,6 +2310,14 @@ suite("real account authentication", () => {
     expect((await command({ kind: 'budget-clear', meter: 'build_minutes' })).status).toBe(403);
     h.cookies.clear(); await h.challenge('outsider@example.test'); await h.deliver(); await h.complete(); expect((await h.call(path)).status).toBe(404);
     h.restoreCookies(owner); expect((await overview()).usage.find(item => item.meter === 'build_minutes')!.budget).toMatchObject({ monthlyLimit: 30, mode: 'warn' });
+
+    // Rotating the provider's signing secret: while both are configured either one signs; once the old one is removed it signs nothing.
+    const next = `whsec_${randomBytes(24).toString('hex')}`; const sign = (body: string, secret: string) => { const at = Math.floor(Date.now() / 1000); return `t=${at},v1=${createHmac('sha256', secret).update(`${at}.${body}`).digest('hex')}`; };
+    const during = new BillingWebhooks(h.billing, [next, h.webhookSecret]); const after = new BillingWebhooks(h.billing, [next]); const probe = JSON.stringify(event('customer.created', { id: 'cus_probe' }, t0 + 200));
+    const refused = (work: Promise<unknown>) => work.then(outcome => outcome, error => (error as { code?: string }).code);
+    expect(await during.receive(probe, sign(probe, h.webhookSecret), crypto.randomUUID())).toBe('unhandled'); expect(await during.receive(probe, sign(probe, next), crypto.randomUUID())).toBe('duplicate');
+    expect(await refused(after.receive(probe, sign(probe, h.webhookSecret), crypto.randomUUID()))).toBe('unauthenticated'); expect(await after.receive(probe, sign(probe, next), crypto.randomUUID())).toBe('duplicate');
+    expect(await refused(during.receive(probe, sign(probe, 'whsec_never_configured_anywhere'), crypto.randomUUID()))).toBe('unauthenticated'); expect(() => new BillingWebhooks(h.billing, [])).toThrow();
   }, 60000);
 
   test('charged work is admitted under one count per organization: racing requests cannot pass the plan or a budget, and each thing that ran is metered once', async () => {

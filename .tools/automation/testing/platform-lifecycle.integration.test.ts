@@ -3,7 +3,11 @@ import { createHash, generateKeyPairSync, randomBytes } from 'node:crypto';
 import { AccountAuthentication, PostgresAccountIdentityRepository, EnvelopeMessageProtector, PostgresMfaVerification, Rfc6238Totp,
   OrganizationAccess, PostgresOrganizationRepository, AccountServiceAccounts, PostgresServiceAccountRepository, ServiceAssertionIssuer, opaqueToken, tokenDigest, bodyDigest, type AssertionTrust } from '@carbon/identity';
 import { DECLARATION_PATH, HttpRegistrySource, INSTALL_ROOT, LOCK_PATH, NodePackageCache, NodePluginProject, RegistryPluginError, RegistryPlugins, parseLock } from '@carbon/catalog';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { migrationStatus, observe } from '@carbon/operations';
+import { composeOperations as cloudOperations } from '../../../products/carbon-cloud/composition/operations.ts';
+import { composeOperations as databaseOperations } from '../../../products/carbon-database/composition/operations.ts';
+import { composeOperations as registryOperations } from '../../../products/carbon-registry/composition/operations.ts';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AccountRegistry, HttpRegistryClient, PostgresAccountRegistryAuthority, RegistryTrustError, libraryFile, manifestDigest, manifestFile, packArchive, publicKeyHex, signTrustBundle, verifyRegistryPackage, type RegistryArchiveStore } from '@carbon/catalog';
@@ -71,8 +75,10 @@ async function harness() {
   const registryStore: RegistryArchiveStore = { async put(key, bytes) { registryObjects.set(key, bytes); }, async get(key) { return registryObjects.get(key) ?? null; }, async delete(key) { registryObjects.delete(key); } };
   const registryRootSeed = randomBytes(32).toString('hex'); const registrySigningSeed = randomBytes(32).toString('hex');
   const registryBundle = signTrustBundle(registryRootSeed, { sequence: 1, issuedAt: new Date().toISOString(), keys: [{ id: 'registry-test', publicKey: publicKeyHex(registrySigningSeed), state: 'active' }] });
+  // A test can restart Registry with other trust material, as a key rotation does.
+  let registryTrustOverride: Record<string, unknown> = {};
   const registryConfig = () => ({ trust, authorityOrigin: cloudServer.url.origin, publishing: { store: registryStore, origin: registryServer.url.origin, rootPublicKey: publicKeyHex(registryRootSeed), trustBundle: registryBundle,
-    signingKeyId: 'registry-test', signingSeed: registrySigningSeed, limits: { publishersPerOrganization: 2, pendingPerPublisher: 2, uploadSeconds: 900 } } });
+    signingKeyId: 'registry-test', signingSeed: registrySigningSeed, limits: { publishersPerOrganization: 2, pendingPerPublisher: 2, uploadSeconds: 900 }, ...registryTrustOverride } });
   registryHandler = composeRegistry(registry, registryConfig());
   const repo = new PostgresProvisioningRepository(cloud);
   const databaseProvider = new HttpEnvironmentProvisioner('database', databaseServer.url.origin, issuer);
@@ -141,7 +147,9 @@ async function harness() {
   const download = (url: string, method = 'GET') => downloadHandler(new Request(url, { method }));
   return { blobObjects, failBlobWrites: (count: number) => { failBlobWrites = count; }, duringBlobWrite: (work: () => Promise<void>) => { duringBlobWrite = work; }, sweepBlobs: () => databaseHandler.blobStorage!.sweep(), apiHandler, token, csrf, origin,
     exportJobs, restartExports: (): ExportJobs => new PostgresExportJobs(cloud), exportWorker, exportObjects, exportWrites, failExportWrites: (count: number) => { failWrites = count; }, download, session,
-    registryObjects, registryRoot: publicKeyHex(registryRootSeed), get registryReview() { return registryHandler.review!; },
+    registryObjects, registryRoot: publicKeyHex(registryRootSeed), get registryReview() { return registryHandler.review!; }, registryTrustMaterial: { rootSeed: registryRootSeed, signingSeed: registrySigningSeed },
+    /** Starts Registry again with other trust settings. If the new settings are refused, the running Registry is left as it was. */
+    recomposeRegistry: (override: Record<string, unknown>) => { const previous = registryTrustOverride; registryTrustOverride = override; try { registryHandler = composeRegistry(registry, registryConfig()); } catch (error) { registryTrustOverride = previous; throw error; } },
     cloud, database, registry, issuer, protector, worker, repo, api, create, signed, signedData, clientData, account, organization, databaseProvider, registryProvider, databaseServer, registryServer,
     importJobs, importClient, importWorker, restartImports: () => new PostgresImportJobs(cloud, protector),
     interceptAuthority: (callback?: (call: number) => Promise<void>) => { authorityCalls = 0; beforeAuthority = callback; },
@@ -1372,6 +1380,119 @@ suite('Cloud-to-owning-service lifecycle over real HTTP and PostgreSQL', () => {
       const offline = clone(dev, 'offline'); expect(await code(offline.plugins.install())).toBe('unavailable'); expect(offline.installed()).toBe(false);
       expect(await offline.plugins.install({ offline: true })).toEqual({ installed: ['acme/clipboard'], unchanged: [], removed: [] }); expect(offline.installed()).toBe(true);
       expect(await code(clone(dev, 'cold', 'cold-cache').plugins.install({ offline: true }))).toBe('not_cached'); expect(await code(dev.plugins.audit())).toBe('unavailable');
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }, 120000);
+
+  test('each service says whether it is ready from its real schema, reconciles its migrations without changing them, and reports its queues', async () => {
+    const h = await harness(); const scrape = 'scrape-token-with-enough-length-0123';
+    const services = [
+      { name: 'carbon-cloud', sql: h.cloud, ledger: 'cloud_schema_migrations', directory: join(import.meta.dir, '../../../products/carbon-cloud/infrastructure/persistence/migrations'), compose: cloudOperations },
+      { name: 'carbon-database', sql: h.database, ledger: 'database_schema_migrations', directory: join(import.meta.dir, '../../../products/carbon-database/infrastructure/persistence/migrations'), compose: databaseOperations },
+      { name: 'carbon-registry', sql: h.registry, ledger: 'registry_schema_migrations', directory: join(import.meta.dir, '../../../products/carbon-registry/infrastructure/persistence/migrations'), compose: registryOperations },
+    ];
+    const get = (path: string, headers: Record<string, string> = {}) => new Request(`https://service.example.test${path}`, { headers });
+    for (const service of services) {
+      const shipped = readdirSync(service.directory).filter(file => file.endsWith('.sql')).sort(); const ledger = () => service.sql.unsafe(`SELECT version, checksum, applied_at FROM ${service.ledger} ORDER BY version`);
+      const before = JSON.stringify(await ledger()); const status = () => migrationStatus(service.sql, service.ledger, service.directory);
+      // Freshly migrated: exactly the schema this code ships.
+      expect(await status()).toEqual({ applied: shipped, pending: [], drift: null, current: true });
+      const operations = service.compose(service.sql, { CARBON_METRICS_TOKEN: scrape }); const ready = async () => { const response = (await operations.routes(get('/readyz')))!; return [response.status, await response.json()]; };
+      expect(await ready()).toEqual([200, { ready: true, checks: { database: 'ok', migrations: 'ok' } }]);
+
+      // The code is ahead of the database: a migration has not been run. Not ready, and it says which check.
+      const last = shipped.at(-1)!; const row = (await service.sql.unsafe(`SELECT * FROM ${service.ledger} WHERE version = $1`, [last]))[0];
+      await service.sql.unsafe(`DELETE FROM ${service.ledger} WHERE version = $1`, [last]);
+      expect(await status()).toEqual({ applied: shipped.slice(0, -1), pending: [last], drift: null, current: false }); expect(await ready()).toEqual([503, { ready: false, checks: { database: 'ok', migrations: 'failed' } }]);
+      await service.sql.unsafe(`INSERT INTO ${service.ledger} (version, checksum, applied_at) VALUES ($1, $2, $3)`, [row.version, row.checksum, row.applied_at]);
+      // The database is ahead of the code: an older release is running against a newer schema.
+      await service.sql.unsafe(`INSERT INTO ${service.ledger} (version, checksum) VALUES ('9999_from_a_newer_release.sql', $1)`, ['a'.repeat(64)]);
+      expect(await status()).toMatchObject({ pending: [], drift: '9999_from_a_newer_release.sql', current: false }); expect((await ready())[0]).toBe(503);
+      await service.sql.unsafe(`DELETE FROM ${service.ledger} WHERE version = '9999_from_a_newer_release.sql'`);
+      // A migration that was edited after it ran, or a ledger changed by hand.
+      await service.sql.unsafe(`UPDATE ${service.ledger} SET checksum = $1 WHERE version = $2`, ['b'.repeat(64), shipped[1]]);
+      expect(await status()).toMatchObject({ drift: shipped[1], pending: [], current: false }); expect((await ready())[0]).toBe(503);
+      await service.sql.unsafe(`UPDATE ${service.ledger} SET checksum = $1 WHERE version = $2`, [JSON.parse(before)[1].checksum, shipped[1]]);
+      // Looking changed nothing: the ledger is byte for byte what it was, and a ledger that does not exist was not created.
+      expect(await status()).toMatchObject({ current: true }); expect(JSON.stringify(await ledger())).toBe(before); expect(await ready()).toEqual([200, { ready: true, checks: { database: 'ok', migrations: 'ok' } }]);
+      expect(await migrationStatus(service.sql, 'no_such_ledger', service.directory)).toEqual({ applied: [], pending: shipped, drift: null, current: false });
+      expect((await service.sql`SELECT to_regclass('public.no_such_ledger') AS name`)[0].name).toBeNull();
+      await expect(migrationStatus(service.sql, 'ledger; DROP TABLE x', service.directory).then(() => 'ran', () => 'refused')).resolves.toBe('refused');
+
+      // Metrics exist only for the scrape token, and every sample is a count or an age.
+      expect((await operations.routes(get('/metrics')))!.status).toBe(404); expect((await service.compose(service.sql, {}).routes(get('/metrics', { authorization: `Bearer ${scrape}` })))!.status).toBe(404);
+      const scraped = await (await operations.routes(get('/metrics', { authorization: `Bearer ${scrape}` })))!.text();
+      for (const line of scraped.split('\n').filter(line => line && !line.startsWith('#'))) expect(line).toMatch(/^carbon_[a-z_]+(\{state="[a-z_]+"\})? [0-9]+$/);
+    }
+
+    // With work in the system, the gauges show it. One project with both services: two provisioning operations, then two environments.
+    const scrapeOf = async (service: typeof services[number]) => (await (await service.compose(service.sql, { CARBON_METRICS_TOKEN: scrape }).routes(get('/metrics', { authorization: `Bearer ${scrape}` })))!.text());
+    const created = await h.create('observed'); const scope = parseComponent('EnvironmentScope', created.scope);
+    const queued = await scrapeOf(services[0]!); expect(queued).toMatch(/carbon_operations_open\{state="queued"\} [12]\n/); expect(queued).toMatch(/carbon_operations_oldest_seconds [0-9]+\n/);
+    for (let attempt = 0; attempt < 6 && await h.worker.execute(); attempt++);
+    expect(await scrapeOf(services[0]!)).not.toContain('carbon_operations_open{'); expect(await scrapeOf(services[1]!)).toContain('carbon_environments{state="active"} 1\n'); expect(await scrapeOf(services[2]!)).toContain('carbon_environments{state="active"} 1\n');
+    for (const empty of ['carbon_billing_events_unmatched 0', 'carbon_email_outbox_pending 0', 'carbon_worker_leases_overdue 0', 'carbon_deletions_blocked 0', 'carbon_operator_approvals_pending 0']) expect(await scrapeOf(services[0]!)).toContain(`${empty}\n`);
+    await h.cloud`INSERT INTO billing_webhook_events (provider, event_id, type, payload_digest, occurred_at, outcome) VALUES ('stripe', 'evt_orphan', 'customer.subscription.updated', ${'c'.repeat(64)}, now(), 'unmatched')`;
+    expect(await scrapeOf(services[0]!)).toContain('carbon_billing_events_unmatched 1\n'); expect(await scrapeOf(services[0]!)).toMatch(/carbon_billing_last_event_seconds [0-9]+\n/);
+    // A real request through an observed handler is logged by route. The identifiers it carried are not in the line.
+    const lines: Record<string, unknown>[] = []; const registry = registryOperations(h.registry, {}); const observed = observe({ ...registry.config, log: line => { lines.push(line as never); } }, (request: Request) => fetch(h.registryServer.url.origin + new URL(request.url).pathname));
+    expect((await observed(get('/registry/v1/packages/acme/clipboard'))).status).toBe(404); expect((await observed(get(`/internal/platform/v1/environments/${scope.environmentId}/registry/namespace.get?orgId=${scope.orgId}`))).status).not.toBe(200);
+    expect(lines.map(line => [line.service, line.route, line.status])).toEqual([['carbon-registry', '/registry/v1/packages/:value/:value', 404], ['carbon-registry', '/internal/platform/v1/environments/:id/registry/namespace.get', lines[1]!.status]]);
+    expect(JSON.stringify(lines)).not.toContain(scope.environmentId); expect(JSON.stringify(lines)).not.toContain('acme');
+  }, 120000);
+
+  test('rotating Registry\'s signing key: what the old key signed stays installable while it is retiring, a revoked key vouches for nothing, and nobody can be walked back to an older bundle', async () => {
+    const h = await harness(); const first = await h.create('rotation', ['registry']); expect(await h.worker.execute()).toBe(true);
+    const A = parseComponent('EnvironmentScope', first.scope); const id = () => crypto.randomUUID(); const origin = h.registryServer.url.origin; const target = 'x86_64-pc-windows-msvc' as const;
+    const command = async (body: Record<string, unknown>) => { const response = await h.api(`/platform/v1/orgs/${A.orgId}/projects/${A.projectId}/environments/${A.environmentId}/registry`, body, body.revision as string | undefined, body.commandId ? { 'idempotency-key': body.commandId as string } : {});
+      if (response.status !== 200) throw new Error(`${body.kind} answered ${response.status}`); return (await response.json() as { result: Record<string, any> }).result; };
+    const publish = async (version: string) => {
+      const manifest = { abiMajor: 1, abiMinor: 4, description: 'clipboard for the rotation drill', requiredCapabilities: [], optionalCapabilities: [] }; const dll = Buffer.alloc(256); dll.write('MZ', 0); dll.writeUInt32LE(64, 60); dll.write('PE\0\0', 64); dll.writeUInt16LE(0x8664, 68);
+      const bytes = packArchive([{ path: 'carbon-plugin.json', bytes: new TextEncoder().encode(manifestFile({ publisher: 'acme', name: 'clipboard', version, target }, manifest)) }, { path: libraryFile('clipboard', target), bytes: new Uint8Array(dll) }]);
+      const reserved = await command({ kind: 'version.submit', commandId: id(), publisher: 'acme', name: 'clipboard', version, target, sizeBytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), manifest });
+      expect((await fetch(reserved.upload.url, { method: 'PUT', body: Buffer.from(bytes) })).status).toBe(200);
+      return h.registryReview.approve({ versionId: reserved.version.id, operator: 'reviewer@carbon.example', reason: 'Reviewed', requestId: id() });
+    };
+    const material = h.registryTrustMaterial; const oldKey = { id: 'registry-test', publicKey: publicKeyHex(material.signingSeed) }; const newSeed = randomBytes(32).toString('hex'); const newKey = { id: 'registry-next', publicKey: publicKeyHex(newSeed) };
+    const bundle = (sequence: number, keys: { id: string; publicKey: string; state: 'active' | 'retiring' | 'revoked' }[]) => signTrustBundle(material.rootSeed, { sequence, issuedAt: new Date().toISOString(), keys });
+    /** What an installer does with an exact version, remembering the newest bundle it has accepted. */
+    const install = async (version: string, minimumSequence: number) => {
+      const trust = parseComponent('RegistryTrustBundle', await (await fetch(`${origin}/registry/v1/trust`)).json()); const listing = parseComponent('RegistryPublicPackage', await (await fetch(`${origin}/registry/v1/packages/acme/clipboard`)).json());
+      const download = await fetch(`${origin}/registry/v1/packages/acme/clipboard/${version}/${target}`); const body = new Uint8Array(await download.arrayBuffer());
+      try { return verifyRegistryPackage({ rootPublicKey: h.registryRoot, trust, minimumSequence, expected: { publisher: 'acme', name: 'clipboard', version, target }, version: listing.versions.find(item => item.version === version)!, bytes: body }).version + ` under ${listing.versions.find(item => item.version === version)!.signed.keyId} at ${trust.bundle.sequence}`; }
+      catch (error) { if (error instanceof RegistryTrustError) return error.category; throw error; }
+    };
+
+    await command({ kind: 'publisher.claim', commandId: id(), slug: 'acme' }); const one = await publish('1.0.0'); expect(one.signed!.keyId).toBe('registry-test'); expect(await install('1.0.0', 0)).toBe('1.0.0 under registry-test at 1');
+
+    // Step 1 of a rotation: the root signs a bundle that adds the new key and marks the old one retiring. Registry will not start on it with the old key.
+    const second = bundle(2, [{ ...oldKey, state: 'retiring' }, { ...newKey, state: 'active' }]);
+    expect(() => h.recomposeRegistry({ trustBundle: second })).toThrow('signing_key_not_active'); expect(() => h.recomposeRegistry({ trustBundle: second, signingKeyId: 'registry-next', signingSeed: material.signingSeed })).toThrow('signing_key_not_active');
+    // A bundle the root did not sign is refused at start-up too.
+    expect(() => h.recomposeRegistry({ trustBundle: signTrustBundle(randomBytes(32).toString('hex'), second.bundle), signingKeyId: 'registry-next', signingSeed: newSeed })).toThrow('bundle_signature');
+    // A refused start leaves the running Registry as it was.
+    expect(await install('1.0.0', 0)).toBe('1.0.0 under registry-test at 1');
+    h.recomposeRegistry({ trustBundle: second, signingKeyId: 'registry-next', signingSeed: newSeed });
+    // After the restart: the old version is still good, and new versions are signed by the new key.
+    expect(await install('1.0.0', 1)).toBe('1.0.0 under registry-test at 2'); const two = await publish('1.1.0'); expect(two.signed!.keyId).toBe('registry-next'); expect(await install('1.1.0', 2)).toBe('1.1.0 under registry-next at 2');
+    expect((await command({ kind: 'version.get', versionId: one.id })).version.signed).toEqual(one.signed);
+
+    // Step 2: the old key is revoked. What it signed is refused by every installer that sees the new bundle; the rest is unaffected.
+    const third = bundle(3, [{ ...oldKey, state: 'revoked' }, { ...newKey, state: 'active' }]); h.recomposeRegistry({ trustBundle: third, signingKeyId: 'registry-next', signingSeed: newSeed });
+    expect(await install('1.0.0', 2)).toBe('key_revoked'); expect(await install('1.1.0', 2)).toBe('1.1.0 under registry-next at 3');
+    // Someone serves the older bundle again, to bring the revoked key back. An installer that has seen the newer one refuses it; one that never has cannot tell.
+    h.recomposeRegistry({ trustBundle: second, signingKeyId: 'registry-next', signingSeed: newSeed });
+    expect(await install('1.0.0', 3)).toBe('bundle_rollback'); expect(await install('1.1.0', 3)).toBe('bundle_rollback'); expect(await install('1.0.0', 0)).toBe('1.0.0 under registry-test at 2');
+    h.recomposeRegistry({ trustBundle: third, signingKeyId: 'registry-next', signingSeed: newSeed });
+
+    // The same drill as a project sees it: locked on the old version, it is stopped, and updating moves it to a version the trusted key signed.
+    const root = mkdtempSync(join(tmpdir(), 'carbon-rotation-'));
+    try {
+      const project = (name: string) => { mkdirSync(join(root, name, 'carbon'), { recursive: true }); return { directory: join(root, name), plugins: new RegistryPlugins(new NodePluginProject(join(root, name)), new HttpRegistrySource(), new NodePackageCache(join(root, `${name}-cache`)), { target, abiMajor: 1, abiMinor: 23 }) }; };
+      const refusal = (work: Promise<unknown>) => work.then(() => 'accepted', error => error instanceof RegistryPluginError ? `${error.code}:${error.details.category ?? ''}` : Promise.reject(error));
+      const app = project('app'); app.plugins.init(origin, h.registryRoot); expect(await refusal(app.plugins.add('acme/clipboard@1.0.0'))).toBe('untrusted:key_revoked'); expect(existsSync(join(app.directory, LOCK_PATH))).toBe(false);
+      expect((await app.plugins.add('acme/clipboard@^1.0.0')).to).toBe('1.1.0'); expect(parseLock(readFileSync(join(app.directory, LOCK_PATH), 'utf8')).trustSequence).toBe(3);
+      // The lock remembers bundle 3, so this project cannot be walked back either.
+      h.recomposeRegistry({ trustBundle: second, signingKeyId: 'registry-next', signingSeed: newSeed }); expect(await refusal(app.plugins.update())).toBe('untrusted:bundle_rollback'); expect(await refusal(app.plugins.audit())).toBe('untrusted:bundle_rollback');
     } finally { rmSync(root, { recursive: true, force: true }); }
   }, 120000);
 

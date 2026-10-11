@@ -28,23 +28,24 @@ meaningful tests pass together.
 | 15 — partly complete | Implement BE-12 project plugin consumption and the remaining CLI workflows. | Done and proven against the real Registry: a declaration and an exact lock, add, install, update, remove and audit with pinned trust, capability approval, ABI and target compatibility, offline install and recovery from interruptions. Not built: loading an installed package in an app (G-126), Cloud's project plugin API and source proposals (G-127), and the remaining CLI workflows (G-128). The gate's "project APIs" half is not met. |
 | 16 — partly complete | Implement BE-13 billing, quotas, operator boundaries, recovery, deletion and unknown-outcome resolution. | Done and proven: signed provider events applied once and in the provider's order through every subscription state; charged work admitted under one count per organization with budgets and unique metering; operator accounts with roles, reasons, a permanent record and two-person early deletion; legal holds and live subscriptions stopping final deletion. Not built: backup and restore (G-135). Never run against the real provider (G-136); unknown outcomes are kept, not resolved (G-138). |
 | 17 — partly complete | Complete production browser adapters and the Carbon frontend one vertical slice at a time. | Done and proven for the first part: a production composition with no mock module in it, enforced by the build and by a test; live adapters for accounts, organizations, members, invitations, projects and environments, walked against the real API; Cloud serving the built console. Not done: every other area of the console (G-147), parts of the connected one (G-148), anything in a real browser (G-151). |
-| 18 | Complete observability, deployment compatibility, security review, migration reconciliation, canary rollout and cutover. | Sections 25-29 of the backend plan have recorded production evidence, including restore, rotation, rollback and no-mock-fallback drills. |
+| 18 — partly complete | Complete observability, deployment compatibility, security review, migration reconciliation, canary rollout and cutover. | **Gate not met:** there is no deployment, so no production evidence exists (G-154). Done and proven on a development machine: liveness, readiness and metrics endpoints on all three services, request logs that carry routes and no values, read-only migration status and migrations as a separate release step, and rotation of Registry's signing key, the message key and the webhook secret. Written, not exercised: runbooks, the security checklist as a self-review, the cutover plan. Not done: restore drill (G-135), version-skew tests (G-158), threat model and independent review (G-159), canary cohorts (G-162). |
 | 19 | Close the gap ledger: every open decision and everything an earlier phase could not finish or prove. | Each entry in [gaps.md](gaps.md) is closed with evidence or explicitly accepted by the owner. Includes the hardware- and account-dependent proofs (a real Windows build, signing, isolation, real KMS, a real identity provider) and CI running the database suites. |
 
-## Start with Phase 18
+## Start with Phase 19
 
-Phases 1 to 7, 9, 11, 12 and 14 are complete; Phases 8, 10, 13, 15, 16 and 17 are partly complete.
-Read these files before changing Phase 18 code:
+Phases 1 to 7, 9, 11, 12 and 14 are complete; Phases 8, 10, 13, 15, 16, 17 and 18 are partly complete.
+Phase 19 is the gap ledger itself. Read these first:
 
-- sections 25 to 29 of [the backend plan](../platform-backend-plan.md): verification strategy, deployment and observability, the security and privacy checklist, cutover, and the definition of done
-- [gaps.md](gaps.md), all of it: Phase 18 asks for recorded production evidence, and the ledger is the list of what has none
-- [migrations.md](../migrations.md): every migration and its recovery note, the input to migration reconciliation
-- the compositions that would be deployed: `products/carbon-cloud/composition`, `products/carbon-database/composition`, `products/carbon-registry/composition`, and their Dockerfiles
-- `.github/workflows/ci.yml`: CI has no database, so the PostgreSQL suites have only ever run on a development machine (G-50)
+- [gaps.md](gaps.md), all of it. It is the work list
+- [cutover.md](../cutover.md), "Before any customer data": the order in which the outside dependencies matter
+- [security-review.md](../security-review.md): which checklist items are not met
+- [operations.md](../operations.md): what a deployment would be given to run
 
-Phase 18 covers observability, deployment compatibility, the security review,
-migration reconciliation, canary rollout and cutover. Much of its gate needs a
-real deployment, which this repository has never had (G-03).
+The ledger falls into three kinds of work:
+
+- **Can be done in the repository now.** The largest is the rest of the console (G-147, G-148, G-150). Also: function logs and schedules (G-101, G-102), Cloud's project plugin API and the remaining CLI workflows (G-127, G-128), unknown-outcome resolution (G-138), process-level tests of the entrypoints (G-145, G-163), observing the legacy routes and workers (G-157), and removing legacy paths once nothing depends on them.
+- **Needs something from outside.** A deployment (G-03, G-154), a database in CI (G-50), a Windows host with packaging tools and a signing certificate (G-36, G-37), an isolation mechanism for builds and functions (G-38, G-100), real AWS KMS, a real identity provider and the real payment provider (G-01, G-136), and an independent reviewer (G-159).
+- **Needs the owner's decision.** The section "Open: needs a decision", plus retention (G-106, G-146), row-level security in Cloud (G-160), and what gates readiness (G-164).
 
 ## Deferred work
 

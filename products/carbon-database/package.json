@@ -6,7 +6,8 @@
   "scripts": {
     "start": "bun ./main.ts",
     "dev": "bun ./main.ts",
-    "test": "bun test"
+    "test": "bun test",
+    "migrate": "bun ./composition/migrate.ts"
   },
   "engines": {
     "bun": ">=1.3.0"

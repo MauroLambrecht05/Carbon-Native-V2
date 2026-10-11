@@ -4,6 +4,7 @@
 // what a build IS or does — that's cloud-orchestration. This only wires.
 
 import { createFrontendRoutes } from '../infrastructure/http/frontend-routes.ts';
+import { composeOperations } from './operations.ts';
 import {
   ClaimNextBuildUseCase,
   CompleteBuildUseCase,
@@ -98,7 +99,9 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): CarbonCloud
 
 export async function startServer(config: CarbonCloudConfig) {
   const sql = openDatabase(config.databaseUrl);
-  await migrate(sql);
+  // By default a service brings its own schema up to date when it starts. A deployment that runs migrations as a release step
+  // turns this off; the service then starts against the schema it finds, and reports not ready until it is the right one.
+  if (process.env.CARBON_MIGRATE_ON_START !== "disabled") await migrate(sql);
 
   const builds = new PostgresBuildRepository(sql);
   const identity = new PostgresIdentityRepository(sql);
@@ -132,13 +135,15 @@ export async function startServer(config: CarbonCloudConfig) {
     stripeWebhookSecret: config.stripe?.webhookSecret,
   });
 
+  const operations = composeOperations(sql);
   const frontend = process.env.CARBON_CONSOLE_DIR ? createFrontendRoutes(process.env.CARBON_CONSOLE_DIR) : undefined;
   // With a console to serve, the root path is the console, not the API's placeholder page.
   if (frontend) (routes as Record<string, unknown>)["/"] = { GET: (request: Request) => frontend(request) };
   return Bun.serve({
     port: config.port,
     routes,
-    fetch: (request, server) => {
+    fetch: operations.observe(async (request: Request, server: { requestIP(request: Request): { address: string } | null }) => {
+      const operational = await operations.routes(request); if (operational) return operational;
       if (new URL(request.url).pathname === '/internal/platform/v1/authority') return serviceAuthority ? serviceAuthority(request)
         : Response.json({ current: false }, { status: 503, headers: { 'cache-control': 'no-store' } });
       if (new URL(request.url).pathname.startsWith("/app/v1/")) {
@@ -178,6 +183,6 @@ export async function startServer(config: CarbonCloudConfig) {
       // The console, when this deployment was given a build of it. Same origin as the API, so its cookies apply.
       if (frontend) return frontend(request);
       return new Response("not found", { status: 404 });
-    },
+    }),
   });
 }

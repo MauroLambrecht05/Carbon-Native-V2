@@ -1,0 +1,8 @@
+{
+  "name": "@carbon/operations",
+  "version": "0.1.0",
+  "private": true,
+  "description": "What a running service tells its operators: redaction, metrics, readiness and request observation.",
+  "type": "module",
+  "exports": { ".": "./index.ts" }
+}

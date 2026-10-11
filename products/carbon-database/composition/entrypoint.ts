@@ -20,6 +20,7 @@ import { MigrationEngine } from "../infrastructure/persistence/MigrationEngine.t
 import { SnapshotEngine } from "../infrastructure/persistence/SnapshotEngine.ts";
 import { buildDatabaseRoutes } from "../infrastructure/http/routes.ts";
 import { startDatabaseServer } from "../infrastructure/http/server.ts";
+import { composeOperations } from "./operations.ts";
 
 export interface CarbonDatabaseConfig {
   readonly internalPlatform?: LifecyclePlatformConfig;
@@ -71,7 +72,9 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): CarbonDatab
 
 export async function buildDatabaseSystem(config: CarbonDatabaseConfig) {
   const sql = openDatabase(config.databaseUrl);
-  await migrate(sql);
+  // By default a service brings its own schema up to date when it starts. A deployment that runs migrations as a release step
+  // turns this off; the service then starts against the schema it finds, and reports not ready until it is the right one.
+  if (process.env.CARBON_MIGRATE_ON_START !== "disabled") await migrate(sql);
 
   const s3 = new Bun.S3Client({
     endpoint: config.objectStore.endpoint,
@@ -115,12 +118,14 @@ export async function buildDatabaseSystem(config: CarbonDatabaseConfig) {
   const handler = (request: Request) => canonical(new URL(request.url).pathname)
     ? lifecycle ? lifecycle(request) : Promise.resolve(Response.json({ error: { code: 'capability', message: 'Internal platform is not configured', requestId: crypto.randomUUID() } }, { status: 501, headers: { 'cache-control': 'no-store' } }))
     : legacyHandler(request);
-  return { deps, handler, realtime, blobStorage: lifecycle?.blobStorage, pruneChanges: lifecycle?.pruneChanges };
+  return { sql, deps, handler, realtime, blobStorage: lifecycle?.blobStorage, pruneChanges: lifecycle?.pruneChanges };
 }
 
 export async function startDatabase(config: CarbonDatabaseConfig = configFromEnv()) {
-  const { handler, realtime, deps, blobStorage, pruneChanges } = await buildDatabaseSystem(config);
-  const server = startDatabaseServer({ port: config.port, handler, realtime });
+  const { sql, handler, realtime, deps, blobStorage, pruneChanges } = await buildDatabaseSystem(config);
+  const operations = composeOperations(sql);
+  const observedHandler = operations.observe(async (request: Request) => (await operations.routes(request)) ?? handler(request));
+  const server = startDatabaseServer({ port: config.port, handler: observedHandler, realtime });
   // The change feed keeps three days of events; older ones are removed hourly.
   if (pruneChanges) setInterval(() => { pruneChanges().catch(() => console.error(JSON.stringify({ event: 'data.changes.prune_unavailable' }))); }, 3_600_000).unref();
   // Blob cleanup: lapsed transfer addresses, abandoned uploads, and versions past their retention.

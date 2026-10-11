@@ -14,6 +14,7 @@ import { RegistryEngine } from "../infrastructure/services/RegistryEngine.ts";
 import { TrustSigner } from "../infrastructure/services/TrustSigner.ts";
 import { buildRegistryRoutes } from "../infrastructure/http/routes.ts";
 import { startRegistryServer } from "../infrastructure/http/server.ts";
+import { composeOperations } from "./operations.ts";
 
 export interface CarbonRegistryConfig {
   readonly internalPlatform?: LifecyclePlatformConfig;
@@ -65,7 +66,9 @@ export function publishingFromEnv(env: NodeJS.ProcessEnv, objectStore: CarbonReg
 
 export async function buildRegistrySystem(config: CarbonRegistryConfig) {
   const sql = openDatabase(config.databaseUrl);
-  await migrate(sql);
+  // By default a service brings its own schema up to date when it starts. A deployment that runs migrations as a release step
+  // turns this off; the service then starts against the schema it finds, and reports not ready until it is the right one.
+  if (process.env.CARBON_MIGRATE_ON_START !== "disabled") await migrate(sql);
 
   const s3 = new Bun.S3Client({
     endpoint: config.objectStore.endpoint,
@@ -103,12 +106,14 @@ export async function buildRegistrySystem(config: CarbonRegistryConfig) {
     ? lifecycle ? lifecycle(request) : Promise.resolve(Response.json({ error: { code: 'capability', message: 'Internal platform is not configured', requestId: crypto.randomUUID() } }, { status: 501, headers: { 'cache-control': 'no-store' } }))
     : legacyHandler(request);
 
-  return { deps, handler };
+  return { sql, deps, handler };
 }
 
 export async function startRegistry(config: CarbonRegistryConfig = configFromEnv()) {
-  const { deps, handler } = await buildRegistrySystem(config);
-  const server = startRegistryServer({ port: config.port, handler });
+  const { sql, deps, handler } = await buildRegistrySystem(config);
+  const operations = composeOperations(sql);
+  const observedHandler = operations.observe(async (request: Request) => (await operations.routes(request)) ?? handler(request));
+  const server = startRegistryServer({ port: config.port, handler: observedHandler });
 
   console.log(`\n🏪 Carbon Plugin Registry & Marketplace running at: http://localhost:${server.port}`);
   console.log(`📦 Native plugin search, semver resolution, and package publishing online`);
