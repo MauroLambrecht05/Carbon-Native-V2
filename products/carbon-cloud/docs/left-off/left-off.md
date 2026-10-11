@@ -1,6 +1,6 @@
 # Carbon platform left-off checkpoint
 
-Checkpoint: 2026-10-11, after Phase 14: Registry publishing and trust.
+Checkpoint: 2026-10-11, after Phase 15: plugin consumption.
 
 The overall platform plan remains unfinished. The rough scope estimate is about
 **30% of the complete backend-and-frontend goal**, with backend foundations in
@@ -73,6 +73,10 @@ the **low 40% range** and the requested production frontend redesign still at
   inspected into quarantine, operator review, statements signed under a
   root-signed trust bundle, yanking, security revocation, public distribution,
   and the checks an installer must make.
+- Plugin consumption, in part: `carbon plugin registry` resolves a package to an
+  exact version this host can load, verifies it against a root key pinned in
+  the project, records it in a lock, and installs from the lock, online or
+  from a local cache. An installed package is not yet loaded by an app.
 
 The service-account implementation is described in
 [service-accounts.md](../service-accounts.md), its wire surface in
@@ -83,7 +87,7 @@ legacy permissions are inferred.
 
 ## Last verified state
 
-- Affected Bun regression: **699 tests, 0 failures and 7,704 assertions across 86 files, with the object-store tests run against a local MinIO container**,
+- Affected Bun regression: **716 tests, 0 failures and 8,007 assertions across 88 files, with the object-store tests run against a local MinIO container**,
   including the real HTTP/PostgreSQL cross-service suites. These database
   scenarios run on the development machine only: CI has no database and skips
   them (G-50).
@@ -129,7 +133,7 @@ build queue and the legacy end-user routes still work as before. Existing legacy
 implementations elsewhere in the repository still need review against the new
 isolation, durability and trust requirements before they count as complete.
 
-Phases 8, 10 and 13 are **partly complete**; Phases 9, 11, 12 and 14 are complete. By
+Phases 8, 10, 13 and 15 are **partly complete**; Phases 9, 11, 12 and 14 are complete. By
 the owner's decision (2026-10-10), open decisions and everything a phase could
 not finish or prove are collected in [gaps.md](gaps.md) and worked in a final
 Phase 19; phases do not stop for them.
@@ -139,14 +143,16 @@ function is an unisolated child process of the worker with no resource limits
 and no logs (G-100, G-102), only an account session can invoke one (G-104), and
 schedules are plain intervals (G-101).
 
-Registry publishes reviewed, signed packages and serves them publicly, but
-nothing installs from it yet: the CLI and the loader still use the legacy API
-and an older signature scheme (G-116, G-118). Review is an operator's
-command-line tool with no operator accounts (G-114), and the signing key is not
-in a KMS (G-115).
+Registry publishes reviewed, signed packages and serves them publicly, and the
+CLI installs them into a project by declaration and lock with pinned trust. An
+installed package still cannot run: the build does not stage it and the loader
+does not accept Registry's signatures (G-126). Cloud has no project plugin API
+(G-127), and the legacy Registry API and CLI paths still exist (G-118, G-128).
+Review is an operator's command-line tool with no operator accounts (G-114),
+and the signing key is not in a KMS (G-115).
 
-The next bounded goal is **Phase 15: project plugin consumption and the
-remaining CLI workflows**. Continue
+The next bounded goal is **Phase 16: billing, quotas, operator boundaries,
+recovery, deletion and unknown-outcome resolution**. Continue
 with exactly one phase from [handoff.md](handoff.md) per future work session.
 Finish that phase's proof gate, update both checkpoint documents, and stop
 before beginning the next phase unless the user explicitly combines them.

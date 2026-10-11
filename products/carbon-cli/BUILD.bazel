@@ -71,6 +71,16 @@ bun_test(
 )
 
 bun_test(
+    name = "plugin_registry_consumption_test",
+    entry = "tests/plugin.registry-consumption.test.ts",
+    srcs = [
+        ":srcs",
+        ":test_srcs",
+    ],
+    data = _DEPS,
+)
+
+bun_test(
     name = "device_authorization_test",
     entry = "tests/device-authorization.test.ts",
     srcs = [

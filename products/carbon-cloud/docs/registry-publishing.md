@@ -10,8 +10,8 @@ Registry owns all of it: publishers, versions, archives, reviews and signing.
 Cloud authorizes the account and forwards one signed command at a time, as it
 does for Database ([signed-data.md](signed-data.md)).
 
-Nothing installs from this yet. The CLI still uses the legacy Registry API;
-moving it over is Phase 15 (G-116).
+Installing is in [registry-plugins.md](registry-plugins.md). An installed
+package cannot run in an app yet (G-126).
 
 ## The path of a version
 
@@ -247,8 +247,8 @@ A publisher can also `version.withdraw` a version that has not been reviewed.
 
 See G-114 to G-125 in [the gap ledger](left-off/gaps.md). The main ones:
 
-- Nothing installs from this yet, and the legacy Registry API still exists
-  beside it (G-116, G-118).
+- An installed package cannot run in an app yet, and the legacy Registry API
+  still exists beside this (G-126, G-118).
 - Operators are names, not accounts (G-114).
 - Keys are not in a KMS, and rotation is unproven (G-115).
 - Every published package is public, and any member with `release.publish`

@@ -25,27 +25,25 @@ meaningful tests pass together.
 | 12 — complete | Implement BE-09 vector, graph and realtime parity with canonical environment authority and durable outbox semantics. | Completed: a database-captured change feed read in commit order under row policy with a resumable stream; vector collections with exact deterministic search; a bounded property graph; exact-scope isolation and reconnect, replay and revocation proven. Events carry no row values (G-88); the stream is polled and account-only (G-90); vector search has no index (G-94). |
 | 13 — partly complete | Implement BE-10 functions and schedules with immutable revisions, secret bindings, leases, limits and durable executions. | Gate met: deploy, invoke, schedule, cancel and retry tests prove revision pinning, secret isolation, idempotency and timeout recovery, and a real worker process runs leased code. Not built from the plan's section 16: isolation and resource limits (G-100), logs (G-102), calendar schedules (G-101), app and service invocation (G-104), drafts, packaging and promotion (G-105). |
 | 14 — complete | Implement BE-11 Registry publisher identity, review, trust, immutable archives, yanking and signed distribution. | Completed: organization-owned publisher names, exact uploads inspected into quarantine, operator review with permanent records, signed statements under a root-signed trust bundle, yanking, security revocation and public distribution, proven from publish to verified install across two tenants over real HTTP. Nothing installs from it yet (G-116); operators are names, not accounts (G-114); keys are not in a KMS (G-115); binaries are checked by header only (G-117). |
-| 15 | Implement BE-12 project plugin consumption and the remaining CLI workflows. | Lockfile, install/update/remove, compatibility and offline/error recovery pass against real Registry and project APIs. |
+| 15 — partly complete | Implement BE-12 project plugin consumption and the remaining CLI workflows. | Done and proven against the real Registry: a declaration and an exact lock, add, install, update, remove and audit with pinned trust, capability approval, ABI and target compatibility, offline install and recovery from interruptions. Not built: loading an installed package in an app (G-126), Cloud's project plugin API and source proposals (G-127), and the remaining CLI workflows (G-128). The gate's "project APIs" half is not met. |
 | 16 | Implement BE-13 billing, quotas, operator boundaries, recovery, deletion and unknown-outcome resolution. | Provider webhook replay, quota races, operator audit, backup/restore and irreversible-deletion gates pass. |
 | 17 | Complete production browser adapters and the Carbon frontend one vertical slice at a time. | Each frontend-plan walkthrough passes against real services; production bundles contain no mock imports or mock data. |
 | 18 | Complete observability, deployment compatibility, security review, migration reconciliation, canary rollout and cutover. | Sections 25-29 of the backend plan have recorded production evidence, including restore, rotation, rollback and no-mock-fallback drills. |
 | 19 | Close the gap ledger: every open decision and everything an earlier phase could not finish or prove. | Each entry in [gaps.md](gaps.md) is closed with evidence or explicitly accepted by the owner. Includes the hardware- and account-dependent proofs (a real Windows build, signing, isolation, real KMS, a real identity provider) and CI running the database suites. |
 
-## Start with Phase 15
+## Start with Phase 16
 
-Phases 1 to 7, 9, 11, 12 and 14 are complete; Phases 8, 10 and 13 are partly complete.
-Read these files before changing Phase 15 code:
+Phases 1 to 7, 9, 11, 12 and 14 are complete; Phases 8, 10, 13 and 15 are partly complete.
+Read these files before changing Phase 16 code:
 
-- section 18 of [the backend plan](../platform-backend-plan.md), "BE-12: plugin consumption and CLI changes", and its proof gate
-- [registry-publishing.md](../registry-publishing.md): what Registry serves and exactly what an installer must check (`verifyRegistryPackage`, `packArchive`, `inspectArchive` in `@carbon/catalog`)
-- `products/carbon-cli/presentation/commands/plugins/plugin.command.ts` and `products/carbon-cli/composition/registry.ts`: the commands as they are, still on the legacy API (G-116)
-- `products/carbon-cli/infrastructure/cloud/RegistryDeviceClient.ts`: the CLI's signed path to Registry, which so far sends only `namespace.get` (G-122)
-- `solutions/capabilities/plugin/lifecycle` and `solutions/capabilities/plugin/trust`: local plugin builds and the loader's older signature scheme
-- [github-repositories.md](../github-repositories.md): source proposals, the way a lock file reaches a repository
+- section 19 of [the backend plan](../platform-backend-plan.md), "BE-13: billing, quotas, operators, and recovery", and its proof gate
+- `solutions/capabilities/cloud/billing` (what exists today) and the `org_plans` table the build quota already reads
+- [builds.md](../builds.md): the one place quota is reserved and settled today; blob, vector, function and Registry limits are fixed constants (G-99, G-107)
+- [resource-lifecycle.md](../resource-lifecycle.md): scheduled deletion and suspension, which mark rows and destroy nothing in the owning services yet (G-09)
+- [registry-publishing.md](../registry-publishing.md): review is the first operator action, and operators are still names, not accounts (G-114)
 
-Phase 15 builds plugin consumption: an exact lock file, install, update and
-remove against the canonical Registry with pinned trust, and the remaining CLI
-workflows.
+Phase 16 builds billing, quotas, the operator boundary, recovery, deletion and
+unknown-outcome resolution.
 
 ## Deferred work
 

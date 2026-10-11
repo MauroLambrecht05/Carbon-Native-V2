@@ -32,6 +32,7 @@ import { PRODUCTS_DIR } from "@carbon/workspace";
 import { createHash, createPublicKey, verify as edVerify } from "node:crypto";
 import { join, resolve } from "node:path";
 import { executePluginSearchTui, fetchRegistryPlugins } from "./plugin-search-tui.ts";
+import { RegistryPluginCommand } from "./registry.command.ts";
 
 /**
  * Where the plugin SDK lives.
@@ -660,6 +661,7 @@ export class PluginCommand extends CommandGroup {
     new ListPluginsCommand(),
     new InfoPluginCommand(),
     new DevKeyCommand(),
+    new RegistryPluginCommand(),
   ];
 }
 

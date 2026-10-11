@@ -40,6 +40,12 @@ export { AccountRegistry, HttpRegistryClient, type AccountRegistryAuthority, typ
 export { PostgresRegistryPackages, type RegistryLimits } from './infrastructure/PostgresRegistryPackages.ts';
 export { PostgresAccountRegistryAuthority } from './infrastructure/PostgresAccountRegistryAuthority.ts';
 export { S3RegistryArchiveStore, type RegistryArchiveStoreConfig } from './infrastructure/S3RegistryArchiveStore.ts';
+// Installing from Registry into a project: a declaration, an exact lock, and files that match it.
+export { RegistryPlugins, RegistryUnreachableError, type AuditFinding, type ChangeReport, type InstallReport, type PackageCache, type PluginHost, type PluginProject, type RegistrySource } from './application/usecases/RegistryConsumption.ts';
+export { DECLARATION_PATH, INSTALL_ROOT, LOCK_PATH, PROVENANCE_FILE, RegistryPluginError, compareVersions, installPath, parseDeclaration, parseLock, parsePackageName, parsePackageSpec, satisfies, serialize, validRange,
+  type LockedPlugin, type LockedTarget, type RegistryDeclaration, type RegistryLock } from './domain/RegistryLock.ts';
+export { HttpRegistrySource, NodePackageCache, NodePluginProject } from './infrastructure/NodeRegistryConsumption.ts';
+export { readArchive } from './domain/RegistryArchive.ts';
 export { MANIFEST_PATH, MAX_ARCHIVE_BYTES, inspectArchive, libraryFile, manifestFile, packArchive, type ArchiveFile, type ArchiveInspection, type PackageCoordinates } from './domain/RegistryArchive.ts';
 export { RegistrySigner, RegistryTrustError, manifestDigest, openRegistryTrust, publicKeyHex, signTrustBundle, verifyRegistryPackage, verifyTrustBundle, type PackageCheck, type RegistryTrust } from './domain/RegistryTrust.ts';
 export type { EnvironmentProvisioner, ProvisioningRepository, ProvisioningWork, ProvisioningResult } from './application/ports/EnvironmentProvisioner.ts';

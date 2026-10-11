@@ -7,7 +7,9 @@ Publishing under those namespaces now exists beside the legacy API: publisher
 names owned by an organization, exact uploads into quarantine, operator review,
 signed statements, a root-signed trust bundle and public distribution. See
 [Registry publishing and trust](../carbon-cloud/docs/registry-publishing.md).
-Nothing installs from it yet; the CLI and everything described below still use
+`carbon plugin registry` installs from it
+([installing packages](../carbon-cloud/docs/registry-plugins.md)), though an
+installed package is not yet loaded by an app. Everything described below is
 the legacy API and its signing, which remain separate migration work.
 
 The official Plugin & Component Registry / Marketplace for Carbon Native.

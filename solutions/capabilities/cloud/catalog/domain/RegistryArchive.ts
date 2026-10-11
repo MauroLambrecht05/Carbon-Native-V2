@@ -123,6 +123,15 @@ function entries(tar: Uint8Array): ArchiveFile[] {
  * the one named for the package, built for the declared target.
  */
 export function inspectArchive(bytes: Uint8Array, coordinates: PackageCoordinates, manifest: RegistryManifest): ArchiveInspection {
+  const result = readArchive(bytes, coordinates, manifest);
+  return result.ok ? { ok: true, files: result.files.map(file => ({ path: file.path, sizeBytes: file.bytes.length })) } : result;
+}
+
+/**
+ * The same checks, returning the files themselves. This is the only way an installer gets at an archive's
+ * contents: what it writes to disk has passed every check Registry made before publishing.
+ */
+export function readArchive(bytes: Uint8Array, coordinates: PackageCoordinates, manifest: RegistryManifest): { readonly ok: true; readonly files: readonly ArchiveFile[] } | { readonly ok: false; readonly category: string } {
   try {
     if (bytes.length === 0 || bytes.length > MAX_ARCHIVE_BYTES) refuse('archive.size');
     if (frameLength(bytes) !== bytes.length) refuse('archive.trailing_data');
@@ -140,7 +149,7 @@ export function inspectArchive(bytes: Uint8Array, coordinates: PackageCoordinate
     if (machine(found!.bytes, expected.format) !== expected.machine) refuse('archive.library_target');
     // Any other executable is something the manifest does not account for.
     for (const file of files) if (file !== found && executable(file.bytes)) refuse('archive.unexpected_executable');
-    return { ok: true, files: files.map(file => ({ path: file.path, sizeBytes: file.bytes.length })) };
+    return { ok: true, files };
   } catch (error) {
     if (error instanceof Refused) return { ok: false, category: error.category };
     throw error;

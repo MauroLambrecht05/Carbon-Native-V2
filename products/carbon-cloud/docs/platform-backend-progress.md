@@ -2163,3 +2163,73 @@ header only (G-117); every published package is public (G-119).
 
 Phase 14 stops here. Phase 15 (plugin consumption and the CLI) is next in
 [the handoff](left-off/handoff.md).
+
+## 2026-10-11: Phase 15, plugin consumption (partly complete)
+
+Phase 15 built the installing side of Registry
+([registry-plugins.md](registry-plugins.md)): `RegistryPlugins` and its domain
+in `@carbon/catalog`, and `carbon plugin registry` in the CLI. It adds no
+migration and no contract. It closes G-116.
+
+- **Declaration and lock.** `carbon/registry.json` names one Registry, the root
+  key the project trusts, and version ranges. `carbon/registry.lock.json` holds
+  the exact version of each package with its signed statement, the approved
+  capabilities, and the highest trust-bundle sequence accepted.
+- **Resolution.** The newest version in range for this target that is
+  published, not yanked or revoked, and fits the toolchain's plugin ABI.
+- **Verification.** The pinned root, the bundle sequence, the statement, the
+  package identity, the manifest and the bytes, then the same archive
+  inspection Registry made, before any file is written.
+- **Commands.** `init`, `add`, `install`, `update`, `remove`, `audit`, `list`.
+  Only `add`, `update` and `remove` write the lock.
+- **Offline.** `install --offline` works from a local cache of verified
+  archives and the last verified bundle, both verified again.
+
+Proof gate ("lockfile, install/update/remove, compatibility and offline/error
+recovery pass against real Registry and project APIs"). The Registry half is
+met; the project-API half is not built (G-127).
+
+- **Against the real Registry over HTTP,** with packages published through the
+  real submit, upload and review path: add, update, a fresh checkout that
+  installs the locked version while a newer one exists, capability approval,
+  a project pinned to another root, a storage fault, a publisher's yank, an
+  operator's revocation (audit, a fresh checkout and a machine with the bytes
+  cached are each stopped), update moving off a revoked version, and an offline
+  install after the Registry is stopped.
+- **Lock file:** deterministic output; an entry is only valid for the package,
+  version and target it is filed under; a lock for another Registry is refused.
+- **Install, update, remove:** install never changes the lock and refuses a
+  declaration the lock does not answer for; a repeat install touches neither
+  disk nor network; changed, deleted and stray files are put right; update
+  moves all packages or none; remove takes everything of one package.
+- **Compatibility:** target, ABI major and ABI minor, with the exact reason
+  when nothing qualifies; ranges and semantic-version order, including
+  pre-releases.
+- **Trust:** changed, truncated and substituted bytes, a replaced version, a
+  bundle from another root, an older bundle, a revoked signing key, a listing
+  for another package, an unlisted key, a wrongly keyed signature, and a
+  correctly signed archive that fails inspection each install nothing.
+- **Offline and error recovery:** a warm cache with no network; a cold cache; a
+  missing archive with the network available but `--offline` given; a changed
+  cached archive; a cached bundle from another root or an older sequence; a
+  failed download; a failure while writing files, after the lock; a failure
+  between the declaration and the lock; a failed directory replacement that
+  keeps the previous one; paths that would leave the project.
+- **Command line:** every subcommand's output and exit code against an
+  in-memory Registry.
+- **Mutation checks:** 45 deliberate breakages in resolution, the lock, install,
+  audit, the file formats and the disk adapter. All 45 make a test fail.
+
+The affected regression passed **716 tests, 0 failures and 8,007 assertions across 88 files, with the object-store tests run against a local MinIO container**. The consumption and command tests need no
+database and run in CI. The TypeScript checks pass.
+
+**Why partly complete.** Three things the plan's section 18 asks for are not
+built. An installed package cannot run in an app: the build does not stage it
+and the loader does not accept Registry's signatures (G-126). Cloud has no
+project plugin API, so there is no desired state in Cloud, no resolution from a
+commit and no lock written by a source proposal (G-127). The other CLI
+workflows, and publishing from the CLI to the canonical Registry, still use
+legacy paths or do not exist (G-128). New gaps are G-126 to G-134.
+
+Phase 15 stops here. Phase 16 (billing, quotas, operators and recovery) is next
+in [the handoff](left-off/handoff.md).

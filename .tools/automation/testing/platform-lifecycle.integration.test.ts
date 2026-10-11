@@ -2,6 +2,10 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { createHash, generateKeyPairSync, randomBytes } from 'node:crypto';
 import { AccountAuthentication, PostgresAccountIdentityRepository, EnvelopeMessageProtector, PostgresMfaVerification, Rfc6238Totp,
   OrganizationAccess, PostgresOrganizationRepository, AccountServiceAccounts, PostgresServiceAccountRepository, ServiceAssertionIssuer, opaqueToken, tokenDigest, bodyDigest, type AssertionTrust } from '@carbon/identity';
+import { DECLARATION_PATH, HttpRegistrySource, INSTALL_ROOT, LOCK_PATH, NodePackageCache, NodePluginProject, RegistryPluginError, RegistryPlugins, parseLock } from '@carbon/catalog';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { AccountRegistry, HttpRegistryClient, PostgresAccountRegistryAuthority, RegistryTrustError, libraryFile, manifestDigest, manifestFile, packArchive, publicKeyHex, signTrustBundle, verifyRegistryPackage, type RegistryArchiveStore } from '@carbon/catalog';
 import { AccountCatalog, PostgresCatalogRepository, PostgresProvisioningRepository, ProvisionEnvironment, HttpEnvironmentProvisioner,
   PostgresServiceLifecycleRepository, PostgresDatabaseEnvironmentDriver, databaseEnvironmentIdentifiers, type ProvisioningWork } from '@carbon/catalog';
@@ -1293,6 +1297,82 @@ suite('Cloud-to-owning-service lifecycle over real HTTP and PostgreSQL', () => {
     h.restart(); expect((await install('1.2.1')).statement).toEqual(nextPublished.signed!.statement);
     expect((await h.registry`SELECT action FROM registry_package_events WHERE version_id = ${versionId} ORDER BY sequence`).map((row: { action: string }) => row.action))
       .toEqual(['version.reserved', 'version.submitted', 'version.approved', 'version.yanked', 'version.restored', 'version.revoked']);
+  }, 120000);
+
+  test('a project installs from the real Registry by declaration and lock: add, update, a fresh checkout, yank, revocation, a storage fault, a wrong root and an offline install', async () => {
+    const h = await harness(); const first = await h.create('consumer', ['registry']); expect(await h.worker.execute()).toBe(true);
+    const A = parseComponent('EnvironmentScope', first.scope); const id = () => crypto.randomUUID(); const origin = h.registryServer.url.origin; const target = 'x86_64-pc-windows-msvc' as const;
+    const command = async (body: Record<string, unknown>) => { const response = await h.api(`/platform/v1/orgs/${A.orgId}/projects/${A.projectId}/environments/${A.environmentId}/registry`, body, body.revision as string | undefined, body.commandId ? { 'idempotency-key': body.commandId as string } : {});
+      if (response.status !== 200) throw new Error(`${body.kind} answered ${response.status}`); return (await response.json() as { result: Record<string, any> }).result; };
+    const dll = () => { const bytes = Buffer.alloc(256); bytes.write('MZ', 0); bytes.writeUInt32LE(64, 60); bytes.write('PE\0\0', 64); bytes.writeUInt16LE(0x8664, 68); return new Uint8Array(bytes); };
+    /** Publishes one version the whole real way: submit through Cloud, upload to Registry, operator approval. */
+    const publish = async (name: string, version: string, required: string[] = []) => {
+      const manifest = { abiMajor: 1, abiMinor: 4, description: `${name} for the consumption test`, requiredCapabilities: required, optionalCapabilities: [] };
+      const bytes = packArchive([{ path: 'carbon-plugin.json', bytes: new TextEncoder().encode(manifestFile({ publisher: 'acme', name, version, target }, manifest)) }, { path: libraryFile(name, target), bytes: dll() }, { path: 'README.md', bytes: new TextEncoder().encode(`# ${name} ${version}\n`) }]);
+      const reserved = await command({ kind: 'version.submit', commandId: id(), publisher: 'acme', name, version, target, sizeBytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), manifest });
+      expect((await fetch(reserved.upload.url, { method: 'PUT', body: Buffer.from(bytes) })).status).toBe(200);
+      return h.registryReview.approve({ versionId: reserved.version.id, operator: 'reviewer@carbon.example', reason: 'Reviewed', requestId: id() });
+    };
+    await command({ kind: 'publisher.claim', commandId: id(), slug: 'acme' }); const one = await publish('clipboard', '1.2.0');
+
+    const root = mkdtempSync(join(tmpdir(), 'carbon-consume-')); const host = { target, abiMajor: 1, abiMinor: 23 };
+    const checkout = (name: string, cache = 'cache') => { const project = join(root, name); mkdirSync(project, { recursive: true });
+      return { project, plugins: new RegistryPlugins(new NodePluginProject(project), new HttpRegistrySource(), new NodePackageCache(join(root, cache)), host), installed: () => existsSync(join(project, INSTALL_ROOT, 'acme/clipboard', target, 'clipboard.dll')) }; };
+    const clone = (from: { project: string }, name: string, cache = 'cache') => { const next = checkout(name, cache); mkdirSync(join(next.project, 'carbon'), { recursive: true });
+      for (const path of [DECLARATION_PATH, LOCK_PATH]) writeFileSync(join(next.project, path), readFileSync(join(from.project, path))); return next; };
+    const code = (work: Promise<unknown>) => work.then(() => 'accepted', error => error instanceof RegistryPluginError ? (error.details.category ? `${error.code}:${error.details.category}` : error.code) : Promise.reject(error));
+    const lockOf = (item: { project: string }) => parseLock(readFileSync(join(item.project, LOCK_PATH), 'utf8'));
+    try {
+      // Add: resolved, downloaded over anonymous HTTP, verified against the pinned root, locked and written.
+      const dev = checkout('dev'); dev.plugins.init(origin, h.registryRoot);
+      expect(await dev.plugins.add('acme/clipboard')).toEqual({ name: 'acme/clipboard', from: undefined, to: '1.2.0', capabilities: [] });
+      expect(lockOf(dev).plugins['acme/clipboard']!.targets[target]!.signed).toEqual(one.signed!); expect(lockOf(dev).trustSequence).toBe(1); expect(dev.installed()).toBe(true);
+      expect(Buffer.from(readFileSync(join(dev.project, INSTALL_ROOT, 'acme/clipboard', target, 'clipboard.dll'))).equals(Buffer.from(dll()))).toBe(true);
+      // A project that pinned another root trusts nothing this Registry says.
+      const stranger = checkout('stranger', 'stranger-cache'); stranger.plugins.init(origin, publicKeyHex(randomBytes(32).toString('hex')));
+      expect(await code(stranger.plugins.add('acme/clipboard'))).toBe('untrusted:bundle_signature'); expect(stranger.installed()).toBe(false);
+      // Capabilities in a really published manifest need approval.
+      await publish('keychain', '1.0.0', ['keychain.read']);
+      expect(await code(dev.plugins.add('acme/keychain'))).toBe('approval_required'); expect((await dev.plugins.add('acme/keychain', ['keychain.read'])).capabilities).toEqual(['keychain.read']); dev.plugins.remove('acme/keychain');
+
+      // Update: a newer version inside the range is taken; the lock moves and the files are replaced.
+      const two = await publish('clipboard', '1.2.1'); expect(await dev.plugins.update()).toEqual([{ name: 'acme/clipboard', from: '1.2.0', to: '1.2.1', capabilities: [] }]);
+      expect(readFileSync(join(dev.project, INSTALL_ROOT, 'acme/clipboard', target, 'README.md'), 'utf8')).toBe('# clipboard 1.2.1\n'); expect(await dev.plugins.audit()).toEqual([]);
+
+      // A fresh checkout on another machine installs exactly the locked version, although a newer one now exists.
+      await publish('clipboard', '1.2.2'); const ci = clone(dev, 'ci', 'ci-cache');
+      expect(await ci.plugins.install()).toEqual({ installed: ['acme/clipboard'], unchanged: [], removed: [] }); expect(lockOf(ci)).toEqual(lockOf(dev));
+      expect(readFileSync(join(ci.project, INSTALL_ROOT, 'acme/clipboard', target, 'README.md'), 'utf8')).toBe('# clipboard 1.2.1\n'); expect((await ci.plugins.install()).unchanged).toEqual(['acme/clipboard']);
+
+      // Stored bytes that no longer match: Registry refuses to serve them, and the installer writes nothing.
+      const key = `packages/acme/clipboard/1.2.1/${target}.tar.zst`; const original = h.registryObjects.get(key)!; const corrupt = new Uint8Array(original); corrupt[12]! ^= 1; h.registryObjects.set(key, corrupt);
+      const faulted = clone(dev, 'faulted', 'faulted-cache'); expect(await code(faulted.plugins.install())).toBe('unavailable'); expect(faulted.installed()).toBe(false); h.registryObjects.set(key, original);
+
+      // Yanked by its publisher: new resolutions skip it, the locked project still installs it, and audit says so.
+      const yanking = (await command({ kind: 'version.get', versionId: (await command({ kind: 'versions.list', publisher: 'acme', name: 'clipboard' })).versions.find((item: { version: string }) => item.version === '1.2.2').id })).version;
+      await command({ kind: 'version.yank', commandId: id(), versionId: yanking.id, revision: yanking.revision, yanked: true, reason: 'crashes on start' });
+      const late = checkout('late'); late.plugins.init(origin, h.registryRoot); expect((await late.plugins.add('acme/clipboard')).to).toBe('1.2.1'); expect(await dev.plugins.update()).toEqual([]);
+      const pinned = checkout('pinned'); pinned.plugins.init(origin, h.registryRoot); expect(await code(pinned.plugins.add('acme/clipboard@1.2.2'))).toBe('no_compatible_version');
+
+      // Revoked by an operator: audit reports it with the reason, a fresh checkout refuses it, and nothing in its range is left to move to.
+      await h.registryReview.revoke({ versionId: two.id, operator: 'reviewer@carbon.example', reason: 'Exfiltrates the clipboard', requestId: id() });
+      expect(await dev.plugins.audit()).toEqual([{ name: 'acme/clipboard', version: '1.2.1', problem: 'revoked', reason: 'Exfiltrates the clipboard' }]);
+      const after = clone(dev, 'after', 'after-cache'); expect(await code(after.plugins.install())).toBe('revoked'); expect(after.installed()).toBe(false);
+      // Even a machine that still has the bytes cached is stopped when it asks Registry.
+      const cached = clone(dev, 'cached'); expect(await code(cached.plugins.install())).toBe('revoked'); expect(cached.installed()).toBe(false);
+      // Update moves off the revoked version to the newest one in range that is still published and not yanked: here, back to 1.2.0.
+      expect(await dev.plugins.update()).toEqual([{ name: 'acme/clipboard', from: '1.2.1', to: '1.2.0', capabilities: [] }]); expect(lockOf(dev).plugins['acme/clipboard']!.targets[target]!.signed).toEqual(one.signed!);
+      expect(readFileSync(join(dev.project, INSTALL_ROOT, 'acme/clipboard', target, 'README.md'), 'utf8')).toBe('# clipboard 1.2.0\n'); expect(await dev.plugins.audit()).toEqual([]);
+      // A project whose range admits only revoked or yanked versions has nothing to move to, and is left as it was.
+      const stuck = clone(late, 'stuck'); writeFileSync(join(stuck.project, DECLARATION_PATH), readFileSync(join(stuck.project, DECLARATION_PATH), 'utf8').replace('^1.2.1', '~1.2.1'));
+      expect(await code(stuck.plugins.update())).toBe('no_compatible_version'); expect(lockOf(stuck).plugins['acme/clipboard']!.version).toBe('1.2.1');
+
+      // Registry is gone. A machine that installed 1.2.0 before installs it again from its cache; one that did not cannot.
+      await h.registryServer.stop(true);
+      const offline = clone(dev, 'offline'); expect(await code(offline.plugins.install())).toBe('unavailable'); expect(offline.installed()).toBe(false);
+      expect(await offline.plugins.install({ offline: true })).toEqual({ installed: ['acme/clipboard'], unchanged: [], removed: [] }); expect(offline.installed()).toBe(true);
+      expect(await code(clone(dev, 'cold', 'cold-cache').plugins.install({ offline: true }))).toBe('not_cached'); expect(await code(dev.plugins.audit())).toBe('unavailable');
+    } finally { rmSync(root, { recursive: true, force: true }); }
   }, 120000);
 
   test('an app user reads and writes only their own rows through a request-bound assertion, and loses access with their session', async () => {
