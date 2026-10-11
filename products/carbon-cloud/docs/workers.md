@@ -96,13 +96,15 @@ values when the lease ends.
   claimed lapses without a retry.
 - **Sweeper.** `bun run --cwd products/carbon-cloud worker-lease-sweeper`
   expires overdue leases and creates successors every five seconds. It needs
-  only the Cloud database and never decrypts anything.
+  only the Cloud database and never decrypts anything. After each sweep it also
+  ends builds and function executions that can no longer finish, and fires
+  function schedules that are due ([functions.md](functions.md)).
 
 ## Not included
 
-- Builds grant leases; function executions do not yet (Phase 13).
-- A worker that ends a build lease with the plain lease `complete` command,
-  instead of the build's own, leaves the build to be failed by the sweeper.
+- A worker that ends a build or function lease with the plain lease `complete`
+  command, instead of the build's or function's own, leaves the subject to be
+  failed by the sweeper.
 - The legacy `wk_` worker tokens and the legacy build queue routes are unchanged
   and are not connected to enrolled workers.
 - Authenticated worker calls are not rate limited; only enrollment attempts are.

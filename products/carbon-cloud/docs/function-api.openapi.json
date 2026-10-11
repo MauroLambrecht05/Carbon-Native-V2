@@ -1,0 +1,950 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Carbon function API",
+    "version": "1.0.0",
+    "description": "Deploying functions, running and scheduling them, and the worker protocol for running one execution on a lease."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "paths": {
+    "/platform/v1/orgs/{orgId}/projects/{projectId}/environments/{environmentId}/functions": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrgId"
+        },
+        {
+          "$ref": "#/components/parameters/ProjectId"
+        },
+        {
+          "$ref": "#/components/parameters/EnvironmentId"
+        }
+      ],
+      "get": {
+        "operationId": "listFunctions",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "description": "Requires metadata.read.",
+        "parameters": [
+          {
+            "$ref": "organization-api.openapi.json#/components/parameters/Limit"
+          },
+          {
+            "$ref": "organization-api.openapi.json#/components/parameters/Cursor"
+          },
+          {
+            "$ref": "organization-api.openapi.json#/components/parameters/Sort"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Functions of the environment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/FunctionPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "deployFunction",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "description": "Stores the code as a new immutable revision and makes it the active one. The first deploy of a name creates the function. The body may be up to 393,216 bytes. Requires resources.configure.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/MutationOrigin"
+          },
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/RequestId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/FunctionDeploy"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The function after the deploy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/FunctionReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/orgs/{orgId}/projects/{projectId}/environments/{environmentId}/functions/{functionId}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrgId"
+        },
+        {
+          "$ref": "#/components/parameters/ProjectId"
+        },
+        {
+          "$ref": "#/components/parameters/EnvironmentId"
+        },
+        {
+          "$ref": "#/components/parameters/FunctionId"
+        }
+      ],
+      "get": {
+        "operationId": "getFunction",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "description": "Requires metadata.read.",
+        "responses": {
+          "200": {
+            "description": "The function and its most recent 100 revisions, without code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/FunctionDetails"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "commandFunction",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "description": "activate moves the active pointer to any existing revision. disable cancels every queued and running execution and refuses new ones. enable allows them again. Requires resources.configure.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/MutationOrigin"
+          },
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/RequestId"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/FunctionCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The function after the command",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/FunctionReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/orgs/{orgId}/projects/{projectId}/environments/{environmentId}/functions/{functionId}/revisions/{revisionNumber}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrgId"
+        },
+        {
+          "$ref": "#/components/parameters/ProjectId"
+        },
+        {
+          "$ref": "#/components/parameters/EnvironmentId"
+        },
+        {
+          "$ref": "#/components/parameters/FunctionId"
+        },
+        {
+          "$ref": "#/components/parameters/RevisionNumber"
+        }
+      ],
+      "get": {
+        "operationId": "getFunctionRevision",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "description": "Requires resources.configure: reading code needs the permission that changes it.",
+        "responses": {
+          "200": {
+            "description": "One revision with its code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/FunctionRevisionDetails"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/orgs/{orgId}/projects/{projectId}/environments/{environmentId}/functions/{functionId}/invoke": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrgId"
+        },
+        {
+          "$ref": "#/components/parameters/ProjectId"
+        },
+        {
+          "$ref": "#/components/parameters/EnvironmentId"
+        },
+        {
+          "$ref": "#/components/parameters/FunctionId"
+        }
+      ],
+      "post": {
+        "operationId": "invokeFunction",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "description": "Queues one execution of the active revision and grants its worker lease in the same transaction. The execution keeps that revision whatever is deployed afterwards. It does not wait for the result. Requires data.write.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/MutationOrigin"
+          },
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/RequestId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/FunctionInvoke"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "The queued execution",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/FunctionExecutionReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/orgs/{orgId}/projects/{projectId}/environments/{environmentId}/functions/{functionId}/executions": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrgId"
+        },
+        {
+          "$ref": "#/components/parameters/ProjectId"
+        },
+        {
+          "$ref": "#/components/parameters/EnvironmentId"
+        },
+        {
+          "$ref": "#/components/parameters/FunctionId"
+        }
+      ],
+      "get": {
+        "operationId": "listFunctionExecutions",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "description": "Requires metadata.read.",
+        "parameters": [
+          {
+            "$ref": "organization-api.openapi.json#/components/parameters/Limit"
+          },
+          {
+            "$ref": "organization-api.openapi.json#/components/parameters/Cursor"
+          },
+          {
+            "$ref": "organization-api.openapi.json#/components/parameters/Sort"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Executions of the function",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/FunctionExecutionPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/orgs/{orgId}/projects/{projectId}/environments/{environmentId}/functions/{functionId}/schedules": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrgId"
+        },
+        {
+          "$ref": "#/components/parameters/ProjectId"
+        },
+        {
+          "$ref": "#/components/parameters/EnvironmentId"
+        },
+        {
+          "$ref": "#/components/parameters/FunctionId"
+        }
+      ],
+      "get": {
+        "operationId": "listFunctionSchedules",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "description": "Requires metadata.read.",
+        "responses": {
+          "200": {
+            "description": "Schedules of the function",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/FunctionScheduleList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createFunctionSchedule",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "description": "Runs the function every intervalSeconds, first one interval from now. Requires resources.configure.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/MutationOrigin"
+          },
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/RequestId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/FunctionScheduleCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The schedule",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/FunctionScheduleReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/orgs/{orgId}/projects/{projectId}/environments/{environmentId}/executions/{executionId}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrgId"
+        },
+        {
+          "$ref": "#/components/parameters/ProjectId"
+        },
+        {
+          "$ref": "#/components/parameters/EnvironmentId"
+        },
+        {
+          "$ref": "#/components/parameters/ExecutionId"
+        }
+      ],
+      "get": {
+        "operationId": "getFunctionExecution",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "description": "Requires metadata.read.",
+        "responses": {
+          "200": {
+            "description": "The execution",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/FunctionExecution"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "commandFunctionExecution",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "description": "cancel ends a queued or running execution and cancels its lease. retry queues a new execution of the same revision with the same input, for one that failed, timed out or was cancelled. Requires data.write.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/MutationOrigin"
+          },
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/RequestId"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/FunctionExecutionCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The cancelled execution, or the new one",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/FunctionExecutionReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/orgs/{orgId}/projects/{projectId}/environments/{environmentId}/schedules/{scheduleId}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrgId"
+        },
+        {
+          "$ref": "#/components/parameters/ProjectId"
+        },
+        {
+          "$ref": "#/components/parameters/EnvironmentId"
+        },
+        {
+          "$ref": "#/components/parameters/ScheduleId"
+        }
+      ],
+      "post": {
+        "operationId": "commandFunctionSchedule",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "description": "pause, resume or delete. Resuming starts a fresh interval from now. Requires resources.configure.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/MutationOrigin"
+          },
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/RequestId"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/FunctionScheduleCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The schedule after the command",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/FunctionScheduleReceipt"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/worker/v1/leases/{leaseId}/function": {
+      "post": {
+        "operationId": "readWorkerFunction",
+        "security": [
+          {
+            "workerCredential": []
+          }
+        ],
+        "description": "What the lease holder runs: the code of the execution's pinned revision, its input and its time limit. The first read by a new attempt starts the attempt.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/LeaseId"
+          },
+          {
+            "$ref": "#/components/parameters/LeaseToken"
+          },
+          {
+            "$ref": "#/components/parameters/RequestId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The function to run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/WorkerFunctionInput"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/worker/v1/leases/{leaseId}/function/complete": {
+      "post": {
+        "operationId": "completeWorkerFunction",
+        "security": [
+          {
+            "workerCredential": []
+          }
+        ],
+        "description": "Reports the outcome: an output of at most 262,144 bytes, or an error category. Refused before the input was read by this attempt, after the deadline, and once the lease is no longer held.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/LeaseId"
+          },
+          {
+            "$ref": "#/components/parameters/LeaseToken"
+          },
+          {
+            "$ref": "#/components/parameters/RequestId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The finished execution",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/FunctionExecution"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/WorkerFunctionComplete"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "browserSession": {
+        "$ref": "account-api.openapi.json#/components/securitySchemes/browserSession"
+      },
+      "workerCredential": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A wc_ worker credential."
+      }
+    },
+    "parameters": {
+      "OrgId": {
+        "name": "orgId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+        }
+      },
+      "ProjectId": {
+        "name": "projectId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+        }
+      },
+      "EnvironmentId": {
+        "name": "environmentId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+        }
+      },
+      "LeaseId": {
+        "name": "leaseId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+        }
+      },
+      "LeaseToken": {
+        "name": "x-carbon-lease-token",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^wl_[A-Za-z0-9_-]{43}$"
+        }
+      },
+      "MutationOrigin": {
+        "$ref": "account-api.openapi.json#/components/parameters/Origin"
+      },
+      "CsrfToken": {
+        "$ref": "account-api.openapi.json#/components/parameters/CsrfToken"
+      },
+      "IdempotencyKey": {
+        "$ref": "account-api.openapi.json#/components/parameters/IdempotencyKey"
+      },
+      "IfMatch": {
+        "$ref": "account-api.openapi.json#/components/parameters/IfMatch"
+      },
+      "RequestId": {
+        "$ref": "account-api.openapi.json#/components/parameters/RequestId"
+      },
+      "FunctionId": {
+        "name": "functionId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+        }
+      },
+      "ExecutionId": {
+        "name": "executionId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+        }
+      },
+      "ScheduleId": {
+        "name": "scheduleId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+        }
+      },
+      "RevisionNumber": {
+        "name": "revisionNumber",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        }
+      }
+    }
+  }
+}

@@ -1997,3 +1997,87 @@ cancellable job (G-96).
 
 Phase 12 stops here. Phase 13 (functions and schedules) is next in
 [the handoff](left-off/handoff.md).
+
+## 2026-10-11: Phase 13, functions and schedules (partly complete)
+
+Phase 13 added functions to Cloud's orchestration capability
+([functions.md](functions.md), [function-api.openapi.json](function-api.openapi.json),
+Cloud migration `0030_functions.sql`).
+
+- **Revisions.** Each deploy is a new immutable revision: code, its SHA-256, the
+  names of its secrets and a time limit. A function points at its active
+  revision; `activate` moves the pointer forward or back.
+- **Executions.** Durable, pinned at creation to one revision, and created in
+  the same transaction as the worker lease they run on. The lease names exactly
+  that revision's secrets.
+- **Recovery.** Lost workers are retried within the lease's attempt limit;
+  deadlines, cancellation and disabling each end an execution and its lease.
+- **Schedules.** Fixed intervals, fired by the lease sweeper, one execution per
+  slot.
+- **Worker.** `RunLeasedFunctionUseCase` and `BunFunctionRunner` run the code in
+  its own Bun process in a disposable workspace, with only the lease's secrets
+  in its environment, a wall-time kill and a bounded output.
+
+Proof gate ("deploy/invoke/schedule/cancel/retry tests prove revision pinning,
+secret isolation, idempotency and timeout recovery"), against real PostgreSQL
+through Cloud's account and worker HTTP handlers:
+
+- **Revision pinning:** an execution queued before a second deploy still runs
+  revision 1; a retry runs the original's revision and input while another is
+  active; a lost worker's next attempt gets the same revision and input; a
+  scheduled slot takes the revision active when it fires; rollback by
+  `activate`. The database refuses to change a revision, what an execution
+  runs, or a finished execution.
+- **Secret isolation:** two revisions with different secrets each get a lease
+  naming only their own, and the worker receives only that value; a real
+  function process sees its named secret and neither the environment's other
+  secret nor anything from the worker's own environment; a revision whose
+  secret is disabled queues nothing; no account response contains a secret
+  value, and only the revision read contains code.
+- **Idempotency:** deploy, invoke, activate, retry, cancel and schedule creation
+  each return the first receipt for a repeated key and refuse the key for a
+  different request; commands refuse a stale revision.
+- **Timeout and recovery:** lost once then succeeds on attempt 2; lost three
+  times ends as `worker_lost`; unclaimed ends as `no_worker`; a passed deadline
+  ends as `timed_out` and a late result is refused before and after the
+  reconciler; a new attempt gets the function's own time; the worker's own
+  timeout kills a function that never yields.
+- **Cancel and disable:** the lease is cancelled with the execution, the worker
+  learns on its heartbeat and can neither read secrets nor report; a running
+  real process is killed and its workspace erased; disabling cancels queued and
+  running work and refuses invocations and retries.
+- **Schedules:** three concurrent schedulers create one execution for a due
+  slot; overlap, a disabled function and a full environment each skip the slot
+  and record why; many missed slots become one run; pause, resume and delete.
+- **Limits and authority:** each limit answers 429, including four concurrent
+  invocations for two places; a Viewer reads but cannot deploy, run, retry,
+  schedule or read code; another environment of the same organization and
+  another organization get 404.
+- **Runtime:** output, thrown errors, an invalid module, a syntax error, an
+  early exit, an oversized and an unserializable result each produce the
+  documented category, with no error text leaving the worker and nothing left
+  on disk.
+- **Mutation checks:** 51 deliberate breakages; 49 make a test fail. They cover
+  pinning (4), secrets (3), idempotency (3), deadlines and recovery (6), cancel
+  and disable (5), schedules (7), limits (4), authority and scope (8), revision
+  checks and retry rules (5), the database guards (4) and the worker runtime
+  (6, one of them a pair of guards removed together). The two that no test
+  catches: removing one of the worker's two "do not report after cancel" checks
+  alone changes nothing because the other still holds, and sending a function's
+  standard output to the worker's instead of discarding it is not observed by
+  any test.
+
+The affected regression passed **690 tests, 0 failures and 7,440 assertions across 85 files, with the object-store tests run against a local MinIO container**. Generated contracts are current and the
+TypeScript checks pass.
+
+**Why partly complete.** The proof gate is met, but section 16 of the plan asks
+for more than the gate tests: worker isolation with CPU, memory, filesystem and
+egress limits; redacted, retained logs; app and service principals; schedules
+with time zones; drafts, packaging and promotion. None of those is built. New
+gaps are G-100 to G-113. The ones to know: a function is an unisolated child
+process of the worker (G-100), there are no logs (G-102), only an account
+session can invoke (G-104), schedules are plain intervals (G-101), and functions
+live in Cloud rather than Database (G-112).
+
+Phase 13 stops here. Phase 14 (Registry publishing and trust) is next in
+[the handoff](left-off/handoff.md).

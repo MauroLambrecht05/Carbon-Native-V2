@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { AccountBuilds, AccountReleases } from '@carbon/orchestration';
+import type { AccountBuilds, AccountFunctions, AccountReleases } from '@carbon/orchestration';
 import type { AccountRealms } from '@carbon/auth';
 import type { AccountCatalog, AccountEnvironmentCredentials, AccountWorkers, AccountEnvironmentSecrets, AccountRepositories, CatalogCommand } from '@carbon/catalog';
 import type { AccountBlobs, AccountData, AccountEngine, AccountExports, AccountImports } from '@carbon/data';
@@ -14,7 +14,7 @@ function cookieValue(request: Request, name: string): string {
   return matches.length === 1 ? matches[0]!.slice(name.length + 1) : "";
 }
 
-export function createAccountRoutes(auth: AccountAuthentication, origin: string, security?: AccountSecurity, profile?: AccountProfile, organizations?: OrganizationAccess, invitations?: OrganizationInvitations, github?: ExternalAccountAuthentication, access?: AccountAuthorization, catalog?: AccountCatalog, data?: AccountData, imports?: AccountImports, credentials?: AccountEnvironmentCredentials, secrets?: AccountEnvironmentSecrets, repositories?: AccountRepositories, devices?: AccountDeviceAuthorization, serviceAccounts?: AccountServiceAccounts, personal?: AccountPersonalCredentials, legacy?: AccountLegacyTokens, workers?: AccountWorkers, audit?: AccountAudit, realms?: AccountRealms, personalExchange?: PersonalCredentialExchange, builds?: AccountBuilds, releases?: AccountReleases, exports?: AccountExports, blobs?: AccountBlobs, vectors?: AccountEngine, graph?: AccountEngine) {
+export function createAccountRoutes(auth: AccountAuthentication, origin: string, security?: AccountSecurity, profile?: AccountProfile, organizations?: OrganizationAccess, invitations?: OrganizationInvitations, github?: ExternalAccountAuthentication, access?: AccountAuthorization, catalog?: AccountCatalog, data?: AccountData, imports?: AccountImports, credentials?: AccountEnvironmentCredentials, secrets?: AccountEnvironmentSecrets, repositories?: AccountRepositories, devices?: AccountDeviceAuthorization, serviceAccounts?: AccountServiceAccounts, personal?: AccountPersonalCredentials, legacy?: AccountLegacyTokens, workers?: AccountWorkers, audit?: AccountAudit, realms?: AccountRealms, personalExchange?: PersonalCredentialExchange, builds?: AccountBuilds, releases?: AccountReleases, exports?: AccountExports, blobs?: AccountBlobs, vectors?: AccountEngine, graph?: AccountEngine, functions?: AccountFunctions) {
   const secure = new URL(origin).protocol === "https:";
   const names = { session: `${secure ? "__Host-" : ""}carbon-session`, csrf: `${secure ? "__Host-" : ""}carbon-csrf`, browser: `${secure ? "__Host-" : ""}carbon-browser` };
   const cookie = (name: string, value: string, seconds: number, httpOnly = true) => `${name}=${value}; Path=/; Max-Age=${seconds}; SameSite=Lax${httpOnly ? "; HttpOnly" : ""}${secure ? "; Secure" : ""}`;
@@ -228,6 +228,31 @@ export function createAccountRoutes(auth: AccountAuthentication, origin: string,
           expectedRevision: request.headers.get('if-match')?.replace(/^"([1-9][0-9]*)"$/, '$1') });
         if (importRoute[5] === 'cancel') return json({ receipt: await imports.cancel(token, csrf, scope, importRoute[4]!, parseComponent('DataImportJobCancel', await body()), options) }, 202);
         return json({ receipt: await imports.enqueue(token, csrf, scope, parseComponent('DataImportJobCreate', await body(393216)), options, requestId) }, 202);
+      }
+      // Functions, their revisions, executions and schedules.
+      const functionRoute = new RegExp(`^${BASE}/orgs/([^/]+)/projects/([^/]+)/environments/([^/]+)/(functions|executions|schedules)(?:/([^/]+)(?:/(revisions|executions|schedules|invoke)(?:/([^/]+))?)?)?$`).exec(url.pathname);
+      if (functionRoute) {
+        if (!functions) throw new PlatformFault('capability', 'Functions are not configured');
+        const scope = parseComponent('EnvironmentScope', { orgId: functionRoute[1], projectId: functionRoute[2], environmentId: functionRoute[3] });
+        const session = cookieValue(request, names.session); const csrf = request.headers.get('x-csrf-token') ?? ''; const [kind, id, sub, subId] = [functionRoute[4], functionRoute[5], functionRoute[6], functionRoute[7]];
+        const options = () => parseComponent('CommandOptions', { idempotencyKey: request.headers.get('idempotency-key') ?? '', expectedRevision: request.headers.get('if-match')?.replace(/^"([1-9][0-9]*)"$/, '$1') }); const get = request.method === 'GET'; const post = request.method === 'POST';
+        if (kind === 'functions') {
+          if (get && !id) return json(await functions.list(session, scope, page()));
+          // Code is the one large account payload.
+          if (post && !id) return json(await functions.deploy(session, csrf, scope, parseComponent('FunctionDeploy', await body(393216)), options(), requestId), 201);
+          if (get && id && !sub) return json(await functions.get(session, scope, id));
+          if (post && id && !sub) return json(await functions.command(session, csrf, scope, id, parseComponent('FunctionCommand', await body()), options(), requestId));
+          if (get && id && sub === 'revisions' && subId) return json(await functions.revisionCode(session, scope, id, Number(subId)));
+          if (post && id && sub === 'invoke' && !subId) return json(await functions.invoke(session, csrf, scope, id, parseComponent('FunctionInvoke', await body(131072)), options(), requestId), 202);
+          if (get && id && sub === 'executions' && !subId) return json(await functions.executions(session, scope, id, page()));
+          if (get && id && sub === 'schedules' && !subId) return json(await functions.schedules(session, scope, id));
+          if (post && id && sub === 'schedules' && !subId) return json(await functions.createSchedule(session, csrf, scope, id, parseComponent('FunctionScheduleCreate', await body()), options(), requestId), 201);
+        }
+        if (kind === 'executions' && id && !sub) {
+          if (get) return json(await functions.execution(session, scope, id));
+          if (post) return json(await functions.executionCommand(session, csrf, scope, id, parseComponent('FunctionExecutionCommand', await body()), options(), requestId));
+        }
+        if (kind === 'schedules' && id && !sub && post) return json(await functions.scheduleCommand(session, csrf, scope, id, parseComponent('FunctionScheduleCommand', await body()), options(), requestId));
       }
       // Vector collections and the graph: one POST endpoint each that takes a command.
       const engineRoute = new RegExp(`^${BASE}/orgs/([^/]+)/projects/([^/]+)/environments/([^/]+)/(vectors|graph)$`).exec(url.pathname);

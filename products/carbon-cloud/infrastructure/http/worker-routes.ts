@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { WorkerProtocol } from '@carbon/catalog';
-import type { WorkerBuilds } from '@carbon/orchestration';
+import type { WorkerBuilds, WorkerFunctions } from '@carbon/orchestration';
 import { ContractError, PlatformFault, parseComponent } from '@carbon/contracts/platform';
 
 const BASE = '/worker/v1';
@@ -10,7 +10,7 @@ const STATUS: Record<string, number> = { unauthenticated: 401, forbidden: 403, v
  * The worker API. It authenticates with worker credentials only: no cookie, session, CSRF token or other credential
  * type is ever consulted, and a request that carries a browser Origin is refused outright.
  */
-export function createWorkerRoutes(workers: WorkerProtocol, origin: string, builds?: WorkerBuilds) {
+export function createWorkerRoutes(workers: WorkerProtocol, origin: string, builds?: WorkerBuilds, functions?: WorkerFunctions) {
   return async (request: Request, peerAddress: string): Promise<Response> => {
     let requestId = request.headers.get('x-request-id') ?? randomUUID();
     try { parseComponent('Id', requestId); } catch { requestId = randomUUID(); }
@@ -41,6 +41,14 @@ export function createWorkerRoutes(workers: WorkerProtocol, origin: string, buil
         if (build[2] === 'logs') return json(await builds.appendLog(authorization, leaseId, leaseToken, parseComponent('BuildLogAppend', await body(true, 270336)), requestId));
         if (build[2] === 'artifacts') return json(await builds.declareArtifact(authorization, leaseId, leaseToken, parseComponent('BuildArtifactDeclare', await body(true)), requestId), 201);
         return json(await builds.complete(authorization, leaseId, leaseToken, parseComponent('WorkerBuildComplete', await body(true)), requestId));
+      }
+      const run = new RegExp(`^${BASE}/leases/([^/]+)/function(/complete)?$`).exec(url.pathname);
+      if (run) {
+        if (!functions) throw new PlatformFault('capability', 'Functions are not configured');
+        const leaseToken = request.headers.get('x-carbon-lease-token') ?? '';
+        if (!run[2]) return json(await functions.input(authorization, run[1]!, leaseToken, requestId));
+        // A function's output is the one large payload here.
+        return json(await functions.complete(authorization, run[1]!, leaseToken, parseComponent('WorkerFunctionComplete', await body(true, 393216)), requestId));
       }
       const lease = new RegExp(`^${BASE}/leases/([^/]+)(/secrets)?$`).exec(url.pathname);
       if (lease) {

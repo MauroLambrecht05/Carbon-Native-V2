@@ -304,6 +304,48 @@ export type BuildMaterials = { readonly "resolvedCommit": string; readonly "depe
 
 export type BuildProvenance = { readonly "statement": { readonly "version": 1; readonly "buildId": Id; readonly "scope": EnvironmentScope; readonly "attempt": number; readonly "workerId": Id; readonly "source": BuildSource; readonly "sourceDigest": Digest; readonly "materials": BuildMaterials; readonly "artifacts": ReadonlyArray<{ readonly "target": string; readonly "objectKey": string; readonly "sizeBytes": number; readonly "sha256": Digest; }>; readonly "startedAt": Timestamp; readonly "finishedAt": Timestamp; }; readonly "statementDigest": Digest; readonly "signature": { readonly "keyId": string; readonly "algorithm": "ed25519"; readonly "value": string; } | null; };
 
+export type FunctionName = string;
+
+export type FunctionDeploy = { readonly "name": FunctionName; readonly "code": string; readonly "secretNames": ReadonlyArray<string>; readonly "timeoutSeconds": number; };
+
+export type FunctionRevision = { readonly "number": number; readonly "codeDigest": Digest; readonly "secretNames": ReadonlyArray<string>; readonly "timeoutSeconds": number; readonly "createdBy": Id; readonly "createdAt": Timestamp; };
+
+export type FunctionRevisionDetails = { readonly "revision": FunctionRevision; readonly "code": string; };
+
+export type Function = { readonly "id": Id; readonly "scope": EnvironmentScope; readonly "name": FunctionName; readonly "state": "active" | "disabled"; readonly "activeRevision": number; readonly "latestRevision": number; readonly "revision": Revision; readonly "createdAt": Timestamp; };
+
+export type FunctionDetails = { readonly "function": Function; readonly "revisions": ReadonlyArray<FunctionRevision>; };
+
+export type FunctionPage = { readonly "items": ReadonlyArray<Function>; readonly "nextCursor": string | null; };
+
+export type FunctionReceipt = { readonly "function": Function; readonly "message": string; };
+
+export type FunctionCommand = { readonly "kind": "activate"; readonly "revision": number; } | { readonly "kind": "disable" | "enable"; };
+
+export type FunctionInvoke = { readonly "input": unknown; };
+
+export type FunctionExecution = { readonly "id": Id; readonly "scope": EnvironmentScope; readonly "functionId": Id; readonly "revisionNumber": number; readonly "codeDigest": Digest; readonly "state": "queued" | "running" | "succeeded" | "failed" | "timed_out" | "cancelled"; readonly "trigger": "manual" | "schedule" | "retry"; readonly "scheduleId": Id | null; readonly "retryOf": Id | null; readonly "attempt": number; readonly "output": unknown; readonly "errorCategory": string | null; readonly "createdBy": Id | null; readonly "revision": Revision; readonly "createdAt": Timestamp; readonly "startedAt": Timestamp | null; readonly "completedAt": Timestamp | null; };
+
+export type FunctionExecutionPage = { readonly "items": ReadonlyArray<FunctionExecution>; readonly "nextCursor": string | null; };
+
+export type FunctionExecutionReceipt = { readonly "execution": FunctionExecution; readonly "message": string; };
+
+export type FunctionExecutionCommand = { readonly "kind": "cancel" | "retry"; };
+
+export type FunctionScheduleCreate = { readonly "intervalSeconds": number; };
+
+export type FunctionSchedule = { readonly "id": Id; readonly "functionId": Id; readonly "intervalSeconds": number; readonly "state": "active" | "paused"; readonly "nextRunAt": Timestamp; readonly "lastRunAt": Timestamp | null; readonly "revision": Revision; readonly "createdAt": Timestamp; };
+
+export type FunctionScheduleList = { readonly "items": ReadonlyArray<FunctionSchedule>; };
+
+export type FunctionScheduleCommand = { readonly "kind": "pause" | "resume" | "delete"; };
+
+export type FunctionScheduleReceipt = { readonly "schedule": FunctionSchedule; readonly "message": string; };
+
+export type WorkerFunctionInput = { readonly "executionId": Id; readonly "scope": EnvironmentScope; readonly "functionId": Id; readonly "revisionNumber": number; readonly "code": string; readonly "codeDigest": Digest; readonly "input": unknown; readonly "attempt": number; readonly "timeoutSeconds": number; };
+
+export type WorkerFunctionComplete = { readonly "outcome": "succeeded"; readonly "output": unknown; } | { readonly "outcome": "failed"; readonly "errorCategory": string; };
+
 export type VectorCollectionDefinition = { readonly "name": string; readonly "dimension": number; readonly "metric": "cosine" | "l2" | "inner"; };
 
 export type VectorCollection = { readonly "id": Id; readonly "definition": VectorCollectionDefinition; readonly "pointCount": number; readonly "revision": Revision; readonly "createdAt": Timestamp; };
@@ -789,6 +831,27 @@ export interface Components {
   WorkerBuildInput: WorkerBuildInput;
   BuildMaterials: BuildMaterials;
   BuildProvenance: BuildProvenance;
+  FunctionName: FunctionName;
+  FunctionDeploy: FunctionDeploy;
+  FunctionRevision: FunctionRevision;
+  FunctionRevisionDetails: FunctionRevisionDetails;
+  Function: Function;
+  FunctionDetails: FunctionDetails;
+  FunctionPage: FunctionPage;
+  FunctionReceipt: FunctionReceipt;
+  FunctionCommand: FunctionCommand;
+  FunctionInvoke: FunctionInvoke;
+  FunctionExecution: FunctionExecution;
+  FunctionExecutionPage: FunctionExecutionPage;
+  FunctionExecutionReceipt: FunctionExecutionReceipt;
+  FunctionExecutionCommand: FunctionExecutionCommand;
+  FunctionScheduleCreate: FunctionScheduleCreate;
+  FunctionSchedule: FunctionSchedule;
+  FunctionScheduleList: FunctionScheduleList;
+  FunctionScheduleCommand: FunctionScheduleCommand;
+  FunctionScheduleReceipt: FunctionScheduleReceipt;
+  WorkerFunctionInput: WorkerFunctionInput;
+  WorkerFunctionComplete: WorkerFunctionComplete;
   VectorCollectionDefinition: VectorCollectionDefinition;
   VectorCollection: VectorCollection;
   VectorPoint: VectorPoint;

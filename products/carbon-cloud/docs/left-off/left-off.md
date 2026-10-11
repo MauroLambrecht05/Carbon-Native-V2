@@ -1,6 +1,6 @@
 # Carbon platform left-off checkpoint
 
-Checkpoint: 2026-10-11, after Phase 12: realtime, vectors and graph.
+Checkpoint: 2026-10-11, after Phase 13: functions and schedules.
 
 The overall platform plan remains unfinished. The rough scope estimate is about
 **30% of the complete backend-and-frontend goal**, with backend foundations in
@@ -64,6 +64,11 @@ the **low 40% range** and the requested production frontend redesign still at
   commit order under row policy, with a resumable stream for the browser.
 - Vector collections with exact deterministic search, and one bounded property
   graph per environment.
+- Functions and schedules, in part: immutable revisions, executions pinned to
+  one revision on worker leases that carry exactly that revision's secrets,
+  cancel, retry, timeout and lost-worker recovery, interval schedules that run
+  each slot at most once, and a worker that runs the code in its own process.
+  Functions are not isolated and have no logs.
 
 The service-account implementation is described in
 [service-accounts.md](../service-accounts.md), its wire surface in
@@ -74,7 +79,7 @@ legacy permissions are inferred.
 
 ## Last verified state
 
-- Affected Bun regression: **686 tests, 0 failures and 7,128 assertions across 85 files, with the object-store tests run against a local MinIO container**,
+- Affected Bun regression: **690 tests, 0 failures and 7,440 assertions across 85 files, with the object-store tests run against a local MinIO container**,
   including the real HTTP/PostgreSQL cross-service suites. These database
   scenarios run on the development machine only: CI has no database and skips
   them (G-50).
@@ -82,7 +87,7 @@ legacy permissions are inferred.
 - Solutions, Carbon Cloud, Database, Registry and CLI TypeScript checks passed.
 - Generated platform types are current.
 - The build OpenAPI document parses as JSON.
-- The build and release OpenAPI documents parse as JSON.
+- The build, release and function OpenAPI documents parse as JSON.
 - A full local `bazel build //...` passed on 2026-10-10 before Phases 2 to 7. Local
   `bazel test //...` is unreliable while `defs.bzl` runs `cargo sweep` after
   every Cargo invocation: parallel Rust tests delete each other's build output
@@ -120,13 +125,18 @@ build queue and the legacy end-user routes still work as before. Existing legacy
 implementations elsewhere in the repository still need review against the new
 isolation, durability and trust requirements before they count as complete.
 
-Phases 8 and 10 are **partly complete**; Phases 9, 11 and 12 are complete. By
+Phases 8, 10 and 13 are **partly complete**; Phases 9, 11 and 12 are complete. By
 the owner's decision (2026-10-10), open decisions and everything a phase could
 not finish or prove are collected in [gaps.md](gaps.md) and worked in a final
 Phase 19; phases do not stop for them.
 
-The next bounded goal is **Phase 13: functions and schedules with immutable
-revisions, secret bindings, leases, limits and durable executions**. Continue
+Functions run on worker leases with pinned revisions and leased secrets, but a
+function is an unisolated child process of the worker with no resource limits
+and no logs (G-100, G-102), only an account session can invoke one (G-104), and
+schedules are plain intervals (G-101).
+
+The next bounded goal is **Phase 14: Registry publisher identity, review,
+trust, immutable archives, yanking and signed distribution**. Continue
 with exactly one phase from [handoff.md](handoff.md) per future work session.
 Finish that phase's proof gate, update both checkpoint documents, and stop
 before beginning the next phase unless the user explicitly combines them.

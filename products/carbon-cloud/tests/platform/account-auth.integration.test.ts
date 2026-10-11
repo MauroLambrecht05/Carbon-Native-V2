@@ -1,11 +1,11 @@
 import { canonicalRegistryRequest, dataRequestPath, parseComponent, registryRequestPath, type DeviceAuthorizationCreate, type EnvironmentScope } from "@carbon/contracts/platform";
 import { AccountCatalog, AccountEnvironmentCredentials, AccountEnvironmentSecrets, AccountRepositories, AccountWorkers, WorkerLeases, WorkerProtocol, PostgresWorkerRepository, CatalogLifecycle, PostgresProviderSecretReader, EnvelopeSecretProtector, EnvironmentCredentialAuthentication, LocalAesSecretKeyCustodian, PostgresCatalogRepository, PostgresEnvironmentCredentialRepository, PostgresEnvironmentSecretRepository, PostgresProvisioningRepository, PostgresRepositoryIntegrationRepository, PostgresServiceAuthority, ProvisionEnvironment, type ProvisioningWork, type RepositoryProvider } from '@carbon/catalog';
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { nodeProcessRunner } from "@carbon/process";
-import { DisposableWorkspaces, GitSourceCheckout, HttpBuildProtocol, RunLeasedBuildUseCase, digestDependencyLocks, type BuildPipeline } from "@carbon/worker";
+import { BunFunctionRunner, DisposableWorkspaces, GitSourceCheckout, HttpBuildProtocol, RunLeasedBuildUseCase, RunLeasedFunctionUseCase, digestDependencyLocks, type BuildPipeline } from "@carbon/worker";
 import { createHash, createHmac, createPrivateKey, createPublicKey, randomBytes, generateKeyPairSync } from "node:crypto";
 import {
   AccountAuthentication, AccountDeviceAuthorization, AccountServiceAccounts, AccountAudit, OrganizationLifecycle, PostgresAuditLog, AccountPersonalCredentials, PersonalCredentialAuthentication, PersonalCredentialExchange, PostgresPersonalCredentialRepository, AccountLegacyTokens, PostgresLegacyTokenRepository, PostgresIdentityRepository, CreateOrganizationUseCase, IssueWorkerTokenUseCase, VerifyTokenUseCase, DeviceCredentialAuthentication, DeliverAccountMail, EnvelopeMessageProtector, PostgresAccountIdentityRepository, PostgresDeviceAuthorizationRepository, PostgresServiceAccountRepository, ServiceAccountAuthentication, ServiceAssertionIssuer, ServiceAssertionVerifier,
@@ -18,7 +18,7 @@ import {
 import { GitHubAccountProvider } from "@carbon/github-identity";
 import { ResendAccountNotification } from "@carbon/resend-notification";
 import { migrate } from "../../infrastructure/persistence/Database.ts";
-import { AccountBuilds, AccountReleases, BuildOrchestration, Ed25519ProvenanceSigner, PostgresPlatformBuildRepository, PostgresPlatformReleaseRepository, PublicUpdateFeed, SecretReleaseSigner, WorkerBuilds, verifyBuildProvenance } from "@carbon/orchestration";
+import { AccountBuilds, AccountFunctions, AccountReleases, BuildOrchestration, Ed25519ProvenanceSigner, FunctionOrchestration, PostgresPlatformFunctionRepository, WorkerFunctions, type FunctionLimits, PostgresPlatformBuildRepository, PostgresPlatformReleaseRepository, PublicUpdateFeed, SecretReleaseSigner, WorkerBuilds, verifyBuildProvenance } from "@carbon/orchestration";
 import { decideUpdate, verifyUpdateSignature } from "@carbon/updating";
 import { createUpdateRoutes } from "../../infrastructure/http/update-routes.ts";
 import { SignJWT } from "jose";
@@ -39,7 +39,7 @@ async function cleanupDatabases() { while (cleanups.length) { await cleanups.at(
 afterEach(cleanupDatabases, 30000);
 afterAll(cleanupDatabases, 30000);
 
-async function harness() {
+async function harness(functionLimits?: FunctionLimits) {
   const url = new URL(databaseUrl!);
   if (url.pathname !== "/carbon_platform_test") throw new Error("Requires the dedicated carbon_platform_test database");
   const admin = new Bun.SQL(url.href, { max: 1 });
@@ -84,12 +84,13 @@ async function harness() {
   const artifactVerifier = { async verify(artifact: { objectKey: string; sizeBytes: number; sha256: string }) { if (!storeAvailable) throw new Error('store down'); const value = objects.get(artifact.objectKey); return !!value && value.byteLength === artifact.sizeBytes && createHash('sha256').update(value).digest('hex') === artifact.sha256; } };
   const buildRepository = new PostgresPlatformBuildRepository(sql, new PostgresWorkerRepository(sql, secretProtector), provenanceSigner); const builds = new BuildOrchestration(buildRepository);
   const releaseRepository = new PostgresPlatformReleaseRepository(sql, origin);
+  const functionRepository = new PostgresPlatformFunctionRepository(sql, new PostgresWorkerRepository(sql, secretProtector), functionLimits);
   // Reads what a worker uploaded, the way Cloud reads the artifact bucket before it signs.
   const artifactReader = { async read(objectKey: string, maximumBytes: number) { if (!storeAvailable) throw new Error('store down'); const value = objects.get(objectKey); return value && value.byteLength <= maximumBytes ? value : null; } };
   const updateHandler = createUpdateRoutes(new PublicUpdateFeed(releaseRepository));
   // What an installed app does: an anonymous GET of the public feed.
   const updates = (path: string, method = 'GET') => updateHandler(new Request(origin + path, { method }));
-  const makeHandler = (auth: AccountAuthentication) => createAccountRoutes(auth, origin, new AccountSecurity(auth, new PostgresAccountSecurityRepository(sql, mfa), protector, totp), new AccountProfile(auth, new PostgresAccountProfileRepository(sql, mfa), protector, config), new OrganizationAccess(auth, new PostgresOrganizationRepository(sql), protector), new OrganizationInvitations(auth, new PostgresOrganizationInvitationsRepository(sql), new PostgresOrganizationRepository(sql), protector, config), new ExternalAccountAuthentication(auth, new PostgresExternalAccountRepository(sql, mfa), githubProvider, protector, config), new AccountAuthorization(auth, new PostgresPlatformAuthority(sql)), new AccountCatalog(auth, new PostgresCatalogRepository(sql), protector), undefined, undefined, new AccountEnvironmentCredentials(auth, new PostgresEnvironmentCredentialRepository(sql), protector), new AccountEnvironmentSecrets(auth, new PostgresEnvironmentSecretRepository(sql, secretProtector), protector), new AccountRepositories(auth, new PostgresRepositoryIntegrationRepository(sql), repositoryProvider, protector), new AccountDeviceAuthorization(auth,new PostgresDeviceAuthorizationRepository(sql),protector,origin,config.rateLimitKey,new DeviceCredentialAuthentication(sql),assertionIssuer),new AccountServiceAccounts(auth,new PostgresServiceAccountRepository(sql),protector,assertionIssuer),new AccountPersonalCredentials(auth,new PostgresPersonalCredentialRepository(sql),protector),new AccountLegacyTokens(auth,new PostgresLegacyTokenRepository(sql),protector,'accept'),new AccountWorkers(auth,new PostgresWorkerRepository(sql,secretProtector),protector),new AccountAudit(auth,new PostgresAuditLog(sql),protector,{pollMs:15,heartbeatMs:120,maxMs:900}),new AccountRealms(auth,new PostgresAppAuthRepository(sql),protector),new PersonalCredentialExchange(new PersonalCredentialAuthentication(sql),assertionIssuer),new AccountBuilds(auth,buildRepository,protector),new AccountReleases(auth,releaseRepository,new SecretReleaseSigner(new PostgresProviderSecretReader(sql,secretProtector)),artifactReader,protector,{artifactBaseUrl:'https://downloads.example.test/'}));
+  const makeHandler = (auth: AccountAuthentication) => createAccountRoutes(auth, origin, new AccountSecurity(auth, new PostgresAccountSecurityRepository(sql, mfa), protector, totp), new AccountProfile(auth, new PostgresAccountProfileRepository(sql, mfa), protector, config), new OrganizationAccess(auth, new PostgresOrganizationRepository(sql), protector), new OrganizationInvitations(auth, new PostgresOrganizationInvitationsRepository(sql), new PostgresOrganizationRepository(sql), protector, config), new ExternalAccountAuthentication(auth, new PostgresExternalAccountRepository(sql, mfa), githubProvider, protector, config), new AccountAuthorization(auth, new PostgresPlatformAuthority(sql)), new AccountCatalog(auth, new PostgresCatalogRepository(sql), protector), undefined, undefined, new AccountEnvironmentCredentials(auth, new PostgresEnvironmentCredentialRepository(sql), protector), new AccountEnvironmentSecrets(auth, new PostgresEnvironmentSecretRepository(sql, secretProtector), protector), new AccountRepositories(auth, new PostgresRepositoryIntegrationRepository(sql), repositoryProvider, protector), new AccountDeviceAuthorization(auth,new PostgresDeviceAuthorizationRepository(sql),protector,origin,config.rateLimitKey,new DeviceCredentialAuthentication(sql),assertionIssuer),new AccountServiceAccounts(auth,new PostgresServiceAccountRepository(sql),protector,assertionIssuer),new AccountPersonalCredentials(auth,new PostgresPersonalCredentialRepository(sql),protector),new AccountLegacyTokens(auth,new PostgresLegacyTokenRepository(sql),protector,'accept'),new AccountWorkers(auth,new PostgresWorkerRepository(sql,secretProtector),protector),new AccountAudit(auth,new PostgresAuditLog(sql),protector,{pollMs:15,heartbeatMs:120,maxMs:900}),new AccountRealms(auth,new PostgresAppAuthRepository(sql),protector),new PersonalCredentialExchange(new PersonalCredentialAuthentication(sql),assertionIssuer),new AccountBuilds(auth,buildRepository,protector),new AccountReleases(auth,releaseRepository,new SecretReleaseSigner(new PostgresProviderSecretReader(sql,secretProtector)),artifactReader,protector,{artifactBaseUrl:'https://downloads.example.test/'}),undefined,undefined,undefined,undefined,new AccountFunctions(auth,functionRepository,protector));
   let auth = makeAuth(); let handler = makeHandler(auth);
   // A stand-in identity provider: real discovery, token and key endpoints over the OIDC client's transport, a real signing key.
   const idpIssuer = 'https://login.example.test'; const idpKeys = generateKeyPairSync('ec', { namedCurve: 'P-256' }); const forgedKeys = generateKeyPairSync('ec', { namedCurve: 'P-256' });
@@ -117,7 +118,7 @@ async function harness() {
   // App calls carry no cookie and no Origin unless a test adds them on purpose.
   const app = (path: string, method = 'GET', input?: unknown, overrides: Record<string, string> = {}, peer = '203.0.113.10') => appHandler(new Request(origin + path, { method,
     headers: { ...(input === undefined ? {} : { 'content-type': 'application/json' }), ...overrides }, body: input === undefined ? undefined : JSON.stringify(input) }), peer);
-  const workerHandler = createWorkerRoutes(new WorkerProtocol(new PostgresWorkerRepository(sql, secretProtector), config.rateLimitKey), origin, new WorkerBuilds(buildRepository, artifactVerifier));
+  const workerHandler = createWorkerRoutes(new WorkerProtocol(new PostgresWorkerRepository(sql, secretProtector), config.rateLimitKey), origin, new WorkerBuilds(buildRepository, artifactVerifier), new WorkerFunctions(functionRepository));
   // The worker runtime's HTTP client, pointed at the same handler.
   const workerFetch = ((input: string | URL | Request, init?: RequestInit) => workerHandler(new Request(String(input), init), '203.0.113.20')) as typeof fetch;
   // Worker calls carry no Origin and no cookies unless a test adds them on purpose.
@@ -200,7 +201,7 @@ async function harness() {
     const redirected = await githubCallback(url.searchParams.get('state')!); expect(redirected.status).toBe(303);
     return redirected.headers.get('location')!.split('#token=')[1]!;
   };
-  return { sql, protector, secretProtector, workerApi, workerFetch, updates, store, provenancePublicKey: provenanceSigner.publicKey(), leases, builds, organizationLifecycle, catalogLifecycle, app, idp, deliverApp, assertionPublicKey:assertionKeys.publicKey, assertionKey, mail, cookies, call, challenge, complete, token, freshRequest, freshComplete, profile, emailToken, emailComplete, createOrganization, organizationCommand, restoreCookies,
+  return { sql, protector, secretProtector, workerApi, workerFetch, updates, store, provenancePublicKey: provenanceSigner.publicKey(), leases, builds, functions: new FunctionOrchestration(functionRepository), organizationLifecycle, catalogLifecycle, app, idp, deliverApp, assertionPublicKey:assertionKeys.publicKey, assertionKey, mail, cookies, call, challenge, complete, token, freshRequest, freshComplete, profile, emailToken, emailComplete, createOrganization, organizationCommand, restoreCookies,
     catalogCommand, createProject,
     invitation, invitationToken, invitationProof,
     githubStart, githubCallback, githubComplete, githubBegin, githubCalls,
@@ -213,6 +214,36 @@ async function harness() {
     failProvider: (value: boolean) => { failProvider = value; },
     restart: () => { auth = makeAuth(); handler = makeHandler(auth); worker = makeWorker(); },
   };
+}
+
+/** An owner, an organization with one environment, its secrets, and one enrolled function worker. */
+async function functionFixture(h: Awaited<ReturnType<typeof harness>>, slug: string, secrets: Record<string, string> = {}) {
+  await h.challenge('owner@example.test'); await h.deliver(); await h.complete();
+  const org = (await organizationResponse(h.createOrganization(slug, slug))).receipt.id;
+  const scope = parseComponent('EnvironmentScope', parseComponent('CatalogReceipt', (await (await h.createProject(org)).json() as { receipt: unknown }).receipt).scope);
+  const csrf = () => h.cookies.get('__Host-carbon-csrf')!; const envPath = `/platform/v1/orgs/${org}/projects/${scope.projectId}/environments/${scope.environmentId}`;
+  const post = (path: string, body: unknown, revision?: string, overrides: Record<string, string> = {}) => h.call(path, 'POST', body, { 'x-csrf-token': csrf(), ...(revision ? { 'if-match': revision } : {}), ...overrides });
+  const secretIds: Record<string, { id: string; revision: string }> = {};
+  for (const [name, value] of Object.entries(secrets)) {
+    const revision = parseComponent('CatalogEnvironmentDetails', await (await h.call(envPath)).json()).environment.revision;
+    secretIds[name] = parseComponent('EnvironmentSecretReceipt', await (await post(`${envPath}/secrets`, { name, value }, revision)).json()).secret;
+  }
+  const enrollment = parseComponent('WorkerEnrollmentIssue', await (await post(`/platform/v1/orgs/${org}/workers`, { name: 'fn-01', purposes: ['function'] })).json());
+  const worker = parseComponent('WorkerCredentialIssue', await (await h.workerApi('/worker/v1/enroll', { code: enrollment.code, capabilities: { platform: 'linux', arch: 'x64', toolchains: [] } })).json());
+  const bearer = { authorization: `Bearer ${worker.token}` };
+  const offer = async () => parseComponent('WorkerLeaseOffer', await (await h.workerApi('/worker/v1/leases/claim', undefined, bearer)).json());
+  const claim = async () => { const value = await offer(); if (value.state !== 'leased') throw new Error('expected a lease'); return value; };
+  const held = (value: { leaseToken: string }) => ({ ...bearer, 'x-carbon-lease-token': value.leaseToken });
+  const on = (value: { lease: { id: string }; leaseToken: string }, suffix = '', body?: unknown) => h.workerApi(`/worker/v1/leases/${value.lease.id}/function${suffix}`, body, held(value));
+  const deploy = async (name: string, code: string, extra: Record<string, unknown> = {}) => parseComponent('FunctionReceipt', await (await post(`${envPath}/functions`, { name, code, secretNames: [], timeoutSeconds: 30, ...extra })).json()).function;
+  const invoke = async (id: string, input: unknown = null) => parseComponent('FunctionExecutionReceipt', await (await post(`${envPath}/functions/${id}/invoke`, { input })).json()).execution;
+  const execution = async (id: string) => parseComponent('FunctionExecution', await (await h.call(`${envPath}/executions/${id}`)).json());
+  const details = async (id: string) => parseComponent('FunctionDetails', await (await h.call(`${envPath}/functions/${id}`)).json());
+  const schedules = async (id: string) => parseComponent('FunctionScheduleList', await (await h.call(`${envPath}/functions/${id}/schedules`)).json()).items;
+  /** A worker takes the next execution and finishes it. */
+  const finish = async (result: unknown = { outcome: 'succeeded', output: null }) => { const value = await claim(); expect((await on(value)).status).toBe(200); return parseComponent('FunctionExecution', await (await on(value, '/complete', result)).json()); };
+  const lose = (leaseId: string) => h.sql`UPDATE worker_leases SET expires_at = now() - interval '1 second' WHERE id = ${leaseId}`;
+  return { org, scope, csrf, envPath, post, secretIds, worker, bearer, offer, claim, held, on, deploy, invoke, execution, details, schedules, finish, lose };
 }
 
 async function invitationResponse(response: Promise<Response> | Response) {
@@ -1806,6 +1837,367 @@ suite("real account authentication", () => {
     expect((await h.sql`SELECT state, used_minutes IS NOT NULL AS settled FROM platform_builds WHERE org_id = ${org}`).every((row: { state: string; settled: boolean }) => ['succeeded', 'failed', 'cancelled'].includes(row.state) && row.settled)).toBe(true);
     expect(await openReservations()).toBe(0);
   });
+
+  test('functions deploy immutable revisions, pin every execution to the revision it was created with, and lease exactly that revision\'s secrets', async () => {
+    const h = await harness(); const f = await functionFixture(h, 'function-team', { API_KEY: 'api-key-value', OTHER_KEY: 'other-key-value' });
+    const sha = (value: string) => createHash('sha256').update(value).digest('hex'); const functionsPath = `${f.envPath}/functions`;
+    const rejected = (promise: Promise<unknown>) => promise.then(() => 'finished', error => String((error as Error).message));
+
+    // Deploy creates the function with revision 1. The same command twice is one deploy; the key cannot be reused for other code.
+    const codeOne = 'export default (input) => ({ revision: 1, n: input.n });'; const body = { name: 'resize', code: codeOne, secretNames: ['API_KEY'], timeoutSeconds: 30 }; const key = crypto.randomUUID();
+    const first = await f.post(functionsPath, body, undefined, { 'idempotency-key': key }); expect(first.status).toBe(201);
+    const created = parseComponent('FunctionReceipt', await first.json()); const id = created.function.id;
+    expect(created.function).toMatchObject({ name: 'resize', state: 'active', activeRevision: 1, latestRevision: 1, revision: '1', scope: f.scope });
+    expect(parseComponent('FunctionReceipt', await (await f.post(functionsPath, body, undefined, { 'idempotency-key': key })).json())).toEqual(created);
+    expect((await f.post(functionsPath, { ...body, code: 'export default () => 0;' }, undefined, { 'idempotency-key': key })).status).toBe(409);
+    expect((await h.sql`SELECT number FROM function_revisions WHERE function_id = ${id}`) as unknown[]).toEqual([{ number: 1 }]);
+    // What cannot be deployed: a secret that does not exist, a bad name, no code, too long a timeout, unknown fields.
+    for (const bad of [{ ...body, secretNames: ['MISSING_KEY'] }, { ...body, name: 'Resize' }, { ...body, code: '' }, { ...body, timeoutSeconds: 301 }, { ...body, timeoutSeconds: 0 }, { ...body, memory: 512 }]) expect((await f.post(functionsPath, bad)).status).toBe(400);
+    expect((await h.sql`SELECT count(*)::integer AS n FROM function_revisions`)[0].n).toBe(1);
+
+    // An execution is pinned to the revision active when it was created. Invoking twice with one key is one execution.
+    const invokeKey = crypto.randomUUID(); const invoked = await f.post(`${functionsPath}/${id}/invoke`, { input: { n: 1 } }, undefined, { 'idempotency-key': invokeKey }); expect(invoked.status).toBe(202);
+    const pinned = parseComponent('FunctionExecutionReceipt', await invoked.json()).execution;
+    expect(pinned).toMatchObject({ functionId: id, revisionNumber: 1, codeDigest: sha(codeOne), state: 'queued', trigger: 'manual', attempt: 0, output: null, retryOf: null, scheduleId: null });
+    expect(parseComponent('FunctionExecutionReceipt', await (await f.post(`${functionsPath}/${id}/invoke`, { input: { n: 1 } }, undefined, { 'idempotency-key': invokeKey })).json()).execution).toEqual(pinned);
+    expect((await f.post(`${functionsPath}/${id}/invoke`, { input: { n: 9 } }, undefined, { 'idempotency-key': invokeKey })).status).toBe(409);
+    expect((await h.sql`SELECT count(*)::integer AS n FROM function_executions`)[0].n).toBe(1);
+
+    // A second deploy is revision 2 and becomes active. The queued execution still runs revision 1.
+    const codeTwo = 'export default (input) => ({ revision: 2, n: input.n });';
+    const second = await f.deploy('resize', codeTwo, { secretNames: ['OTHER_KEY'], timeoutSeconds: 45 }); expect(second).toMatchObject({ id, activeRevision: 2, latestRevision: 2, revision: '2' });
+    const later = await f.invoke(id, { n: 2 }); expect(later).toMatchObject({ revisionNumber: 2, codeDigest: sha(codeTwo) });
+    expect((await f.execution(pinned.id)).revisionNumber).toBe(1);
+    const offers = [await f.claim(), await f.claim()]; expect(await f.offer()).toEqual({ state: 'none' });
+    const one = offers.find(offer => offer.lease.subjectId === pinned.id)!; const two = offers.find(offer => offer.lease.subjectId === later.id)!;
+    // Each lease names exactly its own revision's secrets, and that is all the worker can get.
+    expect(one.lease).toMatchObject({ purpose: 'function', secretNames: ['API_KEY'], attempt: 1 }); expect(two.lease).toMatchObject({ purpose: 'function', secretNames: ['OTHER_KEY'] });
+    // Reporting before reading the input is refused.
+    expect((await f.on(one, '/complete', { outcome: 'succeeded', output: 1 })).status).toBe(409);
+    expect(parseComponent('WorkerFunctionInput', await (await f.on(one)).json())).toMatchObject({ executionId: pinned.id, functionId: id, revisionNumber: 1, code: codeOne, codeDigest: sha(codeOne), input: { n: 1 }, attempt: 1, timeoutSeconds: 30 });
+    expect(parseComponent('WorkerFunctionInput', await (await f.on(two)).json())).toMatchObject({ executionId: later.id, revisionNumber: 2, code: codeTwo, input: { n: 2 }, attempt: 1, timeoutSeconds: 45 });
+    const secretsOf = async (offer: typeof one) => parseComponent('WorkerSecretBindings', await (await h.workerApi(`/worker/v1/leases/${offer.lease.id}/secrets`, undefined, f.held(offer))).json()).bindings.map(binding => [binding.name, binding.value]);
+    expect(await secretsOf(one)).toEqual([['API_KEY', 'api-key-value']]); expect(await secretsOf(two)).toEqual([['OTHER_KEY', 'other-key-value']]);
+    // One lease cannot be used to read or finish another execution.
+    expect((await h.workerApi(`/worker/v1/leases/${two.lease.id}/function`, undefined, f.held(one))).status).toBe(409);
+    // A build lease's routes do not serve a function lease.
+    expect((await h.workerApi(`/worker/v1/leases/${one.lease.id}/build`, undefined, f.held(one))).status).toBe(404);
+    expect((await f.execution(pinned.id))).toMatchObject({ state: 'running', attempt: 1 });
+
+    // Results: a malformed report is refused, a failure carries only a category, a success carries the output.
+    for (const bad of [{ outcome: 'failed' }, { outcome: 'succeeded' }, { outcome: 'failed', errorCategory: 'Has Spaces' }, { outcome: 'succeeded', output: 1, errorCategory: 'x' }]) expect((await f.on(one, '/complete', bad)).status).toBe(400);
+    expect(parseComponent('FunctionExecution', await (await f.on(one, '/complete', { outcome: 'failed', errorCategory: 'function.threw' })).json())).toMatchObject({ state: 'failed', errorCategory: 'function.threw', output: null, attempt: 1 });
+    expect(parseComponent('FunctionExecution', await (await f.on(two, '/complete', { outcome: 'succeeded', output: { revision: 2, n: 2 } })).json())).toMatchObject({ state: 'succeeded', output: { revision: 2, n: 2 }, errorCategory: null });
+    for (const again of [f.on(one, '/complete', { outcome: 'succeeded', output: 1 }), f.on(two, '/complete', { outcome: 'succeeded', output: 1 }), f.on(two)]) expect((await again).status).toBe(409);
+    const failed = await f.execution(pinned.id); expect(failed.startedAt).not.toBeNull(); expect(failed.completedAt).not.toBeNull();
+    expect((await f.execution(later.id)).output).toEqual({ revision: 2, n: 2 });
+
+    // A retry runs what the original ran: revision 1 with the original input, although revision 2 is active.
+    expect((await f.post(`${f.envPath}/executions/${later.id}`, { kind: 'retry' }, (await f.execution(later.id)).revision)).status).toBe(409);
+    expect((await f.post(`${f.envPath}/executions/${pinned.id}`, { kind: 'retry' }, '99')).status).toBe(409);
+    expect((await f.post(`${f.envPath}/executions/${pinned.id}`, { kind: 'retry' })).status).toBe(400);
+    const retryKey = crypto.randomUUID(); const retried = parseComponent('FunctionExecutionReceipt', await (await f.post(`${f.envPath}/executions/${pinned.id}`, { kind: 'retry' }, failed.revision, { 'idempotency-key': retryKey })).json());
+    expect(retried.execution).toMatchObject({ functionId: id, revisionNumber: 1, codeDigest: sha(codeOne), trigger: 'retry', retryOf: pinned.id, state: 'queued' }); expect(retried.execution.id).not.toBe(pinned.id);
+    expect(parseComponent('FunctionExecutionReceipt', await (await f.post(`${f.envPath}/executions/${pinned.id}`, { kind: 'retry' }, failed.revision, { 'idempotency-key': retryKey })).json())).toEqual(retried);
+    const retryOffer = await f.claim(); expect(retryOffer.lease).toMatchObject({ subjectId: retried.execution.id, secretNames: ['API_KEY'] });
+    expect(parseComponent('WorkerFunctionInput', await (await f.on(retryOffer)).json())).toMatchObject({ revisionNumber: 1, code: codeOne, input: { n: 1 } });
+    expect((await f.on(retryOffer, '/complete', { outcome: 'succeeded', output: { revision: 1, n: 1 } })).status).toBe(200);
+    // The original is unchanged by its retry.
+    expect(await f.execution(pinned.id)).toEqual(failed);
+
+    // Going back is moving the pointer: revision 1 becomes active again, and both revisions still exist as deployed.
+    const current = (await f.details(id)).function;
+    expect((await f.post(`${functionsPath}/${id}`, { kind: 'activate', revision: 9 }, current.revision)).status).toBe(404);
+    expect((await f.post(`${functionsPath}/${id}`, { kind: 'activate', revision: 2 }, current.revision)).status).toBe(409);
+    expect((await f.post(`${functionsPath}/${id}`, { kind: 'activate', revision: 1 }, '99')).status).toBe(409);
+    const activateKey = crypto.randomUUID(); const activated = parseComponent('FunctionReceipt', await (await f.post(`${functionsPath}/${id}`, { kind: 'activate', revision: 1 }, current.revision, { 'idempotency-key': activateKey })).json());
+    expect(activated.function).toMatchObject({ activeRevision: 1, latestRevision: 2, revision: '3' });
+    expect(parseComponent('FunctionReceipt', await (await f.post(`${functionsPath}/${id}`, { kind: 'activate', revision: 1 }, current.revision, { 'idempotency-key': activateKey })).json())).toEqual(activated);
+    const rolled = await f.invoke(id, { n: 3 }); expect(rolled.revisionNumber).toBe(1); await f.finish();
+    const details = await f.details(id);
+    expect(details.revisions.map(revision => [revision.number, revision.codeDigest, revision.secretNames, revision.timeoutSeconds])).toEqual([[2, sha(codeTwo), ['OTHER_KEY'], 45], [1, sha(codeOne), ['API_KEY'], 30]]);
+    expect(parseComponent('FunctionRevisionDetails', await (await h.call(`${functionsPath}/${id}/revisions/1`)).json()).code).toBe(codeOne);
+    expect(parseComponent('FunctionRevisionDetails', await (await h.call(`${functionsPath}/${id}/revisions/2`)).json()).code).toBe(codeTwo);
+    expect((await h.call(`${functionsPath}/${id}/revisions/3`)).status).toBe(404);
+
+    // The database itself refuses to change a revision, what an execution runs, or a finished execution.
+    expect(await rejected(h.sql`UPDATE function_revisions SET code = 'export default () => 666;' WHERE function_id = ${id} AND number = 1`)).toContain('A function revision is immutable');
+    expect(await rejected(h.sql`UPDATE function_revisions SET secret_names = '{OTHER_KEY}' WHERE function_id = ${id} AND number = 1`)).toContain('A function revision is immutable');
+    expect(await rejected(h.sql`DELETE FROM function_revisions WHERE function_id = ${id} AND number = 2`)).toContain('A function revision is immutable');
+    const open = await f.invoke(id, { n: 4 });
+    expect(await rejected(h.sql`UPDATE function_executions SET revision_number = 2 WHERE id = ${open.id}`)).toContain('An execution is pinned');
+    expect(await rejected(h.sql`UPDATE function_executions SET input = '{"n":5}'::jsonb WHERE id = ${open.id}`)).toContain('An execution is pinned');
+    expect(await rejected(h.sql`UPDATE function_executions SET attempt = 2 WHERE id = ${pinned.id}`)).toContain('A finished execution cannot change');
+    expect(await rejected(h.sql`UPDATE function_executions SET state = 'succeeded', output = '1'::jsonb, error_category = NULL WHERE id = ${pinned.id}`)).toContain('A finished execution cannot change');
+    await f.finish();
+
+    // A revision whose secret is gone cannot start: nothing is queued, and no lease exists for it.
+    const before = (await h.sql`SELECT count(*)::integer AS n FROM function_executions`)[0].n;
+    expect((await f.post(`${f.envPath}/secrets/${f.secretIds.API_KEY!.id}`, { kind: 'disable', disabled: true }, f.secretIds.API_KEY!.revision)).status).toBe(200);
+    expect((await f.post(`${functionsPath}/${id}/invoke`, { input: null })).status).toBe(400);
+    expect((await h.sql`SELECT count(*)::integer AS n FROM function_executions`)[0].n).toBe(before); expect(await f.offer()).toEqual({ state: 'none' });
+
+    // Lists page by ID, and nothing an account reads contains a secret value or, outside the revision itself, the code.
+    const all = parseComponent('FunctionExecutionPage', await (await h.call(`${functionsPath}/${id}/executions`)).json()); expect(all.items).toHaveLength(5); expect(all.nextCursor).toBeNull();
+    const pageOne = parseComponent('FunctionExecutionPage', await (await h.call(`${functionsPath}/${id}/executions?limit=2`)).json()); expect(pageOne.items).toHaveLength(2);
+    const pageTwo = parseComponent('FunctionExecutionPage', await (await h.call(`${functionsPath}/${id}/executions?limit=2&cursor=${encodeURIComponent(pageOne.nextCursor!)}`)).json());
+    expect([...pageOne.items, ...pageTwo.items].map(item => item.id)).toEqual(all.items.slice(0, 4).map(item => item.id));
+    expect((await h.call(`${functionsPath}/${id}/executions?limit=3&cursor=${encodeURIComponent(pageOne.nextCursor!)}`)).status).toBe(400);
+    const list = parseComponent('FunctionPage', await (await h.call(functionsPath)).json()); expect(list.items.map(item => item.id)).toEqual([id]);
+    const readable = JSON.stringify([list, details, all]); for (const hidden of ['api-key-value', 'other-key-value', 'export default']) expect(readable).not.toContain(hidden);
+    expect((await h.sql`SELECT action FROM function_events WHERE resource_id = ${id} ORDER BY sequence`).map((row: { action: string }) => row.action)).toEqual(['function.deployed', 'function.deployed', 'function.revision_activated']);
+    expect((await h.sql`SELECT count(*)::integer AS n FROM platform_events WHERE source = 'function_events' AND resource_id = ${pinned.id}`)[0].n).toBe(3);
+
+    // Another environment of the same organization, which the same member may use, reaches none of it by ID.
+    const elsewhere = parseComponent('EnvironmentScope', parseComponent('CatalogReceipt', (await (await h.createProject(f.org, 'Other app', 'other-app')).json() as { receipt: unknown }).receipt).scope);
+    const otherPath = `/platform/v1/orgs/${f.org}/projects/${elsewhere.projectId}/environments/${elsewhere.environmentId}`;
+    expect(parseComponent('FunctionPage', await (await h.call(`${otherPath}/functions`)).json()).items).toEqual([]);
+    for (const path of [`${otherPath}/functions/${id}`, `${otherPath}/functions/${id}/revisions/1`, `${otherPath}/functions/${id}/executions`, `${otherPath}/functions/${id}/schedules`, `${otherPath}/executions/${pinned.id}`]) expect((await h.call(path)).status).toBe(404);
+    for (const [path, command, revision] of [[`${otherPath}/functions/${id}/invoke`, { input: 1 }, undefined], [`${otherPath}/functions/${id}`, { kind: 'disable' }, details.function.revision],
+      [`${otherPath}/executions/${pinned.id}`, { kind: 'retry' }, failed.revision], [`${otherPath}/functions/${id}/schedules`, { intervalSeconds: 60 }, undefined]] as const) expect((await f.post(path, command, revision)).status).toBe(404);
+    // The same name there is a different function with its own revision 1.
+    const twin = parseComponent('FunctionReceipt', await (await f.post(`${otherPath}/functions`, { name: 'resize', code: codeTwo, secretNames: [], timeoutSeconds: 30 })).json()).function;
+    expect(twin).toMatchObject({ activeRevision: 1, latestRevision: 1, scope: elsewhere }); expect(twin.id).not.toBe(id);
+    expect((await f.post(`${otherPath}/functions`, { name: 'needs-key', code: codeTwo, secretNames: ['OTHER_KEY'], timeoutSeconds: 30 })).status).toBe(400);
+
+    // A Viewer reads functions and executions, but not code, and can deploy, run, retry or schedule nothing. Another organization sees nothing.
+    const ownerCookies = new Map(h.cookies); h.cookies.clear(); await h.challenge('viewer@example.test'); await h.deliver(); await h.complete();
+    const viewer = (await h.sql`SELECT id FROM accounts WHERE primary_email = 'viewer@example.test'`)[0].id;
+    await h.sql`INSERT INTO memberships (id, account_id, org_id, role, state, project_access) VALUES (${crypto.randomUUID()}, ${viewer}, ${f.org}, 'Viewer', 'active', 'all')`;
+    await h.sql`UPDATE accounts SET permission_revision = permission_revision + 1 WHERE id = ${viewer}`;
+    for (const path of [functionsPath, `${functionsPath}/${id}`, `${functionsPath}/${id}/executions`, `${functionsPath}/${id}/schedules`, `${f.envPath}/executions/${pinned.id}`]) expect((await h.call(path)).status).toBe(200);
+    expect((await h.call(`${functionsPath}/${id}/revisions/1`)).status).toBe(403);
+    for (const [path, command, revision] of [[functionsPath, body, undefined], [`${functionsPath}/${id}/invoke`, { input: 1 }, undefined], [`${functionsPath}/${id}`, { kind: 'disable' }, details.function.revision],
+      [`${f.envPath}/executions/${pinned.id}`, { kind: 'retry' }, failed.revision], [`${functionsPath}/${id}/schedules`, { intervalSeconds: 60 }, undefined]] as const) expect((await f.post(path, command, revision)).status).toBe(403);
+    h.cookies.clear(); await h.challenge('outsider@example.test'); await h.deliver(); await h.complete();
+    for (const path of [functionsPath, `${functionsPath}/${id}`, `${functionsPath}/${id}/revisions/1`, `${f.envPath}/executions/${pinned.id}`]) expect((await h.call(path)).status).toBe(404);
+    expect((await f.post(`${functionsPath}/${id}/invoke`, { input: 1 })).status).toBe(404);
+    h.restoreCookies(ownerCookies); expect((await h.sql`SELECT count(*)::integer AS n FROM function_executions`)[0].n).toBe(before);
+  }, 60000);
+
+  test('function executions recover from lost workers and timeouts, stop on cancel and disable, and schedules run each slot at most once', async () => {
+    const h = await harness(); const f = await functionFixture(h, 'function-recovery'); const functionsPath = `${f.envPath}/functions`; const id = () => crypto.randomUUID();
+    const fn = await f.deploy('job', 'export default () => 1;', { timeoutSeconds: 5 });
+    const leaseState = async (leaseId: string) => (await h.sql`SELECT state FROM worker_leases WHERE id = ${leaseId}`)[0].state;
+
+    // A lost worker: the same execution runs again as the next attempt, on a new lease, with the same revision and input.
+    const resilient = await f.invoke(fn.id, { n: 1 }); let offer = await f.claim(); expect(parseComponent('WorkerFunctionInput', await (await f.on(offer)).json()).attempt).toBe(1);
+    await f.lose(offer.lease.id);
+    // The lease sweeper has not run yet: the execution is not given up on while it still has attempts left.
+    expect(await h.functions.reconcile(id())).toEqual([]); expect((await f.execution(resilient.id)).state).toBe('running');
+    expect((await h.leases.reclaim(id())).map(lease => [lease.subjectId, lease.attempt])).toEqual([[resilient.id, 2]]);
+    // The lost worker comes back: its lease is gone, so it can neither read nor report.
+    for (const attempt of [f.on(offer, '/complete', { outcome: 'succeeded', output: 'ghost' }), f.on(offer)]) expect((await attempt).status).toBe(409);
+    expect(await h.functions.reconcile(id())).toEqual([]);
+    const retry = await f.claim(); expect(retry.lease).toMatchObject({ subjectId: resilient.id, attempt: 2 }); expect(retry.lease.id).not.toBe(offer.lease.id);
+    // The new attempt has not read its input yet, so it cannot report on the old attempt's behalf.
+    expect((await f.on(retry, '/complete', { outcome: 'succeeded', output: 'early' })).status).toBe(409);
+    expect(parseComponent('WorkerFunctionInput', await (await f.on(retry)).json())).toMatchObject({ executionId: resilient.id, attempt: 2, revisionNumber: 1, input: { n: 1 } });
+    expect(parseComponent('FunctionExecution', await (await f.on(retry, '/complete', { outcome: 'succeeded', output: 'real' })).json())).toMatchObject({ state: 'succeeded', attempt: 2, output: 'real' });
+
+    // Lost on every allowed attempt: the execution fails as worker_lost.
+    const doomed = await f.invoke(fn.id);
+    for (const attempt of [1, 2, 3]) {
+      offer = await f.claim(); expect(offer.lease).toMatchObject({ subjectId: doomed.id, attempt }); expect((await f.on(offer)).status).toBe(200);
+      await f.lose(offer.lease.id); expect((await h.leases.reclaim(id())).length).toBe(attempt < 3 ? 1 : 0);
+    }
+    expect((await h.functions.reconcile(id())).map(item => [item.id, item.state, item.errorCategory, item.attempt])).toEqual([[doomed.id, 'failed', 'worker_lost', 3]]);
+    expect(await h.functions.reconcile(id())).toEqual([]);
+
+    // Nobody claims it: the offer lapses and the execution fails as no_worker.
+    const unclaimed = await f.invoke(fn.id); await h.sql`UPDATE worker_leases SET expires_at = now() - interval '1 second' WHERE subject_id = ${unclaimed.id}`;
+    expect(await h.leases.reclaim(id())).toEqual([]);
+    expect((await h.functions.reconcile(id())).map(item => [item.id, item.state, item.errorCategory])).toEqual([[unclaimed.id, 'failed', 'no_worker']]);
+
+    // The deadline ends an execution while a worker still holds it, and the worker's result is no longer accepted.
+    const slow = await f.invoke(fn.id); offer = await f.claim(); expect((await f.on(offer)).status).toBe(200);
+    expect(await h.functions.reconcile(id())).toEqual([]);
+    await h.sql`UPDATE function_executions SET deadline_at = now() - interval '1 second' WHERE id = ${slow.id}`;
+    // Before the reconciler has run, a late result is already refused.
+    expect((await f.on(offer, '/complete', { outcome: 'succeeded', output: 'late' })).status).toBe(409); expect((await f.execution(slow.id)).state).toBe('running');
+    expect((await h.functions.reconcile(id())).map(item => [item.id, item.state, item.errorCategory])).toEqual([[slow.id, 'timed_out', 'deadline_exceeded']]);
+    expect((await f.on(offer, '/complete', { outcome: 'succeeded', output: 'late' })).status).toBe(409); expect(await leaseState(offer.lease.id)).toBe('cancelled');
+    expect(await f.execution(slow.id)).toMatchObject({ state: 'timed_out', output: null });
+    // A fresh attempt gets the function's own time, not the queue's: the deadline moves to its timeout plus a grace period.
+    const timed = await f.invoke(fn.id); offer = await f.claim(); expect((await f.on(offer)).status).toBe(200);
+    const remaining = Number((await h.sql`SELECT extract(epoch FROM (deadline_at - now()))::float8 AS seconds FROM function_executions WHERE id = ${timed.id}`)[0].seconds); expect(remaining).toBeGreaterThan(15); expect(remaining).toBeLessThanOrEqual(20);
+    // A timeout the worker itself enforces is recorded as a timeout, not as a failure of the function.
+    expect(parseComponent('FunctionExecution', await (await f.on(offer, '/complete', { outcome: 'failed', errorCategory: 'function.timeout' })).json())).toMatchObject({ state: 'timed_out', errorCategory: 'function.timeout' });
+    // A failure the worker reports is the function's own and is not retried.
+    const broken = await f.invoke(fn.id); expect(await f.finish({ outcome: 'failed', errorCategory: 'function.threw' })).toMatchObject({ id: broken.id, state: 'failed' });
+    expect(await f.offer()).toEqual({ state: 'none' }); expect(await h.leases.reclaim(id())).toEqual([]); expect(await h.functions.reconcile(id())).toEqual([]);
+    // A timed-out execution can be retried by hand, as a new execution.
+    const again = parseComponent('FunctionExecutionReceipt', await (await f.post(`${f.envPath}/executions/${slow.id}`, { kind: 'retry' }, (await f.execution(slow.id)).revision)).json()).execution;
+    expect(again).toMatchObject({ trigger: 'retry', retryOf: slow.id, state: 'queued', attempt: 0 }); expect((await f.finish()).id).toBe(again.id);
+
+    // Cancellation: the worker is told on its next heartbeat, and can neither read secrets nor report afterwards.
+    const stopped = await f.invoke(fn.id); offer = await f.claim(); expect((await f.on(offer)).status).toBe(200);
+    expect((await f.post(`${f.envPath}/executions/${stopped.id}`, { kind: 'cancel' }, '99')).status).toBe(409);
+    const running = await f.execution(stopped.id); const cancelKey = id();
+    const cancelled = parseComponent('FunctionExecutionReceipt', await (await f.post(`${f.envPath}/executions/${stopped.id}`, { kind: 'cancel' }, running.revision, { 'idempotency-key': cancelKey })).json());
+    expect(cancelled.execution).toMatchObject({ state: 'cancelled', errorCategory: 'cancelled' });
+    expect(parseComponent('FunctionExecutionReceipt', await (await f.post(`${f.envPath}/executions/${stopped.id}`, { kind: 'cancel' }, running.revision, { 'idempotency-key': cancelKey })).json())).toEqual(cancelled);
+    expect((await f.post(`${f.envPath}/executions/${stopped.id}`, { kind: 'cancel' }, cancelled.execution.revision)).status).toBe(409);
+    expect(parseComponent('WorkerLeaseReceipt', await (await h.workerApi(`/worker/v1/leases/${offer.lease.id}`, { kind: 'heartbeat' }, f.held(offer))).json()).cancelled).toBe(true);
+    for (const attempt of [f.on(offer, '/complete', { outcome: 'succeeded', output: 1 }), f.on(offer), h.workerApi(`/worker/v1/leases/${offer.lease.id}/secrets`, undefined, f.held(offer))]) expect((await attempt).status).toBe(409);
+    // A queued execution is cancelled before any worker sees it.
+    const waiting = await f.invoke(fn.id); expect((await f.post(`${f.envPath}/executions/${waiting.id}`, { kind: 'cancel' }, waiting.revision)).status).toBe(200); expect(await f.offer()).toEqual({ state: 'none' });
+
+    // Disabling stops everything open and refuses anything new, including retries, until the function is enabled again.
+    const queued = await f.invoke(fn.id); const active = await f.invoke(fn.id); const offers = [await f.claim(), await f.claim()]; offer = offers.find(item => item.lease.subjectId === active.id)!; expect((await f.on(offer)).status).toBe(200);
+    const disabled = parseComponent('FunctionReceipt', await (await f.post(`${functionsPath}/${fn.id}`, { kind: 'disable' }, (await f.details(fn.id)).function.revision)).json()).function; expect(disabled.state).toBe('disabled');
+    for (const item of [queued, active]) expect(await f.execution(item.id)).toMatchObject({ state: 'cancelled', errorCategory: 'function_disabled' });
+    for (const item of offers) { expect(await leaseState(item.lease.id)).toBe('cancelled'); expect((await f.on(item, '/complete', { outcome: 'succeeded', output: 1 })).status).toBe(409); }
+    expect((await f.post(`${functionsPath}/${fn.id}/invoke`, { input: null })).status).toBe(409);
+    expect((await f.post(`${f.envPath}/executions/${broken.id}`, { kind: 'retry' }, (await f.execution(broken.id)).revision)).status).toBe(409);
+    expect((await f.post(`${functionsPath}/${fn.id}`, { kind: 'disable' }, disabled.revision)).status).toBe(409);
+
+    // Schedules. While the function is disabled a due slot is skipped, not saved up.
+    expect((await f.post(`${functionsPath}/${fn.id}/schedules`, { intervalSeconds: 59 })).status).toBe(400);
+    const scheduleKey = id(); const scheduleResponse = await f.post(`${functionsPath}/${fn.id}/schedules`, { intervalSeconds: 60 }, undefined, { 'idempotency-key': scheduleKey }); expect(scheduleResponse.status).toBe(201);
+    const schedule = parseComponent('FunctionScheduleReceipt', await scheduleResponse.json()).schedule; expect(schedule).toMatchObject({ functionId: fn.id, intervalSeconds: 60, state: 'active', lastRunAt: null });
+    expect(parseComponent('FunctionScheduleReceipt', await (await f.post(`${functionsPath}/${fn.id}/schedules`, { intervalSeconds: 60 }, undefined, { 'idempotency-key': scheduleKey })).json()).schedule).toEqual(schedule);
+    expect(await f.schedules(fn.id)).toHaveLength(1);
+    const due = (seconds = 1) => h.sql`UPDATE function_schedules SET next_run_at = now() - make_interval(secs => ${seconds}) WHERE id = ${schedule.id}`;
+    const skips = async () => (await h.sql`SELECT action FROM function_events WHERE resource_id = ${schedule.id} AND action LIKE 'schedule.skipped.%' ORDER BY sequence`).map((row: { action: string }) => row.action);
+    const scheduled = async () => (await h.sql`SELECT count(*)::integer AS n FROM function_executions WHERE schedule_id = ${schedule.id}`)[0].n;
+    // Not due yet: nothing runs.
+    expect(await h.functions.tick(id())).toEqual([]);
+    await due(); expect(await h.functions.tick(id())).toEqual([]); expect(await skips()).toEqual(['schedule.skipped.function_disabled']);
+    expect(new Date((await f.schedules(fn.id))[0]!.nextRunAt).getTime()).toBeGreaterThan(Date.now());
+    expect((await f.post(`${functionsPath}/${fn.id}`, { kind: 'enable' }, disabled.revision)).status).toBe(200);
+    // A new revision deployed before the slot is what the slot runs.
+    await f.deploy('job', 'export default () => 2;', { timeoutSeconds: 5 });
+
+    // Several schedulers see the same due slot: exactly one execution is created for it.
+    await due();
+    const fired = (await Promise.all([h.functions.tick(id()), h.functions.tick(id()), h.functions.tick(id())])).flat();
+    expect(fired).toHaveLength(1); expect(fired[0]).toMatchObject({ functionId: fn.id, trigger: 'schedule', scheduleId: schedule.id, revisionNumber: 2, state: 'queued', createdBy: null }); expect(await scheduled()).toBe(1);
+    expect(await h.functions.tick(id())).toEqual([]);
+    // The schedulers that lost the race did nothing at all: no second slot was taken and none was skipped.
+    expect(await skips()).toEqual(['schedule.skipped.function_disabled']);
+    let current = (await f.schedules(fn.id))[0]!; expect(current.lastRunAt).not.toBeNull(); expect(new Date(current.nextRunAt).getTime()).toBeGreaterThan(Date.now());
+    // The database refuses a second execution for a slot even if something tried to create one.
+    const slot = (await h.sql`SELECT scheduled_for FROM function_executions WHERE id = ${fired[0]!.id}`)[0].scheduled_for;
+    const duplicate = await h.sql`INSERT INTO function_executions (id, org_id, project_id, environment_id, function_id, revision_number, code_digest, trigger, schedule_id, scheduled_for, input, deadline_at, request_id)
+      SELECT ${id()}, org_id, project_id, environment_id, function_id, revision_number, code_digest, trigger, schedule_id, ${slot}, input, deadline_at, request_id FROM function_executions WHERE id = ${fired[0]!.id}`.then(() => 'finished', error => String((error as Error).message));
+    expect(duplicate).not.toBe('finished'); expect(await scheduled()).toBe(1);
+
+    // The previous run is still open when the next slot comes: that slot is skipped rather than piled up.
+    await due(); expect(await h.functions.tick(id())).toEqual([]); expect(await scheduled()).toBe(1); expect((await skips()).at(-1)).toBe('schedule.skipped.overlap');
+    expect((await f.finish()).id).toBe(fired[0]!.id);
+    // Many slots were missed: one run, and the next slot is the next one after now on the original rhythm.
+    await due(60 * 10 + 20); const caught = await h.functions.tick(id()); expect(caught).toHaveLength(1); expect(await scheduled()).toBe(2);
+    current = (await f.schedules(fn.id))[0]!; const ahead = new Date(current.nextRunAt).getTime() - Date.now(); expect(ahead).toBeGreaterThan(0); expect(ahead).toBeLessThanOrEqual(60000);
+    expect(await h.functions.tick(id())).toEqual([]); await f.finish();
+
+    // Paused: nothing runs. Resumed: a fresh interval starts, and the runs missed while paused are not made up.
+    expect((await f.post(`${f.envPath}/schedules/${schedule.id}`, { kind: 'pause' }, '99')).status).toBe(409);
+    const paused = parseComponent('FunctionScheduleReceipt', await (await f.post(`${f.envPath}/schedules/${schedule.id}`, { kind: 'pause' }, current.revision)).json()).schedule; expect(paused.state).toBe('paused');
+    expect((await f.post(`${f.envPath}/schedules/${schedule.id}`, { kind: 'pause' }, paused.revision)).status).toBe(409);
+    await due(600); expect(await h.functions.tick(id())).toEqual([]); expect(await scheduled()).toBe(2);
+    const resumed = parseComponent('FunctionScheduleReceipt', await (await f.post(`${f.envPath}/schedules/${schedule.id}`, { kind: 'resume' }, paused.revision)).json()).schedule;
+    expect(resumed.state).toBe('active'); expect(new Date(resumed.nextRunAt).getTime() - Date.now()).toBeGreaterThan(50000);
+    expect(await h.functions.tick(id())).toEqual([]); expect(await scheduled()).toBe(2);
+    // Another environment of the same organization cannot command it by ID.
+    const elsewhere = parseComponent('EnvironmentScope', parseComponent('CatalogReceipt', (await (await h.createProject(f.org, 'Other app', 'other-app')).json() as { receipt: unknown }).receipt).scope);
+    for (const kind of ['pause', 'delete']) expect((await f.post(`/platform/v1/orgs/${f.org}/projects/${elsewhere.projectId}/environments/${elsewhere.environmentId}/schedules/${schedule.id}`, { kind }, resumed.revision)).status).toBe(404);
+    expect((await f.schedules(fn.id))[0]).toMatchObject({ state: 'active', revision: resumed.revision });
+    // Deleted: it is gone from the list, cannot be commanded, and never fires again.
+    expect((await f.post(`${f.envPath}/schedules/${schedule.id}`, { kind: 'delete' }, resumed.revision)).status).toBe(200);
+    expect(await f.schedules(fn.id)).toEqual([]); await due(); expect(await h.functions.tick(id())).toEqual([]); expect(await scheduled()).toBe(2);
+    expect((await f.post(`${f.envPath}/schedules/${schedule.id}`, { kind: 'resume' }, '4')).status).toBe(404);
+    expect((await f.post(`${f.envPath}/schedules/${id()}`, { kind: 'pause' }, '1')).status).toBe(404);
+
+    // Nothing is left open, and every execution that ended has a completion time.
+    expect((await h.sql`SELECT count(*)::integer AS n FROM function_executions WHERE state IN ('queued', 'running')`)[0].n).toBe(0);
+    expect((await h.sql`SELECT count(*)::integer AS n FROM worker_leases WHERE purpose = 'function' AND state IN ('granted', 'claimed')`)[0].n).toBe(0);
+  }, 60000);
+
+  test('function limits hold under each kind of growth, and a schedule that finds no room skips its slot', async () => {
+    const h = await harness({ functions: 2, revisions: 2, schedulesPerFunction: 1, openExecutions: 2 }); const f = await functionFixture(h, 'function-limits'); const functionsPath = `${f.envPath}/functions`;
+    const deploy = (name: string, code = 'export default () => 1;') => f.post(functionsPath, { name, code, secretNames: [], timeoutSeconds: 10 });
+    const a = parseComponent('FunctionReceipt', await (await deploy('a')).json()).function; expect((await deploy('b')).status).toBe(201);
+    expect((await deploy('c')).status).toBe(429);
+    expect((await deploy('a', 'export default () => 2;')).status).toBe(201); expect((await deploy('a', 'export default () => 3;')).status).toBe(429);
+    expect((await h.sql`SELECT count(*)::integer AS n FROM functions`)[0].n).toBe(2); expect((await h.sql`SELECT count(*)::integer AS n FROM function_revisions WHERE function_id = ${a.id}`)[0].n).toBe(2);
+
+    // Open executions are counted per environment, whoever arrives together.
+    const attempts = await Promise.all([1, 2, 3, 4].map(n => f.post(`${functionsPath}/${a.id}/invoke`, { input: n })));
+    expect(attempts.map(response => response.status).sort()).toEqual([202, 202, 429, 429]);
+    expect((await h.sql`SELECT count(*)::integer AS n FROM function_executions`)[0].n).toBe(2); expect((await h.sql`SELECT count(*)::integer AS n FROM worker_leases`)[0].n).toBe(2);
+
+    const schedule = parseComponent('FunctionScheduleReceipt', await (await f.post(`${functionsPath}/${a.id}/schedules`, { intervalSeconds: 60 })).json()).schedule;
+    expect((await f.post(`${functionsPath}/${a.id}/schedules`, { intervalSeconds: 120 })).status).toBe(429);
+    // The slot comes while the environment is full: it is skipped and recorded, and leaves no execution without a lease.
+    await h.sql`UPDATE function_schedules SET next_run_at = now() - interval '1 second' WHERE id = ${schedule.id}`;
+    expect(await h.functions.tick(crypto.randomUUID())).toEqual([]);
+    expect((await h.sql`SELECT action FROM function_events WHERE resource_id = ${schedule.id} ORDER BY sequence`).map((row: { action: string }) => row.action)).toEqual(['schedule.created', 'schedule.skipped.limit']);
+    expect((await h.sql`SELECT count(*)::integer AS n FROM function_executions`)[0].n).toBe(2); expect((await h.sql`SELECT count(*)::integer AS n FROM worker_leases`)[0].n).toBe(2);
+    // Room is made: the next slot runs, and a finished execution no longer counts.
+    await f.finish(); await h.sql`UPDATE function_schedules SET next_run_at = now() - interval '1 second' WHERE id = ${schedule.id}`;
+    expect(await h.functions.tick(crypto.randomUUID())).toHaveLength(1);
+    expect((await f.post(`${functionsPath}/${a.id}/invoke`, { input: 5 })).status).toBe(429);
+    // A deleted schedule no longer counts either.
+    expect((await f.post(`${f.envPath}/schedules/${schedule.id}`, { kind: 'delete' }, (await f.schedules(a.id))[0]!.revision)).status).toBe(200);
+    expect((await f.post(`${functionsPath}/${a.id}/schedules`, { intervalSeconds: 120 })).status).toBe(201);
+  }, 60000);
+
+  test('a function worker runs leased code in its own process with only the lease\'s secrets, a wall-time limit and bounded output, and leaves nothing behind', async () => {
+    const h = await harness(); const f = await functionFixture(h, 'function-runtime', { API_KEY: 'api-key-value', OTHER_KEY: 'other-key-value' });
+    const root = mkdtempSync(join(tmpdir(), 'carbon-function-test-')); const workRoot = join(root, 'work'); const marker = process.env.CARBON_WORKER_TOKEN;
+    const left = () => existsSync(workRoot) ? readdirSync(workRoot) : [];
+    // What the worker process itself holds: none of it may reach a function.
+    process.env.CARBON_WORKER_TOKEN = 'worker-credential-marker';
+    try {
+      const run = new RunLeasedFunctionUseCase(new HttpBuildProtocol(origin, f.worker.token, h.workerFetch), new DisposableWorkspaces(workRoot), new BunFunctionRunner(), { heartbeatMs: 50 });
+      expect(await run.execute()).toBe('idle');
+      const once = async (name: string, code: string, input: unknown = null, extra: Record<string, unknown> = {}) => {
+        const fn = await f.deploy(name, code, extra); const execution = await f.invoke(fn.id, input); const outcome = await run.execute(); return { outcome, execution: await f.execution(execution.id) };
+      };
+
+      // The function gets its input and exactly the secrets its revision names: not the environment's other secret, and nothing of the worker's.
+      const echo = await once('echo', `import { readdirSync } from "node:fs";
+        export default async (input) => ({ doubled: input.n * 2, key: process.env.API_KEY ?? null, other: process.env.OTHER_KEY ?? null, worker: process.env.CARBON_WORKER_TOKEN ?? null,
+          database: process.env.CARBON_PLATFORM_TEST_DATABASE_URL ?? null, files: readdirSync(".").sort() });`, { n: 21 }, { secretNames: ['API_KEY'] });
+      expect(echo.outcome).toBe('succeeded');
+      expect(echo.execution).toMatchObject({ state: 'succeeded', attempt: 1, errorCategory: null, output: { doubled: 42, key: 'api-key-value', other: null, worker: null, database: null, files: ['function.mjs', 'harness.mjs'] } });
+      expect(left()).toEqual([]);
+
+      // What a function prints is not its result.
+      const noisy = await once('noisy', `export default () => { console.log('{"forged":true}'); console.error('noise'); return 'real'; };`); expect(noisy.execution).toMatchObject({ state: 'succeeded', output: 'real' });
+      // Returning nothing is a null result.
+      expect((await once('silent', 'export default () => {};')).execution).toMatchObject({ state: 'succeeded', output: null });
+
+      // Failures are reported as a category. The error text, which may hold anything, stays on the worker.
+      const threw = await once('throws', `export default () => { throw new Error('detail with ' + process.env.API_KEY); };`, null, { secretNames: ['API_KEY'] });
+      expect(threw.outcome).toBe('failed'); expect(threw.execution).toMatchObject({ state: 'failed', errorCategory: 'function.threw', output: null }); expect(JSON.stringify(threw.execution)).not.toContain('detail');
+      expect((await once('no-handler', 'export const value = 1;')).execution).toMatchObject({ state: 'failed', errorCategory: 'function.invalid' });
+      expect((await once('syntax', 'export default (')).execution).toMatchObject({ state: 'failed', errorCategory: 'function.invalid' });
+      expect((await once('exits', 'export default () => { process.exit(0); };')).execution).toMatchObject({ state: 'failed', errorCategory: 'function.crashed' });
+      expect((await once('too-big', `export default () => 'x'.repeat(300000);`)).execution).toMatchObject({ state: 'failed', errorCategory: 'function.output_too_large' });
+      expect((await once('cyclic', 'export default () => { const value = {}; value.self = value; return value; };')).execution).toMatchObject({ state: 'failed', errorCategory: 'function.output_invalid' });
+      expect(left()).toEqual([]);
+
+      // The wall-time limit: the process is killed, even one that never yields, and the execution is recorded as timed out.
+      const started = Date.now(); const spin = await once('spins', 'export default () => { while (true) {} };', null, { timeoutSeconds: 1 });
+      expect(spin.outcome).toBe('failed'); expect(spin.execution).toMatchObject({ state: 'timed_out', errorCategory: 'function.timeout', output: null }); expect(Date.now() - started).toBeLessThan(15000);
+      expect(left()).toEqual([]);
+
+      // Cancelled while running: the process is stopped, nothing is reported, and the workspace is erased.
+      const wait = await f.deploy('waits', 'export default () => new Promise(resolve => setTimeout(resolve, 60000));', { timeoutSeconds: 60 }); const waiting = await f.invoke(wait.id); const running = run.execute();
+      for (let i = 0; i < 400 && (await f.execution(waiting.id)).state !== 'running'; i++) await Bun.sleep(25);
+      const live = await f.execution(waiting.id); expect(live.state).toBe('running');
+      expect((await f.post(`${f.envPath}/executions/${waiting.id}`, { kind: 'cancel' }, live.revision)).status).toBe(200);
+      expect(await running).toBe('cancelled'); expect(await f.execution(waiting.id)).toMatchObject({ state: 'cancelled', errorCategory: 'cancelled', output: null });
+      expect(left()).toEqual([]); expect(await run.execute()).toBe('idle');
+      // Nothing the function worker did is left open.
+      expect((await h.sql`SELECT count(*)::integer AS n FROM function_executions WHERE state IN ('queued', 'running')`)[0].n).toBe(0);
+    } finally {
+      if (marker === undefined) delete process.env.CARBON_WORKER_TOKEN; else process.env.CARBON_WORKER_TOKEN = marker;
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 120000);
 
   test('device authorization approves bounded CLI access, discloses once, rate-limits polling, and revokes durably', async()=>{
     const h=await harness();await h.challenge();await h.deliver();await h.complete();const orgId=(await organizationResponse(h.createOrganization('Device team','device-team'))).receipt.id;const project=parseComponent('CatalogReceipt',(await (await h.createProject(orgId)).json() as {receipt:unknown}).receipt);const environmentResponse=await h.catalogCommand(`/platform/v1/orgs/${orgId}/projects/${project.scope.projectId}/environments`,{name:'CLI',kind:'development',services:['database','registry']},project.revision);const environment=parseComponent('CatalogReceipt',(await environmentResponse.json() as {receipt:unknown}).receipt);

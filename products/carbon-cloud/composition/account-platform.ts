@@ -17,7 +17,7 @@ import { ResendAccountNotification } from "@carbon/resend-notification";
 import { DevelopmentInboxNotification } from "../infrastructure/notifications/DevelopmentInboxNotification.ts";
 import { AccountRealms, AppAuthentication, HttpOidcClient, PostgresAppAuthRepository, PostgresAppMailQueue } from '@carbon/auth';
 import { createAppRoutes } from '../infrastructure/http/app-routes.ts';
-import { AccountBuilds, AccountReleases, BuildOrchestration, Ed25519ProvenanceSigner, PostgresPlatformBuildRepository, PostgresPlatformReleaseRepository, PublicUpdateFeed, S3ArtifactReader, S3ArtifactVerifier, SecretReleaseSigner, WorkerBuilds } from '@carbon/orchestration';
+import { AccountBuilds, AccountFunctions, AccountReleases, BuildOrchestration, FunctionOrchestration, PostgresPlatformFunctionRepository, WorkerFunctions, Ed25519ProvenanceSigner, PostgresPlatformBuildRepository, PostgresPlatformReleaseRepository, PublicUpdateFeed, S3ArtifactReader, S3ArtifactVerifier, SecretReleaseSigner, WorkerBuilds } from '@carbon/orchestration';
 import { createUpdateRoutes } from '../infrastructure/http/update-routes.ts';
 import { createWorkerRoutes } from '../infrastructure/http/worker-routes.ts';
 import { createAccountRoutes } from "../infrastructure/http/account-routes.ts";
@@ -150,6 +150,8 @@ export function composeAccountPlatform(sql: Bun.SQL, config: AccountPlatformConf
   // Builds run on worker leases, so they exist exactly when workers do.
   const buildRepository = workerRepository && config.artifactStore ? new PostgresPlatformBuildRepository(sql, workerRepository,
     config.provenance ? new Ed25519ProvenanceSigner(config.provenance.keyId, config.provenance.privateKey) : undefined) : undefined;
+  // Functions run on worker leases, so they exist exactly when workers do.
+  const functionRepository = workerRepository ? new PostgresPlatformFunctionRepository(sql, workerRepository) : undefined;
   // Releases are made from builds and signed with keys held as environment secrets, so they need both.
   const releaseRepository = buildRepository && secretProtector && config.artifactStore && config.artifactPublicBaseUrl ? new PostgresPlatformReleaseRepository(sql, config.origin) : undefined;
   const accountReleases = releaseRepository ? new AccountReleases(auth, releaseRepository, new SecretReleaseSigner(new PostgresProviderSecretReader(sql, secretProtector!)), new S3ArtifactReader(config.artifactStore!),
@@ -163,15 +165,18 @@ export function composeAccountPlatform(sql: Bun.SQL, config: AccountPlatformConf
     : new DevelopmentInboxNotification(config.notification.directory);
   return {
     handler: createAccountRoutes(auth, config.origin, security, new AccountProfile(auth, new PostgresAccountProfileRepository(sql, mfa), protector, config), new OrganizationAccess(auth, new PostgresOrganizationRepository(sql), protector), new OrganizationInvitations(auth, new PostgresOrganizationInvitationsRepository(sql), new PostgresOrganizationRepository(sql), protector, config), github, new AccountAuthorization(auth, new PostgresPlatformAuthority(sql)), new AccountCatalog(auth, new PostgresCatalogRepository(sql), protector), config.data ? new AccountData(auth, new PostgresAccountDataAuthority(sql), config.data, protector) : undefined, importJobs ? new AccountImports(auth, importJobs) : undefined, new AccountEnvironmentCredentials(auth, environmentCredentials, protector), environmentSecrets ? new AccountEnvironmentSecrets(auth, environmentSecrets, protector) : undefined, accountRepositories, new AccountDeviceAuthorization(auth,new PostgresDeviceAuthorizationRepository(sql),protector,config.origin,config.rateLimitKey,new DeviceCredentialAuthentication(sql),config.deviceAssertions),new AccountServiceAccounts(auth,new PostgresServiceAccountRepository(sql),protector,config.serviceAccountAssertions),new AccountPersonalCredentials(auth,new PostgresPersonalCredentialRepository(sql),protector),new AccountLegacyTokens(auth,new PostgresLegacyTokenRepository(sql),protector,config.legacyTokens?.policy??'issue'),workerRepository?new AccountWorkers(auth,workerRepository,protector):undefined,new AccountAudit(auth,auditLog,protector),new AccountRealms(auth,appRepository,protector),new PersonalCredentialExchange(new PersonalCredentialAuthentication(sql),config.personalAssertions),buildRepository?new AccountBuilds(auth,buildRepository,protector):undefined,accountReleases,exportJobs?new AccountExports(auth,exportJobs,config.origin):undefined,config.blobs?new AccountBlobs(auth,new PostgresAccountDataAuthority(sql),config.blobs):undefined,
-      config.engines?new AccountEngine('vectors',auth,new PostgresAccountDataAuthority(sql),config.engines.vectors):undefined,config.engines?new AccountEngine('graph',auth,new PostgresAccountDataAuthority(sql),config.engines.graph):undefined),
+      config.engines?new AccountEngine('vectors',auth,new PostgresAccountDataAuthority(sql),config.engines.vectors):undefined,config.engines?new AccountEngine('graph',auth,new PostgresAccountDataAuthority(sql),config.engines.graph):undefined,
+      functionRepository?new AccountFunctions(auth,functionRepository,protector):undefined),
     buildOrchestration: buildRepository ? new BuildOrchestration(buildRepository) : undefined,
+    functionOrchestration: functionRepository ? new FunctionOrchestration(functionRepository) : undefined,
     updateHandler: releaseRepository ? createUpdateRoutes(new PublicUpdateFeed(releaseRepository)) : undefined,
     appHandler: createAppRoutes(new AppAuthentication(appRepository, protector, { rateLimitKey: config.rateLimitKey }, new HttpOidcClient(),
       secretProtector ? new PostgresProviderSecretReader(sql, secretProtector) : undefined, config.appAssertions), config.origin),
     deliverAppMail: new DeliverAccountMail(new PostgresAppMailQueue(sql), protector, notification),
     organizationLifecycle: new OrganizationLifecycle(auditLog),
     catalogLifecycle: new CatalogLifecycle(new PostgresCatalogRepository(sql)),
-    workerHandler: workerRepository ? createWorkerRoutes(new WorkerProtocol(workerRepository, config.rateLimitKey), config.origin, buildRepository && config.artifactStore ? new WorkerBuilds(buildRepository, new S3ArtifactVerifier(config.artifactStore)) : undefined) : undefined,
+    workerHandler: workerRepository ? createWorkerRoutes(new WorkerProtocol(workerRepository, config.rateLimitKey), config.origin, buildRepository && config.artifactStore ? new WorkerBuilds(buildRepository, new S3ArtifactVerifier(config.artifactStore)) : undefined,
+      functionRepository ? new WorkerFunctions(functionRepository) : undefined) : undefined,
     workerLeases: workerRepository ? new WorkerLeases(workerRepository) : undefined,
     runImports: importJobs && config.imports ? new RunImportJobs(importJobs, config.imports) : undefined,
     runExports: exportJobs ? new RunExportJobs(exportJobs, config.data!, config.exportStore!) : undefined,

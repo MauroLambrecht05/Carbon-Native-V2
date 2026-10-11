@@ -35,3 +35,8 @@ export { AccountReleases, PublicUpdateFeed, MAX_SIGNED_ARTIFACT_BYTES, channelMa
 export type { ArtifactReader, PlatformReleaseRepository, ReleaseSigner, UpdateFeed } from "./application/ports/PlatformReleaseRepository.ts";
 export { PostgresPlatformReleaseRepository } from "./infrastructure/PostgresPlatformReleaseRepository.ts";
 export { S3ArtifactReader, SecretReleaseSigner, type SigningSecretReader } from "./infrastructure/ReleaseSigning.ts";
+
+// Functions and schedules: immutable revisions, executions pinned to one, on worker leases.
+export { AccountFunctions, FunctionOrchestration, WorkerFunctions } from "./application/usecases/PlatformFunctions.ts";
+export type { PlatformFunctionRepository } from "./application/ports/PlatformFunctionRepository.ts";
+export { PostgresPlatformFunctionRepository, type FunctionLimits } from "./infrastructure/PostgresPlatformFunctionRepository.ts";

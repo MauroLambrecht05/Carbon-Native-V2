@@ -30,3 +30,7 @@ export { HttpBuildProtocol, WorkerProtocolError } from "./infrastructure/HttpBui
 export { GitSourceCheckout } from "./infrastructure/GitSourceCheckout.ts";
 export { DisposableWorkspaces, WorkspaceNotErasedError } from "./infrastructure/DisposableWorkspaces.ts";
 export { CarbonBuildPipeline, WINDOWS_CERTIFICATE_PASSWORD_SECRET, WINDOWS_CERTIFICATE_SECRET } from "./infrastructure/CarbonBuildPipeline.ts";
+
+// Functions on worker leases.
+export { RunLeasedFunctionUseCase, type FunctionProtocol, type FunctionRun, type FunctionRunResult, type FunctionRunner, type LeasedFunctionOutcome } from "./application/usecases/RunLeasedFunctionUseCase.ts";
+export { BunFunctionRunner } from "./infrastructure/BunFunctionRunner.ts";

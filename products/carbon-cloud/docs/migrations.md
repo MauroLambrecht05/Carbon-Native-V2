@@ -145,6 +145,14 @@ trigger that copies export events into `platform_events`. It is additive.
 Recovery: code from before 0029 ignores these tables; objects already written to
 the export bucket would then need to be removed by hand.
 
+0030 adds functions: `functions`, `function_revisions`, `function_schedules`,
+`function_executions`, `function_commands` and `function_events`. Triggers make
+a revision immutable, pin what an execution runs, freeze a finished execution,
+and copy function events into `platform_events`. It is additive. Recovery: code
+from before 0030 ignores these tables, but its lease sweeper would then retry
+and expire `function` leases without ending their executions, so cancel open
+executions before rolling back.
+
 Foreign keys need no migration in Database: they are a new kind of entry in the
 existing `canonical_data_constraints` catalog.
 

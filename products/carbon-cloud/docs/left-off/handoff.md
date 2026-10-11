@@ -23,7 +23,7 @@ meaningful tests pass together.
 | 10 — partly complete | Finish BE-08 relational work: private exports, foreign keys, impact previews, asynchronous schema work, migration promotion and restricted SQL. | Done and proven against real Database: foreign keys, cross-table impact previews, and private resumable exports with authorization, cancellation and crash recovery. Not built: restricted SQL, migration promotion, asynchronous schema changes, table deletion (G-64 to G-67). |
 | 11 — complete | Implement BE-09 blob storage with private objects, signed bounded transfers, metadata authority, retention and cleanup. | Completed: buckets, single-use exact-object transfers verified before storing, public download by current visibility, versions and retention, quota, cleanup and metering, proven across two environments over real HTTP. App users have no blob access yet (G-76); transfers are mediated by Database, not presigned (G-78). |
 | 12 — complete | Implement BE-09 vector, graph and realtime parity with canonical environment authority and durable outbox semantics. | Completed: a database-captured change feed read in commit order under row policy with a resumable stream; vector collections with exact deterministic search; a bounded property graph; exact-scope isolation and reconnect, replay and revocation proven. Events carry no row values (G-88); the stream is polled and account-only (G-90); vector search has no index (G-94). |
-| 13 | Implement BE-10 functions and schedules with immutable revisions, secret bindings, leases, limits and durable executions. | Deploy/invoke/schedule/cancel/retry tests prove revision pinning, secret isolation, idempotency and timeout recovery. |
+| 13 — partly complete | Implement BE-10 functions and schedules with immutable revisions, secret bindings, leases, limits and durable executions. | Gate met: deploy, invoke, schedule, cancel and retry tests prove revision pinning, secret isolation, idempotency and timeout recovery, and a real worker process runs leased code. Not built from the plan's section 16: isolation and resource limits (G-100), logs (G-102), calendar schedules (G-101), app and service invocation (G-104), drafts, packaging and promotion (G-105). |
 | 14 | Implement BE-11 Registry publisher identity, review, trust, immutable archives, yanking and signed distribution. | Publish/review/install tests verify namespace authority, provenance, digest/signature checks, revocation and tenant isolation. |
 | 15 | Implement BE-12 project plugin consumption and the remaining CLI workflows. | Lockfile, install/update/remove, compatibility and offline/error recovery pass against real Registry and project APIs. |
 | 16 | Implement BE-13 billing, quotas, operator boundaries, recovery, deletion and unknown-outcome resolution. | Provider webhook replay, quota races, operator audit, backup/restore and irreversible-deletion gates pass. |
@@ -31,18 +31,19 @@ meaningful tests pass together.
 | 18 | Complete observability, deployment compatibility, security review, migration reconciliation, canary rollout and cutover. | Sections 25-29 of the backend plan have recorded production evidence, including restore, rotation, rollback and no-mock-fallback drills. |
 | 19 | Close the gap ledger: every open decision and everything an earlier phase could not finish or prove. | Each entry in [gaps.md](gaps.md) is closed with evidence or explicitly accepted by the owner. Includes the hardware- and account-dependent proofs (a real Windows build, signing, isolation, real KMS, a real identity provider) and CI running the database suites. |
 
-## Start with Phase 13
+## Start with Phase 14
 
-Phases 1 to 7, 9, 11 and 12 are complete; Phases 8 and 10 are partly complete.
-Read these files before changing Phase 13 code:
+Phases 1 to 7, 9, 11 and 12 are complete; Phases 8, 10 and 13 are partly complete.
+Read these files before changing Phase 14 code:
 
-- section 16 of [the backend plan](../platform-backend-plan.md), "BE-10: functions and schedules", and its proof gate
-- [workers.md](../workers.md) and [builds.md](../builds.md): leases, lease-bound secrets, attempts and deadlines are the pattern functions run on
-- [build-worker.md](../build-worker.md): what a worker runtime does and does not isolate (G-38 applies to functions even more)
-- `products/carbon-database/infrastructure/services/EdgeFunctionsEngine.ts` (the legacy in-process engine)
+- section 17 of [the backend plan](../platform-backend-plan.md), "BE-11: Registry publishing and trust", and its proof gate
+- `products/carbon-registry` (the service as it is today) and `solutions/capabilities/plugin`
+- [service-lifecycle.md](../service-lifecycle.md) and [signed-data.md](../signed-data.md): how Cloud signs requests to an owning service; Registry serves one canonical request so far (G-10)
+- [releases.md](../releases.md): signing profiles and signed immutable metadata, the nearest existing pattern for signed distribution
+- [blob-storage.md](../blob-storage.md): exact-byte verified uploads, the pattern for immutable archives
 
-Phase 13 builds functions and schedules: immutable revisions, secret bindings,
-leases, limits and durable executions.
+Phase 14 builds Registry publishing: publisher namespaces, review, trust,
+immutable archives, yanking and signed distribution.
 
 ## Deferred work
 

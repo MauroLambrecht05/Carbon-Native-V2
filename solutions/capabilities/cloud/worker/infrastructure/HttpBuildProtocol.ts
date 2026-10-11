@@ -1,7 +1,7 @@
 // BuildProtocol over Cloud's worker API (/worker/v1). Every call is a POST
 // authenticated by the worker credential; lease calls add the lease token.
 
-import { parseComponent, type BuildArtifactDeclare, type WorkerBuildComplete, type WorkerBuildInput, type WorkerCapabilities, type WorkerLeaseOffer, type WorkerSecretBinding } from "@carbon/contracts/platform";
+import { parseComponent, type BuildArtifactDeclare, type WorkerBuildComplete, type WorkerBuildInput, type WorkerFunctionComplete, type WorkerFunctionInput, type WorkerCapabilities, type WorkerLeaseOffer, type WorkerSecretBinding } from "@carbon/contracts/platform";
 import { LeaseLostError, type BuildProtocol, type HeldBuildLease } from "../application/ports/LeasedBuild.ts";
 
 /** Cloud refused a worker call. Carries the status and Cloud's error code, never a response body. */
@@ -32,7 +32,7 @@ export class HttpBuildProtocol implements BuildProtocol {
       return await post(this.transport, this.base + path, { authorization: `Bearer ${this.token}`, ...(lease ? { "x-carbon-lease-token": lease.leaseToken } : {}) }, body);
     } catch (error) {
       // On a lease call, a conflict means the lease is cancelled, expired or held by someone else now.
-      if (lease && error instanceof WorkerProtocolError && error.status === 409 && !path.endsWith("/artifacts") && !path.endsWith("/complete")) throw new LeaseLostError();
+      if (lease && error instanceof WorkerProtocolError && error.status === 409 && !path.endsWith("/artifacts") && !path.endsWith("/build/complete")) throw new LeaseLostError();
       throw error;
     }
   }
@@ -44,4 +44,7 @@ export class HttpBuildProtocol implements BuildProtocol {
   async appendLog(lease: HeldBuildLease, sequence: number, text: string): Promise<void> { await this.call(`/leases/${lease.leaseId}/build/logs`, lease, { sequence, text }); }
   async declareArtifact(lease: HeldBuildLease, artifact: BuildArtifactDeclare): Promise<void> { await this.call(`/leases/${lease.leaseId}/build/artifacts`, lease, artifact); }
   async complete(lease: HeldBuildLease, result: WorkerBuildComplete): Promise<void> { await this.call(`/leases/${lease.leaseId}/build/complete`, lease, result); }
+  // A function has nothing to verify in storage, so a conflict on any function call means the lease is no longer held.
+  async functionInput(lease: HeldBuildLease): Promise<WorkerFunctionInput> { return parseComponent("WorkerFunctionInput", await this.call(`/leases/${lease.leaseId}/function`, lease)); }
+  async functionComplete(lease: HeldBuildLease, result: WorkerFunctionComplete): Promise<void> { await this.call(`/leases/${lease.leaseId}/function/complete`, lease, result); }
 }
