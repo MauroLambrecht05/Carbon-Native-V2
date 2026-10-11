@@ -59,6 +59,10 @@ export class HttpDataClient {
           previous = id;
         }
       }
+      else if (command.kind === 'rows.changes') {
+        const feed = parseComponent('DataChangesResult', result.result);
+        if (feed.tableId !== command.tableId || feed.events.length > (command.limit ?? 100) || (feed.reset && feed.events.length)) throw new Error('Mismatched change feed');
+      }
       else if (command.kind === 'tables.list') {
         const page = parseComponent('DataTablesResult', result.result);
         const order = dataTablePageOrder(command);

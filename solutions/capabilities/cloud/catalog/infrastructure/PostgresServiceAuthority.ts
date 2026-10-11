@@ -1,5 +1,5 @@
 import { PostgresPlatformAuthority, bodyDigest, sameScope } from '@carbon/identity';
-import { serviceLifecycleBody, serviceLifecycleStatusPath, dataRequestPath, dataPermission, blobRequestPath, blobPermission, dataImportPath, registryRequestPath, registryPermission, type BlobCommand, type DataRequest, type InternalAssertion, type Permission, type RegistryRequest } from '@carbon/contracts/platform';
+import { serviceLifecycleBody, serviceLifecycleStatusPath, dataRequestPath, dataPermission, blobRequestPath, blobPermission, engineRequestPath, enginePermission, dataImportPath, registryRequestPath, registryPermission, type BlobCommand, type DataRequest, type InternalAssertion, type Permission, type RegistryRequest } from '@carbon/contracts/platform';
 import type { ServiceAuthority } from '../application/ports/ServiceAuthority.ts';
 
 /** Live authority for the implemented lifecycle, signed Database data and blob storage, and signed Registry protocols. */
@@ -8,8 +8,9 @@ export class PostgresServiceAuthority extends PostgresPlatformAuthority implemen
     if (/^\/internal\/platform\/v1\/environments\/[^/]+\/registry\//.test(assertion.request.path)) return this.registryAuthority(assertion);
     if (assertion.request.path.includes('/imports/')) return this.importAuthority(assertion);
     if (assertion.request.path.includes('/data/')) return this.dataAuthority(assertion);
-    // Blob commands are bound and checked exactly like data commands, with their own paths and permissions. App users have none.
-    if (/^\/internal\/platform\/v1\/environments\/[^/]+\/blobs\//.test(assertion.request.path)) return this.dataAuthority(assertion, true);
+    // Blob, vector and graph commands are bound and checked exactly like data commands, each family with its own paths and permissions. App users have none.
+    const family = /^\/internal\/platform\/v1\/environments\/[^/]+\/(blobs|vectors|graph)\//.exec(assertion.request.path)?.[1] as 'blobs' | 'vectors' | 'graph' | undefined;
+    if (family) return this.dataAuthority(assertion, family);
     const scope = assertion.scope; const principal = assertion.principal;
     const reading = assertion.request.method === 'GET';
     let readBinding: string | undefined;
@@ -62,7 +63,8 @@ export class PostgresServiceAuthority extends PostgresPlatformAuthority implemen
     });
   }
 
-  private async dataAuthority(assertion: InternalAssertion, blobs = false): Promise<boolean> {
+  private async dataAuthority(assertion: InternalAssertion, family: 'data' | 'blobs' | 'vectors' | 'graph' = 'data'): Promise<boolean> {
+    const blobs = family !== 'data';
     const scope = assertion.scope; const principal = assertion.principal;
     if (principal.kind === 'app_user') return blobs ? false : this.appUserAuthority(assertion);
     if (assertion.aud !== 'carbon-database' || !((principal.kind === 'account' && ['dashboard','cli'].includes(principal.audience)) || (principal.kind === 'service_account' && principal.audience === 'automation')) || !scope.projectId || !scope.environmentId || scope.realmId || assertion.request.method !== 'POST') return false;
@@ -71,9 +73,10 @@ export class PostgresServiceAuthority extends PostgresPlatformAuthority implemen
       const url = new URL(assertion.request.path, 'https://internal.invalid');
       const kind = url.pathname.split('/').at(-1)!; const environment = { orgId: scope.orgId, projectId: scope.projectId, environmentId: scope.environmentId };
       bindingId = url.searchParams.get('bindingId')!;
-      const expected = blobs ? blobRequestPath(environment, bindingId, kind as BlobCommand['kind']) : dataRequestPath(environment, bindingId, kind as DataRequest['command']['kind']);
+      const expected = family === 'blobs' ? blobRequestPath(environment, bindingId, kind as BlobCommand['kind']) : family === 'data' ? dataRequestPath(environment, bindingId, kind as DataRequest['command']['kind'])
+        : engineRequestPath(family, environment, bindingId, kind);
       if (assertion.request.path !== expected) return false;
-      permission = blobs ? blobPermission(kind as BlobCommand['kind']) : dataPermission(kind as DataRequest['command']['kind']);
+      permission = family === 'blobs' ? blobPermission(kind as BlobCommand['kind']) : family === 'data' ? dataPermission(kind as DataRequest['command']['kind']) : enginePermission(family, kind);
       if (assertion.grants.length !== 1 || assertion.grants[0]!.permission !== permission || !sameScope(assertion.grants[0]!.scope, scope)) return false;
     } catch { return false; }
     return this.sql.begin(async tx => {

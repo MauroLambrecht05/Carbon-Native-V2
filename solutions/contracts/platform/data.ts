@@ -14,7 +14,7 @@ export function dataPermission(kind: DataRequest['command']['kind']): Permission
   switch (kind) {
     case 'tables.list': case 'table.get': case 'table.preview': case 'table.types': case 'rows.import-preview': return 'metadata.read';
     case 'table.create': case 'table.policies': case 'table.alter': return 'resources.configure';
-    case 'rows.query': return 'data.read';
+    case 'rows.query': case 'rows.changes': return 'data.read';
     case 'row.insert': case 'row.update': case 'row.delete': return 'data.write';
     default: throw new Error('Unsupported data operation');
   }

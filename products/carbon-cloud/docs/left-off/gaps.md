@@ -150,6 +150,23 @@ entries here.
 | G-86 | Final deletion of an environment does not remove its blobs (see G-09), and blob events are not in the organization log (see G-21) | Owning-service deletion and events are open across the platform | With G-09 and G-21 |
 | G-87 | There is no range request, no conditional request, no object metadata or tags, no copy or move, and no listing by delimiter | Not needed for the proof gate | A need for them |
 
+## Open: from Phase 12 (realtime, vectors, graph)
+
+| # | Gap | Why open | Closes when |
+|---|---|---|---|
+| G-88 | A change event names the row and what happened; it carries no row values, old or new. A reader fetches the row with a query | Row images in the feed would copy customer data into a second place and need their own policy checks | A decision on row images |
+| G-89 | Who is told about a change is decided from the policies and the owner column at the moment of the change. A reader who gains access later is not told about earlier changes, and one who loses access (not by a policy change) keeps being told about rows they owned at the time | The feed stores a visibility snapshot instead of re-evaluating policy at read time | A decision: snapshot or read-time evaluation |
+| G-90 | The change stream is polled by Cloud once a second per open stream, and exists only for account sessions. There is no push, no broker, and no stream endpoint for app users, who must poll `rows.changes` themselves with a fresh assertion each time | The pull primitive came first | An app-facing stream with its own authentication, and a notification path that does not poll |
+| G-91 | Reading the change feed is not audited or rate limited, and every reader re-scans the table's events from their cursor | A polled feed would otherwise flood the audit trail | Phase 18 |
+| G-92 | Every schema or policy change resets every cursor on that table, even when it does not affect visibility | The table revision is the only visibility revision there is | A separate policy revision |
+| G-93 | Rows changed before migration 0009 are not in the feed, and a table's capture trigger can be dropped by anyone with ownership of the table in PostgreSQL; nothing detects a missing trigger | The trigger is not part of the managed-constraint drift check | The drift check covers the capture trigger |
+| G-94 | Vector search is exact: every point of a collection is scored on every query. There is no approximate index, so cost grows with collection size up to the 100,000-point limit | The points table holds vectors of every dimension in one column, which pgvector cannot index | Per-collection storage with an index, and a measured accuracy contract |
+| G-95 | Vectors are stored in single precision; a value read back can differ from the one written in its last digits. Metadata filters are equality on top-level scalar values only | pgvector's `vector` type; simplest filter first | A need for more |
+| G-96 | Large vector and graph work does not run as cancellable jobs, as the plan asks. A batch is at most 100 points; a walk is bounded by depth and size and by a ten-second statement limit | Bounded synchronous commands were enough for the proof gate | Bulk load and bulk walk as jobs |
+| G-97 | A shortest-path search looks at no more than 5,000 newly reached nodes per level. In a graph wider than that it can answer "not found" when a path within the depth limit exists | Bounded work per request | The limit is reported in the answer, or the search becomes a job |
+| G-98 | App users cannot use vectors or the graph, and neither has row-level or node-level policy: anyone with `data.read` in the environment reads all of it | Needs an ownership model for points, nodes and edges | With G-76 |
+| G-99 | The legacy realtime (in-process websocket), vector and graph engines and their routes still exist beside the canonical ones, unhardened. Vector and graph limits are fixed constants, not plan quotas, and their usage is not metered | Retiring them needs the unified frontend; quotas are Phase 16 | Phases 16 and 17 |
+
 ## Open: verification
 
 | # | Gap | Why open | Closes when |

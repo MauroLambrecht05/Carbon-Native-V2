@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { AccountBuilds, AccountReleases } from '@carbon/orchestration';
 import type { AccountRealms } from '@carbon/auth';
 import type { AccountCatalog, AccountEnvironmentCredentials, AccountWorkers, AccountEnvironmentSecrets, AccountRepositories, CatalogCommand } from '@carbon/catalog';
-import type { AccountBlobs, AccountData, AccountExports, AccountImports } from '@carbon/data';
+import type { AccountBlobs, AccountData, AccountEngine, AccountExports, AccountImports } from '@carbon/data';
 import { AccountAuthentication, opaqueToken, type PersonalCredentialExchange, type AccountAudit, type AccountPersonalCredentials, type AccountLegacyTokens, type AccountDeviceAuthorization, type AccountServiceAccounts, type AccountSecurity, type AccountProfile, type OrganizationAccess, type OrganizationInvitations, type ExternalAccountAuthentication, type AccountAuthorization } from "@carbon/identity";
 import { ContractError, PlatformFault, parseComponent, type ErrorCode } from "@carbon/contracts/platform";
 
@@ -14,7 +14,7 @@ function cookieValue(request: Request, name: string): string {
   return matches.length === 1 ? matches[0]!.slice(name.length + 1) : "";
 }
 
-export function createAccountRoutes(auth: AccountAuthentication, origin: string, security?: AccountSecurity, profile?: AccountProfile, organizations?: OrganizationAccess, invitations?: OrganizationInvitations, github?: ExternalAccountAuthentication, access?: AccountAuthorization, catalog?: AccountCatalog, data?: AccountData, imports?: AccountImports, credentials?: AccountEnvironmentCredentials, secrets?: AccountEnvironmentSecrets, repositories?: AccountRepositories, devices?: AccountDeviceAuthorization, serviceAccounts?: AccountServiceAccounts, personal?: AccountPersonalCredentials, legacy?: AccountLegacyTokens, workers?: AccountWorkers, audit?: AccountAudit, realms?: AccountRealms, personalExchange?: PersonalCredentialExchange, builds?: AccountBuilds, releases?: AccountReleases, exports?: AccountExports, blobs?: AccountBlobs) {
+export function createAccountRoutes(auth: AccountAuthentication, origin: string, security?: AccountSecurity, profile?: AccountProfile, organizations?: OrganizationAccess, invitations?: OrganizationInvitations, github?: ExternalAccountAuthentication, access?: AccountAuthorization, catalog?: AccountCatalog, data?: AccountData, imports?: AccountImports, credentials?: AccountEnvironmentCredentials, secrets?: AccountEnvironmentSecrets, repositories?: AccountRepositories, devices?: AccountDeviceAuthorization, serviceAccounts?: AccountServiceAccounts, personal?: AccountPersonalCredentials, legacy?: AccountLegacyTokens, workers?: AccountWorkers, audit?: AccountAudit, realms?: AccountRealms, personalExchange?: PersonalCredentialExchange, builds?: AccountBuilds, releases?: AccountReleases, exports?: AccountExports, blobs?: AccountBlobs, vectors?: AccountEngine, graph?: AccountEngine) {
   const secure = new URL(origin).protocol === "https:";
   const names = { session: `${secure ? "__Host-" : ""}carbon-session`, csrf: `${secure ? "__Host-" : ""}carbon-csrf`, browser: `${secure ? "__Host-" : ""}carbon-browser` };
   const cookie = (name: string, value: string, seconds: number, httpOnly = true) => `${name}=${value}; Path=/; Max-Age=${seconds}; SameSite=Lax${httpOnly ? "; HttpOnly" : ""}${secure ? "; Secure" : ""}`;
@@ -229,6 +229,16 @@ export function createAccountRoutes(auth: AccountAuthentication, origin: string,
         if (importRoute[5] === 'cancel') return json({ receipt: await imports.cancel(token, csrf, scope, importRoute[4]!, parseComponent('DataImportJobCancel', await body()), options) }, 202);
         return json({ receipt: await imports.enqueue(token, csrf, scope, parseComponent('DataImportJobCreate', await body(393216)), options, requestId) }, 202);
       }
+      // Vector collections and the graph: one POST endpoint each that takes a command.
+      const engineRoute = new RegExp(`^${BASE}/orgs/([^/]+)/projects/([^/]+)/environments/([^/]+)/(vectors|graph)$`).exec(url.pathname);
+      if (engineRoute && request.method === 'POST') {
+        const engine = engineRoute[4] === 'vectors' ? vectors : graph;
+        if (!engine) throw new PlatformFault('capability', 'This data service is not configured');
+        if (url.search) throw new PlatformFault('validation', 'Scope belongs in the path');
+        const scope = parseComponent('EnvironmentScope', { orgId: engineRoute[1], projectId: engineRoute[2], environmentId: engineRoute[3] });
+        const command = await body(4_194_304) as { commandId?: unknown };
+        return json({ result: await engine.execute(cookieValue(request, names.session), request.headers.get('x-csrf-token') ?? '', scope, command, command && typeof command === 'object' && 'commandId' in command ? parseComponent('CommandOptions', { idempotencyKey: request.headers.get('idempotency-key') ?? '', expectedRevision: request.headers.get('if-match')?.replace(/^"([1-9][0-9]*)"$/, '$1') }) : undefined, requestId, request.signal) });
+      }
       // Blob storage: one POST endpoint that takes a command, like table data. Bytes never pass through here.
       const blobRoute = new RegExp(`^${BASE}/orgs/([^/]+)/projects/([^/]+)/environments/([^/]+)/blobs$`).exec(url.pathname);
       if (blobRoute && request.method === 'POST') {
@@ -254,6 +264,18 @@ export function createAccountRoutes(auth: AccountAuthentication, origin: string,
         }
         if (action === 'cancel') return json(await exports.cancel(token, csrf, scope, exportRoute[5]!, parseComponent('DataExportCancel', await body()), parseComponent('CommandOptions', { idempotencyKey: request.headers.get('idempotency-key') ?? '', expectedRevision: request.headers.get('if-match')?.replace(/^"([1-9][0-9]*)"$/, '$1') })), 202);
         return json(await exports.enqueue(token, csrf, scope, parseComponent('DataExportCreate', await body()), parseComponent('CommandOptions', { idempotencyKey: request.headers.get('idempotency-key') ?? '', expectedRevision: request.headers.get('if-match')?.replace(/^"([1-9][0-9]*)"$/, '$1') }), requestId), 202);
+      }
+      // A table's change stream, as server-sent events. A reconnecting EventSource resends the last frame's id.
+      const changesRoute = new RegExp(`^${BASE}/orgs/([^/]+)/projects/([^/]+)/environments/([^/]+)/data/changes$`).exec(url.pathname);
+      if (changesRoute && request.method === 'GET') {
+        if (!data) throw new PlatformFault('capability', 'Database forwarding is not configured');
+        for (const key of url.searchParams.keys()) if (!['tableId', 'userId', 'cursor'].includes(key) || url.searchParams.getAll(key).length !== 1) throw new PlatformFault('validation', 'Unsupported change stream query');
+        const scope = parseComponent('EnvironmentScope', { orgId: changesRoute[1], projectId: changesRoute[2], environmentId: changesRoute[3] });
+        const cursor = url.searchParams.get('cursor') ?? request.headers.get('last-event-id') ?? undefined;
+        const stream = await data.changes(cookieValue(request, names.session), scope, parseComponent('Id', url.searchParams.get('tableId') ?? ''), url.searchParams.get('userId') ?? undefined,
+          cursor === undefined ? undefined : parseComponent('DataChangeCursor', cursor), request.signal);
+        const streamHeaders = new Headers(headers); streamHeaders.set('content-type', 'text/event-stream; charset=utf-8'); streamHeaders.set('x-accel-buffering', 'no');
+        return new Response(stream, { headers: streamHeaders });
       }
       const dataRoute = new RegExp(`^${BASE}/orgs/([^/]+)/projects/([^/]+)/environments/([^/]+)/data$`).exec(url.pathname);
       if (dataRoute && request.method === 'POST') {

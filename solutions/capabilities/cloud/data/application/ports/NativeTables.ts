@@ -1,6 +1,6 @@
 import type { EnvironmentScope, Permission, Principal, DataMutation, DataCommandReceipt, DataTable, DataTablesQuery, DataTablesResult, DataRowSelection } from '@carbon/contracts/platform';
 import type { NativeDefinition, NativePolicySet } from '../../domain/NativeTable.ts';
-import type { DataQuery, DataQueryResult } from '@carbon/contracts/platform';
+import type { DataChangesQuery, DataChangesResult, DataQuery, DataQueryResult } from '@carbon/contracts/platform';
 import type { DataSchemaChange, DataSchemaPreview } from '@carbon/contracts/platform';
 import type { DataImportExecution, DataImportExecutionResult } from '@carbon/contracts/platform';
 
@@ -23,6 +23,8 @@ export interface NativeTablesRepository {
   importStatus(authority: NativeDataAuthority, input: DataImportExecution): Promise<DataImportExecutionResult | null>;
   preview(authority: NativeDataAuthority, id: string, change: DataSchemaChange): Promise<DataSchemaPreview>;
   queryPage(authority: NativeDataAuthority, input: DataQuery): Promise<DataQueryResult>;
+  /** The table's change feed after a cursor, in commit order, filtered to what this reader could see. */
+  changes(authority: NativeDataAuthority, input: DataChangesQuery): Promise<DataChangesResult>;
   list(authority: NativeDataAuthority, input: DataTablesQuery): Promise<DataTablesResult>;
   get(authority: NativeDataAuthority, id: string): Promise<NativeTableRecord>;
   command(authority: NativeDataAuthority, input: DataMutation): Promise<DataCommandReceipt>;

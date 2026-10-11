@@ -34,6 +34,7 @@ export class ExecuteServiceData {
       const result = command.kind === 'tables.list' ? await this.repository.list(authority, command) : await this.repository.get(authority, command.tableId);
       return parseComponent('DataResponse', { scope: request.scope, bindingId: request.bindingId, result });
     }
+    if (command.kind === 'rows.changes') return parseComponent('DataResponse', { scope: request.scope, bindingId: request.bindingId, result: await this.repository.changes(authority, command) });
     if (command.kind === 'rows.query') {
       return parseComponent('DataResponse', { scope: request.scope, bindingId: request.bindingId, result: await this.repository.queryPage(authority, command) });
     }

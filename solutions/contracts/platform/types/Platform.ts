@@ -304,6 +304,44 @@ export type BuildMaterials = { readonly "resolvedCommit": string; readonly "depe
 
 export type BuildProvenance = { readonly "statement": { readonly "version": 1; readonly "buildId": Id; readonly "scope": EnvironmentScope; readonly "attempt": number; readonly "workerId": Id; readonly "source": BuildSource; readonly "sourceDigest": Digest; readonly "materials": BuildMaterials; readonly "artifacts": ReadonlyArray<{ readonly "target": string; readonly "objectKey": string; readonly "sizeBytes": number; readonly "sha256": Digest; }>; readonly "startedAt": Timestamp; readonly "finishedAt": Timestamp; }; readonly "statementDigest": Digest; readonly "signature": { readonly "keyId": string; readonly "algorithm": "ed25519"; readonly "value": string; } | null; };
 
+export type VectorCollectionDefinition = { readonly "name": string; readonly "dimension": number; readonly "metric": "cosine" | "l2" | "inner"; };
+
+export type VectorCollection = { readonly "id": Id; readonly "definition": VectorCollectionDefinition; readonly "pointCount": number; readonly "revision": Revision; readonly "createdAt": Timestamp; };
+
+export type VectorPoint = { readonly "id": Id; readonly "vector": ReadonlyArray<number>; readonly "metadata": { readonly [key: string]: string | number | boolean | null; }; };
+
+export type VectorMatch = { readonly "id": Id; readonly "distance": number; readonly "metadata": { readonly [key: string]: string | number | boolean | null; }; };
+
+export type VectorCommand = { readonly "kind": "collection.create"; readonly "commandId": Id; readonly "collectionId": Id; readonly "definition": VectorCollectionDefinition; } | { readonly "kind": "collection.delete"; readonly "commandId": Id; readonly "collectionId": Id; readonly "revision": Revision; readonly "confirmation": string; } | { readonly "kind": "collections.list"; } | { readonly "kind": "points.upsert"; readonly "commandId": Id; readonly "collectionId": Id; readonly "points": ReadonlyArray<VectorPoint>; } | { readonly "kind": "points.delete"; readonly "commandId": Id; readonly "collectionId": Id; readonly "ids": ReadonlyArray<Id>; } | { readonly "kind": "points.get"; readonly "collectionId": Id; readonly "ids": ReadonlyArray<Id>; } | { readonly "kind": "points.query"; readonly "collectionId": Id; readonly "vector": ReadonlyArray<number>; readonly "limit"?: number; readonly "filter"?: { readonly [key: string]: string | number | boolean | null; }; };
+
+export type VectorResult = { readonly "collections": ReadonlyArray<VectorCollection>; } | { readonly "commandId": Id; readonly "collectionId": Id; readonly "revision"?: Revision; readonly "affected"?: number; } | { readonly "collectionId": Id; readonly "points": ReadonlyArray<VectorPoint>; } | { readonly "collectionId": Id; readonly "matches": ReadonlyArray<VectorMatch>; };
+
+export type VectorRequest = { readonly "scope": EnvironmentScope; readonly "bindingId": Id; readonly "command": VectorCommand; };
+
+export type VectorResponse = { readonly "scope": EnvironmentScope; readonly "bindingId": Id; readonly "result": VectorResult; };
+
+export type GraphNode = { readonly "id": Id; readonly "label": string; readonly "properties": { readonly [key: string]: string | number | boolean | null; }; };
+
+export type GraphEdge = { readonly "id": Id; readonly "source": Id; readonly "target": Id; readonly "label": string; readonly "properties": { readonly [key: string]: string | number | boolean | null; }; };
+
+export type GraphCommand = { readonly "kind": "node.put"; readonly "commandId": Id; readonly "node": GraphNode; } | { readonly "kind": "node.delete"; readonly "commandId": Id; readonly "nodeId": Id; readonly "detach"?: boolean; } | { readonly "kind": "edge.put"; readonly "commandId": Id; readonly "edge": GraphEdge; } | { readonly "kind": "edge.delete"; readonly "commandId": Id; readonly "edgeId": Id; } | { readonly "kind": "node.get"; readonly "nodeId": Id; } | { readonly "kind": "neighbors"; readonly "nodeId": Id; readonly "direction": "out" | "in" | "both"; readonly "label"?: string; readonly "limit"?: number; } | { readonly "kind": "traverse"; readonly "nodeId": Id; readonly "direction": "out" | "in" | "both"; readonly "label"?: string; readonly "maxDepth": number; readonly "limit"?: number; } | { readonly "kind": "path"; readonly "from": Id; readonly "to": Id; readonly "direction": "out" | "in" | "both"; readonly "label"?: string; readonly "maxDepth": number; };
+
+export type GraphResult = { readonly "commandId": Id; readonly "nodeId"?: Id; readonly "edgeId"?: Id; readonly "removedEdges"?: number; } | { readonly "node": GraphNode; } | { readonly "neighbors": ReadonlyArray<{ readonly "node": GraphNode; readonly "edge": GraphEdge; }>; readonly "truncated": boolean; } | { readonly "reached": ReadonlyArray<{ readonly "node": GraphNode; readonly "depth": number; }>; readonly "truncated": boolean; } | { readonly "found": boolean; readonly "nodes": ReadonlyArray<Id>; readonly "edges": ReadonlyArray<Id>; };
+
+export type GraphRequest = { readonly "scope": EnvironmentScope; readonly "bindingId": Id; readonly "command": GraphCommand; };
+
+export type GraphResponse = { readonly "scope": EnvironmentScope; readonly "bindingId": Id; readonly "result": GraphResult; };
+
+export type DataChangeCursor = string;
+
+export type DataChangesQuery = { readonly "kind": "rows.changes"; readonly "tableId": Id; readonly "access": DataRowAccess; readonly "cursor"?: DataChangeCursor; readonly "limit"?: number; };
+
+export type DataChangeEvent = { readonly "cursor": DataChangeCursor; readonly "operation": "insert" | "update" | "delete"; readonly "rowId": Id; readonly "revision": Revision | null; readonly "occurredAt": Timestamp; };
+
+export type DataChangesResult = { readonly "tableId": Id; readonly "events": ReadonlyArray<DataChangeEvent>; readonly "nextCursor": DataChangeCursor; readonly "reset": boolean; };
+
+export type DataChangeMessage = { readonly "state": "connected" | "heartbeat" | "reset" | "authorization_revoked" | "closed"; readonly "cursor": DataChangeCursor | ""; readonly "events": ReadonlyArray<DataChangeEvent>; };
+
 export type BlobBucketName = string;
 
 export type BlobKey = string;
@@ -514,13 +552,13 @@ export type DataMutation = { readonly "commandId": Id; readonly "tableId": Id; r
 
 export type DataQuery = { readonly "kind": "rows.query"; readonly "tableId": Id; readonly "access": DataRowAccess; readonly "limit"?: number; readonly "afterId"?: Id; readonly "filters"?: ReadonlyArray<DataRowFilter>; readonly "columns"?: ReadonlyArray<DataIdentifier>; readonly "selectedIds"?: ReadonlyArray<Id>; readonly "sort"?: DataRowSort; readonly "afterSort"?: DataRowBoundary; };
 
-export type DataRequest = { readonly "scope": EnvironmentScope; readonly "bindingId": Id; readonly "command": DataMutation | DataQuery | DataTablesQuery | DataTableQuery | DataSchemaQuery | DataTypesQuery | DataImportQuery; };
+export type DataRequest = { readonly "scope": EnvironmentScope; readonly "bindingId": Id; readonly "command": DataMutation | DataQuery | DataTablesQuery | DataTableQuery | DataSchemaQuery | DataTypesQuery | DataImportQuery | DataChangesQuery; };
 
 export type DataCommandReceipt = { readonly "commandId": Id; readonly "tableId": Id; readonly "rowId"?: Id; readonly "revision"?: Revision; };
 
 export type DataQueryResult = { readonly "rows": ReadonlyArray<DataRow>; readonly "nextAfterId": Id | null; readonly "tableId": Id; readonly "nextSort"?: DataRowBoundary; };
 
-export type DataResponse = { readonly "scope": EnvironmentScope; readonly "bindingId": Id; readonly "result": DataCommandReceipt | DataQueryResult | DataTablesResult | DataTable | DataSchemaPreview | DataGeneratedTypes | DataImportPreview; };
+export type DataResponse = { readonly "scope": EnvironmentScope; readonly "bindingId": Id; readonly "result": DataCommandReceipt | DataQueryResult | DataTablesResult | DataTable | DataSchemaPreview | DataGeneratedTypes | DataImportPreview | DataChangesResult; };
 
 export type AccountDataQuery = { readonly "kind": "rows.query"; readonly "tableId": Id; readonly "access": DataRowAccess; readonly "limit"?: number; readonly "cursor"?: string; readonly "filters"?: ReadonlyArray<DataRowFilter>; readonly "columns"?: ReadonlyArray<DataIdentifier>; readonly "selectedIds"?: ReadonlyArray<Id>; readonly "sort"?: DataRowSort; };
 
@@ -751,6 +789,25 @@ export interface Components {
   WorkerBuildInput: WorkerBuildInput;
   BuildMaterials: BuildMaterials;
   BuildProvenance: BuildProvenance;
+  VectorCollectionDefinition: VectorCollectionDefinition;
+  VectorCollection: VectorCollection;
+  VectorPoint: VectorPoint;
+  VectorMatch: VectorMatch;
+  VectorCommand: VectorCommand;
+  VectorResult: VectorResult;
+  VectorRequest: VectorRequest;
+  VectorResponse: VectorResponse;
+  GraphNode: GraphNode;
+  GraphEdge: GraphEdge;
+  GraphCommand: GraphCommand;
+  GraphResult: GraphResult;
+  GraphRequest: GraphRequest;
+  GraphResponse: GraphResponse;
+  DataChangeCursor: DataChangeCursor;
+  DataChangesQuery: DataChangesQuery;
+  DataChangeEvent: DataChangeEvent;
+  DataChangesResult: DataChangesResult;
+  DataChangeMessage: DataChangeMessage;
   BlobBucketName: BlobBucketName;
   BlobKey: BlobKey;
   BlobBucketDefinition: BlobBucketDefinition;

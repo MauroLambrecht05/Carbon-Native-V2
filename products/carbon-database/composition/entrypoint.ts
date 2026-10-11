@@ -115,12 +115,14 @@ export async function buildDatabaseSystem(config: CarbonDatabaseConfig) {
   const handler = (request: Request) => canonical(new URL(request.url).pathname)
     ? lifecycle ? lifecycle(request) : Promise.resolve(Response.json({ error: { code: 'capability', message: 'Internal platform is not configured', requestId: crypto.randomUUID() } }, { status: 501, headers: { 'cache-control': 'no-store' } }))
     : legacyHandler(request);
-  return { deps, handler, realtime, blobStorage: lifecycle?.blobStorage };
+  return { deps, handler, realtime, blobStorage: lifecycle?.blobStorage, pruneChanges: lifecycle?.pruneChanges };
 }
 
 export async function startDatabase(config: CarbonDatabaseConfig = configFromEnv()) {
-  const { handler, realtime, deps, blobStorage } = await buildDatabaseSystem(config);
+  const { handler, realtime, deps, blobStorage, pruneChanges } = await buildDatabaseSystem(config);
   const server = startDatabaseServer({ port: config.port, handler, realtime });
+  // The change feed keeps three days of events; older ones are removed hourly.
+  if (pruneChanges) setInterval(() => { pruneChanges().catch(() => console.error(JSON.stringify({ event: 'data.changes.prune_unavailable' }))); }, 3_600_000).unref();
   // Blob cleanup: lapsed transfer addresses, abandoned uploads, and versions past their retention.
   if (blobStorage) setInterval(() => { blobStorage.sweep().catch(() => console.error(JSON.stringify({ event: 'blob.sweep_unavailable' }))); }, 60_000).unref();
 

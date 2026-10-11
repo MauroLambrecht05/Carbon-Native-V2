@@ -2036,6 +2036,25 @@
     "WorkerBuildInput":{"type":"object","additionalProperties":false,"required":["buildId","scope","source","sourceDigest","attempt","nextLogSequence"],"properties":{"buildId":{"$ref":"#/$defs/Id"},"scope":{"$ref":"#/$defs/EnvironmentScope"},"source":{"$ref":"#/$defs/BuildSource"},"sourceDigest":{"$ref":"#/$defs/Digest"},"attempt":{"type":"integer","minimum":0,"maximum":10},"nextLogSequence":{"type":"integer","minimum":1,"maximum":100000}}},
     "BuildMaterials":{"type":"object","additionalProperties":false,"required":["resolvedCommit","dependencyLockDigest","configurationDigest","tools","workspaceErased"],"properties":{"resolvedCommit":{"type":"string","pattern":"^[a-f0-9]{40}$"},"dependencyLockDigest":{"$ref":"#/$defs/Digest"},"configurationDigest":{"anyOf":[{"$ref":"#/$defs/Digest"},{"type":"null"}]},"tools":{"type":"array","maxItems":20,"items":{"type":"object","additionalProperties":false,"required":["name","version"],"properties":{"name":{"type":"string","pattern":"^[a-z][a-z0-9._-]{0,39}$"},"version":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$"}}}},"workspaceErased":{"const":true}}},
     "BuildProvenance":{"type":"object","additionalProperties":false,"required":["statement","statementDigest","signature"],"properties":{"statement":{"type":"object","additionalProperties":false,"required":["version","buildId","scope","attempt","workerId","source","sourceDigest","materials","artifacts","startedAt","finishedAt"],"properties":{"version":{"const":1},"buildId":{"$ref":"#/$defs/Id"},"scope":{"$ref":"#/$defs/EnvironmentScope"},"attempt":{"type":"integer","minimum":1,"maximum":10},"workerId":{"$ref":"#/$defs/Id"},"source":{"$ref":"#/$defs/BuildSource"},"sourceDigest":{"$ref":"#/$defs/Digest"},"materials":{"$ref":"#/$defs/BuildMaterials"},"artifacts":{"type":"array","minItems":1,"maxItems":8,"items":{"type":"object","additionalProperties":false,"required":["target","objectKey","sizeBytes","sha256"],"properties":{"target":{"type":"string","pattern":"^[a-z][a-z0-9-]{1,31}$"},"objectKey":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._/-]{0,511}$"},"sizeBytes":{"type":"integer","minimum":1,"maximum":17179869184},"sha256":{"$ref":"#/$defs/Digest"}}}},"startedAt":{"$ref":"#/$defs/Timestamp"},"finishedAt":{"$ref":"#/$defs/Timestamp"}}},"statementDigest":{"$ref":"#/$defs/Digest"},"signature":{"anyOf":[{"type":"object","additionalProperties":false,"required":["keyId","algorithm","value"],"properties":{"keyId":{"type":"string","pattern":"^[A-Za-z0-9_-]{1,64}$"},"algorithm":{"const":"ed25519"},"value":{"type":"string","pattern":"^[A-Za-z0-9_-]{86}$"}}},{"type":"null"}]}}},
+    "VectorCollectionDefinition":{"type":"object","additionalProperties":false,"required":["name","dimension","metric"],"properties":{"name":{"type":"string","pattern":"^[a-z][a-z0-9_-]{0,62}$"},"dimension":{"type":"integer","minimum":1,"maximum":2000},"metric":{"enum":["cosine","l2","inner"]}}},
+    "VectorCollection":{"type":"object","additionalProperties":false,"required":["id","definition","pointCount","revision","createdAt"],"properties":{"id":{"$ref":"#/$defs/Id"},"definition":{"$ref":"#/$defs/VectorCollectionDefinition"},"pointCount":{"type":"integer","minimum":0,"maximum":9007199254740991},"revision":{"$ref":"#/$defs/Revision"},"createdAt":{"$ref":"#/$defs/Timestamp"}}},
+    "VectorPoint":{"type":"object","additionalProperties":false,"required":["id","vector","metadata"],"properties":{"id":{"$ref":"#/$defs/Id"},"vector":{"type":"array","minItems":1,"maxItems":2000,"items":{"type":"number","minimum":-1000000,"maximum":1000000}},"metadata":{"type":"object","maxProperties":16,"propertyNames":{"pattern":"^[A-Za-z][A-Za-z0-9_]{0,62}$"},"additionalProperties":{"anyOf":[{"type":"string","maxLength":512},{"type":"number"},{"type":"boolean"},{"type":"null"}]}}}},
+    "VectorMatch":{"type":"object","additionalProperties":false,"required":["id","distance","metadata"],"properties":{"id":{"$ref":"#/$defs/Id"},"distance":{"type":"number"},"metadata":{"type":"object","maxProperties":16,"propertyNames":{"pattern":"^[A-Za-z][A-Za-z0-9_]{0,62}$"},"additionalProperties":{"anyOf":[{"type":"string","maxLength":512},{"type":"number"},{"type":"boolean"},{"type":"null"}]}}}},
+    "VectorCommand":{"anyOf":[{"type":"object","additionalProperties":false,"required":["kind","commandId","collectionId","definition"],"properties":{"kind":{"const":"collection.create"},"commandId":{"$ref":"#/$defs/Id"},"collectionId":{"$ref":"#/$defs/Id"},"definition":{"$ref":"#/$defs/VectorCollectionDefinition"}}},{"type":"object","additionalProperties":false,"required":["kind","commandId","collectionId","revision","confirmation"],"properties":{"kind":{"const":"collection.delete"},"commandId":{"$ref":"#/$defs/Id"},"collectionId":{"$ref":"#/$defs/Id"},"revision":{"$ref":"#/$defs/Revision"},"confirmation":{"type":"string","maxLength":63}}},{"type":"object","additionalProperties":false,"required":["kind"],"properties":{"kind":{"const":"collections.list"}}},{"type":"object","additionalProperties":false,"required":["kind","commandId","collectionId","points"],"properties":{"kind":{"const":"points.upsert"},"commandId":{"$ref":"#/$defs/Id"},"collectionId":{"$ref":"#/$defs/Id"},"points":{"type":"array","minItems":1,"maxItems":100,"items":{"$ref":"#/$defs/VectorPoint"}}}},{"type":"object","additionalProperties":false,"required":["kind","commandId","collectionId","ids"],"properties":{"kind":{"const":"points.delete"},"commandId":{"$ref":"#/$defs/Id"},"collectionId":{"$ref":"#/$defs/Id"},"ids":{"type":"array","minItems":1,"maxItems":100,"uniqueItems":true,"items":{"$ref":"#/$defs/Id"}}}},{"type":"object","additionalProperties":false,"required":["kind","collectionId","ids"],"properties":{"kind":{"const":"points.get"},"collectionId":{"$ref":"#/$defs/Id"},"ids":{"type":"array","minItems":1,"maxItems":100,"uniqueItems":true,"items":{"$ref":"#/$defs/Id"}}}},{"type":"object","additionalProperties":false,"required":["kind","collectionId","vector"],"properties":{"kind":{"const":"points.query"},"collectionId":{"$ref":"#/$defs/Id"},"vector":{"type":"array","minItems":1,"maxItems":2000,"items":{"type":"number","minimum":-1000000,"maximum":1000000}},"limit":{"type":"integer","minimum":1,"maximum":100},"filter":{"type":"object","maxProperties":8,"propertyNames":{"pattern":"^[A-Za-z][A-Za-z0-9_]{0,62}$"},"additionalProperties":{"anyOf":[{"type":"string","maxLength":512},{"type":"number"},{"type":"boolean"},{"type":"null"}]}}}}]},
+    "VectorResult":{"anyOf":[{"type":"object","additionalProperties":false,"required":["collections"],"properties":{"collections":{"type":"array","maxItems":50,"items":{"$ref":"#/$defs/VectorCollection"}}}},{"type":"object","additionalProperties":false,"required":["commandId","collectionId"],"properties":{"commandId":{"$ref":"#/$defs/Id"},"collectionId":{"$ref":"#/$defs/Id"},"revision":{"$ref":"#/$defs/Revision"},"affected":{"type":"integer","minimum":0,"maximum":9007199254740991}}},{"type":"object","additionalProperties":false,"required":["collectionId","points"],"properties":{"collectionId":{"$ref":"#/$defs/Id"},"points":{"type":"array","maxItems":100,"items":{"$ref":"#/$defs/VectorPoint"}}}},{"type":"object","additionalProperties":false,"required":["collectionId","matches"],"properties":{"collectionId":{"$ref":"#/$defs/Id"},"matches":{"type":"array","maxItems":100,"items":{"$ref":"#/$defs/VectorMatch"}}}}]},
+    "VectorRequest":{"type":"object","additionalProperties":false,"required":["scope","bindingId","command"],"properties":{"scope":{"$ref":"#/$defs/EnvironmentScope"},"bindingId":{"$ref":"#/$defs/Id"},"command":{"$ref":"#/$defs/VectorCommand"}}},
+    "VectorResponse":{"type":"object","additionalProperties":false,"required":["scope","bindingId","result"],"properties":{"scope":{"$ref":"#/$defs/EnvironmentScope"},"bindingId":{"$ref":"#/$defs/Id"},"result":{"$ref":"#/$defs/VectorResult"}}},
+    "GraphNode":{"type":"object","additionalProperties":false,"required":["id","label","properties"],"properties":{"id":{"$ref":"#/$defs/Id"},"label":{"type":"string","pattern":"^[A-Za-z][A-Za-z0-9_]{0,62}$"},"properties":{"type":"object","maxProperties":32,"propertyNames":{"pattern":"^[A-Za-z][A-Za-z0-9_]{0,62}$"},"additionalProperties":{"anyOf":[{"type":"string","maxLength":512},{"type":"number"},{"type":"boolean"},{"type":"null"}]}}}},
+    "GraphEdge":{"type":"object","additionalProperties":false,"required":["id","source","target","label","properties"],"properties":{"id":{"$ref":"#/$defs/Id"},"source":{"$ref":"#/$defs/Id"},"target":{"$ref":"#/$defs/Id"},"label":{"type":"string","pattern":"^[A-Za-z][A-Za-z0-9_]{0,62}$"},"properties":{"type":"object","maxProperties":32,"propertyNames":{"pattern":"^[A-Za-z][A-Za-z0-9_]{0,62}$"},"additionalProperties":{"anyOf":[{"type":"string","maxLength":512},{"type":"number"},{"type":"boolean"},{"type":"null"}]}}}},
+    "GraphCommand":{"anyOf":[{"type":"object","additionalProperties":false,"required":["kind","commandId","node"],"properties":{"kind":{"const":"node.put"},"commandId":{"$ref":"#/$defs/Id"},"node":{"$ref":"#/$defs/GraphNode"}}},{"type":"object","additionalProperties":false,"required":["kind","commandId","nodeId"],"properties":{"kind":{"const":"node.delete"},"commandId":{"$ref":"#/$defs/Id"},"nodeId":{"$ref":"#/$defs/Id"},"detach":{"type":"boolean"}}},{"type":"object","additionalProperties":false,"required":["kind","commandId","edge"],"properties":{"kind":{"const":"edge.put"},"commandId":{"$ref":"#/$defs/Id"},"edge":{"$ref":"#/$defs/GraphEdge"}}},{"type":"object","additionalProperties":false,"required":["kind","commandId","edgeId"],"properties":{"kind":{"const":"edge.delete"},"commandId":{"$ref":"#/$defs/Id"},"edgeId":{"$ref":"#/$defs/Id"}}},{"type":"object","additionalProperties":false,"required":["kind","nodeId"],"properties":{"kind":{"const":"node.get"},"nodeId":{"$ref":"#/$defs/Id"}}},{"type":"object","additionalProperties":false,"required":["kind","nodeId","direction"],"properties":{"kind":{"const":"neighbors"},"nodeId":{"$ref":"#/$defs/Id"},"direction":{"enum":["out","in","both"]},"label":{"type":"string","pattern":"^[A-Za-z][A-Za-z0-9_]{0,62}$"},"limit":{"type":"integer","minimum":1,"maximum":500}}},{"type":"object","additionalProperties":false,"required":["kind","nodeId","direction","maxDepth"],"properties":{"kind":{"const":"traverse"},"nodeId":{"$ref":"#/$defs/Id"},"direction":{"enum":["out","in","both"]},"label":{"type":"string","pattern":"^[A-Za-z][A-Za-z0-9_]{0,62}$"},"maxDepth":{"type":"integer","minimum":1,"maximum":6},"limit":{"type":"integer","minimum":1,"maximum":1000}}},{"type":"object","additionalProperties":false,"required":["kind","from","to","direction","maxDepth"],"properties":{"kind":{"const":"path"},"from":{"$ref":"#/$defs/Id"},"to":{"$ref":"#/$defs/Id"},"direction":{"enum":["out","in","both"]},"label":{"type":"string","pattern":"^[A-Za-z][A-Za-z0-9_]{0,62}$"},"maxDepth":{"type":"integer","minimum":1,"maximum":6}}}]},
+    "GraphResult":{"anyOf":[{"type":"object","additionalProperties":false,"required":["commandId"],"properties":{"commandId":{"$ref":"#/$defs/Id"},"nodeId":{"$ref":"#/$defs/Id"},"edgeId":{"$ref":"#/$defs/Id"},"removedEdges":{"type":"integer","minimum":0,"maximum":9007199254740991}}},{"type":"object","additionalProperties":false,"required":["node"],"properties":{"node":{"$ref":"#/$defs/GraphNode"}}},{"type":"object","additionalProperties":false,"required":["neighbors","truncated"],"properties":{"neighbors":{"type":"array","maxItems":500,"items":{"type":"object","additionalProperties":false,"required":["node","edge"],"properties":{"node":{"$ref":"#/$defs/GraphNode"},"edge":{"$ref":"#/$defs/GraphEdge"}}}},"truncated":{"type":"boolean"}}},{"type":"object","additionalProperties":false,"required":["reached","truncated"],"properties":{"reached":{"type":"array","maxItems":1000,"items":{"type":"object","additionalProperties":false,"required":["node","depth"],"properties":{"node":{"$ref":"#/$defs/GraphNode"},"depth":{"type":"integer","minimum":0,"maximum":6}}}},"truncated":{"type":"boolean"}}},{"type":"object","additionalProperties":false,"required":["found","nodes","edges"],"properties":{"found":{"type":"boolean"},"nodes":{"type":"array","maxItems":7,"items":{"$ref":"#/$defs/Id"}},"edges":{"type":"array","maxItems":6,"items":{"$ref":"#/$defs/Id"}}}}]},
+    "GraphRequest":{"type":"object","additionalProperties":false,"required":["scope","bindingId","command"],"properties":{"scope":{"$ref":"#/$defs/EnvironmentScope"},"bindingId":{"$ref":"#/$defs/Id"},"command":{"$ref":"#/$defs/GraphCommand"}}},
+    "GraphResponse":{"type":"object","additionalProperties":false,"required":["scope","bindingId","result"],"properties":{"scope":{"$ref":"#/$defs/EnvironmentScope"},"bindingId":{"$ref":"#/$defs/Id"},"result":{"$ref":"#/$defs/GraphResult"}}},
+    "DataChangeCursor":{"type":"string","pattern":"^[1-9][0-9]{0,18}\\.[0-9]{1,20}\\.[0-9]{1,19}$"},
+    "DataChangesQuery":{"type":"object","additionalProperties":false,"required":["kind","tableId","access"],"properties":{"kind":{"const":"rows.changes"},"tableId":{"$ref":"#/$defs/Id"},"access":{"$ref":"#/$defs/DataRowAccess"},"cursor":{"$ref":"#/$defs/DataChangeCursor"},"limit":{"type":"integer","minimum":1,"maximum":500}}},
+    "DataChangeEvent":{"type":"object","additionalProperties":false,"required":["cursor","operation","rowId","revision","occurredAt"],"properties":{"cursor":{"$ref":"#/$defs/DataChangeCursor"},"operation":{"enum":["insert","update","delete"]},"rowId":{"$ref":"#/$defs/Id"},"revision":{"anyOf":[{"$ref":"#/$defs/Revision"},{"type":"null"}]},"occurredAt":{"$ref":"#/$defs/Timestamp"}}},
+    "DataChangesResult":{"type":"object","additionalProperties":false,"required":["tableId","events","nextCursor","reset"],"properties":{"tableId":{"$ref":"#/$defs/Id"},"events":{"type":"array","maxItems":500,"items":{"$ref":"#/$defs/DataChangeEvent"}},"nextCursor":{"$ref":"#/$defs/DataChangeCursor"},"reset":{"type":"boolean"}}},
+    "DataChangeMessage":{"type":"object","additionalProperties":false,"required":["state","cursor","events"],"properties":{"state":{"enum":["connected","heartbeat","reset","authorization_revoked","closed"]},"cursor":{"anyOf":[{"$ref":"#/$defs/DataChangeCursor"},{"const":""}]},"events":{"type":"array","maxItems":500,"items":{"$ref":"#/$defs/DataChangeEvent"}}}},
     "BlobBucketName":{"type":"string","pattern":"^[a-z][a-z0-9-]{1,62}$"},
     "BlobKey":{"type":"string","minLength":1,"maxLength":512,"pattern":"^(?!.*(^|/)\\.{1,2}(/|$))[A-Za-z0-9!_.*'()-]+(/[A-Za-z0-9!_.*'()-]+)*$"},
     "BlobBucketDefinition":{"type":"object","additionalProperties":false,"required":["name","visibility","maxObjectBytes","allowedContentTypes","versioning","retentionDays","quotaBytes"],"properties":{"name":{"$ref":"#/$defs/BlobBucketName"},"visibility":{"enum":["private","public"]},"maxObjectBytes":{"type":"integer","minimum":1,"maximum":268435456},"allowedContentTypes":{"type":"array","maxItems":32,"uniqueItems":true,"items":{"type":"string","pattern":"^[a-z0-9][a-z0-9!#$&^_.+-]{0,62}/[a-z0-9][a-z0-9!#$&^_.+-]{0,62}$"}},"versioning":{"type":"boolean"},"retentionDays":{"anyOf":[{"type":"integer","minimum":1,"maximum":3650},{"type":"null"}]},"quotaBytes":{"type":"integer","minimum":1,"maximum":1099511627776}}},
@@ -3810,48 +3829,7 @@
         }
       }
     },
-    "DataRequest": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "scope",
-        "bindingId",
-        "command"
-      ],
-      "properties": {
-        "scope": {
-          "$ref": "#/$defs/EnvironmentScope"
-        },
-        "bindingId": {
-          "$ref": "#/$defs/Id"
-        },
-        "command": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/DataMutation"
-            },
-            {
-              "$ref": "#/$defs/DataQuery"
-            },
-            {
-              "$ref": "#/$defs/DataTablesQuery"
-            },
-            {
-              "$ref": "#/$defs/DataTableQuery"
-            },
-            {
-              "$ref": "#/$defs/DataSchemaQuery"
-            },
-            {
-              "$ref": "#/$defs/DataTypesQuery"
-            },
-            {
-              "$ref": "#/$defs/DataImportQuery"
-            }
-          ]
-        }
-      }
-    },
+    "DataRequest":{"type":"object","additionalProperties":false,"required":["scope","bindingId","command"],"properties":{"scope":{"$ref":"#/$defs/EnvironmentScope"},"bindingId":{"$ref":"#/$defs/Id"},"command":{"anyOf":[{"$ref":"#/$defs/DataMutation"},{"$ref":"#/$defs/DataQuery"},{"$ref":"#/$defs/DataTablesQuery"},{"$ref":"#/$defs/DataTableQuery"},{"$ref":"#/$defs/DataSchemaQuery"},{"$ref":"#/$defs/DataTypesQuery"},{"$ref":"#/$defs/DataImportQuery"},{"$ref":"#/$defs/DataChangesQuery"}]}}},
     "DataCommandReceipt": {
       "type": "object",
       "additionalProperties": false,
@@ -3909,48 +3887,7 @@
         }
       }
     },
-    "DataResponse": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "scope",
-        "bindingId",
-        "result"
-      ],
-      "properties": {
-        "scope": {
-          "$ref": "#/$defs/EnvironmentScope"
-        },
-        "bindingId": {
-          "$ref": "#/$defs/Id"
-        },
-        "result": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/DataCommandReceipt"
-            },
-            {
-              "$ref": "#/$defs/DataQueryResult"
-            },
-            {
-              "$ref": "#/$defs/DataTablesResult"
-            },
-            {
-              "$ref": "#/$defs/DataTable"
-            },
-            {
-              "$ref": "#/$defs/DataSchemaPreview"
-            },
-            {
-              "$ref": "#/$defs/DataGeneratedTypes"
-            },
-            {
-              "$ref": "#/$defs/DataImportPreview"
-            }
-          ]
-        }
-      }
-    },
+    "DataResponse":{"type":"object","additionalProperties":false,"required":["scope","bindingId","result"],"properties":{"scope":{"$ref":"#/$defs/EnvironmentScope"},"bindingId":{"$ref":"#/$defs/Id"},"result":{"anyOf":[{"$ref":"#/$defs/DataCommandReceipt"},{"$ref":"#/$defs/DataQueryResult"},{"$ref":"#/$defs/DataTablesResult"},{"$ref":"#/$defs/DataTable"},{"$ref":"#/$defs/DataSchemaPreview"},{"$ref":"#/$defs/DataGeneratedTypes"},{"$ref":"#/$defs/DataImportPreview"},{"$ref":"#/$defs/DataChangesResult"}]}}},
     "AccountDataQuery": {
       "type": "object",
       "additionalProperties": false,

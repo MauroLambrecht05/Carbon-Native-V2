@@ -285,6 +285,100 @@ suite('canonical native PostgreSQL policies', () => {
     expect((await h.data.get(authority, categories)).revision).toBe('1');
   });
 
+  test('the change feed captures every row change in its own transaction, in commit order, and tells each reader only about rows they could see', async () => {
+    const h = await harness(); const authority = h.environments[0]!; const elsewhere = h.environments[1]!; const alice = uuid(); const bob = uuid(); const id = uuid();
+    const fault = (error: { code?: string; errno?: string; name?: string }): string => error.name === 'ContractError' ? 'validation' : error.errno ?? error.code ?? String(error);
+    const ownerRule = { id: uuid(), name: 'Owner', kind: 'owner' as const, ownerColumn: 'owner', operations: ['select', 'insert', 'update', 'delete'] as ('select' | 'insert' | 'update' | 'delete')[] };
+    const columns = [{ name: 'owner', type: 'uuid' as const, nullable: false }, { name: 'body', type: 'text' as const, nullable: false }];
+    await h.data.create(authority, id, { name: 'notes', columns, policies: { enabled: true, rules: [ownerRule] } });
+    const names = databaseEnvironmentIdentifiers(authority.scope.environmentId); const target = `"${names.schema}"."ct_${id.replaceAll('-', '')}"`;
+    const as = (user: string) => app(authority, user);
+    // One reader's view of the feed: what they are told, as [operation, row, revision].
+    const feed = async (reader: NativeDataAuthority, cursor?: string, limit?: number, tableId = id, mode: { mode: 'application' } | { mode: 'policy-preview'; userId?: string } = access) => {
+      const result = await h.data.changes({ ...reader, requestId: uuid() }, { kind: 'rows.changes', tableId, access: mode, ...(cursor ? { cursor } : {}), ...(limit ? { limit } : {}) });
+      return { ...result, seen: result.events.map(event => [event.operation, event.rowId, event.revision]) };
+    };
+    // A reader starts from now: no history, and a cursor to continue from.
+    const start = await feed(as(alice)); expect(start).toMatchObject({ tableId: id, events: [], reset: false }); expect(start.nextCursor).toBe('1.0.0');
+
+    const one = await h.data.insert(as(alice), id, access, { owner: alice, body: 'first' });
+    const two = await h.data.insert(as(bob), id, access, { owner: bob, body: 'bob only' });
+    const edited = await h.data.update(as(alice), id, access, one.id, one.revision, { body: 'first, edited' });
+    await h.data.delete(as(alice), id, access, one.id, edited.revision);
+    // Alice is told about her row's whole life, in order, and nothing about Bob's.
+    const hers = await feed(as(alice), start.nextCursor); expect(hers.seen).toEqual([['insert', one.id, '1'], ['update', one.id, '2'], ['delete', one.id, null]]); expect(hers.reset).toBe(false);
+    expect((await feed(as(bob), start.nextCursor)).seen).toEqual([['insert', two.id, '1']]);
+    // Cursors are strictly increasing positions, and each event carries the cursor that continues after it.
+    expect(new Set(hers.events.map(event => event.cursor)).size).toBe(3); expect(hers.nextCursor).toBe(hers.events.at(-1)!.cursor);
+    expect((await feed(as(alice), hers.events[0]!.cursor)).seen).toEqual([['update', one.id, '2'], ['delete', one.id, null]]);
+    expect((await feed(as(alice), hers.nextCursor)).seen).toEqual([]); expect((await feed(as(alice), hers.nextCursor)).nextCursor).toBe(hers.nextCursor);
+    // The cursor moves past changes the reader cannot see, so they are not scanned again and nothing about them leaks.
+    const bobs = await feed(as(bob), start.nextCursor); expect(bobs.nextCursor).toBe(hers.nextCursor);
+    // Pages: a limit stops the page, and the next one continues exactly after it.
+    const page = await feed(as(alice), start.nextCursor, 2); expect(page.seen).toHaveLength(2); expect((await feed(as(alice), page.nextCursor, 2)).seen).toEqual([['delete', one.id, null]]);
+    // An account previewing as a user sees what that user would; previewing as nobody sees nothing here.
+    expect((await feed(authority, start.nextCursor, undefined, id, { mode: 'policy-preview', userId: bob })).seen).toEqual([['insert', two.id, '1']]);
+    expect((await feed(authority, start.nextCursor, undefined, id, { mode: 'policy-preview' })).seen).toEqual([]);
+    expect(fault(await rejected(feed(authority, start.nextCursor)))).toBe('forbidden'); expect(fault(await rejected(feed(as(alice), start.nextCursor, undefined, id, { mode: 'policy-preview', userId: bob })))).toBe('forbidden');
+    for (const cursor of ['1', '1.2', 'x.1.1', '0.1.1', '1.-1.1', '1.1.1.1']) expect(fault(await rejected(feed(as(alice), cursor)))).toBe('validation');
+    // Another environment has no such table, and a reader whose authority is gone gets nothing.
+    expect(fault(await rejected(feed(app(elsewhere, alice), start.nextCursor)))).toBe('not_found');
+    expect(fault(await rejected(feed({ ...as(alice), permit: async () => false }, start.nextCursor)))).toBe('forbidden');
+    let checks = 0; expect(fault(await rejected(feed({ ...as(alice), permit: async () => ++checks < 2 }, start.nextCursor)))).toBe('forbidden');
+
+    // Capture is in the database, not the API: a change made by plain SQL is in the feed, and a rolled-back one is not.
+    let position = hers.nextCursor;
+    await h.sql.unsafe(`INSERT INTO ${target} (owner, body) VALUES ($1::uuid, 'written by an operator')`, [alice]);
+    await h.sql.begin(async tx => { await tx.unsafe(`INSERT INTO ${target} (owner, body) VALUES ($1::uuid, 'never committed')`, [alice]); throw new Error('rollback'); }).catch(() => undefined);
+    const direct = await feed(as(alice), position); expect(direct.seen.map(event => event[0])).toEqual(['insert']); position = direct.nextCursor;
+    expect(Number((await h.sql`SELECT count(*)::integer AS count FROM data_change_events WHERE table_id = ${id}`)[0].count)).toBe(5);
+    // The role that changes rows can neither read the feed nor write to it.
+    const forbidden = async (statement: string) => fault(await rejected(h.sql.begin(async tx => { await tx.unsafe(`SET LOCAL ROLE "${names.role}"`); await tx.unsafe(statement); })));
+    expect(await forbidden('SELECT 1 FROM public.data_change_events')).toBe('42501');
+    expect(await forbidden(`INSERT INTO public.data_change_events (environment_id, table_id, row_id, operation, row_revision, visibility) VALUES ('${authority.scope.environmentId}', '${id}', '${uuid()}', 'insert', 1, '{"public":true,"owners":[]}')`)).toBe('42501');
+    expect(await forbidden(`SELECT public.carbon_capture_change()`)).not.toBe('ok');
+
+    // Commit order: a change that commits while an earlier transaction is still open is held back until that one ends,
+    // so nothing can ever appear behind a cursor that was already handed out.
+    const second = new Bun.SQL(h.url, { max: 1 }); let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; }); let opened!: () => void; const ready = new Promise<void>(resolve => { opened = resolve; });
+    const slow = second.begin(async tx => { await tx.unsafe(`INSERT INTO ${target} (owner, body) VALUES ($1::uuid, 'slow transaction')`, [alice]); opened(); await gate; });
+    await ready; const fast = await h.data.insert(as(alice), id, access, { owner: alice, body: 'fast transaction' });
+    const held = await feed(as(alice), position); expect(held.seen).toEqual([]); expect(held.nextCursor).toBe(position);
+    release(); await slow; await second.close();
+    const both = await feed(as(alice), position); expect(both.seen.map(event => event[0])).toEqual(['insert', 'insert']); expect(both.seen[1]![1]).toBe(fast.id); position = both.nextCursor;
+
+    // Ownership changes hands: the row leaves one reader's view and enters another's, and both are told.
+    const moved = await h.sql.unsafe(`UPDATE ${target} SET owner = $1::uuid, _carbon_revision = _carbon_revision + 1 WHERE _carbon_id = $2::uuid RETURNING _carbon_revision::text AS revision`, [bob, fast.id]);
+    expect((await feed(as(alice), position)).seen).toEqual([['update', fast.id, moved[0].revision]]); expect((await feed(as(bob), position)).seen).toEqual([['update', fast.id, moved[0].revision]]);
+    const carol = uuid(); expect((await feed(as(carol), position)).seen).toEqual([]);
+
+    // Policies decide who is told, and they are part of the table's revision: changing them resets every cursor.
+    const open = await h.data.replacePolicies(authority, id, '1', { enabled: true, rules: [ownerRule, { id: uuid(), name: 'Everyone reads', kind: 'public-read', operations: ['select'] }] });
+    const stale = await feed(as(carol), position); expect(stale).toMatchObject({ events: [], reset: true }); expect(stale.nextCursor.startsWith(`${open.revision}.`)).toBe(true);
+    const published = await h.data.insert(as(alice), id, access, { owner: alice, body: 'now public' });
+    expect((await feed(as(carol), stale.nextCursor)).seen).toEqual([['insert', published.id, '1']]);
+    expect((await feed(authority, stale.nextCursor, undefined, id, { mode: 'policy-preview' })).seen).toEqual([['insert', published.id, '1']]);
+    // With policies off nobody reads the table through the API, and nobody is told about its changes.
+    const closed = await h.data.replacePolicies(authority, id, open.revision, { enabled: false, rules: [ownerRule] }); const quiet = await feed(as(alice), `${closed.revision}.0.0`);
+    await h.sql.unsafe(`INSERT INTO ${target} (owner, body) VALUES ($1::uuid, 'unseen')`, [alice]);
+    expect((await feed(as(alice), quiet.nextCursor)).seen).toEqual([]);
+    const reopened = await h.data.replacePolicies(authority, id, closed.revision, { enabled: true, rules: [ownerRule] }); const fresh = (await feed(as(alice))).nextCursor; expect(fresh.startsWith(`${reopened.revision}.`)).toBe(true);
+    // A schema change is a new revision too.
+    await h.data.command({ ...authority, requestId: uuid() }, { kind: 'table.alter', tableId: id, revision: reopened.revision, commandId: uuid(), change: { kind: 'column.add', column: { name: 'note', type: 'text', nullable: true } } });
+    expect(await feed(as(alice), fresh)).toMatchObject({ events: [], reset: true });
+
+    // Retention: old events are removed, and a reader who was behind them is told to start again rather than silently missing them.
+    const current = (await feed(as(alice))).nextCursor; const kept = await h.data.insert(as(alice), id, access, { owner: alice, body: 'recent' }); void kept;
+    const after = (await feed(as(alice), current)); expect(after.seen).toHaveLength(1);
+    await h.sql`UPDATE data_change_events SET occurred_at = now() - interval '100 hours' WHERE table_id = ${id}`;
+    const late = await h.data.insert(as(alice), id, access, { owner: alice, body: 'after the cut' });
+    expect(await h.data.pruneChanges(72)).toBeGreaterThan(5); expect(await h.sql`SELECT 1 FROM data_change_events WHERE table_id = ${id}`).toHaveLength(1);
+    expect(await feed(as(alice), current)).toMatchObject({ events: [], reset: true });
+    // A reader who had already read up to the cut continues normally.
+    expect((await feed(as(alice), after.nextCursor)).seen).toEqual([['insert', late.id, '1']]); expect((await feed(as(alice), after.nextCursor)).reset).toBe(false);
+    expect(await h.data.pruneChanges(72)).toBe(0);
+  });
+
   test('user keys can be added, replaced and cleared atomically without replacing internal row identities', async () => {
     const h = await harness(); const authority = h.environments[0]!; const id = uuid(); const user = uuid(); const actor = app(authority, user);
     await h.data.create(authority, id, { ...definition(), columns: [...definition().columns, { name: 'slug', type: 'text', nullable: true }, { name: 'number', type: 'integer', nullable: false, default: { kind: 'literal', value: '1' } }] });

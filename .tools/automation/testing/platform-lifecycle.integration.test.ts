@@ -6,7 +6,7 @@ import { AccountCatalog, PostgresCatalogRepository, PostgresProvisioningReposito
   PostgresServiceLifecycleRepository, PostgresDatabaseEnvironmentDriver, databaseEnvironmentIdentifiers, type ProvisioningWork } from '@carbon/catalog';
 import { parseComponent, serviceLifecycleBody, dataPermission, dataRequestPath, canonicalRegistryRequest, registryRequestPath } from '@carbon/contracts/platform';
 import { AppAuthentication, PostgresAppAuthRepository } from '@carbon/auth';
-import { AccountBlobs, HttpBlobClient, type BlobStore } from '@carbon/data';
+import { AccountBlobs, AccountEngine, HttpBlobClient, HttpEngineClient, type BlobStore } from '@carbon/data';
 import { HttpDataClient, AccountData, PostgresAccountDataAuthority, AccountImports, PostgresImportJobs, HttpImportClient, RunImportJobs, AccountExports, ExportDownloads, PostgresExportJobs, RunExportJobs,
   type ExportJobs, type ExportStore } from '@carbon/data';
 import { createExportRoutes } from '../../../products/carbon-cloud/infrastructure/http/export-routes.ts';
@@ -83,10 +83,12 @@ async function harness() {
   await cloud`INSERT INTO account_sessions (id, account_id, token_hash, csrf_hash, security_revision, device_name, expires_at, fresh_until)
     VALUES (${session}, ${account}, ${tokenDigest(token)}, ${tokenDigest(csrf)}, 1, 'Fixture', now() + interval '8 hours', now() + interval '10 minutes')`;
   const apiHandler = createAccountRoutes(auth, origin, undefined, undefined, new OrganizationAccess(auth, new PostgresOrganizationRepository(cloud), protector), undefined, undefined, undefined,
-    new AccountCatalog(auth, new PostgresCatalogRepository(cloud), protector), new AccountData(auth, new PostgresAccountDataAuthority(cloud), new HttpDataClient(databaseServer.url.origin, issuer), protector), new AccountImports(auth, importJobs),
+    new AccountCatalog(auth, new PostgresCatalogRepository(cloud), protector), new AccountData(auth, new PostgresAccountDataAuthority(cloud), new HttpDataClient(databaseServer.url.origin, issuer), protector, { pollMs: 25, heartbeatMs: 150, maxMs: 6000 }), new AccountImports(auth, importJobs),
     undefined, undefined, undefined, undefined, new AccountServiceAccounts(auth, new PostgresServiceAccountRepository(cloud), protector, issuer),
     undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, new AccountExports(auth, exportJobs, origin),
-    new AccountBlobs(auth, new PostgresAccountDataAuthority(cloud), new HttpBlobClient(databaseServer.url.origin, issuer)));
+    new AccountBlobs(auth, new PostgresAccountDataAuthority(cloud), new HttpBlobClient(databaseServer.url.origin, issuer)),
+    new AccountEngine('vectors', auth, new PostgresAccountDataAuthority(cloud), new HttpEngineClient('vectors', databaseServer.url.origin, issuer)),
+    new AccountEngine('graph', auth, new PostgresAccountDataAuthority(cloud), new HttpEngineClient('graph', databaseServer.url.origin, issuer)));
   const downloadHandler = createExportRoutes(new ExportDownloads(exportJobs, exportStore));
   const api = (path: string, input?: unknown, revision?: string, overrides?: Record<string, string>) => apiHandler(new Request(origin + path, { method: input === undefined ? 'GET' : 'POST',
     headers: { origin, cookie: `__Host-carbon-session=${token}`, 'x-csrf-token': csrf, 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID(), ...(revision ? { 'if-match': revision } : {}), ...Object.fromEntries(new Headers(overrides)) },
@@ -654,6 +656,143 @@ suite('Cloud-to-owning-service lifecycle over real HTTP and PostgreSQL', () => {
     // Nothing durable holds an address.
     expect(JSON.stringify(await h.database`SELECT * FROM blob_transfers`)).not.toContain('bt_'); expect(JSON.stringify(await h.database`SELECT * FROM blob_events`)).not.toContain('bt_');
   }, 240000);
+
+  test('the change stream delivers ordered notifications, resumes exactly after a reconnect, replays from a cursor, resets on schema change and closes when access ends', async () => {
+    const h = await harness(); const created = await h.create('stream-api', ['database']); expect(await h.worker.execute()).toBe(true);
+    const scope = parseComponent('EnvironmentScope', created.scope);
+    const envPath = `/platform/v1/orgs/${scope.orgId}/projects/${scope.projectId}/environments/${scope.environmentId}`; const dataPath = envPath + '/data';
+    const env = parseComponent('CatalogEnvironmentDetails', await (await h.api(envPath)).json()); const tableId = crypto.randomUUID(); const access = { mode: 'policy-preview', userId: h.account };
+    const create = { kind: 'table.create', commandId: crypto.randomUUID(), tableId, definition: { name: 'feed', columns: [{ name: 'owner', type: 'uuid', nullable: false }, { name: 'body', type: 'text', nullable: false }],
+      policies: { enabled: true, rules: [{ id: crypto.randomUUID(), name: 'Owner', kind: 'owner', ownerColumn: 'owner', operations: ['select', 'insert', 'update', 'delete'] }] } } };
+    expect((await h.api(dataPath, create, env.environment.revision, { 'idempotency-key': create.commandId })).status).toBe(200);
+    let revision = '1';
+    const mutate = async (command: Record<string, unknown>) => { const response = await h.api(dataPath, command, command.revision as string, { 'idempotency-key': command.commandId as string }); expect(response.status).toBe(200); return (await response.json() as { receipt: { rowId: string; revision: string } }).receipt; };
+    const insert = (body: string, owner = h.account) => mutate({ kind: 'row.insert', commandId: crypto.randomUUID(), tableId, revision, access, values: { owner, body } });
+    // An EventSource as a browser would use it: frames in order, each with the id to resume from.
+    const open = async (query = `tableId=${tableId}&userId=${h.account}`, headers: Record<string, string> = {}) => {
+      const response = await h.api(`${dataPath}/changes?${query}`, undefined, undefined, headers);
+      if (response.status !== 200) return { status: response.status, next: async () => undefined, seen: async () => [] as unknown[][], close: async () => {} };
+      expect(response.headers.get('content-type')).toBe('text/event-stream; charset=utf-8');
+      const reader = response.body!.getReader(); const decoder = new TextDecoder(); let buffer = '';
+      const next = async () => {
+        while (!buffer.includes('\n\n')) { const { done, value } = await reader.read(); if (done) return undefined; buffer += decoder.decode(value); }
+        const index = buffer.indexOf('\n\n'); const frame = buffer.slice(0, index); buffer = buffer.slice(index + 2);
+        return { id: /^id: (.+)$/m.exec(frame)?.[1], message: parseComponent('DataChangeMessage', JSON.parse(/^data: (.+)$/m.exec(frame)![1]!)) };
+      };
+      // The next frame that carries events, skipping heartbeats.
+      const seen = async () => { for (;;) { const frame = await next(); if (!frame) throw new Error('stream ended'); if (frame.message.events.length) return frame.message.events.map(event => [event.operation, event.rowId, event.revision]); } };
+      return { status: 200, next, seen, close: () => reader.cancel() };
+    };
+
+    // Who may open a stream.
+    expect((await open(undefined, { cookie: '' })).status).toBe(401); expect((await open(`tableId=${crypto.randomUUID()}&userId=${h.account}`)).status).toBe(404);
+    expect((await open(`tableId=${tableId}&cursor=nonsense`)).status).toBe(400); expect((await open(`tableId=${tableId}&extra=1`)).status).toBe(400); expect((await open('userId=' + h.account)).status).toBe(400);
+    const viewerToken = opaqueToken('as'); const viewerCsrf = opaqueToken('csrf'); const viewerId = crypto.randomUUID();
+    await h.cloud`INSERT INTO accounts (id, primary_email, name, verified_at, terms_version) VALUES (${viewerId}, 'viewer@example.test', 'Viewer', now(), 'fixture')`;
+    await h.cloud`INSERT INTO account_sessions (id, account_id, token_hash, csrf_hash, security_revision, device_name, expires_at, fresh_until)
+      VALUES (${crypto.randomUUID()}, ${viewerId}, ${tokenDigest(viewerToken)}, ${tokenDigest(viewerCsrf)}, 1, 'Fixture', now() + interval '8 hours', now() + interval '10 minutes')`;
+    await h.cloud`INSERT INTO memberships (id, account_id, org_id, role, state, project_access) VALUES (${crypto.randomUUID()}, ${viewerId}, ${scope.orgId}, 'Viewer', 'active', 'all')`;
+    expect((await open(undefined, { cookie: `__Host-carbon-session=${viewerToken}`, 'x-csrf-token': viewerCsrf })).status).toBe(403);
+
+    // A stream starts from now.
+    const stream = await open(); const hello = (await stream.next())!; expect(hello.message).toMatchObject({ state: 'connected', events: [] }); expect(hello.id).toBe(hello.message.cursor); const origin = hello.id!;
+    const first = await insert('one'); expect(await stream.seen()).toEqual([['insert', first.rowId, '1']]);
+    // Someone else's row is not this reader's business.
+    const stranger = crypto.randomUUID(); const names = databaseEnvironmentIdentifiers(scope.environmentId);
+    await h.database.unsafe(`INSERT INTO "${names.schema}"."ct_${tableId.replaceAll('-', '')}" (owner, body) VALUES ($1::uuid, 'not yours')`, [stranger]);
+    const second = await insert('two'); const frame = (await stream.next())!;
+    expect(frame.message.events.map(event => [event.operation, event.rowId])).toEqual([['insert', second.rowId]]); const resume = frame.id!;
+    // Quiet periods carry heartbeats, so the client can tell a silent stream from a dead one.
+    let beat; do { beat = (await stream.next())!; } while (beat.message.state !== 'heartbeat'); expect(beat.message.events).toEqual([]); expect(beat.id).toBe(resume);
+    await stream.close();
+
+    // While disconnected, things happen. Reconnecting with the last id delivers exactly those, once, in order.
+    const edited = await mutate({ kind: 'row.update', commandId: crypto.randomUUID(), tableId, access, rowId: first.rowId, revision: '1', values: { body: 'one, edited' } });
+    const third = await insert('three'); await mutate({ kind: 'row.delete', commandId: crypto.randomUUID(), tableId, access, rowId: second.rowId, revision: '1' });
+    const missed = [['update', first.rowId, edited.revision], ['insert', third.rowId, '1'], ['delete', second.rowId, null]];
+    const again = await open(undefined, { 'last-event-id': resume }); expect(await again.seen()).toEqual(missed); await again.close();
+    // The cursor can also be given explicitly, and an older one replays from there.
+    const replay = await open(`tableId=${tableId}&userId=${h.account}&cursor=${origin}`);
+    expect(await replay.seen()).toEqual([['insert', first.rowId, '1'], ['insert', second.rowId, '1'], ...missed]);
+    // Previewing as someone else shows their rows only; previewing as nobody shows none.
+    const theirs = await open(`tableId=${tableId}&userId=${stranger}&cursor=${origin}`); expect((await theirs.seen()).map(event => event[0])).toEqual(['insert']); await theirs.close();
+    const nobody = await open(`tableId=${tableId}&cursor=${origin}`); expect((await nobody.next())!.message).toMatchObject({ state: 'connected', events: [] }); await nobody.close();
+
+    // A schema change resets the stream: the client reloads the table and continues from the new cursor.
+    const alter = { kind: 'table.alter', commandId: crypto.randomUUID(), tableId, revision: '1', change: { kind: 'column.add', column: { name: 'note', type: 'text', nullable: true } } };
+    expect((await h.api(dataPath, alter, '1', { 'idempotency-key': alter.commandId })).status).toBe(200); revision = '2';
+    let reset; do { reset = (await replay.next())!; } while (reset.message.state !== 'reset'); expect(reset.message.events).toEqual([]); expect(reset.id!.startsWith('2.')).toBe(true);
+    const fourth = await insert('four'); expect(await replay.seen()).toEqual([['insert', fourth.rowId, '1']]);
+    // A stale cursor given at connect time is answered the same way, before anything else.
+    const stale = await open(`tableId=${tableId}&userId=${h.account}&cursor=${origin}`); expect((await stale.next())!.message.state).toBe('reset'); await stale.close();
+
+    // Access ends: the stream says so and stops. Nothing further is delivered.
+    await h.cloud`UPDATE account_sessions SET expires_at = now() - interval '1 second' WHERE id = ${h.session}`;
+    let last; do { last = (await replay.next())!; } while (last.message.state === 'heartbeat' || last.message.state === 'connected');
+    expect(last.message).toEqual({ state: 'authorization_revoked', cursor: '', events: [] }); expect(last.id).toBeUndefined(); expect(await replay.next()).toBeUndefined();
+    await h.cloud`UPDATE account_sessions SET expires_at = now() + interval '8 hours' WHERE id = ${h.session}`;
+    // A stream does not live forever: it closes cleanly and the client reconnects with its cursor.
+    const bounded = await open(); let end; do { end = (await bounded.next())!; } while (end.message.state !== 'closed'); expect(end.id).toBeDefined(); expect(await bounded.next()).toBeUndefined();
+  }, 120000);
+
+  test('vector and graph commands reach Database only as signed requests for one exact environment, under live authority and separate permissions', async () => {
+    const h = await harness(); const first = await h.create('engine-a', ['database']); expect(await h.worker.execute()).toBe(true);
+    const second = await h.create('engine-b', ['database']); expect(await h.worker.execute()).toBe(true);
+    const A = parseComponent('EnvironmentScope', first.scope); const B = parseComponent('EnvironmentScope', second.scope); const id = () => crypto.randomUUID();
+    const send = (family: 'vectors' | 'graph', scope: typeof A, command: Record<string, unknown>, overrides: Record<string, string> = {}) =>
+      h.api(`/platform/v1/orgs/${scope.orgId}/projects/${scope.projectId}/environments/${scope.environmentId}/${family}`, command, command.revision as string | undefined, { ...(command.commandId ? { 'idempotency-key': command.commandId as string } : {}), ...overrides });
+    const ok = async (family: 'vectors' | 'graph', scope: typeof A, command: Record<string, unknown>) => { const response = await send(family, scope, command); if (response.status !== 200) throw new Error(`${command.kind} answered ${response.status}`); return (await response.json() as { result: Record<string, any> }).result; };
+    const status = async (family: 'vectors' | 'graph', scope: typeof A, command: Record<string, unknown>, overrides?: Record<string, string>) => (await send(family, scope, command, overrides)).status;
+
+    // Vectors.
+    const collection = id(); const [near, far] = [id(), id()]; const creating = { kind: 'collection.create', commandId: id(), collectionId: collection, definition: { name: 'articles', dimension: 2, metric: 'l2' } };
+    expect(await status('vectors', A, creating, { cookie: '' })).toBe(401); expect(await status('vectors', A, creating, { 'x-csrf-token': 'bad' })).toBe(403); expect(await status('vectors', A, creating, { 'idempotency-key': id() })).toBe(400);
+    expect(await status('vectors', A, { kind: 'collection.drop', commandId: id(), collectionId: collection })).toBe(400); expect(await status('vectors', A, { kind: 'node.get', nodeId: id() })).toBe(400);
+    const created = await ok('vectors', A, creating); expect(created).toEqual({ commandId: creating.commandId, collectionId: collection, revision: '1' }); expect(await ok('vectors', A, creating)).toEqual(created);
+    await ok('vectors', A, { kind: 'points.upsert', commandId: id(), collectionId: collection, points: [{ id: near, vector: [1, 1], metadata: { lang: 'en' } }, { id: far, vector: [9, 9], metadata: { lang: 'nl' } }] });
+    expect((await ok('vectors', A, { kind: 'points.query', collectionId: collection, vector: [0, 0] })).matches.map((match: { id: string }) => match.id)).toEqual([near, far]);
+    expect((await ok('vectors', A, { kind: 'points.query', collectionId: collection, vector: [0, 0], filter: { lang: 'nl' } })).matches.map((match: { id: string }) => match.id)).toEqual([far]);
+    expect(await status('vectors', A, { kind: 'points.query', collectionId: collection, vector: [0, 0, 0] })).toBe(400);
+    // Graph.
+    const [ada, bob, eve] = [id(), id(), id()]; for (const [node, name] of [[ada, 'Ada'], [bob, 'Bob'], [eve, 'Eve']] as const) await ok('graph', A, { kind: 'node.put', commandId: id(), node: { id: node, label: 'Person', properties: { name } } });
+    const knows = id(); await ok('graph', A, { kind: 'edge.put', commandId: id(), edge: { id: knows, source: ada, target: bob, label: 'KNOWS', properties: {} } });
+    await ok('graph', A, { kind: 'edge.put', commandId: id(), edge: { id: id(), source: bob, target: eve, label: 'KNOWS', properties: {} } });
+    expect(await status('graph', A, { kind: 'edge.put', commandId: id(), edge: { id: id(), source: ada, target: id(), label: 'KNOWS', properties: {} } })).toBe(409);
+    expect((await ok('graph', A, { kind: 'traverse', nodeId: ada, direction: 'out', maxDepth: 3 })).reached.map((item: { node: { properties: { name: string } }; depth: number }) => [item.node.properties.name, item.depth])).toEqual([['Ada', 0], ['Bob', 1], ['Eve', 2]]);
+    expect(await ok('graph', A, { kind: 'path', from: ada, to: eve, direction: 'out', maxDepth: 4 })).toMatchObject({ found: true, nodes: [ada, bob, eve] });
+    expect(await status('graph', A, { kind: 'node.delete', commandId: id(), nodeId: bob })).toBe(409); expect(await status('graph', A, { kind: 'traverse', nodeId: ada, direction: 'out', maxDepth: 9 })).toBe(400);
+
+    // The second environment: nothing of the first is there, by any ID.
+    for (const command of [{ kind: 'points.query', collectionId: collection, vector: [0, 0] }, { kind: 'points.upsert', commandId: id(), collectionId: collection, points: [{ id: id(), vector: [1, 1], metadata: {} }] },
+      { kind: 'collection.delete', commandId: id(), collectionId: collection, revision: '2', confirmation: 'articles' }]) expect(await status('vectors', B, command)).toBe(404);
+    expect((await ok('vectors', B, { kind: 'collections.list' })).collections).toEqual([]);
+    for (const command of [{ kind: 'node.get', nodeId: ada }, { kind: 'traverse', nodeId: ada, direction: 'both', maxDepth: 6 }, { kind: 'node.delete', commandId: id(), nodeId: ada, detach: true }, { kind: 'edge.delete', commandId: id(), edgeId: knows }]) expect(await status('graph', B, command)).toBe(404);
+    expect(await status('graph', B, { kind: 'edge.put', commandId: id(), edge: { id: id(), source: ada, target: bob, label: 'KNOWS', properties: {} } })).toBe(409);
+
+    // Permissions are separate. A member with metadata access can list collections and nothing else.
+    const viewerToken = opaqueToken('as'); const viewerCsrf = opaqueToken('csrf'); const viewerId = id();
+    await h.cloud`INSERT INTO accounts (id, primary_email, name, verified_at, terms_version) VALUES (${viewerId}, 'viewer@example.test', 'Viewer', now(), 'fixture')`;
+    await h.cloud`INSERT INTO account_sessions (id, account_id, token_hash, csrf_hash, security_revision, device_name, expires_at, fresh_until)
+      VALUES (${id()}, ${viewerId}, ${tokenDigest(viewerToken)}, ${tokenDigest(viewerCsrf)}, 1, 'Fixture', now() + interval '8 hours', now() + interval '10 minutes')`;
+    await h.cloud`INSERT INTO memberships (id, account_id, org_id, role, state, project_access) VALUES (${id()}, ${viewerId}, ${A.orgId}, 'Viewer', 'active', 'all')`;
+    const viewer = { cookie: `__Host-carbon-session=${viewerToken}`, 'x-csrf-token': viewerCsrf };
+    expect(await status('vectors', A, { kind: 'collections.list' }, viewer)).toBe(200);
+    for (const command of [{ kind: 'points.query', collectionId: collection, vector: [0, 0] }, { kind: 'points.get', collectionId: collection, ids: [near] }, { kind: 'points.upsert', commandId: id(), collectionId: collection, points: [{ id: id(), vector: [1, 1], metadata: {} }] },
+      { kind: 'collection.create', commandId: id(), collectionId: id(), definition: { name: 'viewer', dimension: 2, metric: 'l2' } }]) expect(await status('vectors', A, command, viewer)).toBe(403);
+    for (const command of [{ kind: 'node.get', nodeId: ada }, { kind: 'traverse', nodeId: ada, direction: 'out', maxDepth: 2 }, { kind: 'node.put', commandId: id(), node: { id: id(), label: 'Person', properties: {} } }]) expect(await status('graph', A, command, viewer)).toBe(403);
+
+    // Authority is live at Database too: a principal that stops being current mid-request changes nothing.
+    const points = (await h.database`SELECT count(*)::integer AS count FROM canonical_vector_points`)[0].count; const nodes = (await h.database`SELECT count(*)::integer AS count FROM canonical_graph_nodes`)[0].count;
+    h.interceptAuthority(async () => { await h.cloud`UPDATE accounts SET permission_revision = permission_revision + 1 WHERE id = ${h.account}`; });
+    expect([401, 403]).toContain(await status('vectors', A, { kind: 'points.upsert', commandId: id(), collectionId: collection, points: [{ id: id(), vector: [5, 5], metadata: {} }] }));
+    expect([401, 403]).toContain(await status('graph', A, { kind: 'node.put', commandId: id(), node: { id: id(), label: 'Person', properties: {} } })); h.interceptAuthority();
+    expect((await h.database`SELECT count(*)::integer AS count FROM canonical_vector_points`)[0].count).toBe(points); expect((await h.database`SELECT count(*)::integer AS count FROM canonical_graph_nodes`)[0].count).toBe(nodes);
+    // An assertion for one family is not accepted on another family's route, and a tampered path is refused.
+    const proof = await h.signedData({ scope: A, bindingId: (await h.cloud`SELECT id FROM service_bindings WHERE environment_id = ${A.environmentId} AND owner = 'database'`)[0].id, command: { kind: 'tables.list' } });
+    for (const route of ['/vectors/collections.list', '/graph/node.get']) expect([400, 401]).toContain((await fetch(proof.url.replace('/data/tables.list', route), proof.init)).status);
+    // Both environments are intact.
+    expect((await ok('vectors', A, { kind: 'collections.list' })).collections.map((item: { pointCount: number }) => item.pointCount)).toEqual([2]); expect((await ok('graph', A, { kind: 'node.get', nodeId: eve })).node.properties.name).toBe('Eve');
+  }, 120000);
 
   test('table catalog is paginated, scoped and available to metadata-only accounts with current schema policies', async () => {
     const h = await harness(); const created = await h.create('catalog-data', ['database']); expect(await h.worker.execute()).toBe(true);

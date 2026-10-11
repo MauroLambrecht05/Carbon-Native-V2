@@ -1,4 +1,4 @@
-import { HttpBlobClient, HttpDataClient, HttpImportClient, S3ExportStore } from '@carbon/data';
+import { HttpBlobClient, HttpDataClient, HttpEngineClient, HttpImportClient, S3ExportStore } from '@carbon/data';
 import { serviceAssertionIssuerFromEnv } from './service-assertion-signing.ts';
 
 export function dataClientFromEnv(env: NodeJS.ProcessEnv = process.env): HttpDataClient | undefined {
@@ -30,4 +30,13 @@ export function blobClientFromEnv(env: NodeJS.ProcessEnv = process.env): HttpBlo
   if (env.CARBON_BLOBS !== 'enabled') throw new Error('CARBON_BLOBS must be enabled or disabled');
   if (!env.CARBON_DATA_DATABASE_ORIGIN) throw new Error('Blob storage requires CARBON_DATA_DATABASE_ORIGIN');
   return new HttpBlobClient(env.CARBON_DATA_DATABASE_ORIGIN, serviceAssertionIssuerFromEnv(env));
+}
+
+/** Cloud's transports for vector and graph commands, offered together when CARBON_DATA_ENGINES is enabled. */
+export function engineClientsFromEnv(env: NodeJS.ProcessEnv = process.env): { vectors: HttpEngineClient; graph: HttpEngineClient } | undefined {
+  if (!env.CARBON_DATA_ENGINES || env.CARBON_DATA_ENGINES === 'disabled') return undefined;
+  if (env.CARBON_DATA_ENGINES !== 'enabled') throw new Error('CARBON_DATA_ENGINES must be enabled or disabled');
+  if (!env.CARBON_DATA_DATABASE_ORIGIN) throw new Error('Vector and graph data require CARBON_DATA_DATABASE_ORIGIN');
+  const issuer = serviceAssertionIssuerFromEnv(env);
+  return { vectors: new HttpEngineClient('vectors', env.CARBON_DATA_DATABASE_ORIGIN, issuer), graph: new HttpEngineClient('graph', env.CARBON_DATA_DATABASE_ORIGIN, issuer) };
 }

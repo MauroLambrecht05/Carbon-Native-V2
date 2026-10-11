@@ -1936,3 +1936,64 @@ by Database rather than presigned (G-78).
 
 Phase 11 stops here. Phase 12 (vector, graph and realtime parity) is next in
 [the handoff](left-off/handoff.md).
+
+## 2026-10-11: Phase 12, realtime, vectors and graph
+
+Phase 12 brought the remaining three Database engines under canonical
+environment authority ([realtime-vectors-graph.md](realtime-vectors-graph.md),
+[data-engines.openapi.json](data-engines.openapi.json), Database migrations
+`0009_data_changes.sql` and `0010_vector_graph.sql`).
+
+- **Realtime.** A trigger on every canonical table writes a change event in the
+  same transaction as the change, whatever makes it. `rows.changes` reads the
+  feed in commit order from a cursor, filtered to what the reader could see when
+  the row changed. Cloud serves it to the browser as a resumable event stream.
+- **Vectors.** Collections with an enforced dimension and metric, bounded
+  batches, exact deterministic scoring, metadata filters and limits.
+- **Graph.** One property graph per environment with enforced edge ends,
+  breadth-first walks bounded by depth and size, and shortest paths.
+- Vector and graph commands share one signed request shape and one executor,
+  client and account use case. Cloud's live authority recognizes both families.
+
+Proof gate ("exact-scope CRUD/query isolation and reconnect/replay/revocation
+tests pass for every service"), against real PostgreSQL and pgvector and, for
+the cross-service parts, the real Cloud API and Database over HTTP:
+
+- **Realtime capture:** API writes, plain SQL and ownership changes are in the
+  feed; a rolled-back change is not; the restricted role can neither read nor
+  write the feed.
+- **Ordering:** an event that committed while an earlier transaction was still
+  open is held back until that transaction ends, then both appear, in order.
+- **Policy per event:** each reader is told only about rows they could see; the
+  cursor still moves past the rest; public-read and disabled policies behave as
+  documented; an ownership change tells both owners.
+- **Reconnect and replay:** the stream resumes exactly after `Last-Event-ID`
+  with no gap and no repeat, and replays from an older cursor.
+- **Reset:** a schema or policy change, and a cursor older than the retention,
+  answer `reset` instead of silently skipping.
+- **Revocation:** when the session ends the stream says so and stops; a member
+  without data access cannot open one; a bounded stream closes cleanly.
+- **Vectors:** dimension, zero-vector and batch rules; the three metrics with
+  known geometry; a tie broken by ID; filters; point and collection limits,
+  including two racing batches for the last room; replacement in a full
+  collection; another environment sees nothing and may reuse names and IDs.
+- **Graph:** dangling and moved edges refused, by the store and by the database
+  itself; neighbours by direction and label; walks bounded by depth and size on
+  a graph with a cycle; shortest paths, including a tie resolved the same way
+  every time; node and edge limits; delete with and without detach; a second
+  environment with the same IDs and its own graph.
+- **Both:** idempotent receipts, authority rechecked before a result leaves,
+  paused environments readable but not writable, app users refused, a Viewer
+  limited to listing, and a mid-request revocation that changes nothing.
+- **Mutation checks:** 34 deliberate breakages each make a test fail: 11 in the change feed and its capture trigger (the visibility filter, the commit-order hold-back, cursor reset on revision change and on retention, the cursor moving past unseen changes, capture on new tables, the final authority check, who may read as an application, the old owner on update, the public rule and disabled policies), 3 in the stream (authority at every poll, resuming from the cursor, the bounded lifetime), 8 in vectors (dimension, environment scope, tie order, the filter, both limits, the zero vector, delete confirmation), 9 in the graph (dangling and moved edges, delete without detach, the depth and size limits of walks, the depth limit of paths, the label filter, both limits) and 3 shared (app users, the authority check after the work, replay with a different body).
+
+The affected regression passed **686 tests, 0 failures and 7,128 assertions across 85 files, with the object-store tests run against a local MinIO container**. Generated contracts are
+current and the TypeScript checks pass.
+
+New gaps are G-88 to G-99. The ones to know: change events carry no row values
+(G-88), the stream is polled and is for account sessions only (G-90), vector
+search is exact with no index (G-94), and large vector and graph work is not a
+cancellable job (G-96).
+
+Phase 12 stops here. Phase 13 (functions and schedules) is next in
+[the handoff](left-off/handoff.md).

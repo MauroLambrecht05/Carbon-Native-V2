@@ -22,7 +22,7 @@ meaningful tests pass together.
 | 9 — complete | Implement BE-07 releases, channel revisions, rollout/promotion/withdrawal and updater compatibility. | Completed: immutable releases over verified artifacts, signing profiles, signed channel revisions, promotion, rollout, withdrawal with a stop list, a public feed, and one conformance fixture run by the publisher's code and the TypeScript, standalone and Rust updaters. No packaged app has updated from the feed yet (G-57). |
 | 10 — partly complete | Finish BE-08 relational work: private exports, foreign keys, impact previews, asynchronous schema work, migration promotion and restricted SQL. | Done and proven against real Database: foreign keys, cross-table impact previews, and private resumable exports with authorization, cancellation and crash recovery. Not built: restricted SQL, migration promotion, asynchronous schema changes, table deletion (G-64 to G-67). |
 | 11 — complete | Implement BE-09 blob storage with private objects, signed bounded transfers, metadata authority, retention and cleanup. | Completed: buckets, single-use exact-object transfers verified before storing, public download by current visibility, versions and retention, quota, cleanup and metering, proven across two environments over real HTTP. App users have no blob access yet (G-76); transfers are mediated by Database, not presigned (G-78). |
-| 12 | Implement BE-09 vector, graph and realtime parity with canonical environment authority and durable outbox semantics. | Exact-scope CRUD/query isolation and reconnect/replay/revocation tests pass for every service. |
+| 12 — complete | Implement BE-09 vector, graph and realtime parity with canonical environment authority and durable outbox semantics. | Completed: a database-captured change feed read in commit order under row policy with a resumable stream; vector collections with exact deterministic search; a bounded property graph; exact-scope isolation and reconnect, replay and revocation proven. Events carry no row values (G-88); the stream is polled and account-only (G-90); vector search has no index (G-94). |
 | 13 | Implement BE-10 functions and schedules with immutable revisions, secret bindings, leases, limits and durable executions. | Deploy/invoke/schedule/cancel/retry tests prove revision pinning, secret isolation, idempotency and timeout recovery. |
 | 14 | Implement BE-11 Registry publisher identity, review, trust, immutable archives, yanking and signed distribution. | Publish/review/install tests verify namespace authority, provenance, digest/signature checks, revocation and tenant isolation. |
 | 15 | Implement BE-12 project plugin consumption and the remaining CLI workflows. | Lockfile, install/update/remove, compatibility and offline/error recovery pass against real Registry and project APIs. |
@@ -31,18 +31,18 @@ meaningful tests pass together.
 | 18 | Complete observability, deployment compatibility, security review, migration reconciliation, canary rollout and cutover. | Sections 25-29 of the backend plan have recorded production evidence, including restore, rotation, rollback and no-mock-fallback drills. |
 | 19 | Close the gap ledger: every open decision and everything an earlier phase could not finish or prove. | Each entry in [gaps.md](gaps.md) is closed with evidence or explicitly accepted by the owner. Includes the hardware- and account-dependent proofs (a real Windows build, signing, isolation, real KMS, a real identity provider) and CI running the database suites. |
 
-## Start with Phase 12
+## Start with Phase 13
 
-Phases 1 to 7, 9 and 11 are complete; Phases 8 and 10 are partly complete. Read
-these files before changing Phase 12 code:
+Phases 1 to 7, 9, 11 and 12 are complete; Phases 8 and 10 are partly complete.
+Read these files before changing Phase 13 code:
 
-- sections 15.2 and 15.3 of [the backend plan](../platform-backend-plan.md), "Vector and graph" and "Realtime", and their proof gate
-- [blob-storage.md](../blob-storage.md): the newest example of a signed command family owned by Database, with its own paths and permissions in Cloud's live authority
-- `products/carbon-database/infrastructure/services/` (`VectorEngine`, `GraphEngine`, `RealtimeEngine`: the legacy engines)
-- [audit-events.md](../audit-events.md): the event log and stream are the existing durable-ordering pattern
+- section 16 of [the backend plan](../platform-backend-plan.md), "BE-10: functions and schedules", and its proof gate
+- [workers.md](../workers.md) and [builds.md](../builds.md): leases, lease-bound secrets, attempts and deadlines are the pattern functions run on
+- [build-worker.md](../build-worker.md): what a worker runtime does and does not isolate (G-38 applies to functions even more)
+- `products/carbon-database/infrastructure/services/EdgeFunctionsEngine.ts` (the legacy in-process engine)
 
-Phase 12 brings vector, graph and realtime to canonical environment authority
-with durable outbox semantics.
+Phase 13 builds functions and schedules: immutable revisions, secret bindings,
+leases, limits and durable executions.
 
 ## Deferred work
 

@@ -152,3 +152,12 @@ Blob storage adds no Cloud migration. Its tables are Database migration
 `0008_blob_storage.sql` (`blob_buckets`, `blob_objects`, `blob_transfers`,
 `blob_commands`, `blob_events`, `blob_usage`), which is additive and leaves the
 legacy `storage_buckets` and `storage_files` tables untouched.
+
+Realtime, vectors and graph add no Cloud migration. In Database, `0009_data_changes.sql`
+adds the change feed (`data_change_events`, `data_change_pruned`, the capture
+trigger function, and a trigger on every existing canonical table), and
+`0010_vector_graph.sql` adds `canonical_vector_collections`,
+`canonical_vector_points`, `canonical_graph_nodes`, `canonical_graph_edges` and
+`engine_commands`. Both are additive and leave the legacy vector, graph and
+realtime structures untouched. 0009 changes behaviour for existing tables: every
+row change from then on also writes one feed row in the same transaction.

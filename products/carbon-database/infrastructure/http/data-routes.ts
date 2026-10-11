@@ -9,7 +9,7 @@ export function createDataRoutes(data: ExecuteServiceData) {
     const headers = { 'cache-control': 'no-store', 'x-request-id': requestId, 'x-content-type-options': 'nosniff' };
     try {
       const url = new URL(request.url);
-      if (request.method !== 'POST' || !/^\/internal\/platform\/v1\/environments\/[^/]+\/data\/(rows\.import-preview|table\.types|table\.preview|table\.alter|tables\.list|table\.get|table\.create|table\.policies|rows\.query|row\.insert|row\.update|row\.delete)$/.test(url.pathname)) throw new PlatformFault('not_found', 'Route not found');
+      if (request.method !== 'POST' || !/^\/internal\/platform\/v1\/environments\/[^/]+\/data\/(rows\.import-preview|table\.types|table\.preview|table\.alter|tables\.list|table\.get|table\.create|table\.policies|rows\.query|rows\.changes|row\.insert|row\.update|row\.delete)$/.test(url.pathname)) throw new PlatformFault('not_found', 'Route not found');
       const authorization = request.headers.get('authorization') ?? '';
       if (!authorization.startsWith('Bearer ') || authorization.length > 32775) throw new PlatformFault('unauthenticated', 'A signed assertion is required');
       if (request.headers.get('content-type')?.split(';')[0]?.trim() !== 'application/json') throw new PlatformFault('validation', 'A JSON request is required');

@@ -1,0 +1,332 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Carbon realtime, vectors and graph",
+    "version": "1.0.0",
+    "description": "The table change stream, vector collections and the environment graph. See realtime-vectors-graph.md."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "paths": {
+    "/platform/v1/orgs/{orgId}/projects/{projectId}/environments/{environmentId}/data/changes": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrgId"
+        },
+        {
+          "$ref": "#/components/parameters/ProjectId"
+        },
+        {
+          "$ref": "#/components/parameters/EnvironmentId"
+        }
+      ],
+      "get": {
+        "operationId": "streamTableChanges",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "description": "Server-sent events of one table's change notifications. Each frame's data is a DataChangeMessage and its id is the cursor to resume from. Access is checked again at every poll.",
+        "parameters": [
+          {
+            "name": "tableId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "query",
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+            },
+            "description": "Preview the feed as this user. Omitted: only publicly readable rows."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DataChangeCursor"
+            }
+          },
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "schema": {
+              "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DataChangeCursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The stream",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/DataChangeMessage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/orgs/{orgId}/projects/{projectId}/environments/{environmentId}/vectors": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrgId"
+        },
+        {
+          "$ref": "#/components/parameters/ProjectId"
+        },
+        {
+          "$ref": "#/components/parameters/EnvironmentId"
+        }
+      ],
+      "post": {
+        "operationId": "executeVectorCommand",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "description": "Runs one vector command for this environment.",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Required, and equal to commandId, for commands that change something."
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/VectorCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The command's result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "result"
+                  ],
+                  "properties": {
+                    "result": {
+                      "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/VectorResult"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/platform/v1/orgs/{orgId}/projects/{projectId}/environments/{environmentId}/graph": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrgId"
+        },
+        {
+          "$ref": "#/components/parameters/ProjectId"
+        },
+        {
+          "$ref": "#/components/parameters/EnvironmentId"
+        }
+      ],
+      "post": {
+        "operationId": "executeGraphCommand",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "description": "Runs one graph command for this environment.",
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Required, and equal to commandId, for commands that change something."
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/GraphCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The command's result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "result"
+                  ],
+                  "properties": {
+                    "result": {
+                      "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/GraphResult"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "OrgId": {
+        "name": "orgId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+        }
+      },
+      "ProjectId": {
+        "name": "projectId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+        }
+      },
+      "EnvironmentId": {
+        "name": "environmentId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+        }
+      }
+    },
+    "securitySchemes": {
+      "browserSession": {
+        "$ref": "account-api.openapi.json#/components/securitySchemes/browserSession"
+      },
+      "workerCredential": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A wc_ worker credential."
+      }
+    }
+  }
+}

@@ -1,7 +1,7 @@
 export { PostgresNativeTables } from './infrastructure/PostgresNativeTables.ts';
 export { ExecuteServiceData } from './application/usecases/ExecuteServiceData.ts';
 export { HttpDataClient } from './infrastructure/HttpDataClient.ts';
-export { AccountData } from './application/usecases/AccountData.ts';
+export { AccountData, type ChangeStreamTiming } from './application/usecases/AccountData.ts';
 export { PostgresAccountDataAuthority } from './infrastructure/PostgresAccountDataAuthority.ts';
 export { PostgresImportJobs } from './infrastructure/PostgresImportJobs.ts';
 export { HttpImportClient } from './infrastructure/HttpImportClient.ts';
@@ -21,3 +21,5 @@ export { AccountBlobs, ExecuteServiceBlobs, type BlobTransport } from './applica
 export type { BlobAuthority, BlobContent, BlobStorageRepository, BlobStore, BlobSweepResult } from './application/ports/BlobStorage.ts';
 export { PostgresBlobStorage } from './infrastructure/PostgresBlobStorage.ts';
 export { HttpBlobClient, S3BlobStore, type BlobStoreConfig } from './infrastructure/HttpBlobClient.ts';
+export { AccountEngine, ExecuteServiceEngine, HttpEngineClient, type EngineRepository, type EngineTransport } from './application/usecases/Engines.ts';
+export { PostgresGraphStore, PostgresVectorStore, type GraphLimits, type VectorLimits } from './infrastructure/PostgresEngines.ts';

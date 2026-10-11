@@ -5,7 +5,7 @@ import { changesReferencedKey, planSchemaChange } from '../domain/SchemaChange.t
 import { nativePrimaryKeyName, replaceNativePrimaryKey } from './NativePrimaryKey.ts';
 import { assertManagedConstraints, refreshManagedConstraints, replaceManagedConstraint, type ForeignTarget } from './ManagedConstraints.ts';
 import type { DataConstraint, DataSchemaChange } from '@carbon/contracts/platform';
-import type { DataQuery } from '@carbon/contracts/platform';
+import type { DataChangesQuery, DataChangesResult, DataQuery } from '@carbon/contracts/platform';
 import { postgresArray } from './PostgresParameters.ts';
 import { applyNativeImport } from './NativeImportExecutor.ts';
 import { importExecutionDigest } from '../domain/ImportExecution.ts';
@@ -335,6 +335,8 @@ export class PostgresNativeTables implements NativeTablesRepository {
       await tx.unsafe(`CREATE TABLE "${names.schema}".${physical(id)} (_carbon_id uuid PRIMARY KEY DEFAULT pg_catalog.gen_random_uuid(), _carbon_revision bigint NOT NULL DEFAULT 1 CHECK (_carbon_revision > 0), ${columns.join(', ')})`);
       await this.applyPolicies(tx, authority, id, definition);
       const scope = authority.scope;
+      // Every change to the table's rows is captured from here on, in the same transaction as the change, whatever makes it.
+      await tx.unsafe(`CREATE TRIGGER carbon_capture AFTER INSERT OR UPDATE OR DELETE ON "${names.schema}".${physical(id)} FOR EACH ROW EXECUTE FUNCTION public.carbon_capture_change(${literal(id)})`);
       await tx`INSERT INTO public.canonical_data_tables (id, resource_id, org_id, project_id, environment_id, name, definition)
         VALUES (${id}, ${environment.id}, ${scope.orgId}, ${scope.projectId}, ${scope.environmentId}, ${definition.name}, ${JSON.stringify(definition)}::text::jsonb)`;
       for (const constraint of definition.constraints ?? []) await replaceManagedConstraint(tx, names.schema, `"${names.schema}".${physical(id)}`, id, definition, undefined, constraint, foreign.get(constraint.id));
@@ -400,6 +402,58 @@ export class PostgresNativeTables implements NativeTablesRepository {
         sqlNull: last._carbon_sort_null, revision: table.revision } : undefined;
       return parseComponent('DataQueryResult', { tableId: query.tableId, rows, nextAfterId: more ? last._carbon_id : null, ...(nextSort ? { nextSort } : {}) });
     });
+  }
+  /**
+   * Change notifications for one table after a cursor. Order is commit order, and only changes below the oldest
+   * transaction still running are returned, so nothing can later appear behind a cursor. Each event is delivered only to
+   * a reader who could see the row when it changed. A cursor from before a schema or policy change, or from before the
+   * feed's retention, cannot be continued: the reader is told to reset.
+   */
+  async changes(authority: NativeDataAuthority, input: DataChangesQuery): Promise<DataChangesResult> {
+    const query = parseComponent('DataChangesQuery', structuredClone(input)); const limit = query.limit ?? 100; const access = query.access;
+    let userId: string | undefined;
+    if (access.mode === 'application' && authority.principal.kind === 'app_user') userId = authority.principal.id;
+    else if (access.mode === 'policy-preview' && authority.principal.kind === 'account') userId = access.userId;
+    else throw new PlatformFault('forbidden', 'Verified application identity or account policy preview is required');
+    if (userId !== undefined) parseComponent('Id', userId);
+    return this.transact(async tx => {
+      await this.environment(tx, authority, 'data.read'); const table = await this.table(tx, authority, query.tableId);
+      const horizon = (await tx<{ xmin: string }[]>`SELECT pg_snapshot_xmin(pg_current_snapshot())::text AS xmin`)[0]!.xmin;
+      const head = async () => {
+        const last = (await tx<{ tx: string; seq: string }[]>`SELECT transaction_id::text AS tx, sequence::text AS seq FROM public.data_change_events
+          WHERE table_id = ${table.id} AND transaction_id < ${horizon}::xid8 ORDER BY transaction_id DESC, sequence DESC LIMIT 1`)[0];
+        return `${table.revision}.${last?.tx ?? '0'}.${last?.seq ?? '0'}`;
+      };
+      const answer = async (result: Omit<DataChangesResult, 'tableId'>) => { await this.authorizeAgain(authority, 'data.read'); return parseComponent('DataChangesResult', { tableId: table.id, ...result }); };
+      // No cursor: start from now. The reader loads the table, then follows from here.
+      if (!query.cursor) return answer({ events: [], nextCursor: await head(), reset: false });
+      const [revision, after, sequence] = query.cursor.split('.') as [string, string, string];
+      const pruned = (await tx<{ tx: string; seq: string }[]>`SELECT transaction_id::text AS tx, sequence::text AS seq FROM public.data_change_pruned WHERE table_id = ${table.id}`)[0];
+      const missed = pruned !== undefined && (BigInt(after) < BigInt(pruned.tx) || (BigInt(after) === BigInt(pruned.tx) && BigInt(sequence) < BigInt(pruned.seq)));
+      // Who may see what is decided by the table's policies, and those are part of its revision.
+      if (revision !== table.revision || missed) return answer({ events: [], nextCursor: await head(), reset: true });
+      const rows = await tx<Record<string, any>[]>`SELECT transaction_id::text AS tx, sequence::text AS seq, row_id, operation, row_revision::text AS row_revision, visibility, occurred_at FROM public.data_change_events
+        WHERE table_id = ${table.id} AND transaction_id < ${horizon}::xid8 AND (transaction_id, sequence) > (${after}::xid8, ${sequence}::bigint) ORDER BY transaction_id, sequence LIMIT 2000`;
+      const events: DataChangesResult['events'][number][] = []; let position = query.cursor; const reader = userId?.toLowerCase();
+      for (const row of rows) {
+        if (events.length === limit) break;
+        position = `${table.revision}.${row.tx}.${row.seq}`;
+        // A change to a row this reader could not see is skipped, but the cursor still moves past it.
+        if (row.visibility.public !== true && !(reader !== undefined && (row.visibility.owners as string[]).includes(reader))) continue;
+        events.push({ cursor: position, operation: row.operation, rowId: row.row_id, revision: row.row_revision ?? null, occurredAt: row.occurred_at.toISOString() });
+      }
+      return answer({ events, nextCursor: position, reset: false });
+    });
+  }
+  /** Removes change events older than the retention and records how far each table's feed was cut. */
+  async pruneChanges(retentionHours = 72): Promise<number> {
+    const removed = await this.sql`WITH gone AS (DELETE FROM public.data_change_events WHERE occurred_at < now() - make_interval(hours => ${retentionHours})
+        AND transaction_id < pg_snapshot_xmin(pg_current_snapshot()) RETURNING table_id, transaction_id, sequence),
+      cut AS (INSERT INTO public.data_change_pruned (table_id, transaction_id, sequence)
+        SELECT DISTINCT ON (table_id) table_id, transaction_id, sequence FROM gone ORDER BY table_id, transaction_id DESC, sequence DESC
+        ON CONFLICT (table_id) DO UPDATE SET transaction_id = EXCLUDED.transaction_id, sequence = EXCLUDED.sequence, pruned_at = now() RETURNING 1)
+      SELECT (SELECT count(*) FROM gone)::integer AS removed, (SELECT count(*) FROM cut)::integer AS tables`;
+    return removed[0].removed;
   }
   private values(input: Record<string, unknown>, columns: readonly NativeColumn[]) {
     if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).length > 100) throw new PlatformFault('validation', 'Invalid row values');
