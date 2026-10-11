@@ -13,11 +13,14 @@ import { CommandForm, choices } from "./Forms";
 export function AuthPage() {
   const services = useServices(), location = useLocation(), navigate = useNavigate(), { live } = useRuntime();
   const params = new URLSearchParams(location.search), returnTo = safeReturn(params.get("returnTo"));
-  const signup = location.pathname === "/sign-up", recovery = location.pathname === "/auth/recovery", callback = location.pathname === "/auth/callback" || location.pathname === "/auth/complete";
-  return <section><h1>{callback ? "Complete sign-in or identity verification" : recovery ? "Recover your Carbon account" : signup ? "Create your Carbon account" : "Sign in to Carbon"}</h1>
+  const signup = location.pathname === "/sign-up", recovery = location.pathname === "/auth/recovery", fresh = location.pathname === "/auth/fresh", callback = fresh || location.pathname === "/auth/callback" || location.pathname === "/auth/complete";
+  return <section><h1>{fresh ? "Confirm it is you" : callback ? "Complete sign-in or identity verification" : recovery ? "Recover your Carbon account" : signup ? "Create your Carbon account" : "Sign in to Carbon"}</h1>
     <p>{live ? "Carbon emails you a link to continue. Open it in this browser; it works once and expires after 15 minutes." : "Carbon account authentication. Email and GitHub flows are simulated locally. Open development mock tools below to follow the delivered challenge."}</p>
     {callback ? <CommandForm title="Complete verification" sensitive fields={[{ name: "code", label: "MFA or recovery code (if enrolled)", secret: true, required: false }]} submit={async v => {
-      const result = await services.identity.complete(params.get("token") ?? new URLSearchParams(location.hash.slice(1)).get("token") ?? "", v.code);
+      const token = params.get("token") ?? new URLSearchParams(location.hash.slice(1)).get("token") ?? "";
+      // The link from a "confirm it is you" email goes to the session already signed in here; a sign-in link makes a new one.
+      const result = fresh ? await (services.identity.completeFresh?.(token, v.code) ?? Promise.resolve({ ok: false as const, error: { code: "unsupported_operation" as const, message: "This is not available here.", requestId: "" } }))
+        : await services.identity.complete(token, v.code);
       if (!result.ok) return result;
       navigate(safeReturn(result.value.returnTo), { replace: true }); return { ok: true, value: { message: "Verification complete." } };
     }} /> : <>

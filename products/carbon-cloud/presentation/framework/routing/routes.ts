@@ -30,6 +30,7 @@ export const routes: readonly RouteDefinition[] = [
       ["/auth/callback", "Account callback", 2],
       // The paths the live service puts in its emails.
       ["/auth/complete", "Account callback", 2],
+      ["/auth/fresh", "Confirm it is you", 2],
       ["/invitations/accept", "Invitation", 2],
       ["/auth/recovery", "Account recovery", 2],
       ["/invites/:token", "Invitation", 2],

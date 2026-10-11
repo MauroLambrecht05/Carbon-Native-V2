@@ -10,9 +10,11 @@ export const LIVE_SLICES: ReadonlySet<number> = new Set([1, 2, 7]);
  */
 const LIVE_ROUTES: readonly string[] = ["/builds", "/builds/:buildId", "/releases", "/releases/:releaseId", "/channels", "/channels/:channelId", "/settings/signing", "/activity"];
 /** The same, for routes of an organization. */
-const LIVE_ORGANIZATION_ROUTES: readonly string[] = ["/activity"];
+const LIVE_ORGANIZATION_ROUTES: readonly string[] = ["/activity", "/workers"];
+/** The same, for routes of an environment. */
+const LIVE_ENVIRONMENT_ROUTES: readonly string[] = ["/settings/secrets", "/settings/api"];
 /** Whether a route of the catalog has a page against the live service. */
 export const isLive = (route: { slice: number; path: string }) => LIVE_SLICES.has(route.slice) || LIVE_ROUTES.some(suffix => route.path.endsWith(`/projects/:projectId${suffix}`))
-  || LIVE_ORGANIZATION_ROUTES.some(suffix => route.path === `/orgs/:orgId${suffix}`);
+  || LIVE_ORGANIZATION_ROUTES.some(suffix => route.path === `/orgs/:orgId${suffix}`) || LIVE_ENVIRONMENT_ROUTES.some(suffix => route.path.endsWith(`/environments/:environmentId${suffix}`));
 export const RuntimeContext = createContext<Runtime>({ live: false });
 export const useRuntime = () => useContext(RuntimeContext);

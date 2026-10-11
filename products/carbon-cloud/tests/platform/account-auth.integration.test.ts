@@ -2895,6 +2895,70 @@ suite("real account authentication", () => {
     expect(refused(await live.build({ scope: { ...scope, environmentId: crypto.randomUUID() } }, buildId))).toBe('not_found');
   });
 
+  test('the console\'s live configuration adapters work against the real API: secrets, environment credentials, workers, and confirming it is you when a command needs a recent sign-in', async () => {
+    const h = await harness(); const f = await functionFixture(h, 'console-configuration');
+    const { services } = createLiveServices({ fetch: h.browserFetch, cookies: h.browserCookies }); const live = services.liveConfiguration!; const context = { scope: f.scope };
+    const value = <T,>(result: { ok: true; value: T } | { ok: false; error: { code: string; message: string } }): T => { if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`); return result.value; };
+    const refused = (result: { ok: boolean; error?: { code: string } }) => (result.ok ? 'accepted' : result.error!.code);
+    const options = (expectedRevision?: string) => ({ idempotencyKey: crypto.randomUUID(), expectedRevision });
+    const environmentRevision = async () => parseComponent('CatalogEnvironmentDetails', await (await h.call(f.envPath)).json()).environment.revision;
+    const stored = async () => JSON.stringify([await h.sql`SELECT * FROM environment_secrets`, await h.sql`SELECT * FROM environment_secret_versions`, await h.sql`SELECT * FROM environment_credentials`, await h.sql`SELECT * FROM workers`]);
+
+    // Secrets: the value goes in and never comes back, in an answer or a list or a row.
+    expect(value(await live.secrets(context)).items).toEqual([]);
+    expect(refused(await live.createSecret(context, { name: 'api key', value: 'x' }, options(await environmentRevision())))).toBe('validation');
+    expect(refused(await live.createSecret(context, { name: 'API_KEY', value: 'first-secret-value' }, options('999')))).toBe('conflict');
+    const created = value(await live.createSecret(context, { name: 'API_KEY', value: 'first-secret-value' }, options(await environmentRevision())));
+    expect(JSON.stringify(created)).not.toContain('first-secret-value'); expect(created.secretValue).toBeUndefined();
+    const listed = value(await live.secrets(context)).items; expect(listed.map(item => [item.name, item.state, item.currentVersion])).toEqual([['API_KEY', 'active', 1]]); expect(JSON.stringify(listed)).not.toContain('first-secret-value');
+    // The page is handed exactly the fields it shows, whatever else the service's answer holds.
+    expect(Object.keys(listed[0]!).sort()).toEqual(['createdAt', 'currentVersion', 'id', 'name', 'revision', 'state', 'updatedAt']);
+    value(await live.rotateSecret(context, listed[0]!.id, 'second-secret-value', options(listed[0]!.revision)));
+    const rotated = value(await live.secrets(context)).items[0]!; expect(rotated.currentVersion).toBe(2);
+    expect(refused(await live.setSecretDisabled(context, rotated.id, true, options(listed[0]!.revision)))).toBe('conflict');
+    value(await live.setSecretDisabled(context, rotated.id, true, options(rotated.revision))); expect(value(await live.secrets(context)).items[0]!.state).toBe('disabled');
+    expect(await stored()).not.toContain('first-secret-value'); expect(await stored()).not.toContain('second-secret-value');
+
+    // A command that needs a recent sign-in says so in a way the page can act on, and the emailed link makes the session recent again.
+    await h.sql`UPDATE account_sessions SET fresh_until = now() - interval '1 second' WHERE token_hash = ${tokenDigest(h.cookies.get('__Host-carbon-session')!)}`;
+    const stale = await live.createSecret(context, { name: 'LATER', value: 'value-after-confirming' }, options(await environmentRevision()));
+    expect(stale.ok ? '' : [stale.error.code, stale.error.fieldErrors?.authentication]).toEqual(['forbidden', 'fresh_required']);
+    const mails = h.mail.length; expect(value(await services.identity.requestFresh!(`/orgs/${f.scope.orgId}/projects/${f.scope.projectId}/environments/${f.scope.environmentId}/settings/secrets`)).message).toContain('emailed you a link');
+    expect(await h.deliver()).toBe(true); expect(h.mail.length).toBe(mails + 1); expect(h.mail.at(-1)!.text).toContain('/auth/fresh#token=');
+    const link = /#token=(ac_[A-Za-z0-9_-]{43})/.exec(h.mail.at(-1)!.text)![1]!;
+    // A made-up token does nothing; the real one returns to the page the request came from.
+    expect(refused(await services.identity.completeFresh!(`ac_${'A'.repeat(43)}`))).not.toBe('accepted');
+    expect(value(await services.identity.completeFresh!(link))).toEqual({ returnTo: `/orgs/${f.scope.orgId}/projects/${f.scope.projectId}/environments/${f.scope.environmentId}/settings/secrets` });
+    value(await live.createSecret(context, { name: 'LATER', value: 'value-after-confirming' }, options(await environmentRevision())));
+    expect(value(await live.secrets(context)).items.map(item => item.name).sort()).toEqual(['API_KEY', 'LATER']);
+
+    // Environment credentials: the token is in the answer to the command that issued it, once, and nowhere after.
+    expect(value(await live.credentials(context)).items).toEqual([]);
+    const expiresAt = new Date(Date.now() + 30 * 86_400_000).toISOString();
+    const issued = value(await live.createCredential(context, { name: 'CI', permissions: ['metadata.read'], expiresAt }, options(await environmentRevision())));
+    expect(issued.secretValue).toMatch(/^ce_[A-Za-z0-9_-]{43}$/);
+    const credentials = value(await live.credentials(context)).items; expect(credentials.map(item => [item.name, item.status, item.permissions, issued.secretValue!.startsWith(item.prefix)])).toEqual([['CI', 'active', ['metadata.read'], true]]);
+    expect(JSON.stringify(credentials)).not.toContain(issued.secretValue!); expect(await stored()).not.toContain(issued.secretValue!);
+    const replaced = value(await live.credentialCommand(context, credentials[0]!.id, { kind: 'rotate', expiresAt, overlapSeconds: 0 }, options(credentials[0]!.revision)));
+    expect(replaced.secretValue).toMatch(/^ce_[A-Za-z0-9_-]{43}$/); expect(replaced.secretValue).not.toBe(issued.secretValue);
+    const afterRotation = value(await live.credentials(context)).items.find(item => item.status === 'active')!;
+    const revoked = value(await live.credentialCommand(context, afterRotation.id, { kind: 'revoke' }, options(afterRotation.revision))); expect(revoked.secretValue).toBeUndefined();
+    expect(value(await live.credentials(context)).items.every(item => item.status === 'revoked')).toBe(true);
+
+    // Workers: enrolling answers with a one-time code; the machine that presents it becomes active; revoking ends it.
+    const before = value(await live.workers(context)).items; expect(before.map(item => [item.name, item.status])).toEqual([['fn-01', 'active']]);
+    const enrolled = value(await live.enrollWorker(context, { name: 'win-02', purposes: ['build'] }, options())); expect(enrolled.secretValue).toMatch(/^we_/); expect(enrolled.message).toContain('expires');
+    expect(value(await live.workers(context)).items.find(item => item.name === 'win-02')).toMatchObject({ status: 'pending', purposes: ['build'], platform: null, lastSeenAt: null });
+    expect((await h.workerApi('/worker/v1/enroll', { code: enrolled.secretValue, capabilities: { platform: 'windows', arch: 'x64', toolchains: [] } })).status).toBe(201);
+    const active = value(await live.workers(context)).items.find(item => item.name === 'win-02')!; expect(active).toMatchObject({ status: 'active', platform: 'windows' }); expect(await stored()).not.toContain(enrolled.secretValue!);
+    value(await live.workerCommand(context, active.id, 'disable', options(active.revision)));
+    const disabled = value(await live.workers(context)).items.find(item => item.name === 'win-02')!; expect(disabled.status).toBe('disabled');
+    expect(refused(await live.workerCommand(context, active.id, 'revoke', options(active.revision)))).toBe('conflict');
+    value(await live.workerCommand(context, active.id, 'revoke', options(disabled.revision))); expect(value(await live.workers(context)).items.find(item => item.name === 'win-02')!.status).toBe('revoked');
+    // Another environment's secrets do not exist as far as this page can tell.
+    expect(refused(await live.secrets({ scope: { ...f.scope, environmentId: crypto.randomUUID() } }))).toBe('not_found');
+  });
+
   test('the console\'s live adapters walk the account and organization slice against the real API: sign-up by emailed link, session, organizations, projects, members, invitations, permissions, audit and sign-out', async () => {
     const h = await harness(); const { services } = createLiveServices({ fetch: h.browserFetch, cookies: h.browserCookies });
     const value = <T,>(result: { ok: true; value: T } | { ok: false; error: { code: string; message: string } }): T => { if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`); return result.value; };

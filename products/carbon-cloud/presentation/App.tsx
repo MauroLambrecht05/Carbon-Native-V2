@@ -68,7 +68,7 @@ export function App({ tools }: { tools?: ReactNode }) {
         </p>
       </>
     );
-  else if (["/sign-in", "/sign-up", "/auth/callback", "/auth/complete", "/auth/recovery"].includes(location.pathname)) content = <AuthPage key={location.pathname + location.search} />;
+  else if (["/sign-in", "/sign-up", "/auth/callback", "/auth/complete", "/auth/fresh", "/auth/recovery"].includes(location.pathname)) content = <AuthPage key={location.pathname + location.search} />;
   else if (match.params.realmId) content = <HostedAppAuth key={match.params.realmId} realmId={match.params.realmId} />;
   else if (match.params.token) content = <InvitationPage token={match.params.token} />;
   // The emailed invitation link carries its token in the fragment.

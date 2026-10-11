@@ -172,6 +172,8 @@ export interface BrowserServices {
   liveFunctions?: import("./live-function-contracts").LiveFunctionService;
   /** Builds, signing, releases and channels as the live service offers them. Present only in the production composition. */
   liveDelivery?: import("./live-delivery-contracts").LiveDeliveryService;
+  /** Secrets, environment credentials and workers as the live service offers them. Present only in the production composition. */
+  liveConfiguration?: import("./live-configuration-contracts").LiveConfigurationService;
   registry: import("./registry-contracts").RegistryService;
   billing: import("./operations-contracts").BillingService;
   operator: import("./operations-contracts").OperatorService;

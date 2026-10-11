@@ -12,6 +12,7 @@ import type { AccountContext, Audit, AuditRequest, BrowserServices, Capability, 
 import type { Account, AccountCommand, AccountSession, AuthRequest, CommandReceipt, IdentityService, Invitation, Member, OrganizationDetails, PlatformCommand, PlatformService } from "../../../presentation/framework/services/identity-contracts";
 import type { LiveExecution, LiveExecutionLogs, LiveFunction, LiveFunctionDetails, LiveFunctionService, LiveSchedule } from "../../../presentation/framework/services/live-function-contracts";
 import type { LiveBuild, LiveChannel, LiveChannelRevision, LiveDeliveryService, LiveRelease } from "../../../presentation/framework/services/live-delivery-contracts";
+import type { LiveConfigurationService, LiveCredential, LiveSecret, LiveWorker } from "../../../presentation/framework/services/live-configuration-contracts";
 import { API, LiveTransport, failure, pageQuery, unsupported, type LiveTransportOptions } from "./transport.ts";
 
 type Json = Record<string, any>;
@@ -82,6 +83,18 @@ export function createLiveServices(options: LiveTransportOptions = {}): { servic
     },
     async complete(token: string, code?: string) {
       const result = await http.post<Json>(`${API}/auth/complete`, { token, ...(code ? { code } : {}) });
+      if (result.ok) { known = true; securityChanged(); }
+      return then(result, value => ({ returnTo: typeof value.returnTo === "string" ? value.returnTo : "/organizations" }));
+    },
+    async requestFresh(returnTo: string) {
+      // The link is bound to this browser, like a sign-in link, so this browser gets its proof first.
+      const bootstrap = await http.get<Json>(`${API}/auth/bootstrap`);
+      if (!bootstrap.ok) return bootstrap;
+      const result = await http.post<Json>(`${API}/account/fresh-auth/challenges`, { returnTo }, { idempotencyKey: crypto.randomUUID() });
+      return then(result, () => ({ message: "Carbon has emailed you a link. Open it in this browser to continue; it works once and expires after 15 minutes." }));
+    },
+    async completeFresh(token: string, code?: string) {
+      const result = await http.post<Json>(`${API}/account/fresh-auth/complete`, { token, ...(code ? { code } : {}) });
       if (result.ok) { known = true; securityChanged(); }
       return then(result, value => ({ returnTo: typeof value.returnTo === "string" ? value.returnTo : "/organizations" }));
     },
@@ -234,7 +247,8 @@ export function createLiveServices(options: LiveTransportOptions = {}): { servic
       return ok([
         { id: "account", owner: "cloud", available: true }, { id: "organizations", owner: "cloud", available: true }, { id: "catalog", owner: "cloud", available: true }, { id: "activity", owner: "cloud", available: true },
         { id: "functions", owner: "cloud", available: true }, { id: "builds", owner: "cloud", available: true }, { id: "releases", owner: "cloud", available: true },
-        ...["credentials", "billing"].map(id => ({ id, owner: "cloud" as const, available: false, reason: later })),
+        { id: "credentials", owner: "cloud", available: true },
+        ...["billing"].map(id => ({ id, owner: "cloud" as const, available: false, reason: later })),
         ...["data", "storage", "app-auth", "vectors", "graph", "realtime"].map(id => ({ id, owner: "database" as const, available: false, reason: later })),
         { id: "registry", owner: "registry", available: false, reason: later },
       ]);
@@ -365,8 +379,57 @@ export function createLiveServices(options: LiveTransportOptions = {}): { servic
     },
   };
 
+  // Secrets, environment credentials and workers. A value or token appears only in the answer to the command that set or issued it.
+  const secret = (row: Json): LiveSecret => ({ id: row.id, name: row.name, state: row.state, currentVersion: row.currentVersion, revision: row.revision, createdAt: row.createdAt, updatedAt: row.updatedAt });
+  const credential = (row: Json): LiveCredential => ({ id: row.id, name: row.name, prefix: row.prefix, permissions: row.permissions, status: row.status, expiresAt: row.expiresAt, revision: row.revision, createdAt: row.createdAt });
+  const worker = (row: Json): LiveWorker => ({ id: row.id, name: row.name, purposes: row.purposes, status: row.status, platform: row.capabilities?.platform ?? null, credentialExpiresAt: row.credentialExpiresAt ?? null,
+    lastSeenAt: row.lastSeenAt ?? null, revision: row.revision, createdAt: row.createdAt });
+  const liveConfiguration: LiveConfigurationService = {
+    async secrets(context, page) {
+      const result = await http.get<Json>(`${environmentPath(context.scope)}/secrets${pageQuery(page)}`, context.signal);
+      return then(result, value => ({ items: (value.items as Json[]).map(secret), nextCursor: value.nextCursor as string | null, total: (value.items as Json[]).length }));
+    },
+    async createSecret(context, input, options) {
+      const result = await http.post<Json>(`${environmentPath(context.scope)}/secrets`, { name: input.name, value: input.value }, options);
+      return then(result, (value): CommandReceipt => ({ message: value.message, resourceId: value.secret.id }));
+    },
+    async rotateSecret(context, id, value, options) {
+      const result = await http.post<Json>(`${environmentPath(context.scope)}/secrets/${id}`, { kind: "rotate", value }, options);
+      return then(result, (answer): CommandReceipt => ({ message: answer.message, resourceId: answer.secret.id }));
+    },
+    async setSecretDisabled(context, id, disabled, options) {
+      const result = await http.post<Json>(`${environmentPath(context.scope)}/secrets/${id}`, { kind: "disable", disabled }, options);
+      return then(result, (value): CommandReceipt => ({ message: value.message, resourceId: value.secret.id }));
+    },
+    async credentials(context, page) {
+      const result = await http.get<Json>(`${environmentPath(context.scope)}/credentials${pageQuery(page)}`, context.signal);
+      return then(result, value => ({ items: (value.items as Json[]).map(credential), nextCursor: value.nextCursor as string | null, total: (value.items as Json[]).length }));
+    },
+    async createCredential(context, input, options) {
+      const result = await http.post<Json>(`${environmentPath(context.scope)}/credentials`, { name: input.name, permissions: [...input.permissions], expiresAt: input.expiresAt }, options);
+      return then(result, (value): CommandReceipt => ({ message: "Credential created", resourceId: value.credential.id, secretValue: value.token }));
+    },
+    async credentialCommand(context, id, command, options) {
+      const result = await http.post<Json>(`${environmentPath(context.scope)}/credentials/${id}`, command, options);
+      // Rotating issues a new value; revoking does not.
+      return then(result, (value): CommandReceipt => ({ message: typeof value.message === "string" ? value.message : "Credential rotated", resourceId: value.credential.id, ...(typeof value.token === "string" ? { secretValue: value.token } : {}) }));
+    },
+    async workers(context, page) {
+      const result = await http.get<Json>(`${orgPath(context.scope)}/workers${pageQuery(page)}`, context.signal);
+      return then(result, value => ({ items: (value.items as Json[]).map(worker), nextCursor: value.nextCursor as string | null, total: (value.items as Json[]).length }));
+    },
+    async enrollWorker(context, input, options) {
+      const result = await http.post<Json>(`${orgPath(context.scope)}/workers`, { name: input.name, purposes: [...input.purposes] }, { idempotencyKey: options.idempotencyKey });
+      return then(result, (value): CommandReceipt => ({ message: `Enrollment code issued. It expires ${value.expiresAt}.`, resourceId: value.worker.id, secretValue: value.code }));
+    },
+    async workerCommand(context, id, kind, options) {
+      const result = await http.post<Json>(`${orgPath(context.scope)}/workers/${id}`, { kind }, options);
+      return then(result, (value): CommandReceipt => ({ message: value.message, resourceId: value.worker.id }));
+    },
+  };
+
   const services: BrowserServices = {
-    session, identity, platform, catalog, activity, capabilities, liveFunctions, liveDelivery,
+    session, identity, platform, catalog, activity, capabilities, liveFunctions, liveDelivery, liveConfiguration,
     configuration: notConnected("Credentials and configuration"), delivery: notConnected("Builds and releases"), data: notConnected("Database"), appAuth: notConnected("Application authentication"),
     extensions: notConnected("Storage, vectors, graph and realtime"), functions: notConnected("Functions"), registry: notConnected("Registry"), billing: notConnected("Billing"), operator: notConnected("Operator tools"),
     operations: notConnected("Operations"), events: notConnected("Live events"),

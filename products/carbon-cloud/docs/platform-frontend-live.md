@@ -55,6 +55,10 @@ against the live service (see below), but it ships (G-151).
 | Projects and environments | List, create, archive, pause |
 | Scope and permissions | Resolved by the server for every page |
 | Activity | The organization's and a project's log, newest first, a page at a time; and the short list on each overview. No search by actor or action, and no count: the service has neither |
+| Secrets | Per environment: list names, versions and states; add, set a new value, disable and enable. A value is never shown |
+| Environment credentials | Per environment: list, create, rotate with an overlap, revoke. A value is shown once |
+| Workers | Per organization: list, enroll with a one-time code, disable, enable, revoke |
+| Confirming it is you | When a command needs a recent sign-in, the page offers an emailed link; opening it returns to that page |
 | Builds | Per environment: list, queue a build for one commit, read its installers and log, cancel |
 | Signing | Per environment: list signing profiles, create one from an environment secret |
 | Releases | Per environment: list, create from a succeeded build, read, withdraw with a reason |
@@ -80,6 +84,25 @@ channels are done the same way (`LiveDeliveryPages`, `LiveDeliveryService`). The
 mock's pages. The same routes serve both; which pages render is decided by the
 composition, in one place.
 
+### Values that are shown once, or never
+
+A secret's value goes to the service and is never returned: the list has names,
+versions and states. A credential's value and a worker's enrollment code are in
+the answer to the command that issued them, shown once with a notice that they
+cannot be shown again. After any successful command, a field marked secret is
+emptied, so the value does not stay in the page.
+
+### Confirming it is you
+
+Some commands need a sign-in from the last few minutes: adding a secret,
+issuing a credential, changing a repository binding. When the service refuses
+one for that reason, the page shows a button that asks Carbon to email a link.
+The link opens `/auth/fresh` in the same browser, which confirms it against the
+session already signed in and returns to the page the request came from. The
+command is then submitted again by the person; it is not replayed for them.
+
+A refusal for any other reason is shown as what it is, with no such button.
+
 ### Builds and releases belong to an environment
 
 The console's routes file builds, releases, channels and signing under a
@@ -93,9 +116,8 @@ Publishing to a channel reads the channel first: an existing channel is
 changed at the revision it has now, a new one is created, and if the channel's
 state cannot be read nothing is published.
 
-In the same slice of the route catalog, build configuration and organization
-workers are not connected: the service has no build configuration, and the
-workers page is not written. Those two routes still show the notice.
+In the same slice of the route catalog, build configuration is not connected:
+the service has none. That route still shows the notice.
 
 What the live functions pages do not have, because the service does not: a
 stream of log output while a function runs (the log arrives when it finishes),

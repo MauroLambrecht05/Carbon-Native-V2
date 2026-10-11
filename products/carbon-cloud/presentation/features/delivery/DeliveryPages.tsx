@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useRuntime } from "../../framework/services/runtime";
 import { LiveDeliveryPages } from "./LiveDeliveryPages";
+import { LiveWorkersPage } from "../configuration/LiveConfigurationPages";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { Feedback } from "../../components/Feedback";
@@ -42,6 +43,9 @@ function usePagination() {
 /** Against the live service the pages are the live ones; the mock keeps its own, which describe things the service does not have. */
 export function DeliveryScopePage(props: { scope: Scope; resolved: ResolvedScope }) {
   const { live } = useRuntime();
+  const location = useLocation();
+  // Workers belong to the organization, not to a project's delivery.
+  if (live && location.pathname.endsWith("/workers")) return <LiveWorkersPage {...props} />;
   return live ? <LiveDeliveryPages {...props} /> : <MockDeliveryScopePage {...props} />;
 }
 function MockDeliveryScopePage({ scope, resolved }: { scope: Scope; resolved: ResolvedScope }) {

@@ -157,7 +157,7 @@ test("against the live service the console says only true things: no mock wordin
   const organizations = await mount("/organizations", member.send); view!.unmount(); view = undefined;
   expect(organizations).toContain("North Works"); expect(organizations).toContain("Ada"); expect(organizations.toLowerCase()).not.toContain("mock"); expect(organizations).not.toContain("Operations");
   // Routes of areas that are not connected: a notice, and not one request for their data.
-  for (const path of ["/orgs/11111111-1111-4111-8111-111111111111/billing", "/orgs/11111111-1111-4111-8111-111111111111/projects/22222222-2222-4222-8222-222222222222/settings/build", "/orgs/11111111-1111-4111-8111-111111111111/workers",
+  for (const path of ["/orgs/11111111-1111-4111-8111-111111111111/billing", "/orgs/11111111-1111-4111-8111-111111111111/projects/22222222-2222-4222-8222-222222222222/settings/build", "/orgs/11111111-1111-4111-8111-111111111111/publishing",
     "/orgs/11111111-1111-4111-8111-111111111111/projects/22222222-2222-4222-8222-222222222222/environments/33333333-3333-4333-8333-333333333333/database/tables", "/registry", "/operations", "/account/tokens"]) {
     member.calls.length = 0; const page = await mount(path, member.send); view!.unmount(); view = undefined;
     expect(page).toContain("not connected to Carbon Cloud"); expect(page.toLowerCase()).not.toContain("mock");
@@ -407,6 +407,100 @@ test("builds, signing, releases and channels render per environment from live an
   await mount(`${pages}/releases/${releaseId}`, net.send); for (const title of ["Publish to a channel", "Withdraw this release"]) expect([title, formTitled(title).findByType("fieldset").props.disabled]).toEqual([title, true]); done();
   await mount(`${pages}/settings/signing`, net.send); expect(formTitled("Create a signing profile").findByType("fieldset").props.disabled).toBe(true); done();
   expect(net.calls.every(call => call.path.startsWith("/platform/v1/"))).toBe(true);
+});
+
+test("secrets, credentials and workers show no value they hold, show an issued one once, and offer a confirmation link when a command needs a recent sign-in", async () => {
+  const [org, projectId, environmentId, secretId, credentialId, workerId] = ["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", "33333333-3333-4333-8333-333333333333",
+    "44444444-4444-4444-8444-444444444444", "55555555-5555-4555-8555-555555555555", "66666666-6666-4666-8666-666666666666"];
+  const scope = { orgId: org, projectId, environmentId }; const env = `/platform/v1/orgs/${org}/projects/${projectId}/environments/${environmentId}`; const pages = `/orgs/${org}/projects/${projectId}/environments/${environmentId}`;
+  let stale = false; let changedElsewhere = false; let granted = ["metadata.read", "resources.configure", "organization.manage"];
+  const freshRequired = () => json({ error: { code: "forbidden", message: "Recent authentication is required", requestId: "r-9", fieldErrors: { authentication: "fresh_required" } } }, 403);
+  const net = network({
+    "/platform/v1/account/session": () => json({ session: { id: "s-1", expiresAt: "2026-10-12T00:00:00Z", account: { id: "a-1", name: "Ada", securityRevision: "1", permissionRevision: "1" } } }),
+    "/platform/v1/auth/bootstrap": () => json({ termsVersion: "2026-09" }),
+    "/platform/v1/account/fresh-auth/challenges": () => json({ message: "sent" }, 202),
+    "/platform/v1/account/fresh-auth/complete": () => json({ returnTo: `${pages}/settings/secrets` }),
+    [`/platform/v1/orgs/${org}`]: () => json({ organization: { id: org, name: "North Works", slug: "north-works", state: "active", revision: "6", role: "Owner", membershipId: "m-1", membershipRevision: "1", requireMfa: false }, transfer: null }),
+    [`/platform/v1/orgs/${org}/access`]: () => json({ scope, permissions: granted, permissionRevision: "1", membershipRevision: "1", organizationRevision: "6" }),
+    [`/platform/v1/orgs/${org}/projects/${projectId}`]: () => json({ id: projectId, orgId: org, name: "Notes", slug: "notes", state: "active", revision: "2", productionMutationsAllowed: true, createdAt: "2026-10-02T00:00:00Z" }),
+    [env]: () => json({ environment: { id: environmentId, orgId: org, projectId, name: "Development", kind: "development", state: "active", revision: "7", provisioning: "ready", createdAt: "2026-10-02T00:00:00Z" }, bindings: [] }),
+    [`${env}/secrets`]: init => init.method === "POST" ? (stale ? freshRequired() : json({ secret: { id: secretId }, message: "Secret created" }, 201))
+      : json({ items: [{ id: secretId, scope, name: "API_KEY", state: "active", currentVersion: 3, revision: "4", createdAt: "2026-10-01T00:00:00Z", updatedAt: "2026-10-09T00:00:00Z" }], nextCursor: null }),
+    [`${env}/secrets/${secretId}`]: () => changedElsewhere ? json({ error: { code: "conflict", message: "The secret changed; refresh before retrying", requestId: "r-8" } }, 409) : json({ secret: { id: secretId }, message: "Secret rotated" }),
+    [`${env}/credentials`]: init => init.method === "POST" ? json({ credential: { id: credentialId }, token: `ce_${"T".repeat(43)}` }, 201)
+      : json({ items: [{ id: credentialId, scope, name: "CI", prefix: "ce_TTTTTTTT", audience: "automation", permissions: ["metadata.read", "data.read"], status: "active", expiresAt: "2027-01-01T00:00:00Z", revision: "2", createdAt: "2026-10-01T00:00:00Z" }], nextCursor: null }),
+    [`${env}/credentials/${credentialId}`]: init => JSON.parse(String(init.body)).kind === "rotate" ? json({ credential: { id: credentialId }, token: `ce_${"N".repeat(43)}` }) : json({ credential: { id: credentialId }, message: "Credential revoked" }),
+    [`/platform/v1/orgs/${org}/workers`]: init => init.method === "POST" ? json({ worker: { id: workerId }, code: `we_${"E".repeat(43)}`, expiresAt: "2026-10-11T13:00:00Z" }, 201)
+      : json({ items: [{ id: workerId, orgId: org, name: "win-01", purposes: ["build"], capabilities: { platform: "windows", arch: "x64", toolchains: [] }, status: "active", credentialExpiresAt: "2026-11-01T00:00:00Z", lastSeenAt: "2026-10-11T08:00:00Z", revision: "3", createdAt: "2026-10-01T00:00:00Z" },
+        { id: "77777777-7777-4777-8777-777777777777", orgId: org, name: "new-machine", purposes: ["function"], capabilities: null, status: "pending", credentialExpiresAt: null, lastSeenAt: null, revision: "1", createdAt: "2026-10-11T00:00:00Z" },
+        { id: "88888888-8888-4888-8888-888888888888", orgId: org, name: "old-box", purposes: ["build"], capabilities: { platform: "linux", arch: "x64", toolchains: [] }, status: "revoked", credentialExpiresAt: null, lastSeenAt: "2026-09-01T00:00:00Z", revision: "9", createdAt: "2026-08-01T00:00:00Z" }], nextCursor: null }),
+    [`/platform/v1/orgs/${org}/workers/${workerId}`]: () => json({ worker: { id: workerId }, message: "Worker disabled" }),
+  });
+  const done = () => { view!.unmount(); view = undefined; }; const shown = () => JSON.stringify(view!.toJSON());
+  const formTitled = (title: string) => view!.root.findAllByType("form").find(form => JSON.stringify(form.findByType("h3").props.children).includes(title))!;
+  const fill = async (form: ReturnType<typeof formTitled>, values: readonly string[]) => {
+    for (const [index, value] of values.entries()) { const control = form.findAll(node => node.type === "textarea" || node.type === "input" || node.type === "select")[index]!; await act(async () => { control.props.onChange({ target: { value } }); }); }
+  };
+  const submit = async (form: ReturnType<typeof formTitled>) => { await act(async () => { await form.props.onSubmit({ preventDefault() {} }); }); await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); }); };
+  const posts = () => net.calls.filter(call => call.method === "POST");
+
+  // Secrets: names, versions and states. Never a value, and the page says it cannot show one.
+  const secrets = await mount(`${pages}/settings/secrets`, net.send);
+  for (const text of ["API_KEY", "version ", "3", "never shown again", "Add a secret", "Set a new value for "]) expect([text, secrets.includes(text)]).toEqual([text, true]);
+  for (const word of ["mock", "fake", "fixture", "discarded"]) expect([word, secrets.toLowerCase().includes(word)]).toEqual([word, false]);
+  // Adding one changes the environment, so it names the environment's revision. The value is sent once and is not on the page afterwards.
+  net.calls.length = 0; await fill(formTitled("Add a secret"), ["DB_URL", "postgres://user:hunter2@db/app"]); await submit(formTitled("Add a secret"));
+  expect([posts()[0]!.path, posts()[0]!.body, posts()[0]!.headers.get("if-match")]).toEqual([`${env}/secrets`, { name: "DB_URL", value: "postgres://user:hunter2@db/app" }, "7"]); expect(shown()).not.toContain("hunter2");
+  net.calls.length = 0; await fill(formTitled("Set a new value for "), ["rotated-value"]); await submit(formTitled("Set a new value for "));
+  expect([posts()[0]!.path, posts()[0]!.body, posts()[0]!.headers.get("if-match")]).toEqual([`${env}/secrets/${secretId}`, { kind: "rotate", value: "rotated-value" }, "4"]); expect(shown()).not.toContain("rotated-value");
+  net.calls.length = 0; await submit(formTitled("Disable ")); expect(posts()[0]!.body).toEqual({ kind: "disable", disabled: true });
+
+  // A refusal for any other reason is shown as what it is. The confirmation link is offered for one reason only.
+  changedElsewhere = true; await fill(formTitled("Set a new value for "), ["another"]); await submit(formTitled("Set a new value for ")); changedElsewhere = false;
+  expect(shown()).toContain("The secret changed"); expect(shown()).not.toContain("Email me a confirmation link");
+  // Signed in a while ago: the service refuses, and the page offers the way to continue instead of a dead end.
+  stale = true;
+  net.calls.length = 0; await fill(formTitled("Add a secret"), ["LATER", "value"]); await submit(formTitled("Add a secret"));
+  expect(shown()).toContain("confirm it is you"); expect(shown()).toContain("Email me a confirmation link");
+  const button = view!.root.findAllByType("button").find(node => JSON.stringify(node.props.children).includes("Email me a confirmation link"))!;
+  net.calls.length = 0; await act(async () => { await button.props.onClick(); }); await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
+  // The link will bring them back to this page, and nothing else is sent with the request.
+  expect(net.calls.map(call => [call.method, call.path, call.body])).toEqual([["GET", "/platform/v1/auth/bootstrap", undefined], ["POST", "/platform/v1/account/fresh-auth/challenges", { returnTo: `${pages}/settings/secrets` }]]);
+  expect(shown()).toContain("emailed you a link"); done(); stale = false;
+  // Opening that link completes against the signed-in session, with the token read from the fragment, and returns there.
+  const token = `ac_${"F".repeat(43)}`; net.calls.length = 0; const confirm = await mount(`/auth/fresh#token=${token}`, net.send); expect(confirm).toContain("Confirm it is you");
+  await act(async () => { await view!.root.findByType("form").props.onSubmit({ preventDefault() {} }); }); await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
+  const completed = posts().find(call => call.path.includes("/fresh-auth/complete"))!; expect(completed.body).toEqual({ token }); expect(net.calls.every(call => !call.path.includes(token))).toBe(true);
+  expect(posts().some(call => call.path === "/platform/v1/auth/complete")).toBe(false); done();
+
+  // Credentials: the prefix only. An issued or rotated value is shown once, in the answer to that command.
+  const credentials = await mount(`${pages}/settings/api`, net.send);
+  for (const text of ["CI", "ce_TTTTTTTT", "metadata.read, data.read", "shown once", "Create a credential"]) expect([text, credentials.includes(text)]).toEqual([text, true]); expect(credentials).not.toContain("T".repeat(43));
+  net.calls.length = 0; await fill(formTitled("Create a credential"), ["Deploy bot", "release.publish", "30"]); await submit(formTitled("Create a credential"));
+  const createdBody = posts()[0]!.body as { name: string; permissions: string[]; expiresAt: string };
+  expect([posts()[0]!.path, createdBody.name, createdBody.permissions, posts()[0]!.headers.get("if-match")]).toEqual([`${env}/credentials`, "Deploy bot", ["release.publish"], "7"]);
+  expect(Math.round((Date.parse(createdBody.expiresAt) - Date.now()) / 86_400_000)).toBe(30);
+  expect(shown()).toContain(`ce_${"T".repeat(43)}`); expect(shown()).toContain("cannot show it again");
+  net.calls.length = 0; await fill(formTitled("Rotate "), ["60", "300"]); await submit(formTitled("Rotate "));
+  const rotatedBody = posts()[0]!.body as { kind: string; overlapSeconds: number }; expect([posts()[0]!.path, rotatedBody.kind, rotatedBody.overlapSeconds, posts()[0]!.headers.get("if-match")]).toEqual([`${env}/credentials/${credentialId}`, "rotate", 300, "2"]);
+  expect(shown()).toContain(`ce_${"N".repeat(43)}`);
+  net.calls.length = 0; await submit(formTitled("Revoke ")); expect([posts()[0]!.body, posts()[0]!.headers.get("if-match")]).toEqual([{ kind: "revoke" }, "2"]); done();
+
+  // Workers: what each takes and when it was last seen, the warning about what a worker is, and the one-time enrollment code.
+  const workers = await mount(`/orgs/${org}/workers`, net.send);
+  for (const text of ["win-01", "windows", "new-machine", "Waiting for the machine", "no isolation between jobs", "Enroll a worker", "old-box", "revoked"]) expect([text, workers.includes(text)]).toEqual([text, true]);
+  // A revoked worker is over: nothing is offered for it. A pending one can only be revoked.
+  const titles = () => view!.root.findAllByType("form").map(form => JSON.stringify(form.findByType("h3").props.children));
+  expect(titles().filter(title => title.includes("old-box"))).toEqual([]); expect(titles().filter(title => title.includes("new-machine")).map(title => title.includes("Revoke"))).toEqual([true]);
+  net.calls.length = 0; await fill(formTitled("Enroll a worker"), ["gpu-box", "function"]); await submit(formTitled("Enroll a worker"));
+  expect([posts()[0]!.path, posts()[0]!.body]).toEqual([`/platform/v1/orgs/${org}/workers`, { name: "gpu-box", purposes: ["function"] }]); expect(shown()).toContain(`we_${"E".repeat(43)}`); expect(shown()).toContain("It expires ");
+  net.calls.length = 0; await submit(formTitled("Disable win-01")); expect([posts()[0]!.path, posts()[0]!.body, posts()[0]!.headers.get("if-match")]).toEqual([`/platform/v1/orgs/${org}/workers/${workerId}`, { kind: "disable" }, "3"]); done();
+
+  // A member who may only read sees the lists and can change nothing.
+  granted = ["metadata.read"];
+  await mount(`${pages}/settings/secrets`, net.send); for (const title of ["Add a secret", "Set a new value for ", "Disable "]) expect([title, formTitled(title).findByType("fieldset").props.disabled]).toEqual([title, true]); done();
+  await mount(`${pages}/settings/api`, net.send); for (const title of ["Create a credential", "Rotate ", "Revoke "]) expect([title, formTitled(title).findByType("fieldset").props.disabled]).toEqual([title, true]); done();
+  await mount(`/orgs/${org}/workers`, net.send); for (const title of ["Enroll a worker", "Disable win-01", "Revoke win-01"]) expect([title, formTitled(title).findByType("fieldset").props.disabled]).toEqual([title, true]); done();
 });
 
 test("the server serves the built console and nothing outside it", () => {

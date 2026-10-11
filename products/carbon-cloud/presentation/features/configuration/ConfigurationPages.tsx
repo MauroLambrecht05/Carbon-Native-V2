@@ -1,5 +1,6 @@
 import { IntegrationRecipes } from "../data/AppAuthPages";
 import { useRuntime } from "../../framework/services/runtime";
+import { LiveCredentialsPage, LiveSecretsPage } from "./LiveConfigurationPages";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
@@ -35,8 +36,8 @@ export function ConfigurationScopePage({ scope, resolved }: { scope: Scope; reso
   if (path.endsWith("/settings/repository")) return <RepositoryPage scope={scope} resolved={resolved} />;
   if (path.endsWith("/connections")) return <ConnectionsPage scope={scope} resolved={resolved} />;
   if (path.endsWith("/credentials") && !scope.projectId) return <OrganizationCredentialsPage scope={scope} resolved={resolved} />;
-  if (path.endsWith("/settings/api")) return <ApiPage scope={scope} resolved={resolved} />;
-  if (path.endsWith("/settings/secrets")) return <SecretsPage scope={scope} resolved={resolved} />;
+  if (path.endsWith("/settings/api")) return live ? <LiveCredentialsPage scope={scope} resolved={resolved} /> : <ApiPage scope={scope} resolved={resolved} />;
+  if (path.endsWith("/settings/secrets")) return live ? <LiveSecretsPage scope={scope} resolved={resolved} /> : <SecretsPage scope={scope} resolved={resolved} />;
   if (path.endsWith("/activity")) return live ? <LiveActivityPage scope={scope} /> : <ActivityPage scope={scope} />;
   return <section><h2>Configuration route unavailable</h2><p>This Slice 3 route has no matching project scope.</p></section>;
 }

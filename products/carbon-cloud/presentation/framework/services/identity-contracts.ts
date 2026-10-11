@@ -50,6 +50,10 @@ export type Notification = Readonly<{ id: string; name: string; accountId: strin
 export interface IdentityService {
   request(input: AuthRequest): Promise<Result<AuthReceipt>>;
   complete(token: string, code?: string): Promise<Result<AuthCompletion>>;
+  /** Asks for an emailed link that proves the signed-in person is at the keyboard now. Live service only. */
+  requestFresh?(returnTo: string): Promise<Result<AuthReceipt>>;
+  /** Completes that link. The session becomes recently authenticated for a short while. Live service only. */
+  completeFresh?(token: string, code?: string): Promise<Result<AuthCompletion>>;
   recover(email: string, code: string): Promise<Result<AuthReceipt>>;
   getAccount(context?: AccountContext): Promise<Result<Account>>;
   listSessions(page?: PageRequest, context?: AccountContext): Promise<Result<Page<AccountSession>>>;
