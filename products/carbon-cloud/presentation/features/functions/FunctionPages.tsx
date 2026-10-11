@@ -10,6 +10,8 @@ import { CommandForm, choices, type Field } from "../identity/Forms";
 import { Pager } from "../identity/IdentityPages";
 import { confirmation, Inspect, jsonField, QueryView, useDataParams, useDataQuery } from "../data/shared";
 import { denied } from "../extensions/shared";
+import { useRuntime } from "../../framework/services/runtime";
+import { LiveFunctionPages } from "./LiveFunctionPages";
 
 type Props = { scope: Scope; resolved: ResolvedScope };
 const defaultConfig: FunctionConfig = { handler: "echo", authorization: "app-session", timeoutMs: 5000, memoryMb: 128, concurrency: 2, secrets: [] };
@@ -18,7 +20,12 @@ function FunctionForm({ scope, title, fields = [], revision, command, disabled, 
   const { functions } = useServices();
   return <CommandForm title={title} fields={[...fields, confirmation]} revision={revision} disabled={disabled} submit={(v, o) => functions.command({ scope }, command(v), v.production, o)} after={r => after?.(r.resourceId, r.operationId, r.operation?.scope)} />;
 }
+/** Against the live service the pages are the live ones; the mock keeps its own, which describe things the service does not have. */
 export function FunctionPages(props: Props) {
+  const { live } = useRuntime();
+  return live ? <LiveFunctionPages {...props} /> : <MockFunctionPages {...props} />;
+}
+function MockFunctionPages(props: Props) {
   const location = useLocation(), params = resolveRoute(location.pathname)?.params ?? {};
   const available = props.resolved.bindings.some(b => b.owner === "functions" && b.state === "ready");
   if (!available) return <section><p>Functions need a ready service binding.</p><Link to={`${scopePath(props.scope)}/overview`}>Enable Functions in environment overview</Link></section>;

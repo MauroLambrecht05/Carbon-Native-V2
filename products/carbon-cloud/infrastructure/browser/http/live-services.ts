@@ -10,6 +10,7 @@
 import type { AccountContext, Audit, AuditRequest, BrowserServices, Capability, Change, CommandOptions, Environment, Organization, Page, PageRequest, Permission, Permissions, Project, RequestContext, ResolvedScope, Result, Scope, Session,
   Unsubscribe } from "../../../presentation/framework/services/contracts";
 import type { Account, AccountCommand, AccountSession, AuthRequest, CommandReceipt, IdentityService, Invitation, Member, OrganizationDetails, PlatformCommand, PlatformService } from "../../../presentation/framework/services/identity-contracts";
+import type { LiveExecution, LiveExecutionLogs, LiveFunction, LiveFunctionDetails, LiveFunctionService, LiveSchedule } from "../../../presentation/framework/services/live-function-contracts";
 import { API, LiveTransport, failure, pageQuery, unsupported, type LiveTransportOptions } from "./transport.ts";
 
 type Json = Record<string, any>;
@@ -231,15 +232,78 @@ export function createLiveServices(options: LiveTransportOptions = {}): { servic
       const later = "Not connected to the live service in this version of the frontend.";
       return ok([
         { id: "account", owner: "cloud", available: true }, { id: "organizations", owner: "cloud", available: true }, { id: "catalog", owner: "cloud", available: true }, { id: "activity", owner: "cloud", available: true },
-        ...["credentials", "builds", "releases", "billing", "functions"].map(id => ({ id, owner: "cloud" as const, available: false, reason: later })),
+        { id: "functions", owner: "cloud", available: true },
+        ...["credentials", "builds", "releases", "billing"].map(id => ({ id, owner: "cloud" as const, available: false, reason: later })),
         ...["data", "storage", "app-auth", "vectors", "graph", "realtime"].map(id => ({ id, owner: "database" as const, available: false, reason: later })),
         { id: "registry", owner: "registry", available: false, reason: later },
       ]);
     },
   };
 
+  // Functions. Each call is one request to the route of the same name; nothing is reshaped beyond dropping what the pages do not show.
+  const fn = (row: Json): LiveFunction => ({ id: row.id, name: row.name, state: row.state, activeRevision: row.activeRevision, latestRevision: row.latestRevision, revision: row.revision, createdAt: row.createdAt });
+  const execution = (row: Json): LiveExecution => ({ id: row.id, functionId: row.functionId, revisionNumber: row.revisionNumber, state: row.state, trigger: row.trigger, attempt: row.attempt, output: row.output ?? null,
+    errorCategory: row.errorCategory ?? null, hasLogs: row.hasLogs === true, prunedAt: row.prunedAt ?? null, scheduleId: row.scheduleId ?? null, retryOf: row.retryOf ?? null, revision: row.revision,
+    createdAt: row.createdAt, startedAt: row.startedAt ?? null, completedAt: row.completedAt ?? null });
+  const schedule = (row: Json): LiveSchedule => ({ id: row.id, functionId: row.functionId, intervalSeconds: row.intervalSeconds ?? null, cron: row.cron ?? null, timeZone: row.timeZone ?? null, input: row.input ?? null, state: row.state,
+    nextRunAt: row.nextRunAt, lastRunAt: row.lastRunAt ?? null, lastSkippedAt: row.lastSkippedAt ?? null, lastSkipReason: row.lastSkipReason ?? null, revision: row.revision });
+  const liveFunctions: LiveFunctionService = {
+    async list(context, page) {
+      const result = await http.get<Json>(`${environmentPath(context.scope)}/functions${pageQuery(page)}`, context.signal);
+      return then(result, value => ({ items: (value.items as Json[]).map(fn), nextCursor: value.nextCursor as string | null, total: (value.items as Json[]).length }));
+    },
+    async get(context, id) {
+      const result = await http.get<Json>(`${environmentPath(context.scope)}/functions/${id}`, context.signal);
+      return then(result, (value): LiveFunctionDetails => ({ function: fn(value.function), revisions: (value.revisions as Json[]).map(row => ({ number: row.number, codeDigest: row.codeDigest, secretNames: row.secretNames, timeoutSeconds: row.timeoutSeconds, createdAt: row.createdAt })) }));
+    },
+    async code(context, id, revision) {
+      const result = await http.get<Json>(`${environmentPath(context.scope)}/functions/${id}/revisions/${revision}`, context.signal);
+      return then(result, value => value.code as string);
+    },
+    async deploy(context, input, options) {
+      const result = await http.post<Json>(`${environmentPath(context.scope)}/functions`, { name: input.name, code: input.code, secretNames: [...input.secretNames], timeoutSeconds: input.timeoutSeconds }, { idempotencyKey: options.idempotencyKey });
+      return then(result, (value): CommandReceipt => ({ message: value.message, resourceId: value.function.id }));
+    },
+    async command(context, id, command, options) {
+      const result = await http.post<Json>(`${environmentPath(context.scope)}/functions/${id}`, command, options);
+      return then(result, (value): CommandReceipt => ({ message: value.message, resourceId: value.function.id }));
+    },
+    async invoke(context, id, input, options) {
+      const result = await http.post<Json>(`${environmentPath(context.scope)}/functions/${id}/invoke`, { input: input ?? null }, { idempotencyKey: options.idempotencyKey });
+      return then(result, (value): CommandReceipt => ({ message: value.message, resourceId: value.execution.id }));
+    },
+    async executions(context, id, page) {
+      const result = await http.get<Json>(`${environmentPath(context.scope)}/functions/${id}/executions${pageQuery(page)}`, context.signal);
+      return then(result, value => ({ items: (value.items as Json[]).map(execution), nextCursor: value.nextCursor as string | null, total: (value.items as Json[]).length }));
+    },
+    async execution(context, executionId) {
+      return then(await http.get<Json>(`${environmentPath(context.scope)}/executions/${executionId}`, context.signal), execution);
+    },
+    async logs(context, executionId) {
+      const result = await http.get<Json>(`${environmentPath(context.scope)}/executions/${executionId}/logs`, context.signal);
+      // No log is an answer, not a failure: the execution printed nothing, or its contents were removed.
+      if (!result.ok) return result.error.code === "not_found" ? ok(null) : result;
+      return ok<LiveExecutionLogs>({ text: result.value.text, truncated: result.value.truncated === true, attempt: result.value.attempt, recordedAt: result.value.recordedAt });
+    },
+    async executionCommand(context, executionId, kind, options) {
+      const result = await http.post<Json>(`${environmentPath(context.scope)}/executions/${executionId}`, { kind }, options);
+      return then(result, (value): CommandReceipt => ({ message: value.message, resourceId: value.execution.id }));
+    },
+    async schedules(context, id) {
+      return then(await http.get<Json>(`${environmentPath(context.scope)}/functions/${id}/schedules`, context.signal), value => (value.items as Json[]).map(schedule));
+    },
+    async createSchedule(context, id, input, options) {
+      const result = await http.post<Json>(`${environmentPath(context.scope)}/functions/${id}/schedules`, input, { idempotencyKey: options.idempotencyKey });
+      return then(result, (value): CommandReceipt => ({ message: value.message, resourceId: value.schedule.id }));
+    },
+    async scheduleCommand(context, scheduleId, kind, options) {
+      const result = await http.post<Json>(`${environmentPath(context.scope)}/schedules/${scheduleId}`, { kind }, options);
+      return then(result, (value): CommandReceipt => ({ message: value.message, resourceId: value.schedule.id }));
+    },
+  };
+
   const services: BrowserServices = {
-    session, identity, platform, catalog, activity, capabilities,
+    session, identity, platform, catalog, activity, capabilities, liveFunctions,
     configuration: notConnected("Credentials and configuration"), delivery: notConnected("Builds and releases"), data: notConnected("Database"), appAuth: notConnected("Application authentication"),
     extensions: notConnected("Storage, vectors, graph and realtime"), functions: notConnected("Functions"), registry: notConnected("Registry"), billing: notConnected("Billing"), operator: notConnected("Operator tools"),
     operations: notConnected("Operations"), events: notConnected("Live events"),

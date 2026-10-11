@@ -2772,6 +2772,58 @@ suite("real account authentication", () => {
     expect(JSON.stringify(await h.sql`SELECT * FROM operator_credentials`)).not.toContain(alice.token);
   }, 90000);
 
+  test('the console\'s live function adapters work against the real API: deploy, read code, invoke, follow, read the log, retry, and schedule', async () => {
+    const h = await harness(); const f = await functionFixture(h, 'console-functions', { API_KEY: 'api-key-value' });
+    const live = createLiveServices({ fetch: h.browserFetch, cookies: h.browserCookies }).services.liveFunctions!; const context = { scope: f.scope }; const options = () => ({ idempotencyKey: crypto.randomUUID() });
+    const value = <T,>(result: { ok: true; value: T } | { ok: false; error: { code: string; message: string } }): T => { if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`); return result.value; };
+    const refused = (result: { ok: boolean; error?: { code: string } }) => (result.ok ? 'accepted' : result.error!.code);
+
+    expect(value(await live.list(context)).items).toEqual([]);
+    // Deploying: the server's refusals arrive as its own codes, and a deploy returns the function to open.
+    expect(refused(await live.deploy(context, { name: 'report', code: 'export default (', secretNames: [], timeoutSeconds: 30 }, options()))).toBe('validation');
+    expect(refused(await live.deploy(context, { name: 'report', code: 'export default () => 1;', secretNames: ['MISSING'], timeoutSeconds: 30 }, options()))).toBe('validation');
+    const key = options(); const deployed = value(await live.deploy(context, { name: 'report', code: 'export default (input) => ({ echoed: input });', secretNames: ['API_KEY'], timeoutSeconds: 45 }, key));
+    const id = deployed.resourceId!; expect(value(await live.deploy(context, { name: 'report', code: 'export default (input) => ({ echoed: input });', secretNames: ['API_KEY'], timeoutSeconds: 45 }, key)).resourceId).toBe(id);
+    value(await live.deploy(context, { name: 'report', code: 'export default () => 2;', secretNames: [], timeoutSeconds: 30 }, options()));
+    expect(value(await live.list(context)).items.map(item => [item.name, item.state, item.activeRevision, item.latestRevision])).toEqual([['report', 'active', 2, 2]]);
+    const details = value(await live.get(context, id)); expect(details.revisions.map(revision => [revision.number, revision.secretNames, revision.timeoutSeconds])).toEqual([[2, [], 30], [1, ['API_KEY'], 45]]);
+    expect(value(await live.code(context, id, 1))).toBe('export default (input) => ({ echoed: input });');
+    // Going back to revision 1 names the function's current revision; a stale one is a conflict.
+    expect(refused(await live.command(context, id, { kind: 'activate', revision: 1 }, { ...options(), expectedRevision: '1' }))).toBe('conflict');
+    value(await live.command(context, id, { kind: 'activate', revision: 1 }, { ...options(), expectedRevision: details.function.revision }));
+    expect(value(await live.get(context, id)).function.activeRevision).toBe(1);
+
+    // Invoke, then a worker runs it: the page follows the execution it was given.
+    const executionId = value(await live.invoke(context, id, { month: '2026-10' }, options())).resourceId!;
+    expect(value(await live.execution(context, executionId))).toMatchObject({ state: 'queued', revisionNumber: 1, trigger: 'manual', hasLogs: false, output: null });
+    expect(value(await live.logs(context, executionId))).toBeNull();
+    await f.finish({ outcome: 'failed', errorCategory: 'function.threw', logs: { text: 'Error: upstream refused [redacted]\n', truncated: false } });
+    const failed = value(await live.execution(context, executionId)); expect(failed).toMatchObject({ state: 'failed', errorCategory: 'function.threw', hasLogs: true, attempt: 1 });
+    expect(value(await live.logs(context, executionId))).toMatchObject({ text: 'Error: upstream refused [redacted]\n', truncated: false, attempt: 1 });
+    expect(value(await live.executions(context, id)).items.map(item => item.id)).toEqual([executionId]);
+    // "No log" is what the service says when there is none. Any other failure to read one is still a failure, and is reported as one.
+    const signedOut = createLiveServices({ fetch: (async () => Response.json({ error: { code: 'unauthenticated', message: 'Sign in again', requestId: 'r-1' } }, { status: 401 })) as never }).services.liveFunctions!;
+    expect(refused(await signedOut.logs(context, executionId))).toBe('unauthenticated');
+    // Retrying makes a new execution of the same revision; cancelling one that is over is a conflict.
+    expect(refused(await live.executionCommand(context, executionId, 'cancel', { ...options(), expectedRevision: failed.revision }))).toBe('conflict');
+    const retryId = value(await live.executionCommand(context, executionId, 'retry', { ...options(), expectedRevision: failed.revision })).resourceId!; expect(retryId).not.toBe(executionId);
+    const retry = value(await live.execution(context, retryId)); expect(retry).toMatchObject({ state: 'queued', trigger: 'retry', retryOf: executionId, revisionNumber: 1 });
+    value(await live.executionCommand(context, retryId, 'cancel', { ...options(), expectedRevision: retry.revision })); expect(value(await live.execution(context, retryId)).state).toBe('cancelled');
+
+    // Schedules of both kinds, with the server's reasons when one is refused.
+    const bad = await live.createSchedule(context, id, { cron: '61 9 * * *', timeZone: 'UTC' }, options()); expect(bad.ok ? '' : `${bad.error.code}: ${bad.error.message}`).toBe('validation: The minute field is out of range');
+    const scheduleId = value(await live.createSchedule(context, id, { cron: '30 9 * * 1-5', timeZone: 'Europe/Brussels', input: { report: 'daily' } }, options())).resourceId!;
+    value(await live.createSchedule(context, id, { intervalSeconds: 3600 }, options()));
+    const listed = value(await live.schedules(context, id)); expect(listed.map(item => [item.cron, item.timeZone, item.intervalSeconds, item.input, item.state])).toEqual([['30 9 * * 1-5', 'Europe/Brussels', null, { report: 'daily' }, 'active'], [null, null, 3600, null, 'active']]);
+    const calendar = listed.find(item => item.id === scheduleId)!;
+    value(await live.scheduleCommand(context, scheduleId, 'pause', { ...options(), expectedRevision: calendar.revision })); expect(value(await live.schedules(context, id)).find(item => item.id === scheduleId)!.state).toBe('paused');
+    // Disabling stops new invocations, and the service says why.
+    value(await live.command(context, id, { kind: 'disable' }, { ...options(), expectedRevision: value(await live.get(context, id)).function.revision }));
+    expect(refused(await live.invoke(context, id, null, options()))).toBe('conflict');
+    // Another environment's function does not exist as far as this page can tell.
+    expect(refused(await live.get({ scope: { ...f.scope, environmentId: crypto.randomUUID() } }, id))).toBe('not_found');
+  });
+
   test('the console\'s live adapters walk the account and organization slice against the real API: sign-up by emailed link, session, organizations, projects, members, invitations, permissions, audit and sign-out', async () => {
     const h = await harness(); const { services } = createLiveServices({ fetch: h.browserFetch, cookies: h.browserCookies });
     const value = <T,>(result: { ok: true; value: T } | { ok: false; error: { code: string; message: string } }): T => { if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`); return result.value; };

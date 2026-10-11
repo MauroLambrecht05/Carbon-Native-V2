@@ -168,6 +168,8 @@ export interface BrowserServices {
   appAuth: import("./app-auth-contracts").AppAuthService;
   extensions: import("./extension-contracts").ExtensionService;
   functions: import("./function-contracts").FunctionService;
+  /** Functions as the live service offers them. Present only in the production composition; the mock uses `functions`. */
+  liveFunctions?: import("./live-function-contracts").LiveFunctionService;
   registry: import("./registry-contracts").RegistryService;
   billing: import("./operations-contracts").BillingService;
   operator: import("./operations-contracts").OperatorService;

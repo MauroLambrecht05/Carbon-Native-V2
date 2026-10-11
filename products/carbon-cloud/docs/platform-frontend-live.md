@@ -55,11 +55,29 @@ against the live service (see below), but it ships (G-151).
 | Projects and environments | List, create, archive, pause |
 | Scope and permissions | Resolved by the server for every page |
 | Audit | The list on organization, project and environment overviews |
+| Functions | List, deploy a function or a new revision, read a revision's code, activate a revision, enable and disable, invoke, list and follow executions, read an execution's log, cancel, retry, and schedules by calendar or interval with pause, resume and delete |
 
 Not connected inside these areas (G-148): GitHub sign-in, recovery by code,
 notifications, deleting an account, ownership transfer, billing contact,
 declining an invitation, the list of invitations an account received,
 per-project member access, and environment provisioning and policy.
+
+### Pages written for the service, not adapted from the mock
+
+The mock's functions had drafts, a choice of handler, memory sizes, concurrency,
+promotion between environments and several ways to authorize an invocation.
+Carbon Cloud has none of those. Bending the real service into that shape would
+have meant showing settings that do nothing.
+
+So against the live service the functions routes render their own pages
+(`LiveFunctionPages`), over their own contract (`LiveFunctionService`), which
+describes exactly what the service returns. The mock composition keeps the
+mock's pages. The same routes serve both; which pages render is decided by the
+composition, in one place.
+
+What the live functions pages do not have, because the service does not: a
+stream of log output while a function runs (the log arrives when it finishes),
+and anything about who else may invoke a function (G-102, G-104).
 
 Every other route of the console renders one notice, "This area is not
 connected to Carbon Cloud in this version of the console yet", and makes no
