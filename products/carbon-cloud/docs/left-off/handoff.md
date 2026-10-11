@@ -24,26 +24,28 @@ meaningful tests pass together.
 | 11 — complete | Implement BE-09 blob storage with private objects, signed bounded transfers, metadata authority, retention and cleanup. | Completed: buckets, single-use exact-object transfers verified before storing, public download by current visibility, versions and retention, quota, cleanup and metering, proven across two environments over real HTTP. App users have no blob access yet (G-76); transfers are mediated by Database, not presigned (G-78). |
 | 12 — complete | Implement BE-09 vector, graph and realtime parity with canonical environment authority and durable outbox semantics. | Completed: a database-captured change feed read in commit order under row policy with a resumable stream; vector collections with exact deterministic search; a bounded property graph; exact-scope isolation and reconnect, replay and revocation proven. Events carry no row values (G-88); the stream is polled and account-only (G-90); vector search has no index (G-94). |
 | 13 — partly complete | Implement BE-10 functions and schedules with immutable revisions, secret bindings, leases, limits and durable executions. | Gate met: deploy, invoke, schedule, cancel and retry tests prove revision pinning, secret isolation, idempotency and timeout recovery, and a real worker process runs leased code. Not built from the plan's section 16: isolation and resource limits (G-100), logs (G-102), calendar schedules (G-101), app and service invocation (G-104), drafts, packaging and promotion (G-105). |
-| 14 | Implement BE-11 Registry publisher identity, review, trust, immutable archives, yanking and signed distribution. | Publish/review/install tests verify namespace authority, provenance, digest/signature checks, revocation and tenant isolation. |
+| 14 — complete | Implement BE-11 Registry publisher identity, review, trust, immutable archives, yanking and signed distribution. | Completed: organization-owned publisher names, exact uploads inspected into quarantine, operator review with permanent records, signed statements under a root-signed trust bundle, yanking, security revocation and public distribution, proven from publish to verified install across two tenants over real HTTP. Nothing installs from it yet (G-116); operators are names, not accounts (G-114); keys are not in a KMS (G-115); binaries are checked by header only (G-117). |
 | 15 | Implement BE-12 project plugin consumption and the remaining CLI workflows. | Lockfile, install/update/remove, compatibility and offline/error recovery pass against real Registry and project APIs. |
 | 16 | Implement BE-13 billing, quotas, operator boundaries, recovery, deletion and unknown-outcome resolution. | Provider webhook replay, quota races, operator audit, backup/restore and irreversible-deletion gates pass. |
 | 17 | Complete production browser adapters and the Carbon frontend one vertical slice at a time. | Each frontend-plan walkthrough passes against real services; production bundles contain no mock imports or mock data. |
 | 18 | Complete observability, deployment compatibility, security review, migration reconciliation, canary rollout and cutover. | Sections 25-29 of the backend plan have recorded production evidence, including restore, rotation, rollback and no-mock-fallback drills. |
 | 19 | Close the gap ledger: every open decision and everything an earlier phase could not finish or prove. | Each entry in [gaps.md](gaps.md) is closed with evidence or explicitly accepted by the owner. Includes the hardware- and account-dependent proofs (a real Windows build, signing, isolation, real KMS, a real identity provider) and CI running the database suites. |
 
-## Start with Phase 14
+## Start with Phase 15
 
-Phases 1 to 7, 9, 11 and 12 are complete; Phases 8, 10 and 13 are partly complete.
-Read these files before changing Phase 14 code:
+Phases 1 to 7, 9, 11, 12 and 14 are complete; Phases 8, 10 and 13 are partly complete.
+Read these files before changing Phase 15 code:
 
-- section 17 of [the backend plan](../platform-backend-plan.md), "BE-11: Registry publishing and trust", and its proof gate
-- `products/carbon-registry` (the service as it is today) and `solutions/capabilities/plugin`
-- [service-lifecycle.md](../service-lifecycle.md) and [signed-data.md](../signed-data.md): how Cloud signs requests to an owning service; Registry serves one canonical request so far (G-10)
-- [releases.md](../releases.md): signing profiles and signed immutable metadata, the nearest existing pattern for signed distribution
-- [blob-storage.md](../blob-storage.md): exact-byte verified uploads, the pattern for immutable archives
+- section 18 of [the backend plan](../platform-backend-plan.md), "BE-12: plugin consumption and CLI changes", and its proof gate
+- [registry-publishing.md](../registry-publishing.md): what Registry serves and exactly what an installer must check (`verifyRegistryPackage`, `packArchive`, `inspectArchive` in `@carbon/catalog`)
+- `products/carbon-cli/presentation/commands/plugins/plugin.command.ts` and `products/carbon-cli/composition/registry.ts`: the commands as they are, still on the legacy API (G-116)
+- `products/carbon-cli/infrastructure/cloud/RegistryDeviceClient.ts`: the CLI's signed path to Registry, which so far sends only `namespace.get` (G-122)
+- `solutions/capabilities/plugin/lifecycle` and `solutions/capabilities/plugin/trust`: local plugin builds and the loader's older signature scheme
+- [github-repositories.md](../github-repositories.md): source proposals, the way a lock file reaches a repository
 
-Phase 14 builds Registry publishing: publisher namespaces, review, trust,
-immutable archives, yanking and signed distribution.
+Phase 15 builds plugin consumption: an exact lock file, install, update and
+remove against the canonical Registry with pinned trust, and the remaining CLI
+workflows.
 
 ## Deferred work
 

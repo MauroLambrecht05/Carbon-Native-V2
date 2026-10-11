@@ -6,4 +6,4 @@ export { dataPermission, dataRequestPath, canonicalDataRequest, dataTablePageOrd
 export { blobPermission, blobRequestPath, canonicalBlobRequest } from './blob.ts';
 export { enginePermission, engineRequestPath, canonicalEngineRequest, type EngineFamily, type EngineKind } from './engine.ts';
 export { dataImportPath, canonicalDataImportRequest, validateImportExecutionResult } from './data-import.ts';
-export { registryPermission, registryRequestPath, canonicalRegistryRequest } from './registry.ts';
+export { registryPermission, registryRequestPath, canonicalRegistryRequest, canonicalJson, type RegistryKind } from './registry.ts';

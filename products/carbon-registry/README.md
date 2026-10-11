@@ -3,8 +3,12 @@
 Canonical environment lifecycle is now available through opt-in signed internal
 HTTP endpoints, backed by scoped PostgreSQL namespaces and durable command receipts.
 See [configuration, integration evidence and limits](../carbon-cloud/docs/service-lifecycle.md).
-Package publishing still needs integration with those namespaces; the legacy API
-and signing behavior described below remain separate migration work.
+Publishing under those namespaces now exists beside the legacy API: publisher
+names owned by an organization, exact uploads into quarantine, operator review,
+signed statements, a root-signed trust bundle and public distribution. See
+[Registry publishing and trust](../carbon-cloud/docs/registry-publishing.md).
+Nothing installs from it yet; the CLI and everything described below still use
+the legacy API and its signing, which remain separate migration work.
 
 The official Plugin & Component Registry / Marketplace for Carbon Native.
 Self-hosted, v1.

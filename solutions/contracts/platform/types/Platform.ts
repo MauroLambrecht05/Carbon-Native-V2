@@ -168,9 +168,9 @@ export type RegistryNamespaceQuery = { readonly "kind": "namespace.get"; };
 
 export type RegistryNamespace = { readonly "id": Id; readonly "state": "active" | "paused"; readonly "revision": Revision; };
 
-export type RegistryRequest = { readonly "scope": EnvironmentScope; readonly "bindingId": Id; readonly "command": RegistryNamespaceQuery; };
+export type RegistryRequest = { readonly "scope": EnvironmentScope; readonly "bindingId": Id; readonly "command": RegistryCommand; };
 
-export type RegistryResponse = { readonly "scope": EnvironmentScope; readonly "bindingId": Id; readonly "result": RegistryNamespace; };
+export type RegistryResponse = { readonly "scope": EnvironmentScope; readonly "bindingId": Id; readonly "result": RegistryResult; };
 
 export type PersonalCredential = { readonly "id": Id; readonly "name": string; readonly "scope": Scope; readonly "permissions": ReadonlyArray<EnvironmentCredentialPermission>; readonly "prefix": string; readonly "status": "active" | "expired" | "revoked"; readonly "expiresAt": Timestamp; readonly "lastUsedAt": Timestamp | null; readonly "revision": Revision; readonly "createdAt": Timestamp; };
 
@@ -303,6 +303,38 @@ export type WorkerBuildInput = { readonly "buildId": Id; readonly "scope": Envir
 export type BuildMaterials = { readonly "resolvedCommit": string; readonly "dependencyLockDigest": Digest; readonly "configurationDigest": Digest | null; readonly "tools": ReadonlyArray<{ readonly "name": string; readonly "version": string; }>; readonly "workspaceErased": true; };
 
 export type BuildProvenance = { readonly "statement": { readonly "version": 1; readonly "buildId": Id; readonly "scope": EnvironmentScope; readonly "attempt": number; readonly "workerId": Id; readonly "source": BuildSource; readonly "sourceDigest": Digest; readonly "materials": BuildMaterials; readonly "artifacts": ReadonlyArray<{ readonly "target": string; readonly "objectKey": string; readonly "sizeBytes": number; readonly "sha256": Digest; }>; readonly "startedAt": Timestamp; readonly "finishedAt": Timestamp; }; readonly "statementDigest": Digest; readonly "signature": { readonly "keyId": string; readonly "algorithm": "ed25519"; readonly "value": string; } | null; };
+
+export type RegistrySlug = string;
+
+export type RegistryPackageName = string;
+
+export type RegistrySemver = string;
+
+export type RegistryTarget = "x86_64-pc-windows-msvc" | "aarch64-pc-windows-msvc" | "x86_64-unknown-linux-gnu" | "aarch64-unknown-linux-gnu" | "x86_64-apple-darwin" | "aarch64-apple-darwin";
+
+export type RegistryManifest = { readonly "abiMajor": number; readonly "abiMinor": number; readonly "description": string; readonly "requiredCapabilities": ReadonlyArray<string>; readonly "optionalCapabilities": ReadonlyArray<string>; };
+
+export type RegistryPublisher = { readonly "id": Id; readonly "slug": RegistrySlug; readonly "state": "active" | "suspended"; readonly "revision": Revision; readonly "createdAt": Timestamp; };
+
+export type RegistryStatement = { readonly "publisher": RegistrySlug; readonly "name": RegistryPackageName; readonly "version": RegistrySemver; readonly "target": RegistryTarget; readonly "sha256": Digest; readonly "sizeBytes": number; readonly "manifestDigest": Digest; readonly "publishedAt": Timestamp; };
+
+export type RegistrySignedStatement = { readonly "statement": RegistryStatement; readonly "keyId": string; readonly "signature": string; };
+
+export type RegistryVersion = { readonly "id": Id; readonly "publisher": RegistrySlug; readonly "name": RegistryPackageName; readonly "version": RegistrySemver; readonly "target": RegistryTarget; readonly "state": "awaiting_upload" | "submitted" | "rejected" | "published" | "revoked"; readonly "yanked": boolean; readonly "sizeBytes": number; readonly "sha256": Digest; readonly "manifest": RegistryManifest; readonly "reason": string | null; readonly "signed": RegistrySignedStatement | null; readonly "revision": Revision; readonly "createdAt": Timestamp; readonly "publishedAt": Timestamp | null; };
+
+export type RegistryUpload = { readonly "method": "PUT"; readonly "url": string; readonly "expiresAt": Timestamp; };
+
+export type RegistryCommand = RegistryNamespaceQuery | { readonly "kind": "publisher.claim"; readonly "commandId": Id; readonly "slug": RegistrySlug; } | { readonly "kind": "publishers.list"; } | { readonly "kind": "version.submit"; readonly "commandId": Id; readonly "publisher": RegistrySlug; readonly "name": RegistryPackageName; readonly "version": RegistrySemver; readonly "target": RegistryTarget; readonly "sizeBytes": number; readonly "sha256": Digest; readonly "manifest": RegistryManifest; } | { readonly "kind": "versions.list"; readonly "publisher": RegistrySlug; readonly "name": RegistryPackageName; } | { readonly "kind": "version.get"; readonly "versionId": Id; } | { readonly "kind": "version.yank"; readonly "commandId": Id; readonly "versionId": Id; readonly "revision": Revision; readonly "yanked": boolean; readonly "reason": string; } | { readonly "kind": "version.withdraw"; readonly "commandId": Id; readonly "versionId": Id; readonly "revision": Revision; };
+
+export type RegistryResult = RegistryNamespace | { readonly "commandId": Id; readonly "publisher": RegistryPublisher; } | { readonly "publishers": ReadonlyArray<RegistryPublisher>; } | { readonly "commandId": Id; readonly "version": RegistryVersion; readonly "upload": RegistryUpload | null; } | { readonly "versions": ReadonlyArray<RegistryVersion>; } | { readonly "version": RegistryVersion; };
+
+export type RegistryTrustKey = { readonly "id": string; readonly "publicKey": string; readonly "state": "active" | "retiring" | "revoked"; };
+
+export type RegistryTrustBundle = { readonly "bundle": { readonly "sequence": number; readonly "issuedAt": Timestamp; readonly "keys": ReadonlyArray<RegistryTrustKey>; }; readonly "signature": string; };
+
+export type RegistryPublicVersion = { readonly "version": RegistrySemver; readonly "target": RegistryTarget; readonly "state": "published" | "revoked"; readonly "yanked": boolean; readonly "reason": string | null; readonly "signed": RegistrySignedStatement; readonly "manifest": RegistryManifest; };
+
+export type RegistryPublicPackage = { readonly "publisher": RegistrySlug; readonly "name": RegistryPackageName; readonly "versions": ReadonlyArray<RegistryPublicVersion>; };
 
 export type FunctionName = string;
 
@@ -831,6 +863,22 @@ export interface Components {
   WorkerBuildInput: WorkerBuildInput;
   BuildMaterials: BuildMaterials;
   BuildProvenance: BuildProvenance;
+  RegistrySlug: RegistrySlug;
+  RegistryPackageName: RegistryPackageName;
+  RegistrySemver: RegistrySemver;
+  RegistryTarget: RegistryTarget;
+  RegistryManifest: RegistryManifest;
+  RegistryPublisher: RegistryPublisher;
+  RegistryStatement: RegistryStatement;
+  RegistrySignedStatement: RegistrySignedStatement;
+  RegistryVersion: RegistryVersion;
+  RegistryUpload: RegistryUpload;
+  RegistryCommand: RegistryCommand;
+  RegistryResult: RegistryResult;
+  RegistryTrustKey: RegistryTrustKey;
+  RegistryTrustBundle: RegistryTrustBundle;
+  RegistryPublicVersion: RegistryPublicVersion;
+  RegistryPublicPackage: RegistryPublicPackage;
   FunctionName: FunctionName;
   FunctionDeploy: FunctionDeploy;
   FunctionRevision: FunctionRevision;

@@ -39,7 +39,6 @@ Phase 19 as well.
 | G-07 | The legacy `wk_` worker tokens and legacy build queue routes (`/v1/builds`) still work, separate from canonical builds | Phases 3, 4, 7 | Phase 7 built canonical builds but did not retire or bridge the legacy queue: the CLI's `carbon cloud deploy` and the Linux worker still use it. Retire with the CLI work in Phase 15 |
 | G-08 | Suspension and reinstatement have no operator HTTP surface | Phase 5 | Phase 16 |
 | G-09 | Final deletion marks rows in Cloud and destroys no data in Carbon Database, Carbon Registry or object storage | Phase 5 | Needs a delete action in the owning-service lifecycle protocol; Phase 16 (recovery and deletion) |
-| G-10 | Registry serves one canonical request, `namespace.get` | Phase 2 | Phase 14 |
 | G-11 | The CLI uses only the device login; it cannot use personal credentials | Phases 3, gap closures | Phase 15 |
 | G-12 | The production frontend is the mock; no screen is wired to the real API | All | Phase 17 |
 
@@ -189,6 +188,23 @@ than was built. Each difference is an entry here.
 | G-112 | Functions, revisions and executions are stored in Cloud. The plan says Database remains the resource owner | Cloud already owns leases and secrets, and one transaction across both was needed to create an execution with its lease | A decision: keep them in Cloud, or move them behind signed Database requests |
 | G-113 | A function cannot be deleted or renamed, a revision can never be removed (not even one deployed with a secret pasted into its code), and final deletion of an environment does not remove its functions (see G-09) | Immutability came first; deletion is open across the platform | A reviewed removal path for revisions, and G-09 |
 
+## Open: from Phase 14 (Registry publishing and trust)
+
+| # | Gap | Why open | Closes when |
+|---|---|---|---|
+| G-114 | **Operators are names, not accounts.** Review is a command-line tool beside the service; the operator is whatever name is typed, there is no operator sign-in, role or second approver, and the tool itself (`composition/review.ts`) has no test | Operator accounts and the operator boundary are Phase 16 | Phase 16: authenticated operators, and two-person approval for revocation and trust changes |
+| G-115 | Registry's signing key is a seed in an environment variable, not a key in a KMS or HSM. The trust bundle is static configuration, so rotating a key means a redeploy. No root key ceremony is written down, and no rotation (new key active, old key retiring, then revoked) has been exercised in a deployment | No KMS or deployment was available; the bundle format and its checks came first | A signing key held in a KMS, a written root procedure, and a rotation drill (with G-01 and Phase 18) |
+| G-116 | **Nothing installs from the canonical Registry.** `carbon plugin publish` and `carbon plugin add` still use the legacy API; `verifyRegistryPackage` is called only by tests; there is no extraction step on the install side; an installer does not yet store the highest trust-bundle sequence it has seen; the Rust loader's `plugin/trust` crate verifies a different, older scheme | Plugin consumption and the CLI are Phase 15 | Phase 15 |
+| G-117 | Inspection reads a library's header and nothing more. It does not prove the library loads, exports the plugin ABI, was built for the declared ABI version, or needs only the capabilities it declares. There is no malware scan, no check that a build is reproducible from source, and no publisher's own signature: only Registry signs | Each needs tooling that does not exist yet (an ABI reader, a scanner, a build service) | An ABI and capability check against the binary, at least |
+| G-118 | The legacy Registry API, its tables, its marketplace page and its ephemeral-key signing still run beside this. Its pre-seeded standard-library packages are not real versioned builds and are not labelled as fixtures, which the plan requires | Retiring it needs the CLI and the unified frontend | Phases 15 and 17 |
+| G-119 | Every published package is public. Any member with `release.publish` in any environment of an organization can publish under any of that organization's publishers; there are no per-publisher members or grants. A publisher cannot be renamed, transferred or released, and although a publisher has a `suspended` state, nothing sets it. The loader's local name is the package name; there is no explicit mapping | The simplest ownership model that proves namespace authority | Publisher membership, private packages and a suspension operation |
+| G-120 | There is no deprecation state, no search or index of all packages, no download count, and no rate limit on the public endpoints or on upload attempts. Archives are held in memory whole on upload, review and download (up to 64 MiB each) | Not needed for the proof gate | Streaming transfer, rate limits (Phase 18) and a package index |
+| G-121 | A crash between storing an archive and committing can leave an object nobody refers to, under `quarantine/` or `packages/`; nothing sweeps for them. A revoked version's bytes are kept forever. A reservation that was never used is closed only when the same version is submitted again; otherwise it stays `awaiting_upload` (it stops counting toward the limit when it expires). Final deletion of an organization does not remove its publishers (see G-09) | No sweeper was built | A sweep of unreferenced objects and stale reservations, and G-09 |
+| G-122 | Not proven: `S3RegistryArchiveStore` against a real bucket; Registry's environment wiring (`publishingFromEnv`) and the review tool as processes; writes refused in a paused environment; a browser session that is no longer fresh at Registry's live check; publishing through the CLI and service-account assertion exchange (only `namespace.get` is tested that way); real Linux and macOS libraries (headers are hand-made in tests); a plugin actually built by the Zig toolchain, packed and published | Each needs a deployment, another credential path, or a real build | Those scenarios have tests, and one real plugin goes from build to install |
+| G-123 | Registry's package events are in Registry's own table, not the organization audit log (see G-21). A publisher learns of a rejection or revocation only by reading the version; nothing notifies them | Owning-service events are open across the platform | G-21, and a notification |
+| G-124 | The upload address is disclosed once. If that response is lost, the publisher must withdraw the reservation and submit again with a new command | Disclosing a credential a second time was the worse default | An explicit "new upload address" command |
+| G-125 | An operator's rejection reason and a publisher's yank reason are free text shown to others; nothing limits what is written beyond length. A revoked version's reason is public | No moderation model | A decision on reason categories |
+
 ## Open: verification
 
 | # | Gap | Why open | Closes when |
@@ -208,6 +224,7 @@ than was built. Each difference is an entry here.
 
 | Gap | From | Closed by |
 |---|---|---|
+| G-10: Registry served one canonical request, `namespace.get` | Phase 2 | Phase 14: eight canonical commands for publishers and versions, under the same signed, request-bound, live-checked authority |
 | Three updaters decided differently: the standalone one bucketed rollouts without the version, accepted unsigned manifests and ignored `min_version`; the runtime one ignored `min_version` and would install an older version | Inherited | Phase 9: one decision function per language, all held to the shared conformance fixture |
 | The Rust updater's tests never ran in CI | Inherited | Phase 9: `//solutions/capabilities/distribution/updating:rust_updater_test` |
 | G-27: Cloud did not verify declared artifacts | Phase 7 | Phase 8: every declared object is read back and its size and SHA-256 compared before success; keys are confined to the build and attempt |

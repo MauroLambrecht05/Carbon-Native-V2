@@ -171,11 +171,11 @@ export class PostgresServiceAuthority extends PostgresPlatformAuthority implemen
   }
   private async registryAuthority(assertion: InternalAssertion): Promise<boolean> {
     const scope = assertion.scope; const principal = assertion.principal;
-    if (assertion.aud !== 'carbon-registry' || !((principal.kind === 'account' && principal.audience === 'cli') || (principal.kind === 'service_account' && principal.audience === 'automation')) || !scope.projectId || !scope.environmentId || scope.realmId || assertion.request.method !== 'POST' || assertion.roles.length !== 0) return false;
+    if (assertion.aud !== 'carbon-registry' || !((principal.kind === 'account' && ['dashboard', 'cli'].includes(principal.audience)) || (principal.kind === 'service_account' && principal.audience === 'automation')) || !scope.projectId || !scope.environmentId || scope.realmId || assertion.request.method !== 'POST') return false;
     let bindingId: string; let permission: Permission;
     try {
       const url = new URL(assertion.request.path, 'https://internal.invalid');
-      const kind = url.pathname.split('/').at(-1) as RegistryRequest['command']['kind'];
+      const kind = url.pathname.split('/').at(-1)!;
       bindingId = url.searchParams.get('bindingId')!;
       if (assertion.request.path !== registryRequestPath({ orgId: scope.orgId, projectId: scope.projectId, environmentId: scope.environmentId }, bindingId, kind)) return false;
       permission = registryPermission(kind);
@@ -186,7 +186,17 @@ export class PostgresServiceAuthority extends PostgresPlatformAuthority implemen
       const binding = await tx`SELECT id FROM service_bindings WHERE id = ${bindingId} AND org_id = ${scope.orgId} AND project_id = ${scope.projectId}
         AND environment_id = ${scope.environmentId} AND owner = 'registry' AND remote_resource_id IS NOT NULL AND state IN ('ready', 'paused')`;
       if (!binding.length) return false;
-      return this.credentialAuthority(tx, assertion, permission);
+      if (principal.kind === 'service_account' || principal.audience === 'cli') return assertion.roles.length === 0 && this.credentialAuthority(tx, assertion, permission);
+      // A browser session: the session, the account's access and its role must all still be what the assertion was issued under.
+      await this.lockAccounts(tx, [principal.id], true);
+      const session = (await tx`SELECT token_hash, csrf_hash, security_revision::text, fresh_until > clock_timestamp() AS fresh FROM account_sessions WHERE id = ${principal.credentialId} AND account_id = ${principal.id}`)[0];
+      if (!session || (permission !== 'metadata.read' && !session.fresh)) return false;
+      try {
+        const access = await this.resolveInTransaction(tx, { accountId: principal.id, sessionId: principal.credentialId, permissionRevision: principal.permissionRevision,
+          tokenHash: session.token_hash, csrfHash: session.csrf_hash, securityRevision: session.security_revision }, scope);
+        const organization = await this.organization(tx, scope.orgId, principal.id);
+        return access.permissions.includes(permission) && assertion.roles.length === 1 && assertion.roles[0] === organization.role;
+      } catch { return false; }
     });
   }
   private async importAuthority(assertion: InternalAssertion): Promise<boolean> {

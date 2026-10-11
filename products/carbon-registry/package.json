@@ -6,6 +6,7 @@
   "scripts": {
     "start": "bun run main.ts",
     "dev": "bun run main.ts",
+    "review": "bun ./composition/review.ts",
     "test": "bun test"
   },
   "engines": {

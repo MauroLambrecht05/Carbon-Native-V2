@@ -2081,3 +2081,85 @@ live in Cloud rather than Database (G-112).
 
 Phase 13 stops here. Phase 14 (Registry publishing and trust) is next in
 [the handoff](left-off/handoff.md).
+
+## 2026-10-11: Phase 14, Registry publishing and trust
+
+Phase 14 added publishing to Carbon Registry under canonical environment
+authority ([registry-publishing.md](registry-publishing.md),
+[registry-publishing-api.openapi.json](registry-publishing-api.openapi.json),
+Registry migration `0004_publishing.sql`). It closes G-10.
+
+- **Namespace authority.** A publisher name is claimed by, and belongs to, one
+  organization. Seven new canonical commands join `namespace.get`, each bound
+  to its exact request and checked against Cloud again before it commits.
+  Cloud's live authority now accepts browser sessions for Registry.
+- **Upload.** Submitting reserves a version and discloses one upload address
+  once. Exactly the declared bytes are accepted, inspected, and held in
+  quarantine.
+- **Inspection.** One zstd frame, bounded expansion, plain files with portable
+  paths, the declared manifest, and exactly one library for the declared target.
+- **Review.** An operator approves, rejects or revokes with a name and a reason,
+  from a tool beside the service. Records are permanent.
+- **Trust.** Registry signs a statement naming the package, version, target and
+  bytes. Its signing keys are listed in a bundle signed by a root key Registry
+  does not hold, and it refuses to start publishing otherwise.
+- **Distribution.** Anonymous endpoints for the bundle, the listing and the
+  archive, and `verifyRegistryPackage`, which is everything an installer checks.
+
+Proof gate ("publish/review/install tests verify namespace authority,
+provenance, digest/signature checks, revocation and tenant isolation"), against
+real PostgreSQL with the real Cloud API and Registry over HTTP, plus unit tests
+of inspection and trust that also run in CI:
+
+- **Namespace authority:** a claimed name is refused to everyone else and to a
+  second claim; reserved names are refused; another organization can neither
+  submit under the name nor learn that its versions exist; a member with only
+  metadata access reads and can change nothing.
+- **Upload:** the address is disclosed once and stored only as a hash; wrong
+  bytes, a short body and an unknown token are refused and leave the
+  reservation usable; the right bytes are accepted once; an expired reservation
+  takes nothing and frees its number.
+- **Inspection:** every refusal category, across not-zstd, trailing data, expansion, entry
+  types, unsafe and colliding paths, manifest differences, a missing or
+  wrong-target library and extra executables, for six targets; an archive that
+  fails is rejected at upload with nothing stored.
+- **Review and provenance:** an operator cannot approve what was not submitted,
+  act without a name or reason, or sign quarantined bytes that changed; the
+  record holds who, why, and the digest, size, file list and key; the statement
+  matches the submission exactly.
+- **Digest and signature checks:** a verified install from anonymous HTTP
+  against the pinned root; refusal under another root, an older bundle, an
+  unknown or revoked key, a changed statement, a genuine statement for another
+  package, version or target, a changed manifest, and changed, longer or other
+  bytes; stored bytes that no longer match are never served.
+- **Yank and revocation:** a yanked version stays installable by exact version
+  and can be restored; a revoked one is never served again, stays listed with
+  its statement and reason, cannot be yanked, and its number cannot be reused.
+- **Tenant isolation and live authority:** signed requests cannot be replayed,
+  moved to another command or sent under the wrong permission; authority lost
+  before the request, and lost after the work but before the commit, both
+  leave nothing behind.
+- **Start-up:** Registry opens its trust only with a root-signed bundle that
+  lists its exact key as active.
+- **The database:** identity, published statements, closed versions and review
+  records each refuse to change.
+- **Mutation checks:** 58 deliberate breakages; 55 make a test fail: 31 in the
+  repository, the routes' authority, Cloud's forwarding and the migration, 13
+  in archive inspection and 11 in trust. The three no test catches: removing
+  the check for `..` path segments changes nothing because the rule against
+  segments ending in a dot refuses them too; removing the size comparison
+  changes nothing because the digest comparison covers it; and giving bundles
+  and statements the same signing domain cannot be told apart through the
+  public functions, because the two documents never parse as each other.
+
+The affected regression passed **699 tests, 0 failures and 7,704 assertions across 86 files, with the object-store tests run against a local MinIO container**. Generated contracts are current and the
+TypeScript checks pass.
+
+New gaps are G-114 to G-125. The ones to know: nothing installs from this yet,
+and the legacy Registry API still runs beside it (G-116, G-118); operators are
+names typed into a tool, not accounts (G-114); the signing key is a seed in the
+environment and rotation is unexercised (G-115); a library is checked by its
+header only (G-117); every published package is public (G-119).
+
+Phase 14 stops here. Phase 15 (plugin consumption and the CLI) is next in
+[the handoff](left-off/handoff.md).

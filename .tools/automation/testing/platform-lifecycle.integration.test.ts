@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { createHash, generateKeyPairSync, randomBytes } from 'node:crypto';
 import { AccountAuthentication, PostgresAccountIdentityRepository, EnvelopeMessageProtector, PostgresMfaVerification, Rfc6238Totp,
   OrganizationAccess, PostgresOrganizationRepository, AccountServiceAccounts, PostgresServiceAccountRepository, ServiceAssertionIssuer, opaqueToken, tokenDigest, bodyDigest, type AssertionTrust } from '@carbon/identity';
+import { AccountRegistry, HttpRegistryClient, PostgresAccountRegistryAuthority, RegistryTrustError, libraryFile, manifestDigest, manifestFile, packArchive, publicKeyHex, signTrustBundle, verifyRegistryPackage, type RegistryArchiveStore } from '@carbon/catalog';
 import { AccountCatalog, PostgresCatalogRepository, PostgresProvisioningRepository, ProvisionEnvironment, HttpEnvironmentProvisioner,
   PostgresServiceLifecycleRepository, PostgresDatabaseEnvironmentDriver, databaseEnvironmentIdentifiers, type ProvisioningWork } from '@carbon/catalog';
 import { parseComponent, serviceLifecycleBody, dataPermission, dataRequestPath, canonicalRegistryRequest, registryRequestPath } from '@carbon/contracts/platform';
@@ -56,11 +57,19 @@ async function harness() {
   const blobStore: BlobStore = { async put(key, bytes) { const during = duringBlobWrite; duringBlobWrite = undefined; await during?.(); if (failBlobWrites > 0) { failBlobWrites--; throw new Error('storage unavailable'); } blobObjects.set(key, bytes); },
     async get(key) { return blobObjects.get(key) ?? null; }, async delete(key) { blobObjects.delete(key); } };
   let databaseHandler: ReturnType<typeof composeDatabase>;
-  let registryHandler = composeRegistry(registry, { trust, authorityOrigin: cloudServer.url.origin });
+  let registryHandler: ReturnType<typeof composeRegistry>;
   const databaseServer = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: request => databaseHandler(request) }); servers.push(databaseServer);
   const databaseConfig = () => ({ trust, authorityOrigin: cloudServer.url.origin, blobs: { store: blobStore, origin: databaseServer.url.origin } });
   databaseHandler = composeDatabase(database, databaseConfig());
   const registryServer = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: request => registryHandler(request) }); servers.push(registryServer);
+  // Stands in for Registry's private archive bucket, and for the offline root that signs its trust bundle.
+  const registryObjects = new Map<string, Uint8Array>();
+  const registryStore: RegistryArchiveStore = { async put(key, bytes) { registryObjects.set(key, bytes); }, async get(key) { return registryObjects.get(key) ?? null; }, async delete(key) { registryObjects.delete(key); } };
+  const registryRootSeed = randomBytes(32).toString('hex'); const registrySigningSeed = randomBytes(32).toString('hex');
+  const registryBundle = signTrustBundle(registryRootSeed, { sequence: 1, issuedAt: new Date().toISOString(), keys: [{ id: 'registry-test', publicKey: publicKeyHex(registrySigningSeed), state: 'active' }] });
+  const registryConfig = () => ({ trust, authorityOrigin: cloudServer.url.origin, publishing: { store: registryStore, origin: registryServer.url.origin, rootPublicKey: publicKeyHex(registryRootSeed), trustBundle: registryBundle,
+    signingKeyId: 'registry-test', signingSeed: registrySigningSeed, limits: { publishersPerOrganization: 2, pendingPerPublisher: 2, uploadSeconds: 900 } } });
+  registryHandler = composeRegistry(registry, registryConfig());
   const repo = new PostgresProvisioningRepository(cloud);
   const databaseProvider = new HttpEnvironmentProvisioner('database', databaseServer.url.origin, issuer);
   const registryProvider = new HttpEnvironmentProvisioner('registry', registryServer.url.origin, issuer);
@@ -88,7 +97,8 @@ async function harness() {
     undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, new AccountExports(auth, exportJobs, origin),
     new AccountBlobs(auth, new PostgresAccountDataAuthority(cloud), new HttpBlobClient(databaseServer.url.origin, issuer)),
     new AccountEngine('vectors', auth, new PostgresAccountDataAuthority(cloud), new HttpEngineClient('vectors', databaseServer.url.origin, issuer)),
-    new AccountEngine('graph', auth, new PostgresAccountDataAuthority(cloud), new HttpEngineClient('graph', databaseServer.url.origin, issuer)));
+    new AccountEngine('graph', auth, new PostgresAccountDataAuthority(cloud), new HttpEngineClient('graph', databaseServer.url.origin, issuer)), undefined,
+    new AccountRegistry(auth, new PostgresAccountRegistryAuthority(cloud), new HttpRegistryClient(registryServer.url.origin, issuer)));
   const downloadHandler = createExportRoutes(new ExportDownloads(exportJobs, exportStore));
   const api = (path: string, input?: unknown, revision?: string, overrides?: Record<string, string>) => apiHandler(new Request(origin + path, { method: input === undefined ? 'GET' : 'POST',
     headers: { origin, cookie: `__Host-carbon-session=${token}`, 'x-csrf-token': csrf, 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID(), ...(revision ? { 'if-match': revision } : {}), ...Object.fromEntries(new Headers(overrides)) },
@@ -127,10 +137,11 @@ async function harness() {
   const download = (url: string, method = 'GET') => downloadHandler(new Request(url, { method }));
   return { blobObjects, failBlobWrites: (count: number) => { failBlobWrites = count; }, duringBlobWrite: (work: () => Promise<void>) => { duringBlobWrite = work; }, sweepBlobs: () => databaseHandler.blobStorage!.sweep(), apiHandler, token, csrf, origin,
     exportJobs, restartExports: (): ExportJobs => new PostgresExportJobs(cloud), exportWorker, exportObjects, exportWrites, failExportWrites: (count: number) => { failWrites = count; }, download, session,
+    registryObjects, registryRoot: publicKeyHex(registryRootSeed), get registryReview() { return registryHandler.review!; },
     cloud, database, registry, issuer, protector, worker, repo, api, create, signed, signedData, clientData, account, organization, databaseProvider, registryProvider, databaseServer, registryServer,
     importJobs, importClient, importWorker, restartImports: () => new PostgresImportJobs(cloud, protector),
     interceptAuthority: (callback?: (call: number) => Promise<void>) => { authorityCalls = 0; beforeAuthority = callback; },
-    restart: () => { authority = composeServiceAuthority(cloud, trust); databaseHandler = composeDatabase(database, databaseConfig()); registryHandler = composeRegistry(registry, { trust, authorityOrigin: cloudServer.url.origin }); },
+    restart: () => { authority = composeServiceAuthority(cloud, trust); databaseHandler = composeDatabase(database, databaseConfig()); registryHandler = composeRegistry(registry, registryConfig()); },
   };
 }
 
@@ -1045,7 +1056,7 @@ suite('Cloud-to-owning-service lifecycle over real HTTP and PostgreSQL', () => {
 
     const first = await assertion(); const accepted = await send(h.registryServer.url.origin, first); expect(accepted.status).toBe(200);
     const namespace = parseComponent('RegistryResponse', await accepted.json()); expect(namespace.scope).toEqual(scope); expect(namespace.bindingId).toBe(registryBinding);
-    expect(namespace.result).toEqual({ id: (await h.registry`SELECT id FROM registry_environment_namespaces`)[0].id, state: 'active', revision: namespace.result.revision });
+    expect(namespace.result).toEqual({ id: (await h.registry`SELECT id FROM registry_environment_namespaces`)[0].id, state: 'active', revision: (namespace.result as { revision: string }).revision });
     expect((await send(h.registryServer.url.origin, first)).status).toBe(401);
     expect((await send(h.registryServer.url.origin, { ...(await assertion()), requestId: crypto.randomUUID() })).status).toBe(400);
     expect((await send(h.registryServer.url.origin, await assertion(), path, JSON.stringify({ ...JSON.parse(body), extra: true }))).status).toBe(400);
@@ -1078,6 +1089,211 @@ suite('Cloud-to-owning-service lifecycle over real HTTP and PostgreSQL', () => {
     expect((await exchange('/platform/v1/service-registry-assertions', registryExchange)).response.status).toBe(401);
     expect(JSON.stringify(await h.registry`SELECT * FROM internal_assertion_replays`)).not.toContain(issued.token);
   }, 30000);
+
+  test('packages are published only through an owned name, an exact upload and an operator review, and installed only against the pinned root; yanking, revocation and other tenants behave as documented', async () => {
+    const h = await harness(); const first = await h.create('pub-a', ['registry']); expect(await h.worker.execute()).toBe(true);
+    const A = parseComponent('EnvironmentScope', first.scope); const id = () => crypto.randomUUID(); const origin = h.registryServer.url.origin;
+    // A second organization of the same account: another tenant as far as Registry is concerned.
+    const rival = parseComponent('OrganizationReceipt', (await (await h.api('/platform/v1/orgs', { name: 'Rival', slug: 'rival' })).json() as { receipt: unknown }).receipt);
+    const rivalRevision = (await (await h.api(`/platform/v1/orgs/${rival.id}`)).json() as { organization: { revision: string } }).organization.revision;
+    const second = await h.api(`/platform/v1/orgs/${rival.id}/projects`, { name: 'rival-app', slug: 'rival-app', services: ['registry'] }, rivalRevision); expect(second.status).toBe(202);
+    const B = parseComponent('EnvironmentScope', parseComponent('CatalogReceipt', (await second.json() as { receipt: unknown }).receipt).scope); expect(await h.worker.execute()).toBe(true);
+    const send = (scope: typeof A, command: Record<string, unknown>, overrides: Record<string, string> = {}) =>
+      h.api(`/platform/v1/orgs/${scope.orgId}/projects/${scope.projectId}/environments/${scope.environmentId}/registry`, command, command.revision as string | undefined, { ...(command.commandId ? { 'idempotency-key': command.commandId as string } : {}), ...overrides });
+    const ok = async (scope: typeof A, command: Record<string, unknown>) => { const response = await send(scope, command); if (response.status !== 200) throw new Error(`${command.kind} answered ${response.status}`); return (await response.json() as { result: Record<string, any> }).result; };
+    const status = async (scope: typeof A, command: Record<string, unknown>, overrides?: Record<string, string>) => (await send(scope, command, overrides)).status;
+    const target = 'x86_64-pc-windows-msvc' as const; const manifest = { abiMajor: 1, abiMinor: 4, description: 'Clipboard access', requiredCapabilities: ['clipboard.read'], optionalCapabilities: [] };
+    const dll = () => { const bytes = Buffer.alloc(256); bytes.write('MZ', 0); bytes.writeUInt32LE(64, 60); bytes.write('PE\0\0', 64); bytes.writeUInt16LE(0x8664, 68); return new Uint8Array(bytes); };
+    const archive = (version: string, extra: { path: string; bytes: Uint8Array }[] = [], name = 'clipboard') => packArchive([{ path: 'carbon-plugin.json', bytes: new TextEncoder().encode(manifestFile({ publisher: 'acme', name, version, target }, manifest)) },
+      { path: libraryFile(name, target), bytes: dll() }, { path: 'README.md', bytes: new TextEncoder().encode(`# ${name} ${version}\n`) }, ...extra]);
+    const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
+    const submission = (version: string, bytes: Uint8Array, name = 'clipboard') => ({ kind: 'version.submit', commandId: id(), publisher: 'acme', name, version, target, sizeBytes: bytes.length, sha256: digest(bytes), manifest });
+    const put = (url: string, bytes: Uint8Array) => fetch(url, { method: 'PUT', body: Buffer.from(bytes) });
+    const decision = (versionId: string, reason = 'Reviewed source and archive') => ({ versionId, operator: 'reviewer@carbon.example', reason, requestId: id() });
+    const review = h.registryReview; const stored = () => [...h.registryObjects.keys()].sort();
+    const rejected = (promise: Promise<unknown>) => promise.then(() => 'finished', error => String((error as Error).message));
+    const fault = (promise: Promise<unknown>) => promise.then(() => 'finished', error => (error as { code?: string }).code ?? String(error));
+
+    // Cloud forwards one command at a time, for a signed-in account, with CSRF and a matching idempotency key.
+    expect(await ok(A, { kind: 'namespace.get' })).toMatchObject({ state: 'active' });
+    const claim = { kind: 'publisher.claim', commandId: id(), slug: 'acme' };
+    expect(await status(A, claim, { cookie: '' })).toBe(401); expect(await status(A, claim, { 'x-csrf-token': 'bad' })).toBe(403); expect(await status(A, claim, { 'idempotency-key': id() })).toBe(400);
+    expect(await status(A, { kind: 'publisher.seize', commandId: id(), slug: 'acme' })).toBe(400); expect(await status(A, { ...claim, slug: 'Acme' })).toBe(400);
+
+    // Namespace authority: a publisher name belongs to the organization that claimed it, and to nobody else.
+    const claimed = await ok(A, claim); expect(claimed.publisher).toMatchObject({ slug: 'acme', state: 'active' }); expect(await ok(A, claim)).toEqual(claimed);
+    expect(await status(A, { ...claim, slug: 'other-name' })).toBe(409);
+    expect(await status(B, { kind: 'publisher.claim', commandId: id(), slug: 'acme' })).toBe(409); expect(await status(A, { kind: 'publisher.claim', commandId: id(), slug: 'acme' })).toBe(409);
+    for (const reserved of ['carbon', 'official', 'registry']) expect(await status(B, { kind: 'publisher.claim', commandId: id(), slug: reserved })).toBe(409);
+    expect((await ok(A, { kind: 'publishers.list' })).publishers.map((item: { slug: string }) => item.slug)).toEqual(['acme']); expect((await ok(B, { kind: 'publishers.list' })).publishers).toEqual([]);
+    expect((await h.registry`SELECT org_id FROM registry_publishers WHERE slug = 'acme'`)[0].org_id).toBe(A.orgId);
+
+    // Submitting reserves the version and discloses a single upload address, once.
+    const bytes = archive('1.2.0'); const submit = submission('1.2.0', bytes);
+    expect(await status(B, submission('1.2.0', bytes))).toBe(404); expect(await status(A, { ...submission('1.2.0', bytes), publisher: 'unclaimed' })).toBe(404);
+    const reserved = await ok(A, submit); const versionId = reserved.version.id as string;
+    expect(reserved.version).toMatchObject({ publisher: 'acme', name: 'clipboard', version: '1.2.0', target, state: 'awaiting_upload', yanked: false, signed: null, publishedAt: null, sha256: digest(bytes) });
+    expect(reserved.upload.url.startsWith(`${origin}/registry/v1/uploads/ru_`)).toBe(true);
+    const replay = await ok(A, submit); expect(replay.version.id).toBe(versionId); expect(replay.upload).toBeNull();
+    expect(JSON.stringify(await h.registry`SELECT * FROM registry_versions`)).not.toContain(reserved.upload.url.split('/').at(-1));
+    expect(await status(A, submission('1.2.0', bytes))).toBe(409);
+
+    // The upload: exactly the declared bytes, once. Nothing else is stored, and a wrong upload does not use the reservation up.
+    expect((await put(reserved.upload.url, archive('1.2.0', [{ path: 'extra.txt', bytes: new Uint8Array(3) }]))).status).toBe(400);
+    expect((await put(reserved.upload.url, bytes.subarray(0, bytes.length - 1))).status).toBe(400);
+    expect((await put(`${origin}/registry/v1/uploads/ru_${'A'.repeat(43)}`, bytes)).status).toBe(404); expect((await fetch(reserved.upload.url)).status).toBe(404);
+    expect(stored()).toEqual([]); expect((await ok(A, { kind: 'version.get', versionId })).version.state).toBe('awaiting_upload');
+    const uploaded = await put(reserved.upload.url, bytes); expect(uploaded.status).toBe(200);
+    expect(parseComponent('RegistryVersion', (await uploaded.json() as { version: unknown }).version)).toMatchObject({ id: versionId, state: 'submitted', signed: null });
+    expect((await put(reserved.upload.url, bytes)).status).toBe(404); expect(stored()).toEqual([`quarantine/${versionId}.tar.zst`]);
+    // Submitted is not published: nobody can list or download it.
+    expect((await fetch(`${origin}/registry/v1/packages/acme/clipboard`)).status).toBe(404); expect((await fetch(`${origin}/registry/v1/packages/acme/clipboard/1.2.0/${target}`)).status).toBe(404);
+
+    // An archive that fails inspection is refused at upload: no reviewer sees it, nothing is kept, and the number is free again.
+    const hostile = archive('1.2.1', [{ path: 'tools/helper.exe', bytes: dll() }]); const hostileReserved = await ok(A, submission('1.2.1', hostile));
+    const refused = parseComponent('RegistryVersion', (await (await put(hostileReserved.upload.url, hostile)).json() as { version: unknown }).version);
+    expect(refused).toMatchObject({ state: 'rejected', reason: 'archive.unexpected_executable' }); expect(stored()).toEqual([`quarantine/${versionId}.tar.zst`]);
+    expect((await review.pending(10)).map(item => item.id)).toEqual([versionId]);
+
+    // Review. An operator decides only on what a publisher submitted, with a name and a reason, and the record is permanent.
+    expect(await fault(review.approve(decision(id())))).toBe('not_found'); expect(await fault(review.approve(decision(refused.id)))).toBe('conflict');
+    expect(await fault(review.approve({ ...decision(versionId), operator: '' }))).toBe('validation'); expect(await fault(review.approve({ ...decision(versionId), reason: '' }))).toBe('validation');
+    expect(await fault(review.revoke(decision(versionId)))).toBe('conflict');
+    // Quarantined bytes that changed since submission are not signed.
+    const quarantined = h.registryObjects.get(`quarantine/${versionId}.tar.zst`)!; h.registryObjects.set(`quarantine/${versionId}.tar.zst`, archive('1.2.0', [{ path: 'swapped.txt', bytes: new Uint8Array(1) }]));
+    expect(await fault(review.approve(decision(versionId)))).toBe('conflict'); h.registryObjects.set(`quarantine/${versionId}.tar.zst`, quarantined);
+    const approved = await review.approve(decision(versionId));
+    expect(approved).toMatchObject({ state: 'published', yanked: false, reason: null }); expect(approved.publishedAt).not.toBeNull();
+    expect(approved.signed!.statement).toEqual({ publisher: 'acme', name: 'clipboard', version: '1.2.0', target, sha256: digest(bytes), sizeBytes: bytes.length, manifestDigest: manifestDigest(manifest), publishedAt: approved.publishedAt! });
+    expect(approved.signed!.keyId).toBe('registry-test');
+    expect(stored()).toEqual([`packages/acme/clipboard/1.2.0/${target}.tar.zst`]);
+    expect(await fault(review.approve(decision(versionId)))).toBe('conflict'); expect(await fault(review.reject(decision(versionId)))).toBe('conflict'); expect(await review.pending(10)).toEqual([]);
+    // Provenance: who approved, why, and exactly what they approved.
+    const records = await review.reviews(versionId);
+    expect(records.map(record => [record.decision, record.operator, record.reason])).toEqual([['approved', 'reviewer@carbon.example', 'Reviewed source and archive']]);
+    expect(records[0]!.evidence).toMatchObject({ sha256: digest(bytes), sizeBytes: bytes.length, keyId: 'registry-test', files: [{ path: 'README.md' }, { path: 'carbon-plugin.json' }, { path: 'clipboard.dll' }] });
+    expect((await ok(A, { kind: 'version.get', versionId })).version).toEqual(approved);
+
+    // Install: an anonymous client fetches the bundle, the listing and the bytes, and trusts none of it until it checks out against the root it pinned.
+    const install = async (version: string, pinnedRoot = h.registryRoot, minimumSequence = 0) => {
+      const trust = parseComponent('RegistryTrustBundle', await (await fetch(`${origin}/registry/v1/trust`)).json());
+      const listing = parseComponent('RegistryPublicPackage', await (await fetch(`${origin}/registry/v1/packages/acme/clipboard`)).json());
+      const entry = listing.versions.find(item => item.version === version && item.target === target)!;
+      const download = await fetch(`${origin}/registry/v1/packages/acme/clipboard/${version}/${target}`);
+      const body = download.status === 200 ? new Uint8Array(await download.arrayBuffer()) : new Uint8Array();
+      try { return { status: download.status, statement: verifyRegistryPackage({ rootPublicKey: pinnedRoot, trust, minimumSequence, expected: { publisher: 'acme', name: 'clipboard', version, target }, version: entry, bytes: body }), entry }; }
+      catch (error) { if (error instanceof RegistryTrustError) return { status: download.status, refused: error.category, entry }; throw error; }
+    };
+    const installed = await install('1.2.0'); expect(installed.status).toBe(200); expect(installed.statement).toEqual(approved.signed!.statement);
+    // The same answers checked against any other root are worth nothing, and an installer that has seen a newer bundle refuses this one.
+    expect((await install('1.2.0', publicKeyHex(randomBytes(32).toString('hex')))).refused).toBe('bundle_signature'); expect((await install('1.2.0', h.registryRoot, 2)).refused).toBe('bundle_rollback');
+    // Stored bytes that no longer match the signed digest are never served.
+    const publishedKey = `packages/acme/clipboard/1.2.0/${target}.tar.zst`; const original = h.registryObjects.get(publishedKey)!; const corrupted = new Uint8Array(original); corrupted[10]! ^= 1;
+    h.registryObjects.set(publishedKey, corrupted); expect((await fetch(`${origin}/registry/v1/packages/acme/clipboard/1.2.0/${target}`)).status).toBe(503); h.registryObjects.set(publishedKey, original);
+    for (const path of ['/registry/v1/packages/acme/missing', '/registry/v1/packages/nobody/clipboard', `/registry/v1/packages/acme/clipboard/9.9.9/${target}`, '/registry/v1/packages/acme/clipboard/1.2.0/sparc-sun-solaris', '/registry/v1/packages/Acme/clipboard']) expect((await fetch(origin + path)).status).toBe(404);
+    expect((await fetch(`${origin}/registry/v1/packages/acme/clipboard`, { method: 'POST' })).status).toBe(404); expect((await fetch(`${origin}/registry/v1/trust?x=1`)).status).toBe(400);
+
+    // Tenant isolation: the other organization can read, change or learn nothing about these versions through its own environment.
+    for (const command of [{ kind: 'version.get', versionId }, { kind: 'versions.list', publisher: 'acme', name: 'clipboard' }, { kind: 'version.yank', commandId: id(), versionId, revision: approved.revision, yanked: true, reason: 'not yours' },
+      { kind: 'version.withdraw', commandId: id(), versionId, revision: approved.revision }]) expect(await status(B, command)).toBe(404);
+    expect((await ok(A, { kind: 'versions.list', publisher: 'acme', name: 'clipboard' })).versions.map((item: { version: string; state: string }) => [item.version, item.state]).sort()).toEqual([['1.2.0', 'published'], ['1.2.1', 'rejected']]);
+    // A member who can only read metadata sees publishers and versions, and can claim, submit, yank or withdraw nothing.
+    const viewerToken = opaqueToken('as'); const viewerCsrf = opaqueToken('csrf'); const viewerId = id();
+    await h.cloud`INSERT INTO accounts (id, primary_email, name, verified_at, terms_version) VALUES (${viewerId}, 'viewer@example.test', 'Viewer', now(), 'fixture')`;
+    await h.cloud`INSERT INTO account_sessions (id, account_id, token_hash, csrf_hash, security_revision, device_name, expires_at, fresh_until)
+      VALUES (${id()}, ${viewerId}, ${tokenDigest(viewerToken)}, ${tokenDigest(viewerCsrf)}, 1, 'Fixture', now() + interval '8 hours', now() + interval '10 minutes')`;
+    await h.cloud`INSERT INTO memberships (id, account_id, org_id, role, state, project_access) VALUES (${id()}, ${viewerId}, ${A.orgId}, 'Viewer', 'active', 'all')`;
+    const viewer = { cookie: `__Host-carbon-session=${viewerToken}`, 'x-csrf-token': viewerCsrf };
+    for (const command of [{ kind: 'publishers.list' }, { kind: 'version.get', versionId }]) expect(await status(A, command, viewer)).toBe(200);
+    for (const command of [{ kind: 'publisher.claim', commandId: id(), slug: 'viewer-name' }, submission('3.0.0', archive('3.0.0')), { kind: 'version.yank', commandId: id(), versionId, revision: approved.revision, yanked: true, reason: 'no' }]) expect(await status(A, command, viewer)).toBe(403);
+    expect(await status(B, { kind: 'publishers.list' }, viewer)).toBe(404);
+    // A signed request cannot be replayed, moved to another command, or sent under a permission that does not fit the command.
+    const binding = (await h.cloud`SELECT id FROM service_bindings WHERE environment_id = ${A.environmentId} AND owner = 'registry'`)[0].id as string;
+    const signedRegistry = async (command: Record<string, unknown>, permission: string, path = registryRequestPath(A, binding, command.kind as string)) => {
+      const body = canonicalRegistryRequest({ scope: A, bindingId: binding, command } as never); const requestId = id();
+      const principal = { id: h.account, kind: 'account' as const, audience: 'dashboard' as const, credentialId: h.session, permissionRevision: (await h.cloud`SELECT permission_revision::text FROM accounts WHERE id = ${h.account}`)[0].permission_revision };
+      const proof = await h.issuer.issue({ aud: 'carbon-registry', principal, scope: A, roles: ['Owner'], grants: [{ permission: permission as never, scope: A }], requestId, request: { method: 'POST', path, bodyDigest: bodyDigest(body) } });
+      return () => fetch(origin + path, { method: 'POST', body, headers: { authorization: `Bearer ${proof}`, 'content-type': 'application/json', 'x-request-id': requestId, ...(command.commandId ? { 'idempotency-key': command.commandId as string } : {}) } });
+    };
+    const once = await signedRegistry({ kind: 'publishers.list' }, 'metadata.read'); expect((await once()).status).toBe(200); expect((await once()).status).toBe(401);
+    expect((await (await signedRegistry({ kind: 'publisher.claim', commandId: id(), slug: 'sneaky' }, 'metadata.read'))()).status).toBe(401);
+    expect((await (await signedRegistry({ kind: 'publishers.list' }, 'metadata.read', registryRequestPath(A, binding, 'publisher.claim')))()).status).toBe(400);
+    expect((await h.registry`SELECT count(*)::integer AS n FROM registry_publishers`)[0].n).toBe(1);
+
+    // Yanking is the publisher's: the version stays downloadable by exact version and is marked, and can be restored.
+    expect(await status(A, { kind: 'version.yank', commandId: id(), versionId, revision: '99', yanked: true, reason: 'superseded' })).toBe(409);
+    const yanked = (await ok(A, { kind: 'version.yank', commandId: id(), versionId, revision: approved.revision, yanked: true, reason: 'superseded by 1.2.1' })).version;
+    expect(yanked).toMatchObject({ state: 'published', yanked: true, reason: 'superseded by 1.2.1' }); expect(yanked.signed).toEqual(approved.signed);
+    expect(await status(A, { kind: 'version.yank', commandId: id(), versionId, revision: yanked.revision, yanked: true, reason: 'again' })).toBe(409);
+    const afterYank = await install('1.2.0'); expect(afterYank.entry).toMatchObject({ yanked: true, state: 'published' }); expect(afterYank.statement).toEqual(approved.signed!.statement);
+    const restored = (await ok(A, { kind: 'version.yank', commandId: id(), versionId, revision: yanked.revision, yanked: false, reason: 'yanked by mistake' })).version; expect(restored).toMatchObject({ yanked: false, reason: null });
+
+    // A second version, so that revoking the first leaves something installable.
+    const next = archive('1.2.1'); const nextReserved = await ok(A, submission('1.2.1', next)); expect((await put(nextReserved.upload.url, next)).status).toBe(200);
+    const nextPublished = await review.approve(decision(nextReserved.version.id)); expect(nextPublished.state).toBe('published');
+
+    // Withdrawing a submission before review closes it and removes its quarantined bytes.
+    const draft = archive('1.3.0'); const draftReserved = await ok(A, submission('1.3.0', draft)); expect((await put(draftReserved.upload.url, draft)).status).toBe(200);
+    expect(stored()).toContain(`quarantine/${draftReserved.version.id}.tar.zst`);
+    const submitted = (await ok(A, { kind: 'version.get', versionId: draftReserved.version.id })).version;
+    expect((await ok(A, { kind: 'version.withdraw', commandId: id(), versionId: submitted.id, revision: submitted.revision })).version).toMatchObject({ state: 'rejected', reason: 'withdrawn' });
+    expect(stored()).not.toContain(`quarantine/${draftReserved.version.id}.tar.zst`); expect(await fault(review.approve(decision(submitted.id)))).toBe('conflict'); expect(await review.pending(10)).toEqual([]);
+    expect(await status(A, { kind: 'version.withdraw', commandId: id(), versionId, revision: restored.revision })).toBe(409);
+
+    // Limits, and a reservation nobody used.
+    const [two, three] = [archive('2.0.0'), archive('2.0.1')]; const stale = await ok(A, submission('2.0.0', two)); const waiting = await ok(A, submission('2.0.1', three));
+    expect(await status(A, submission('2.0.2', archive('2.0.2')))).toBe(429);
+    await h.registry`UPDATE registry_versions SET upload_expires_at = now() - interval '1 second' WHERE id = ${stale.version.id}`;
+    expect((await put(stale.upload.url, two)).status).toBe(404); expect(stored().filter(key => key.startsWith('quarantine/'))).toEqual([]);
+    const again = await ok(A, submission('2.0.0', two)); expect(again.version.id).not.toBe(stale.version.id); expect((await ok(A, { kind: 'version.get', versionId: stale.version.id })).version).toMatchObject({ state: 'rejected', reason: 'upload.expired' });
+    // An operator's rejection carries its reason back to the publisher and removes the quarantined bytes.
+    expect((await put(waiting.upload.url, three)).status).toBe(200);
+    expect(await review.reject(decision(waiting.version.id, 'Bundles an unlicensed dependency'))).toMatchObject({ state: 'rejected', reason: 'Bundles an unlicensed dependency' });
+    expect((await ok(A, { kind: 'version.get', versionId: waiting.version.id })).version.reason).toBe('Bundles an unlicensed dependency'); expect(stored().filter(key => key.startsWith('quarantine/'))).toEqual([]);
+    expect(await status(A, { kind: 'publisher.claim', commandId: id(), slug: 'acme-labs' })).toBe(200); expect(await status(A, { kind: 'publisher.claim', commandId: id(), slug: 'acme-three' })).toBe(429);
+
+    // Authority is live at Registry: a principal that stops being current mid-request changes nothing.
+    const before = (await h.registry`SELECT count(*)::integer AS n FROM registry_versions`)[0].n;
+    h.interceptAuthority(async () => { await h.cloud`UPDATE accounts SET permission_revision = permission_revision + 1 WHERE id = ${h.account}`; });
+    expect([401, 403]).toContain(await status(A, submission('4.0.0', archive('4.0.0')))); h.interceptAuthority();
+    expect((await h.registry`SELECT count(*)::integer AS n FROM registry_versions`)[0].n).toBe(before);
+    // Lost after the request was accepted and the work was done, but before it was committed: still nothing.
+    let authorityChecks = 0; const commandsBefore = (await h.registry`SELECT count(*)::integer AS n FROM registry_commands`)[0].n;
+    h.interceptAuthority(async call => { authorityChecks = call; if (call === 2) await h.cloud`UPDATE accounts SET permission_revision = permission_revision + 1 WHERE id = ${h.account}`; });
+    expect(await status(A, submission('4.0.1', archive('4.0.1')))).toBe(403); h.interceptAuthority(); expect(authorityChecks).toBe(2);
+    expect((await h.registry`SELECT count(*)::integer AS n FROM registry_versions`)[0].n).toBe(before); expect((await h.registry`SELECT count(*)::integer AS n FROM registry_commands`)[0].n).toBe(commandsBefore);
+
+    // Security revocation: the version is no longer served to anyone, its number is never reused, and its history stays.
+    const revoked = await review.revoke(decision(versionId, 'Credential exfiltration in clipboard.dll'));
+    expect(revoked).toMatchObject({ state: 'revoked', yanked: false, reason: 'Credential exfiltration in clipboard.dll' }); expect(revoked.signed).toEqual(approved.signed);
+    const afterRevoke = await install('1.2.0'); expect(afterRevoke.status).toBe(404); expect(afterRevoke.refused).toBe('revoked');
+    expect(afterRevoke.entry).toMatchObject({ state: 'revoked', reason: 'Credential exfiltration in clipboard.dll', signed: approved.signed });
+    // An installer that already holds the bytes learns the same thing from the listing alone.
+    try { verifyRegistryPackage({ rootPublicKey: h.registryRoot, trust: parseComponent('RegistryTrustBundle', await (await fetch(`${origin}/registry/v1/trust`)).json()), expected: { publisher: 'acme', name: 'clipboard', version: '1.2.0', target }, version: afterRevoke.entry, bytes }); throw new Error('accepted'); }
+    catch (error) { expect((error as RegistryTrustError).category).toBe('revoked'); }
+    expect((await install('1.2.1')).statement).toEqual(nextPublished.signed!.statement);
+    expect(await status(A, submission('1.2.0', bytes))).toBe(409); expect(await status(A, { kind: 'version.yank', commandId: id(), versionId, revision: revoked.revision, yanked: true, reason: 'too late' })).toBe(409);
+    expect(await fault(review.revoke(decision(versionId)))).toBe('conflict');
+    expect((await review.reviews(versionId)).map(record => record.decision)).toEqual(['approved', 'revoked']);
+    expect(h.registryObjects.has(publishedKey)).toBe(true);
+
+    // The database itself keeps a version's identity, a published statement and the review history as they were.
+    expect(await rejected(h.registry`UPDATE registry_versions SET sha256 = ${'f'.repeat(64)} WHERE id = ${nextReserved.version.id}`)).toContain('A submitted version cannot be changed');
+    expect(await rejected(h.registry`UPDATE registry_versions SET version = '9.9.9' WHERE id = ${nextReserved.version.id}`)).toContain('A submitted version cannot be changed');
+    expect(await rejected(h.registry`UPDATE registry_versions SET signature = 'x' WHERE id = ${nextReserved.version.id}`)).toContain('A published version is immutable');
+    expect(await rejected(h.registry`UPDATE registry_versions SET object_key = 'packages/elsewhere' WHERE id = ${nextReserved.version.id}`)).toContain('A published version is immutable');
+    expect(await rejected(h.registry`UPDATE registry_versions SET state = 'submitted' WHERE id = ${nextReserved.version.id}`)).toContain('This version cannot move to that state');
+    expect(await rejected(h.registry`UPDATE registry_versions SET state = 'published' WHERE id = ${versionId}`)).toContain('This version cannot move to that state');
+    expect(await rejected(h.registry`UPDATE registry_versions SET reason = 'never mind' WHERE id = ${versionId}`)).toContain('A closed version cannot change');
+    expect(await rejected(h.registry`DELETE FROM registry_versions WHERE id = ${refused.id}`)).toContain('A registry version is never deleted');
+    expect(await rejected(h.registry`UPDATE registry_review_records SET reason = 'edited' WHERE version_id = ${versionId}`)).toContain('A review record is permanent');
+    expect(await rejected(h.registry`DELETE FROM registry_review_records WHERE version_id = ${versionId}`)).toContain('A review record is permanent');
+
+    // After a restart with the same trust material, everything published still installs.
+    h.restart(); expect((await install('1.2.1')).statement).toEqual(nextPublished.signed!.statement);
+    expect((await h.registry`SELECT action FROM registry_package_events WHERE version_id = ${versionId} ORDER BY sequence`).map((row: { action: string }) => row.action))
+      .toEqual(['version.reserved', 'version.submitted', 'version.approved', 'version.yanked', 'version.restored', 'version.revoked']);
+  }, 120000);
 
   test('an app user reads and writes only their own rows through a request-bound assertion, and loses access with their session', async () => {
     const h = await harness(); const created = await h.create('appdata', ['database']); expect(await h.worker.execute()).toBe(true);

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { AccountBuilds, AccountFunctions, AccountReleases } from '@carbon/orchestration';
 import type { AccountRealms } from '@carbon/auth';
-import type { AccountCatalog, AccountEnvironmentCredentials, AccountWorkers, AccountEnvironmentSecrets, AccountRepositories, CatalogCommand } from '@carbon/catalog';
+import type { AccountRegistry, AccountCatalog, AccountEnvironmentCredentials, AccountWorkers, AccountEnvironmentSecrets, AccountRepositories, CatalogCommand } from '@carbon/catalog';
 import type { AccountBlobs, AccountData, AccountEngine, AccountExports, AccountImports } from '@carbon/data';
 import { AccountAuthentication, opaqueToken, type PersonalCredentialExchange, type AccountAudit, type AccountPersonalCredentials, type AccountLegacyTokens, type AccountDeviceAuthorization, type AccountServiceAccounts, type AccountSecurity, type AccountProfile, type OrganizationAccess, type OrganizationInvitations, type ExternalAccountAuthentication, type AccountAuthorization } from "@carbon/identity";
 import { ContractError, PlatformFault, parseComponent, type ErrorCode } from "@carbon/contracts/platform";
@@ -14,7 +14,7 @@ function cookieValue(request: Request, name: string): string {
   return matches.length === 1 ? matches[0]!.slice(name.length + 1) : "";
 }
 
-export function createAccountRoutes(auth: AccountAuthentication, origin: string, security?: AccountSecurity, profile?: AccountProfile, organizations?: OrganizationAccess, invitations?: OrganizationInvitations, github?: ExternalAccountAuthentication, access?: AccountAuthorization, catalog?: AccountCatalog, data?: AccountData, imports?: AccountImports, credentials?: AccountEnvironmentCredentials, secrets?: AccountEnvironmentSecrets, repositories?: AccountRepositories, devices?: AccountDeviceAuthorization, serviceAccounts?: AccountServiceAccounts, personal?: AccountPersonalCredentials, legacy?: AccountLegacyTokens, workers?: AccountWorkers, audit?: AccountAudit, realms?: AccountRealms, personalExchange?: PersonalCredentialExchange, builds?: AccountBuilds, releases?: AccountReleases, exports?: AccountExports, blobs?: AccountBlobs, vectors?: AccountEngine, graph?: AccountEngine, functions?: AccountFunctions) {
+export function createAccountRoutes(auth: AccountAuthentication, origin: string, security?: AccountSecurity, profile?: AccountProfile, organizations?: OrganizationAccess, invitations?: OrganizationInvitations, github?: ExternalAccountAuthentication, access?: AccountAuthorization, catalog?: AccountCatalog, data?: AccountData, imports?: AccountImports, credentials?: AccountEnvironmentCredentials, secrets?: AccountEnvironmentSecrets, repositories?: AccountRepositories, devices?: AccountDeviceAuthorization, serviceAccounts?: AccountServiceAccounts, personal?: AccountPersonalCredentials, legacy?: AccountLegacyTokens, workers?: AccountWorkers, audit?: AccountAudit, realms?: AccountRealms, personalExchange?: PersonalCredentialExchange, builds?: AccountBuilds, releases?: AccountReleases, exports?: AccountExports, blobs?: AccountBlobs, vectors?: AccountEngine, graph?: AccountEngine, functions?: AccountFunctions, registry?: AccountRegistry) {
   const secure = new URL(origin).protocol === "https:";
   const names = { session: `${secure ? "__Host-" : ""}carbon-session`, csrf: `${secure ? "__Host-" : ""}carbon-csrf`, browser: `${secure ? "__Host-" : ""}carbon-browser` };
   const cookie = (name: string, value: string, seconds: number, httpOnly = true) => `${name}=${value}; Path=/; Max-Age=${seconds}; SameSite=Lax${httpOnly ? "; HttpOnly" : ""}${secure ? "; Secure" : ""}`;
@@ -253,6 +253,15 @@ export function createAccountRoutes(auth: AccountAuthentication, origin: string,
           if (post) return json(await functions.executionCommand(session, csrf, scope, id, parseComponent('FunctionExecutionCommand', await body()), options(), requestId));
         }
         if (kind === 'schedules' && id && !sub && post) return json(await functions.scheduleCommand(session, csrf, scope, id, parseComponent('FunctionScheduleCommand', await body()), options(), requestId));
+      }
+      // Registry publishing: one POST endpoint that takes a command. Archive bytes never pass through here.
+      const registryRoute = new RegExp(`^${BASE}/orgs/([^/]+)/projects/([^/]+)/environments/([^/]+)/registry$`).exec(url.pathname);
+      if (registryRoute && request.method === 'POST') {
+        if (!registry) throw new PlatformFault('capability', 'Registry publishing is not configured');
+        if (url.search) throw new PlatformFault('validation', 'Scope belongs in the path');
+        const scope = parseComponent('EnvironmentScope', { orgId: registryRoute[1], projectId: registryRoute[2], environmentId: registryRoute[3] });
+        const command = await body(65536) as { commandId?: unknown };
+        return json({ result: await registry.execute(cookieValue(request, names.session), request.headers.get('x-csrf-token') ?? '', scope, command, command && typeof command === 'object' && 'commandId' in command ? parseComponent('CommandOptions', { idempotencyKey: request.headers.get('idempotency-key') ?? '', expectedRevision: request.headers.get('if-match')?.replace(/^"([1-9][0-9]*)"$/, '$1') }) : undefined, requestId, request.signal) });
       }
       // Vector collections and the graph: one POST endpoint each that takes a command.
       const engineRoute = new RegExp(`^${BASE}/orgs/([^/]+)/projects/([^/]+)/environments/([^/]+)/(vectors|graph)$`).exec(url.pathname);

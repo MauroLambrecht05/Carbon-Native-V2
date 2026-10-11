@@ -1,0 +1,499 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Carbon Registry publishing API",
+    "version": "1.0.0",
+    "description": "Publishing packages through Cloud, Registry's signed command endpoint, archive upload, and public signed distribution."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "paths": {
+    "/platform/v1/orgs/{orgId}/projects/{projectId}/environments/{environmentId}/registry": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/OrgId"
+        },
+        {
+          "$ref": "#/components/parameters/ProjectId"
+        },
+        {
+          "$ref": "#/components/parameters/EnvironmentId"
+        }
+      ],
+      "post": {
+        "operationId": "executeRegistryCommand",
+        "security": [
+          {
+            "browserSession": []
+          }
+        ],
+        "description": "One Registry command for one environment. Cloud checks the session, CSRF token and permission, then forwards it to Registry as a signed request bound to this exact command. namespace.get, publishers.list, versions.list and version.get need metadata.read. publisher.claim needs resources.configure. version.submit, version.yank and version.withdraw need release.publish. A command with a commandId needs the same value in Idempotency-Key, and one with a revision needs it in If-Match.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/MutationOrigin"
+          },
+          {
+            "$ref": "#/components/parameters/CsrfToken"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          },
+          {
+            "$ref": "#/components/parameters/RequestId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/RegistryCommand"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The command result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "result"
+                  ],
+                  "properties": {
+                    "result": {
+                      "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/RegistryResult"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/internal/platform/v1/environments/{environmentId}/registry/{kind}": {
+      "servers": [
+        {
+          "url": "/",
+          "description": "Carbon Registry"
+        }
+      ],
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/EnvironmentId"
+        },
+        {
+          "$ref": "#/components/parameters/Kind"
+        },
+        {
+          "name": "orgId",
+          "in": "query",
+          "required": true,
+          "schema": {
+            "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+          }
+        },
+        {
+          "name": "projectId",
+          "in": "query",
+          "required": true,
+          "schema": {
+            "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+          }
+        },
+        {
+          "name": "bindingId",
+          "in": "query",
+          "required": true,
+          "schema": {
+            "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "executeSignedRegistryCommand",
+        "security": [
+          {
+            "serviceAssertion": []
+          }
+        ],
+        "description": "Registry's side. The assertion must be for carbon-registry, bound to this method, path and body digest, carry exactly the one permission the command needs, and be unused. Registry asks Cloud again whether the principal is still current before it commits.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RequestId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/RegistryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The command result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/RegistryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "501": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/registry/v1/uploads/{token}": {
+      "servers": [
+        {
+          "url": "/",
+          "description": "Carbon Registry"
+        }
+      ],
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/UploadToken"
+        }
+      ],
+      "put": {
+        "operationId": "uploadRegistryArchive",
+        "security": [],
+        "description": "Takes the archive for one reserved version. The token in the path is the only authority. Exactly the declared bytes are accepted; a wrong upload answers 400 and leaves the reservation usable. An archive that fails inspection answers 200 with the version rejected and its reason.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/zstd": {
+              "schema": {
+                "type": "string",
+                "format": "binary",
+                "maxLength": 67108864
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The version, now submitted or rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "version"
+                  ],
+                  "properties": {
+                    "version": {
+                      "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/RegistryVersion"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/registry/v1/trust": {
+      "servers": [
+        {
+          "url": "/",
+          "description": "Carbon Registry"
+        }
+      ],
+      "get": {
+        "operationId": "getRegistryTrustBundle",
+        "security": [],
+        "description": "The trust bundle, signed by the root key. An installer verifies it against the root public key it pinned, never one obtained here.",
+        "responses": {
+          "200": {
+            "description": "The signed trust bundle",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/RegistryTrustBundle"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/registry/v1/packages/{publisher}/{name}": {
+      "servers": [
+        {
+          "url": "/",
+          "description": "Carbon Registry"
+        }
+      ],
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/Publisher"
+        },
+        {
+          "$ref": "#/components/parameters/Package"
+        }
+      ],
+      "get": {
+        "operationId": "getRegistryPackage",
+        "security": [],
+        "description": "Every published and revoked version of a package, newest first, each with its signed statement. Revoked versions are listed so that an installer that has one can learn of it.",
+        "responses": {
+          "200": {
+            "description": "The package",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/RegistryPublicPackage"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/registry/v1/packages/{publisher}/{name}/{version}/{target}": {
+      "servers": [
+        {
+          "url": "/",
+          "description": "Carbon Registry"
+        }
+      ],
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/Publisher"
+        },
+        {
+          "$ref": "#/components/parameters/Package"
+        },
+        {
+          "$ref": "#/components/parameters/Version"
+        },
+        {
+          "$ref": "#/components/parameters/Target"
+        }
+      ],
+      "get": {
+        "operationId": "downloadRegistryArchive",
+        "security": [],
+        "description": "The archive of one published version, yanked or not. A revoked version answers 404. The stored bytes are checked against the signed digest before they are sent; a mismatch answers 503.",
+        "responses": {
+          "200": {
+            "description": "The archive",
+            "headers": {
+              "x-carbon-sha256": {
+                "schema": {
+                  "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Digest"
+                }
+              }
+            },
+            "content": {
+              "application/zstd": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "account-api.openapi.json#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "browserSession": {
+        "$ref": "account-api.openapi.json#/components/securitySchemes/browserSession"
+      },
+      "serviceAssertion": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A 60-second request-bound service assertion issued by Cloud."
+      }
+    },
+    "parameters": {
+      "OrgId": {
+        "name": "orgId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+        }
+      },
+      "ProjectId": {
+        "name": "projectId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+        }
+      },
+      "EnvironmentId": {
+        "name": "environmentId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/Id"
+        }
+      },
+      "MutationOrigin": {
+        "$ref": "account-api.openapi.json#/components/parameters/Origin"
+      },
+      "CsrfToken": {
+        "$ref": "account-api.openapi.json#/components/parameters/CsrfToken"
+      },
+      "IdempotencyKey": {
+        "$ref": "account-api.openapi.json#/components/parameters/IdempotencyKey"
+      },
+      "IfMatch": {
+        "$ref": "account-api.openapi.json#/components/parameters/IfMatch"
+      },
+      "RequestId": {
+        "$ref": "account-api.openapi.json#/components/parameters/RequestId"
+      },
+      "Publisher": {
+        "name": "publisher",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/RegistrySlug"
+        }
+      },
+      "Package": {
+        "name": "name",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/RegistryPackageName"
+        }
+      },
+      "Version": {
+        "name": "version",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/RegistrySemver"
+        }
+      },
+      "Target": {
+        "name": "target",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "$ref": "../../../solutions/contracts/platform/schema/platform.schema.json#/$defs/RegistryTarget"
+        }
+      },
+      "UploadToken": {
+        "name": "token",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^ru_[A-Za-z0-9_-]{43}$"
+        }
+      },
+      "Kind": {
+        "name": "kind",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^[a-z]+\\.[a-z]+$"
+        },
+        "description": "The command kind. It must equal the kind in the body."
+      }
+    }
+  }
+}

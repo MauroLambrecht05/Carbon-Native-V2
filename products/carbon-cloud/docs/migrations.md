@@ -156,6 +156,16 @@ executions before rolling back.
 Foreign keys need no migration in Database: they are a new kind of entry in the
 existing `canonical_data_constraints` catalog.
 
+Registry publishing adds no Cloud migration. In Registry, `0004_publishing.sql`
+adds `registry_publishers`, `registry_packages`, `registry_versions`,
+`registry_review_records`, `registry_commands` and `registry_package_events`.
+Triggers fix a version's identity and bytes, allow only forward state changes,
+freeze published, rejected and revoked versions, forbid deleting any version,
+and make review records permanent. It is additive and leaves the legacy
+`plugins` and `plugin_versions` tables untouched. Recovery: code from before
+0004 ignores these tables; archives already written to the bucket under
+`quarantine/` and `packages/` would then need to be removed by hand.
+
 Blob storage adds no Cloud migration. Its tables are Database migration
 `0008_blob_storage.sql` (`blob_buckets`, `blob_objects`, `blob_transfers`,
 `blob_commands`, `blob_events`, `blob_usage`), which is additive and leaves the

@@ -34,4 +34,12 @@ export { PostgresRegistryEnvironmentDriver } from './infrastructure/PostgresRegi
 export { ExecuteServiceRegistry } from './application/usecases/ExecuteServiceRegistry.ts';
 export { PostgresRegistryNamespaces } from './infrastructure/PostgresRegistryNamespaces.ts';
 export type { RegistryNamespaces } from './application/ports/RegistryNamespaces.ts';
+// Registry publishing: publisher names, reviewed versions, signed statements and what an installer checks.
+export type { RegistryArchiveStore, RegistryAuthority, RegistryPackages, ReviewDecision, ReviewRecord } from './application/ports/RegistryPackages.ts';
+export { AccountRegistry, HttpRegistryClient, type AccountRegistryAuthority, type RegistryTransport } from './application/usecases/RegistryPublishing.ts';
+export { PostgresRegistryPackages, type RegistryLimits } from './infrastructure/PostgresRegistryPackages.ts';
+export { PostgresAccountRegistryAuthority } from './infrastructure/PostgresAccountRegistryAuthority.ts';
+export { S3RegistryArchiveStore, type RegistryArchiveStoreConfig } from './infrastructure/S3RegistryArchiveStore.ts';
+export { MANIFEST_PATH, MAX_ARCHIVE_BYTES, inspectArchive, libraryFile, manifestFile, packArchive, type ArchiveFile, type ArchiveInspection, type PackageCoordinates } from './domain/RegistryArchive.ts';
+export { RegistrySigner, RegistryTrustError, manifestDigest, openRegistryTrust, publicKeyHex, signTrustBundle, verifyRegistryPackage, verifyTrustBundle, type PackageCheck, type RegistryTrust } from './domain/RegistryTrust.ts';
 export type { EnvironmentProvisioner, ProvisioningRepository, ProvisioningWork, ProvisioningResult } from './application/ports/EnvironmentProvisioner.ts';

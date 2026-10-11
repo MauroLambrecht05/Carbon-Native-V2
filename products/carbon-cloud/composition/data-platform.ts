@@ -1,4 +1,5 @@
 import { HttpBlobClient, HttpDataClient, HttpEngineClient, HttpImportClient, S3ExportStore } from '@carbon/data';
+import { HttpRegistryClient } from '@carbon/catalog';
 import { serviceAssertionIssuerFromEnv } from './service-assertion-signing.ts';
 
 export function dataClientFromEnv(env: NodeJS.ProcessEnv = process.env): HttpDataClient | undefined {
@@ -39,4 +40,12 @@ export function engineClientsFromEnv(env: NodeJS.ProcessEnv = process.env): { ve
   if (!env.CARBON_DATA_DATABASE_ORIGIN) throw new Error('Vector and graph data require CARBON_DATA_DATABASE_ORIGIN');
   const issuer = serviceAssertionIssuerFromEnv(env);
   return { vectors: new HttpEngineClient('vectors', env.CARBON_DATA_DATABASE_ORIGIN, issuer), graph: new HttpEngineClient('graph', env.CARBON_DATA_DATABASE_ORIGIN, issuer) };
+}
+
+/** Cloud's transport for Registry commands, offered when CARBON_REGISTRY_PUBLISHING is enabled. */
+export function registryClientFromEnv(env: NodeJS.ProcessEnv = process.env): HttpRegistryClient | undefined {
+  if (!env.CARBON_REGISTRY_PUBLISHING || env.CARBON_REGISTRY_PUBLISHING === 'disabled') return undefined;
+  if (env.CARBON_REGISTRY_PUBLISHING !== 'enabled') throw new Error('CARBON_REGISTRY_PUBLISHING must be enabled or disabled');
+  if (!env.CARBON_REGISTRY_ORIGIN) throw new Error('Registry publishing requires CARBON_REGISTRY_ORIGIN');
+  return new HttpRegistryClient(env.CARBON_REGISTRY_ORIGIN, serviceAssertionIssuerFromEnv(env));
 }

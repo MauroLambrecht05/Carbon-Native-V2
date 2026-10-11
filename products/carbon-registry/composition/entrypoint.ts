@@ -6,7 +6,9 @@
 // RegistryEngine, attaches HTTP routes, and launches the server.
 
 import { HttpIdentityClient, assertionTrustFromEnv } from "@carbon/identity";
-import { composeLifecyclePlatform, type LifecyclePlatformConfig } from './lifecycle-platform.ts';
+import { composeLifecyclePlatform, type LifecyclePlatformConfig, type PublishingConfig } from './lifecycle-platform.ts';
+import { S3RegistryArchiveStore } from '@carbon/catalog';
+import { parseComponent } from '@carbon/contracts/platform';
 import { migrate, openDatabase } from "../infrastructure/persistence/Database.ts";
 import { RegistryEngine } from "../infrastructure/services/RegistryEngine.ts";
 import { TrustSigner } from "../infrastructure/services/TrustSigner.ts";
@@ -33,8 +35,9 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): CarbonRegis
     return value;
   };
   const trust = assertionTrustFromEnv(env);
+  const objectStore = { endpoint: required("OBJECT_STORE_ENDPOINT"), accessKeyId: required("OBJECT_STORE_ACCESS_KEY_ID"), secretAccessKey: required("OBJECT_STORE_SECRET_ACCESS_KEY"), bucket: required("OBJECT_STORE_BUCKET") };
   return {
-    internalPlatform: trust ? { trust, authorityOrigin: required('CARBON_AUTHORITY_ORIGIN') } : undefined,
+    internalPlatform: trust ? { trust, authorityOrigin: required('CARBON_AUTHORITY_ORIGIN'), publishing: publishingFromEnv(env, objectStore) } : undefined,
     port: Number(env.PORT ?? 54323),
     databaseUrl: required("DATABASE_URL"),
     controlPlaneUrl: required("CONTROL_PLANE_URL"),
@@ -45,6 +48,19 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): CarbonRegis
       bucket: required("OBJECT_STORE_BUCKET"),
     },
   };
+}
+
+/**
+ * Publishing is on only when CARBON_REGISTRY_PUBLISHING is `enabled`, and then every setting is required. The
+ * signing seed and the root-signed trust bundle come from the deployment; nothing is generated here.
+ */
+export function publishingFromEnv(env: NodeJS.ProcessEnv, objectStore: CarbonRegistryConfig['objectStore']): PublishingConfig | undefined {
+  if (!env.CARBON_REGISTRY_PUBLISHING || env.CARBON_REGISTRY_PUBLISHING === 'disabled') return undefined;
+  if (env.CARBON_REGISTRY_PUBLISHING !== 'enabled') throw new Error('CARBON_REGISTRY_PUBLISHING must be enabled or disabled');
+  const take = (name: string): string => { const value = env[name]; if (!value) throw new Error(`Registry publishing requires ${name}`); delete env[name]; return value; };
+  let trustBundle; try { trustBundle = parseComponent('RegistryTrustBundle', JSON.parse(take('CARBON_REGISTRY_TRUST_BUNDLE'))); } catch { throw new Error('CARBON_REGISTRY_TRUST_BUNDLE must be a signed trust bundle'); }
+  return { store: new S3RegistryArchiveStore(objectStore), origin: take('CARBON_REGISTRY_PUBLIC_ORIGIN'), rootPublicKey: take('CARBON_REGISTRY_ROOT_PUBLIC_KEY'), trustBundle,
+    signingKeyId: take('CARBON_REGISTRY_SIGNING_KEY_ID'), signingSeed: take('CARBON_REGISTRY_SIGNING_SEED') };
 }
 
 export async function buildRegistrySystem(config: CarbonRegistryConfig) {
@@ -83,7 +99,7 @@ export async function buildRegistrySystem(config: CarbonRegistryConfig) {
   const deps = { sql, controlPlaneUrl: config.controlPlaneUrl, verifyToken, registryEngine };
   const legacyHandler = buildRegistryRoutes(deps);
   const lifecycle = config.internalPlatform ? composeLifecyclePlatform(sql, config.internalPlatform) : undefined;
-  const handler = (request: Request) => new URL(request.url).pathname.startsWith('/internal/platform/v1/')
+  const handler = (request: Request) => /^\/(internal\/platform|registry)\/v1\//.test(new URL(request.url).pathname)
     ? lifecycle ? lifecycle(request) : Promise.resolve(Response.json({ error: { code: 'capability', message: 'Internal platform is not configured', requestId: crypto.randomUUID() } }, { status: 501, headers: { 'cache-control': 'no-store' } }))
     : legacyHandler(request);
 
